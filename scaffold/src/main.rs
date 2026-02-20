@@ -115,6 +115,11 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: ".gitignore",
+            content: templates::ROOT_GITIGNORE,
+            executable: false,
+        },
+        FileTemplate {
             path: "Makefile",
             content: templates::ROOT_MAKEFILE,
             executable: false,

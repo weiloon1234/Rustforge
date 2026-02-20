@@ -75,6 +75,18 @@ SEED_ADMIN_SUPERADMIN_EMAIL=superadmin@example.com
 SEED_ADMIN_SUPERADMIN_PASSWORD=password123
 "#;
 
+pub const ROOT_GITIGNORE: &str = r#"target/
+**/target/
+.env
+.DS_Store
+*.log
+*.tmp
+
+# Keep the directory, ignore generated static files by default.
+public/*
+!public/.gitkeep
+"#;
+
 pub const ROOT_MAKEFILE: &str = r#"SHELL := /bin/bash
 RUSTFORGE_PATH ?= ../Rustforge
 
