@@ -165,6 +165,11 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: true,
         },
         FileTemplate {
+            path: "scripts/install-ubuntu.sh",
+            content: templates::SCRIPT_INSTALL_UBUNTU_SH,
+            executable: true,
+        },
+        FileTemplate {
             path: "migrations/.gitkeep",
             content: templates::MIGRATIONS_GITKEEP,
             executable: false,

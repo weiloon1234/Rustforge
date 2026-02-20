@@ -107,6 +107,17 @@ cargo build -p generated
 ./bin/api-server
 ```
 
+### 6. Optional Ubuntu server installer
+
+Starter includes an idempotent installer:
+
+```bash
+sudo ./scripts/install-ubuntu.sh
+```
+
+It can create/reuse an isolated project user, configure SSH access, update `.env`,
+configure nginx + optional HTTPS, and wire Supervisor processes.
+
 ### 6. Optional framework docs mount
 
 In consumer `.env`:
