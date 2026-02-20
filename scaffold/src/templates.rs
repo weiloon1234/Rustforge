@@ -980,7 +980,6 @@ pub const GENERATED_BUILD_RS: &str = r##"fn main() {
     let mut f = std::fs::File::create(&root_lib).expect("Failed to create root lib.rs");
     use std::io::Write;
     writeln!(f, "#![allow(dead_code)]").unwrap();
-    writeln!(f, "#![allow(unused_imports)]").unwrap();
     writeln!(f, "// AUTO-GENERATED FILE — DO NOT EDIT").unwrap();
     writeln!(f, "pub mod models;").unwrap();
     writeln!(f, "pub mod guards;").unwrap();

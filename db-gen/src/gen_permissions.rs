@@ -66,18 +66,19 @@ pub fn generate_permissions(
 
     out.push_str("impl Permission {\n");
     out.push_str("    pub const fn as_str(self) -> &'static str {\n");
-    out.push_str("        match self {\n");
-    for (name, entry) in &variants {
-        writeln!(
-            out,
-            "            Self::{name} => \"{}\",",
-            escape(&entry.key)
-        )?;
-    }
     if variants.is_empty() {
-        out.push_str("            _ => unreachable!(),\n");
+        out.push_str("        match self {}\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (name, entry) in &variants {
+            writeln!(
+                out,
+                "            Self::{name} => \"{}\",",
+                escape(&entry.key)
+            )?;
+        }
+        out.push_str("        }\n");
     }
-    out.push_str("        }\n");
     out.push_str("    }\n\n");
 
     out.push_str("    pub fn from_str(value: &str) -> Option<Self> {\n");
@@ -102,29 +103,31 @@ pub fn generate_permissions(
     out.push_str("    }\n\n");
 
     out.push_str("    pub const fn guard(self) -> &'static str {\n");
-    out.push_str("        match self {\n");
-    for (name, entry) in &variants {
-        writeln!(
-            out,
-            "            Self::{name} => \"{}\",",
-            escape(&entry.guard)
-        )?;
-    }
     if variants.is_empty() {
-        out.push_str("            _ => unreachable!(),\n");
+        out.push_str("        match self {}\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (name, entry) in &variants {
+            writeln!(
+                out,
+                "            Self::{name} => \"{}\",",
+                escape(&entry.guard)
+            )?;
+        }
+        out.push_str("        }\n");
     }
-    out.push_str("        }\n");
     out.push_str("    }\n\n");
 
     out.push_str("    pub const fn meta(self) -> &'static PermissionMeta {\n");
-    out.push_str("        match self {\n");
-    for (idx, (name, _)) in variants.iter().enumerate() {
-        writeln!(out, "            Self::{name} => &PERMISSION_META[{idx}],")?;
-    }
     if variants.is_empty() {
-        out.push_str("            _ => unreachable!(),\n");
+        out.push_str("        match self {}\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (idx, (name, _)) in variants.iter().enumerate() {
+            writeln!(out, "            Self::{name} => &PERMISSION_META[{idx}],")?;
+        }
+        out.push_str("        }\n");
     }
-    out.push_str("        }\n");
     out.push_str("    }\n\n");
 
     out.push_str("    pub fn by_guard(guard: &str) -> Vec<Self> {\n");
