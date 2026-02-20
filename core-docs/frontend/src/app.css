@@ -1,0 +1,22 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* Fix PrismJS styling issues */
+code[class*="language-"],
+pre[class*="language-"] {
+  white-space: pre !important;
+  word-break: normal !important;
+  word-wrap: normal !important;
+}
+
+/* Ensure tokens stay inline */
+.token {
+  display: inline !important;
+}
+
+/* Fix specific issue with TOML table headers being split */
+.token.table,
+.token.punctuation,
+.token.class-name {
+  display: inline !important;
+}

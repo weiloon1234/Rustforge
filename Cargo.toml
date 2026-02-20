@@ -1,0 +1,108 @@
+[workspace]
+resolver = "2"
+members = [
+  "core-i18n",
+  "bootstrap",
+  "core-config",
+  "core-db",
+  "core-jobs",
+  "core-mailer",
+  "core-datatable",
+  "core-realtime",
+  "core-notify",
+  "core-web",
+  "core-http-log",
+  "core-docs",
+  "db-gen",
+  "scaffold",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+authors = ["WeiLoon"]
+
+[workspace.dependencies]
+# --- async runtime ---
+tokio = { version = "1.37", features = ["macros", "rt-multi-thread", "signal"] }
+
+# --- web ---
+axum = { version = "0.8.8", features = ["macros", "multipart"] }
+tower = "0.5.3"
+tower-http = { version = "0.6.8", features = [
+  "cors",
+  "trace",
+  "timeout",
+  "compression-gzip",
+  "catch-panic",
+] }
+
+# --- serde ---
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# --- env/config ---
+dotenvy = "0.15"
+
+# --- logging ---
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [
+  "env-filter",
+  "fmt",
+  "time",
+] }
+tracing-appender = "0.2"
+
+# --- errors ---
+anyhow = "1.0"
+thiserror = "2"
+
+# --- db ---
+sqlx = { version = "0.8.6", features = [
+  "postgres",
+  "runtime-tokio-rustls",
+  "macros",
+  "time",
+  "uuid",
+] }
+
+# --- time/uuid/common ---
+time = { version = "0.3", features = ["serde", "local-offset"] }
+uuid = { version = "1.7", features = ["serde", "v4"] }
+bytes = "1"
+
+# --- redis ---
+redis = { version = "1", features = ["tokio-comp"] }
+
+# --- http client ---
+reqwest = { version = "0.13.1", default-features = false, features = ["json"] }
+tower-cookies = "0.11.0"
+validator = { version = "0.20.0", features = ["derive"] }
+
+# --- aws sdk ---
+aws-config = { version = "1" }
+aws-sdk-s3 = { version = "1", features = ["behavior-version-latest"] }
+aws-credential-types = "1"
+aws-smithy-runtime = "1"
+aws-smithy-types = "1"
+
+# --- misc ---
+async-trait = "0.1"
+rust-i18n = "3.1.5"
+clap = { version = "4", features = ["derive"] }
+
+# --- build deps used by build.rs ---
+toml = "0.9"
+
+# --- proc-macro deps (shared) ---
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+walkdir = "2"
+
+# --- internal crates ---
+core-jobs = { path = "core-jobs" }
+
+[patch.crates-io]
+validator = { path = "vendor/validator" }
+validator_derive = { path = "vendor/validator_derive" }

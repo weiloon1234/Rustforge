@@ -1,0 +1,20 @@
+[package]
+name = "core-notify"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+# Channels
+core-mailer = { path = "../core-mailer" }
+
+# For Async Dispatch (Queue Interface) - Can be optional feature or loose coupling
+# core-jobs = { path = "../core-jobs" }

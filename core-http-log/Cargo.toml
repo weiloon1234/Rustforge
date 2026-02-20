@@ -1,0 +1,45 @@
+[package]
+name = "core-http-log"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Database
+sqlx = { workspace = true, features = [
+    "runtime-tokio-native-tls",
+    "postgres",
+    "uuid",
+    "time",
+    "json",
+] }
+
+# HTTP Client
+reqwest = { workspace = true, features = ["json"] }
+
+# Web Framework
+axum = { workspace = true }
+core-jobs = { workspace = true }
+tower = { workspace = true }
+http-body-util = "0.1"
+bytes = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures-util = "0.3"
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+# Time
+time = { workspace = true }
+
+# Utilities
+uuid = { workspace = true, features = ["v4"] }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+base64 = "0.22"
+
+# Config (to read settings)
+core-config = { path = "../core-config" }

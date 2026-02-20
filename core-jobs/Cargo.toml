@@ -1,0 +1,28 @@
+[package]
+name = "core-jobs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true, features = ["serde", "v4"] }
+anyhow = { workspace = true }
+redis = { workspace = true }
+axum = { workspace = true }
+cron = "0.12"
+chrono = "0.4"
+time = { workspace = true, features = ["serde", "formatting", "parsing"] }
+sqlx = { workspace = true, features = [
+    "postgres",
+    "runtime-tokio-rustls",
+    "macros",
+    "time",
+    "uuid",
+] }
+core-config = { path = "../core-config" }
+core-db = { path = "../core-db" }

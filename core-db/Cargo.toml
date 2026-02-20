@@ -1,0 +1,57 @@
+[package]
+name = "core-db"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+sqlx-checked = []
+
+[dependencies]
+tokio = { workspace = true, features = ["full"] }
+axum = { workspace = true, features = ["macros"] }
+tower = { workspace = true, features = ["util"] }
+tower-http = { workspace = true, features = ["trace", "cors"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+schemars = { version = "0.8.21", features = ["uuid1", "chrono"] }
+sqlx = { workspace = true, features = [
+    "runtime-tokio-native-tls",
+    "postgres",
+    "macros",
+    "chrono",
+    "uuid",
+    "time",
+    "json",
+] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+dotenvy = { workspace = true }
+time = { workspace = true, features = [
+    "serde-human-readable",
+    "macros",
+    "formatting",
+    "parsing",
+] }
+uuid = { workspace = true, features = ["serde", "v4"] }
+toml = { workspace = true }
+regex = "1.10"
+phonenumber = "0.3.9"
+bytes = { workspace = true }
+mime_guess = "2.0.5"
+image = "0.25.9"
+redis = { workspace = true, features = ["tokio-comp"] }
+async-trait = { workspace = true }
+aws-sdk-s3 = { workspace = true }
+aws-credential-types = { workspace = true }
+aws-config = { workspace = true }
+core-i18n = { path = "../core-i18n" }
+core-config = { path = "../core-config" }
+argon2 = { version = "0.5", features = ["std"] }
+aes-gcm = "0.10"
+base64 = "0.22"
+rand = "0.8"
+sha2 = "0.10"
+clap = { version = "4.5.54", features = ["derive", "env"] }

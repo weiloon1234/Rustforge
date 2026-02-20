@@ -1,0 +1,13 @@
+[package]
+name = "core-i18n"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["sync", "rt"] }
+time = { workspace = true, features = ["serde", "formatting", "parsing"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+axum = { workspace = true }

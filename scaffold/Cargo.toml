@@ -1,0 +1,14 @@
+[package]
+name = "scaffold"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "scaffold"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.37", features = ["full", "macros"] }
+anyhow = "1.0"
+clap = { version = "4", features = ["derive"] }
+colored = "2.1"
