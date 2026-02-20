@@ -20,16 +20,16 @@ toml = "0.9"
 uuid = { version = "1", features = ["serde", "v4"] }
 time = { version = "0.3", features = ["serde"] }
 
-bootstrap = { path = "__RUSTFORGE_PATH__/bootstrap" }
-core-config = { path = "__RUSTFORGE_PATH__/core-config" }
-core-db = { path = "__RUSTFORGE_PATH__/core-db" }
-core-datatable = { path = "__RUSTFORGE_PATH__/core-datatable" }
-core-i18n = { path = "__RUSTFORGE_PATH__/core-i18n" }
-core-jobs = { path = "__RUSTFORGE_PATH__/core-jobs" }
-core-notify = { path = "__RUSTFORGE_PATH__/core-notify" }
-core-realtime = { path = "__RUSTFORGE_PATH__/core-realtime" }
-core-web = { path = "__RUSTFORGE_PATH__/core-web" }
-db-gen = { path = "__RUSTFORGE_PATH__/db-gen" }
+bootstrap = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
+core-config = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
+core-db = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
+core-datatable = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
+core-i18n = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
+core-jobs = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
+core-notify = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
+core-realtime = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
+core-web = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
+db-gen = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 "#;
 
 pub const ROOT_ENV_EXAMPLE: &str = r#"APP_NAME=starter
@@ -40,7 +40,7 @@ APP_TIMEZONE=+08:00
 # Starter-owned translation catalogs.
 I18N_DIR=i18n
 
-ENABLE_FRAMEWORK_DOCS=true
+ENABLE_FRAMEWORK_DOCS=false
 FRAMEWORK_DOCS_PATH=/framework-documentation
 ENABLE_OPENAPI_DOCS=true
 OPENAPI_DOCS_PATH=/openapi
@@ -76,7 +76,7 @@ SEED_ADMIN_SUPERADMIN_PASSWORD=password123
 "#;
 
 pub const ROOT_MAKEFILE: &str = r#"SHELL := /bin/bash
-RUSTFORGE_PATH ?= __RUSTFORGE_PATH__
+RUSTFORGE_PATH ?= ../Rustforge
 
 .PHONY: help
 help:
@@ -211,8 +211,8 @@ Set `REDIS_CACHE_PREFIX` only when you need a custom prefix strategy.
 
 ## Dependency Mode
 
-This starter uses local path dependencies to sibling Rustforge crates.
-When Rustforge is published/tagged, you can switch to git dependencies in `Cargo.toml`.
+This starter uses git dependencies to Rustforge.
+For production stability, pin to a tag in `Cargo.toml`.
 "#;
 
 pub const ROOT_I18N_EN_JSON: &str = r#"{
@@ -227,6 +227,11 @@ pub const ROOT_I18N_ZH_JSON: &str = r#"{
   "Invalid credentials": "凭证无效",
   "Access denied": "拒绝访问"
 }
+"#;
+
+pub const ROOT_CONSOLE: &str = r#"#!/usr/bin/env bash
+set -euo pipefail
+./bin/console "$@"
 "#;
 
 pub const BIN_API_SERVER: &str = r#"#!/usr/bin/env bash

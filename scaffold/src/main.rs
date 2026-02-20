@@ -19,11 +19,6 @@ struct Cli {
     force: bool,
 }
 
-#[derive(Debug, Clone)]
-struct RenderContext {
-    rustforge_path: String,
-}
-
 #[derive(Debug, Clone, Copy)]
 struct FileTemplate {
     path: &'static str,
@@ -41,12 +36,6 @@ async fn main() -> anyhow::Result<()> {
 
     ensure_output_ready(&output, cli.force)?;
 
-    let rustforge_path = framework_repo_root()?;
-
-    let render_ctx = RenderContext {
-        rustforge_path: rustforge_path.to_string_lossy().to_string(),
-    };
-
     let files = file_templates();
 
     for file in files {
@@ -56,8 +45,7 @@ async fn main() -> anyhow::Result<()> {
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
 
-        let rendered = render(file.content, &render_ctx);
-        fs::write(&path, rendered)
+        fs::write(&path, file.content)
             .with_context(|| format!("failed to write {}", path.display()))?;
 
         if file.executable {
@@ -71,19 +59,6 @@ async fn main() -> anyhow::Result<()> {
     println!("{}", "Next: cd <output> && cargo check".cyan());
 
     Ok(())
-}
-
-fn framework_repo_root() -> anyhow::Result<PathBuf> {
-    let scaffold_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let Some(repo_root) = scaffold_dir.parent() else {
-        bail!(
-            "failed to resolve Rustforge repo root from {}",
-            scaffold_dir.display()
-        );
-    };
-    repo_root
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize {}", repo_root.display()))
 }
 
 fn normalize_output_path(output: &Path) -> anyhow::Result<PathBuf> {
@@ -127,10 +102,6 @@ fn ensure_output_ready(output: &Path, force: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn render(template: &str, ctx: &RenderContext) -> String {
-    template.replace("__RUSTFORGE_PATH__", &ctx.rustforge_path)
-}
-
 fn file_templates() -> Vec<FileTemplate> {
     vec![
         FileTemplate {
@@ -162,6 +133,11 @@ fn file_templates() -> Vec<FileTemplate> {
             path: "i18n/zh.json",
             content: templates::ROOT_I18N_ZH_JSON,
             executable: false,
+        },
+        FileTemplate {
+            path: "console",
+            content: templates::ROOT_CONSOLE,
+            executable: true,
         },
         FileTemplate {
             path: "bin/api-server",

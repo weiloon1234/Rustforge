@@ -28,26 +28,18 @@ It provides reusable infrastructure crates. Domain/application code should live 
 ### 1. Generate starter project
 
 ```bash
-cargo run --manifest-path scaffold/Cargo.toml -- --output /path/to/Rustforge-Starter --force
+# Option A: run scaffold from local Rustforge clone
+cargo run --manifest-path scaffold/Cargo.toml -- --output /path/to/Rustforge-Starter
+
+# Option B: install scaffold globally from git
+cargo install --git https://github.com/weiloon1234/Rustforge.git scaffold
+scaffold --output /path/to/Rustforge-Starter
 ```
 
-### 2. Add Rustforge dependencies in starter workspace
+### 2. Dependency mode
 
-Use path dependencies first (local development):
-
-```toml
-[workspace.dependencies]
-bootstrap = { path = "/absolute/path/to/Rustforge/bootstrap" }
-core-config = { path = "/absolute/path/to/Rustforge/core-config" }
-core-db = { path = "/absolute/path/to/Rustforge/core-db" }
-core-datatable = { path = "/absolute/path/to/Rustforge/core-datatable" }
-core-i18n = { path = "/absolute/path/to/Rustforge/core-i18n" }
-core-jobs = { path = "/absolute/path/to/Rustforge/core-jobs" }
-core-notify = { path = "/absolute/path/to/Rustforge/core-notify" }
-core-realtime = { path = "/absolute/path/to/Rustforge/core-realtime" }
-core-web = { path = "/absolute/path/to/Rustforge/core-web" }
-db-gen = { path = "/absolute/path/to/Rustforge/db-gen" }
-```
+Starter output uses git dependencies to Rustforge (`branch = "main"`).
+For release stability, pin to a version tag in starter `Cargo.toml`.
 
 ### 3. Bootstrap runtime binaries in consumer repo
 
@@ -121,14 +113,14 @@ In consumer `.env`:
 
 ```bash
 ENABLE_FRAMEWORK_DOCS=true
-FRAMEWORK_DOCS_PATH=/framework-docs
+FRAMEWORK_DOCS_PATH=/framework-documentation
 SERVER_PORT=4582
 ```
 
 Then visit:
 
 ```text
-http://127.0.0.1:4582/framework-docs
+http://127.0.0.1:4582/framework-documentation
 ```
 
 Build framework docs frontend assets first:
