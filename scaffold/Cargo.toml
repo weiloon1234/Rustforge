@@ -11,4 +11,4 @@ path = "src/main.rs"
 tokio = { version = "1.37", features = ["full", "macros"] }
 anyhow = "1.0"
 clap = { version = "4", features = ["derive"] }
-colored = "2.1"
+colored = "3"
