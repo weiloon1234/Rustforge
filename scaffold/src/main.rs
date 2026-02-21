@@ -170,6 +170,11 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: true,
         },
         FileTemplate {
+            path: "scripts/update.sh",
+            content: templates::SCRIPT_UPDATE_SH,
+            executable: true,
+        },
+        FileTemplate {
             path: "migrations/.gitkeep",
             content: templates::MIGRATIONS_GITKEEP,
             executable: false,

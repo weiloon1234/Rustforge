@@ -48,6 +48,9 @@ DATATABLE_EXPORT_LINK_TTL_SECS=604800
 # Used by scripts/install-ubuntu.sh to run services under an isolated Linux user.
 # Leave empty for local dev; installer will prompt and persist it.
 PROJECT_USER=
+# Installer writes this using selected project slug for supervisor/nginx naming.
+# Leave empty to auto-derive "{APP_NAME}-{APP_ENV}" in scripts/update.sh.
+SUPERVISOR_PROJECT_SLUG=
 
 # ----------------------------
 # Paths
@@ -221,6 +224,7 @@ help:
 	@echo "  make migrate-pump"
 	@echo "  make migrate-run"
 	@echo "  make server-install"
+	@echo "  make server-update"
 	@echo "  make assets-publish ASSETS_ARGS='--from frontend/dist --clean'"
 	@echo "  make framework-docs-build"
 	@echo "  make check"
@@ -266,6 +270,10 @@ migrate-run:
 .PHONY: server-install
 server-install:
 	sudo ./scripts/install-ubuntu.sh
+
+.PHONY: server-update
+server-update:
+	./scripts/update.sh
 
 .PHONY: assets-publish
 assets-publish:
@@ -347,6 +355,7 @@ make run-worker
 make migrate-pump
 make migrate-run
 make server-install
+make server-update
 make framework-docs-build
 ```
 
@@ -368,6 +377,22 @@ The installer is idempotent (safe to run multiple times) and will:
 - generate/update nginx site config
 - optionally configure Supervisor programs
 - optionally issue/renew Let's Encrypt certificates with cron renewal
+
+## Server Update Script
+
+Use the generated update helper for deploy-like updates:
+
+```bash
+./scripts/update.sh
+# optional opt-out
+RUN_MIGRATIONS=false ./scripts/update.sh
+```
+
+It will:
+- `git pull --ff-only`
+- compile release binaries (`cargo build --release --workspace`)
+- run migrations by default (set `RUN_MIGRATIONS=false` to skip)
+- reread/update and restart Supervisor programs from the installed supervisor config
 
 ## i18n Ownership
 
@@ -684,6 +709,7 @@ echo "  Project user     : ${PROJECT_USER}"
 echo "  SSH auth mode    : ${SSH_AUTH_MODE}"
 echo "  Domain           : ${DOMAIN}"
 echo "  APP_ENV          : ${APP_ENV}"
+echo "  Supervisor slug  : ${PROJECT_SLUG}"
 echo "  HTTPS            : ${ENABLE_HTTPS}"
 echo "  Supervisor       : ${ENABLE_SUPERVISOR}"
 echo "  Websocket proc   : ${ENABLE_WS}"
@@ -770,6 +796,7 @@ upsert_env "${ENV_FILE}" "APP_NAME" "${APP_NAME}"
 upsert_env "${ENV_FILE}" "APP_ENV" "${APP_ENV}"
 upsert_env "${ENV_FILE}" "APP_DEBUG" "$(bool_value "${APP_DEBUG}")"
 upsert_env "${ENV_FILE}" "PROJECT_USER" "${PROJECT_USER}"
+upsert_env "${ENV_FILE}" "SUPERVISOR_PROJECT_SLUG" "${PROJECT_SLUG}"
 upsert_env "${ENV_FILE}" "SERVER_HOST" "127.0.0.1"
 upsert_env "${ENV_FILE}" "SERVER_PORT" "${SERVER_PORT}"
 upsert_env "${ENV_FILE}" "REALTIME_HOST" "127.0.0.1"
@@ -922,6 +949,131 @@ if [[ -n "${GENERATED_PASSWORD}" ]]; then
     echo "Password   : ${GENERATED_PASSWORD}"
 fi
 echo "Try: https://${DOMAIN} (or http://${DOMAIN} when HTTPS is disabled)"
+"#;
+
+pub const SCRIPT_UPDATE_SH: &str = r#"#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
+ENV_FILE="${PROJECT_DIR}/.env"
+
+read_env_value() {
+    local file="$1"
+    local key="$2"
+    [[ -f "${file}" ]] || return 0
+    awk -F= -v k="${key}" '
+        $1 ~ "^[[:space:]]*"k"[[:space:]]*$" {
+            sub(/^[[:space:]]+/, "", $2)
+            sub(/[[:space:]]+$/, "", $2)
+            print $2
+            exit
+        }
+    ' "${file}"
+}
+
+slugify() {
+    printf "%s" "$1" \
+        | tr '[:upper:]' '[:lower:]' \
+        | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//'
+}
+
+run_as_project_user() {
+    local command="$1"
+    if [[ -n "${PROJECT_USER:-}" && "$(id -u)" -eq 0 ]]; then
+        if command -v runuser >/dev/null 2>&1; then
+            runuser -u "${PROJECT_USER}" -- bash -lc "${command}"
+        elif command -v sudo >/dev/null 2>&1; then
+            sudo -u "${PROJECT_USER}" -H bash -lc "${command}"
+        else
+            su - "${PROJECT_USER}" -c "bash -lc '${command}'"
+        fi
+    else
+        bash -lc "${command}"
+    fi
+}
+
+run_supervisorctl() {
+    if [[ "$(id -u)" -eq 0 ]]; then
+        supervisorctl "$@"
+        return $?
+    fi
+    if supervisorctl "$@"; then
+        return 0
+    fi
+    if command -v sudo >/dev/null 2>&1; then
+        sudo supervisorctl "$@"
+        return $?
+    fi
+    return 1
+}
+
+if [[ ! -d "${PROJECT_DIR}" || ! -f "${PROJECT_DIR}/Cargo.toml" ]]; then
+    echo "Invalid project directory: ${PROJECT_DIR}"
+    exit 1
+fi
+
+APP_NAME="$(read_env_value "${ENV_FILE}" "APP_NAME")"
+APP_ENV="$(read_env_value "${ENV_FILE}" "APP_ENV")"
+PROJECT_USER="$(read_env_value "${ENV_FILE}" "PROJECT_USER")"
+SUPERVISOR_PROJECT_SLUG="$(read_env_value "${ENV_FILE}" "SUPERVISOR_PROJECT_SLUG")"
+
+APP_NAME="${APP_NAME:-$(basename "${PROJECT_DIR}")}"
+APP_ENV="${APP_ENV:-production}"
+RUN_MIGRATIONS="${RUN_MIGRATIONS:-true}"
+
+if [[ -z "${SUPERVISOR_PROJECT_SLUG}" ]]; then
+    candidate_env="$(slugify "${APP_NAME}-${APP_ENV}")"
+    candidate_app="$(slugify "${APP_NAME}")"
+    if [[ -f "/etc/supervisor/conf.d/${candidate_env}.conf" ]]; then
+        SUPERVISOR_PROJECT_SLUG="${candidate_env}"
+    elif [[ -f "/etc/supervisor/conf.d/${candidate_app}.conf" ]]; then
+        SUPERVISOR_PROJECT_SLUG="${candidate_app}"
+    else
+        SUPERVISOR_PROJECT_SLUG="${candidate_env}"
+    fi
+fi
+
+echo "Rustforge Starter Update"
+echo "  Project dir      : ${PROJECT_DIR}"
+echo "  APP_NAME         : ${APP_NAME}"
+echo "  APP_ENV          : ${APP_ENV}"
+echo "  Project user     : ${PROJECT_USER:-<current user>}"
+echo "  Supervisor slug  : ${SUPERVISOR_PROJECT_SLUG}"
+echo "  Run migrations   : ${RUN_MIGRATIONS}"
+echo
+
+if [[ -d "${PROJECT_DIR}/.git" ]]; then
+    run_as_project_user "cd \"${PROJECT_DIR}\" && git pull --ff-only"
+else
+    echo "No git repository detected. Skip git pull."
+fi
+
+run_as_project_user "source \"\$HOME/.cargo/env\" >/dev/null 2>&1 || true; cd \"${PROJECT_DIR}\" && cargo build --release --workspace"
+
+if [[ "${RUN_MIGRATIONS}" == "true" ]]; then
+    run_as_project_user "cd \"${PROJECT_DIR}\" && ./console migrate run"
+fi
+
+if command -v supervisorctl >/dev/null 2>&1; then
+    SUPERVISOR_CONF_PATH="/etc/supervisor/conf.d/${SUPERVISOR_PROJECT_SLUG}.conf"
+    if [[ -f "${SUPERVISOR_CONF_PATH}" ]]; then
+        run_supervisorctl reread || true
+        run_supervisorctl update || true
+
+        mapfile -t programs < <(grep -oE '^\[program:[^]]+\]' "${SUPERVISOR_CONF_PATH}" | sed -E 's/^\[program:([^]]+)\]$/\1/')
+        for program in "${programs[@]}"; do
+            [[ -z "${program}" ]] && continue
+            run_supervisorctl restart "${program}" || run_supervisorctl start "${program}" || true
+        done
+    else
+        echo "Supervisor config not found at ${SUPERVISOR_CONF_PATH}. Skip restart."
+    fi
+else
+    echo "supervisorctl not found. Skip supervisor restart."
+fi
+
+echo "Update completed."
 "#;
 
 pub const BIN_API_SERVER: &str = r#"#!/usr/bin/env bash
