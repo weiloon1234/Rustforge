@@ -4,7 +4,7 @@ export function Guards() {
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">Guards &amp; Auth</h1>
                 <p className="text-xl text-gray-500">
-                    Guard-based authentication with DB-fresh subject permissions.
+                    Guard-based authentication with PAT-only scopes and refresh rotation.
                 </p>
             </div>
 
@@ -16,11 +16,12 @@ export function Guards() {
 default = "admin"
 
 [auth.guards.admin]
-provider = "admin"`}</code>
+provider = "admin"
+ttl_min = 30
+refresh_ttl_days = 30`}</code>
                 </pre>
                 <p>
-                    Guard structs are generated into <code>generated/src/guards</code> by
-                    db-gen.
+                    Guard structs are generated into <code>generated/src/guards</code> by db-gen.
                 </p>
 
                 <h2>2) AuthState Contract</h2>
@@ -47,16 +48,52 @@ pub async fn require_admin(
 }`}</code>
                 </pre>
 
-                <h2>4) Immediate Permission Freshness</h2>
+                <h2>4) PAT Scope Model</h2>
                 <p>
-                    Each authenticated request loads permissions from{' '}
-                    <code>auth_subject_permissions</code>. PAT abilities are compatibility fallback
-                    only when subject rows are empty.
+                    Runtime permissions come from <code>personal_access_tokens.abilities</code> only.
+                    Scopes are snapshot at issue/refresh time.
                 </p>
-
-                <h2>5) Typed Permission Checks</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
-                    <code className="language-rust">{`// Prefer route-level one-call helper:
+                    <code className="language-rust">{`use core_web::auth::{issue_guard_session, TokenScopeGrant};
+
+let session = issue_guard_session::<AdminGuard>(
+    &db,
+    &settings.auth,
+    admin.id,
+    "admin-session",
+    TokenScopeGrant::AuthOnly,
+).await?;`}</code>
+                </pre>
+
+                <h2>5) Refresh Rotation</h2>
+                <p>
+                    Refresh tokens are one-time-use. Reuse is rejected and session family can be revoked.
+                </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
+                    <code className="language-rust">{`use core_web::auth::{
+    extract_refresh_token_for_client,
+    refresh_guard_session,
+    AuthClientType,
+};
+
+let refresh = extract_refresh_token_for_client(
+    &headers,
+    "admin",
+    AuthClientType::Web,
+    None,
+).ok_or_else(|| AppError::BadRequest("Missing refresh token".to_string()))?;
+
+let session = refresh_guard_session::<AdminGuard>(
+    &db,
+    &settings.auth,
+    &refresh,
+    "admin-session",
+).await?;`}</code>
+                </pre>
+
+                <h2>6) Typed Permission Checks</h2>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
+                    <code className="language-rust">{`// Route-level (runtime + OpenAPI):
 core_web::openapi::with_permission_check_post(
     create,
     generated::guards::AdminGuard,
@@ -64,34 +101,12 @@ core_web::openapi::with_permission_check_post(
     [generated::permissions::Permission::ArticleManage],
 );
 
-// Manual fallback in handler/workflow:
+// Handler/workflow fallback:
 core_web::authz::ensure_permissions(
     &auth,
     core_web::authz::PermissionMode::Any,
     &[generated::permissions::Permission::ArticleManage],
 )?;`}</code>
-                </pre>
-
-                <h2>6) Admin Type Helpers (App Extension)</h2>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
-                    <code className="language-rust">{`use models::admin_ext::AdminViewExt;
-
-if auth.user.is_developer() {
-    // developer-only branch
-}`}</code>
-                </pre>
-
-                <h2>7) Permission Storage Repo</h2>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
-                    <code className="language-rust">{`use core_db::{
-    common::sql::DbConn,
-    platform::auth_subject_permissions::repo::AuthSubjectPermissionRepo,
-};
-
-let repo = AuthSubjectPermissionRepo::new(DbConn::pool(&db));
-repo.grant("admin", admin_id, Permission::ArticleManage.as_str()).await?;
-repo.revoke("admin", admin_id, Permission::ArticleManage.as_str()).await?;
-repo.replace("admin", admin_id, &vec!["*".to_string()]).await?;`}</code>
                 </pre>
             </div>
         </div>

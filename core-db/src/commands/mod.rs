@@ -80,14 +80,21 @@ CREATE TABLE IF NOT EXISTS personal_access_tokens (
     tokenable_id TEXT NOT NULL,
     name TEXT NOT NULL,
     token TEXT NOT NULL UNIQUE,
+    token_kind TEXT NOT NULL CHECK (token_kind IN ('access', 'refresh')),
+    family_id UUID NOT NULL,
+    parent_token_id UUID,
     abilities JSONB,
     last_used_at TIMESTAMPTZ,
     expires_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_pat_tokenable ON personal_access_tokens(tokenable_type, tokenable_id);
+CREATE INDEX IF NOT EXISTS idx_pat_tokenable_kind ON personal_access_tokens(tokenable_type, tokenable_id, token_kind);
 CREATE INDEX IF NOT EXISTS idx_pat_token ON personal_access_tokens(token);
+CREATE INDEX IF NOT EXISTS idx_pat_family_id ON personal_access_tokens(family_id);
+CREATE INDEX IF NOT EXISTS idx_pat_parent_token_id ON personal_access_tokens(parent_token_id);
+CREATE INDEX IF NOT EXISTS idx_pat_active_refresh ON personal_access_tokens(tokenable_type, tokenable_id, token_kind, revoked_at, expires_at);
 "#;
         let pat_path = migrations_dir.join("0000000000004_personal_access_tokens.sql");
         fs::write(&pat_path, pat_sql).await?;
@@ -164,26 +171,7 @@ CREATE INDEX IF NOT EXISTS idx_http_client_logs_status ON http_client_logs(respo
         fs::write(&logs_path, logs_sql).await?;
         println!("Created/Updated: {}", logs_path.display());
 
-        // 8. Auth Subject Permissions
-        let authz_sql = r#"
-CREATE TABLE IF NOT EXISTS auth_subject_permissions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    guard TEXT NOT NULL,
-    subject_id TEXT NOT NULL,
-    permission TEXT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_auth_subject_permissions_guard_subject_permission
-    ON auth_subject_permissions(guard, subject_id, permission);
-CREATE INDEX IF NOT EXISTS idx_auth_subject_permissions_guard_subject
-    ON auth_subject_permissions(guard, subject_id);
-CREATE INDEX IF NOT EXISTS idx_auth_subject_permissions_permission
-    ON auth_subject_permissions(permission);
-"#;
-        let authz_path = migrations_dir.join("0000000000008_auth_subject_permissions.sql");
-        fs::write(&authz_path, authz_sql).await?;
-        println!("Created/Updated: {}", authz_path.display());
-
-        // 9. Countries (framework reference data)
+        // 8. Countries (framework reference data)
         let countries_sql = r#"
 CREATE TABLE IF NOT EXISTS countries (
     iso2 TEXT PRIMARY KEY,
@@ -222,7 +210,7 @@ CREATE INDEX IF NOT EXISTS idx_countries_region ON countries(region);
 CREATE INDEX IF NOT EXISTS idx_countries_primary_currency_code ON countries(primary_currency_code);
 CREATE INDEX IF NOT EXISTS idx_countries_currencies_gin ON countries USING GIN (currencies);
 "#;
-        let countries_path = migrations_dir.join("0000000000009_countries.sql");
+        let countries_path = migrations_dir.join("0000000000008_countries.sql");
         fs::write(&countries_path, countries_sql).await?;
         println!("Created/Updated: {}", countries_path.display());
 

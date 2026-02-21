@@ -290,6 +290,11 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: "app/src/internal/api/v1/admin_auth.rs",
+            content: templates::APP_INTERNAL_API_V1_ADMIN_AUTH_RS,
+            executable: false,
+        },
+        FileTemplate {
             path: "app/src/internal/middleware/mod.rs",
             content: templates::APP_INTERNAL_MIDDLEWARE_MOD_RS,
             executable: false,
@@ -302,6 +307,11 @@ fn file_templates() -> Vec<FileTemplate> {
         FileTemplate {
             path: "app/src/internal/workflows/mod.rs",
             content: templates::APP_INTERNAL_WORKFLOWS_MOD_RS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/internal/workflows/admin_auth.rs",
+            content: templates::APP_INTERNAL_WORKFLOWS_ADMIN_AUTH_RS,
             executable: false,
         },
         FileTemplate {

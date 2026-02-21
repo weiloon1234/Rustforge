@@ -10,275 +10,176 @@ export function Chapter2AdminAuth() {
         <div className="space-y-10">
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">
-                    Chapter 2: DTO + Validation + Datatable Contract SSOT
+                    Chapter 2: Admin Auth (PAT Scopes + Refresh Rotation)
                 </h1>
                 <p className="text-xl text-gray-500">
-                    Extend Chapter 1 with centralized DTO files, reusable validation rules, and the
-                    same SSOT pattern for datatable routes.
+                    Build admin login/refresh/logout/me with PAT-only scopes and web/mobile token
+                    transport.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
-                <h2>Step 0: Scope</h2>
+                <h2>Step 0: Objective</h2>
                 <ul>
                     <li>
-                        API request/response DTO source of truth: <code>app/src/contracts/api/*</code>.
+                        Runtime permission source is only{' '}
+                        <code>personal_access_tokens.abilities</code>.
                     </li>
                     <li>
-                        Datatable contract source of truth:{' '}
-                        <code>app/src/contracts/datatable/&lt;scope&gt;/&lt;model&gt;.rs</code>.
+                        Access token: short-lived bearer token. Refresh token: rotated one-time
+                        token.
                     </li>
                     <li>
-                        Reusable validation rules: <code>app/src/validation/*</code>.
-                    </li>
-                    <li>
-                        Runtime validation from <code>ValidatedJson</code>/<code>AsyncValidatedJson</code>,
-                        OpenAPI constraints from <code>JsonSchema</code>/<code>schemars</code>.
+                        Web: refresh token in HttpOnly cookie. Mobile: refresh token in response
+                        body.
                     </li>
                 </ul>
 
-                <h2>Step 1: Folder Layout</h2>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-text">{`app/src/contracts/mod.rs
-app/src/contracts/api/mod.rs
-app/src/contracts/api/v1/mod.rs
-app/src/contracts/api/v1/article.rs
-app/src/contracts/datatable/mod.rs
-app/src/contracts/datatable/admin/mod.rs
-app/src/contracts/datatable/admin/article.rs
-app/src/validation/mod.rs
-app/src/validation/sync.rs
-app/src/validation/db.rs`}</code>
-                </pre>
-
-                <h2>Step 2: API DTO Example</h2>
+                <h2>Step 1: API DTOs</h2>
                 <h3>
-                    File: <code>app/src/contracts/api/v1/article.rs</code>
+                    File: <code>app/src/contracts/api/v1/admin_auth.rs</code>
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`use core_db::platform::attachments::types::AttachmentUploadDto;
-use generated::{localized::MultiLang, models::ArticleStatus};
+                    <code className="language-rust">{`use core_web::auth::AuthClientType;
+use generated::models::AdminType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
-pub struct ArticleMetaInput {
-    #[validate(length(min = 1, max = 120))]
-    #[schemars(length(min = 1, max = 120))]
-    pub seo_title: String,
+pub struct AdminLoginInput {
+    #[validate(length(min = 3, max = 64))]
+    #[schemars(length(min = 3, max = 64))]
+    pub username: String,
 
-    #[validate(range(min = 0, max = 600))]
-    #[schemars(range(min = 0, max = 600))]
-    pub reading_minutes: i32,
+    #[validate(length(min = 8, max = 128))]
+    #[schemars(length(min = 8, max = 128))]
+    pub password: String,
 
-    pub is_featured: bool,
+    pub client_type: AuthClientType,
 }
 
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
-pub struct ArticleCreateInput {
-    #[validate(range(min = 1))]
-    #[schemars(range(min = 1))]
-    pub category_id: i64,
-
-    pub status: ArticleStatus,
-    pub title: MultiLang,
-    pub summary: MultiLang,
-
-    #[validate(nested)]
-    pub meta: ArticleMetaInput,
-
-    pub cover: Option<AttachmentUploadDto>,
-    pub galleries: Vec<AttachmentUploadDto>,
+pub struct AdminRefreshInput {
+    pub client_type: AuthClientType,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 256))]
+    #[schemars(length(min = 1, max = 256))]
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct ArticleCreateOutput {
+pub struct AdminAuthOutput {
+    pub token_type: String,
+    pub access_token: String,
+    #[schemars(with = "Option<String>")]
+    pub access_expires_at: Option<time::OffsetDateTime>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct AdminMeOutput {
     pub id: i64,
+    pub email: String,
+    pub name: String,
+    pub admin_type: AdminType,
+    #[serde(default)]
+    pub scopes: Vec<String>,
 }`}</code>
                 </pre>
 
-                <h2>Step 3: Reusable Validation Rules</h2>
+                <h2>Step 2: Workflow Scope Grant</h2>
                 <h3>
-                    File: <code>app/src/validation/sync.rs</code>
+                    File: <code>app/src/internal/workflows/admin_auth.rs</code>
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`use std::borrow::Cow;
-use validator::ValidationError;
+                    <code className="language-rust">{`use core_web::auth::{self, IssuedTokenPair, TokenScopeGrant};
+use generated::{guards::AdminGuard, models::{AdminType, AdminView}};
 
-fn err(code: &'static str, msg: &'static str) -> ValidationError {
-    ValidationError::new(code).with_message(Cow::Borrowed(msg))
-}
-
-pub fn required_alpha_dash_3_32(value: &str) -> Result<(), ValidationError> {
-    core_web::rules::required_trimmed(value)?;
-    core_web::rules::alpha_dash(value)?;
-
-    if value.len() < 3 || value.len() > 32 {
-        return Err(err("length_3_32", "Value must be 3-32 characters."));
+pub fn resolve_scope_grant(admin: &AdminView) -> TokenScopeGrant {
+    match admin.admin_type {
+        AdminType::Developer | AdminType::SuperAdmin => TokenScopeGrant::Wildcard,
+        AdminType::Admin => TokenScopeGrant::AuthOnly,
     }
-
-    Ok(())
-}`}</code>
-                </pre>
-
-                <h3>
-                    File: <code>app/src/validation/db.rs</code>
-                </h3>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`use anyhow::Result;
-use core_web::rules::{AsyncRule, Exists, NotExists, Unique};
-
-pub async fn ensure_unique(
-    db: &sqlx::PgPool,
-    table: &'static str,
-    column: &'static str,
-    value: impl ToString,
-) -> Result<bool> {
-    Unique::new(table, column, value).check(db).await
 }
 
-pub async fn ensure_exists(
-    db: &sqlx::PgPool,
-    table: &'static str,
-    column: &'static str,
-    value: impl ToString,
-) -> Result<bool> {
-    Exists::new(table, column, value).check(db).await
-}
-
-pub async fn ensure_not_exists(
-    db: &sqlx::PgPool,
-    table: &'static str,
-    column: &'static str,
-    value: impl ToString,
-) -> Result<bool> {
-    NotExists::new(table, column, value).check(db).await
-}`}</code>
+// login(...) -> issue_guard_session::<AdminGuard>(..., resolve_scope_grant(admin))
+// refresh(...) -> refresh_guard_session::<AdminGuard>(...)
+// revoke_session(...) -> revoke_session_by_refresh_token::<AdminGuard>(...)`}</code>
                 </pre>
-
-                <h2>Step 4: Handler Boundary Rule</h2>
                 <p>
-                    After <code>ContractJson&lt;T&gt;</code> (or <code>AsyncContractJson&lt;T&gt;</code>)
-                    extraction succeeds, <code>req</code> is already validated and can be used
-                    directly in workflow code.
+                    This is the project override point. Replace <code>AuthOnly</code> with
+                    <code>Explicit(Vec&lt;Permission&gt;)</code> when you need finer scopes.
                 </p>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`use axum::extract::State;
-use core_i18n::t;
-use core_web::{contracts::ContractJson, error::AppError, response::ApiResponse};
 
-use crate::contracts::api::v1::article::{ArticleCreateInput, ArticleCreateOutput};
-
-async fn create(
-    State(state): State<AppApiState>,
-    req: ContractJson<ArticleCreateInput>,
-) -> Result<ApiResponse<ArticleCreateOutput>, AppError> {
-    let req = req.0; // already validated
-    let _ = state;
-
-    Ok(ApiResponse::success(
-        ArticleCreateOutput { id: 1 },
-        &t("Article created"),
-    ))
-}`}</code>
-                </pre>
-
-                <h2>Step 5: Datatable Contract SSOT (Same DTO Principle)</h2>
+                <h2>Step 3: Admin Auth Routes</h2>
                 <h3>
-                    File: <code>app/src/contracts/datatable/admin/article.rs</code>
+                    File: <code>app/src/internal/api/v1/admin_auth.rs</code>
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`use std::collections::BTreeMap;
+                    <code className="language-rust">{`pub fn router(state: AppApiState) -> ApiRouter {
+    let protected = ApiRouter::new()
+        .api_route("/me", get(me))
+        .api_route("/logout", post(logout))
+        .layer(from_fn_with_state(
+            state.clone(),
+            crate::internal::middleware::auth::require_admin,
+        ));
 
-use core_datatable::DataTableInput;
-use core_web::datatable::{
-    DataTableEmailExportRequestBase, DataTableQueryRequestBase, DataTableScopedContract,
-};
-use generated::models::{ArticleStatus, ArticleView};
-use schemars::JsonSchema;
-use serde::Deserialize;
-use validator::Validate;
-
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
-pub struct ArticleDatatableQueryInput {
-    #[validate(nested)]
-    pub base: DataTableQueryRequestBase,
-    #[serde(default)]
-    pub status: Option<ArticleStatus>,
+    ApiRouter::new()
+        .api_route("/login", post(login))
+        .api_route("/refresh", post(refresh))
+        .merge(protected)
 }
 
-impl ArticleDatatableQueryInput {
-    pub fn to_input(&self) -> DataTableInput {
-        let mut input = self.base.to_input();
-        let mut params = BTreeMap::new();
+// Web refresh token source:
+//   core_web::auth::extract_refresh_token_for_client(..., AuthClientType::Web, None)
+// Mobile refresh token source:
+//   body.refresh_token`}</code>
+                </pre>
 
-        if let Some(status) = self.status {
-            params.insert("f-status".to_string(), status.as_str().to_string());
-        }
-
-        input.params.extend(params);
-        input
-    }
+                <h2>Step 4: Portal Wiring</h2>
+                <h3>
+                    File: <code>app/src/internal/api/v1/mod.rs</code>
+                </h3>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`pub fn router(state: AppApiState) -> ApiRouter {
+    ApiRouter::new()
+        .nest("/user", user_router())
+        .nest("/admin", admin_router(state))
 }
 
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
-pub struct ArticleDatatableEmailExportInput {
-    #[validate(nested)]
-    pub base: DataTableEmailExportRequestBase,
-    #[serde(default)]
-    pub status: Option<ArticleStatus>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct AdminArticleDatatableContract;
-
-impl DataTableScopedContract for AdminArticleDatatableContract {
-    type QueryRequest = ArticleDatatableQueryInput;
-    type EmailRequest = ArticleDatatableEmailExportInput;
-    type Row = ArticleView;
-
-    fn scoped_key(&self) -> &'static str {
-        "admin.article"
-    }
-
-    fn query_to_input(&self, req: &Self::QueryRequest) -> DataTableInput {
-        req.to_input()
-    }
-
-    fn email_to_input(&self, req: &Self::EmailRequest) -> DataTableInput {
-        let mut input = req.base.query.to_input();
-        if let Some(status) = req.status {
-            input.params.insert("f-status".to_string(), status.as_str().to_string());
-        }
-        input.export_file_name = req.base.export_file_name.clone();
-        input
-    }
-
-    fn email_recipients(&self, req: &Self::EmailRequest) -> Vec<String> {
-        req.base.recipients.clone()
-    }
+fn admin_router(state: AppApiState) -> ApiRouter {
+    ApiRouter::new()
+        .nest("/auth", admin_auth::router(state.clone()))
+        .merge(admin_guarded_router(state))
 }`}</code>
                 </pre>
 
-                <h2>Step 6: Mount Contract Routes</h2>
+                <h2>Step 5: Permission Checks on Business Routes</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`// app/src/internal/api/datatable.rs
-core_web::datatable::routes_for_scoped_contract_with_options(
-    "/datatable/admin/articles",
-    state,
-    AdminArticleDatatableContract::default(),
-    core_web::datatable::DataTableRouteOptions {
-        require_bearer_auth: true,
-    },
-)`}</code>
+                    <code className="language-rust">{`core_web::openapi::with_permission_check_post(
+    create,
+    generated::guards::AdminGuard,
+    core_web::authz::PermissionMode::Any,
+    [generated::permissions::Permission::ArticleManage],
+);`}</code>
                 </pre>
 
-                <h2>Step 7: Verify</h2>
+                <h2>Step 6: Verify</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-bash">{`cargo check --workspace
+./console migrate pump
+./console migrate run
 ./console route list
-curl -sS http://127.0.0.1:3000/openapi.json > /tmp/openapi.json`}</code>
+
+# login
+curl -sS -X POST http://127.0.0.1:3000/api/v1/admin/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"developer@example.com","password":"password123","client_type":"mobile"}'`}</code>
                 </pre>
             </div>
         </div>

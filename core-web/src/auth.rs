@@ -10,9 +10,9 @@ use core_db::{
         auth::token::{generate_token, hash_token},
         sql::DbConn,
     },
-    platform::{
-        auth_subject_permissions::repo::AuthSubjectPermissionRepo,
-        personal_access_tokens::repo::PatRepo,
+    platform::personal_access_tokens::{
+        model::{PersonalAccessTokenKind, PersonalAccessTokenRow},
+        repo::{CreatePatInput, PatRepo},
     },
 };
 use std::marker::PhantomData;
@@ -45,12 +45,46 @@ pub trait AuthState {
     fn auth_db(&self) -> &sqlx::PgPool;
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthClientType {
+    Web,
+    Mobile,
+}
+
+#[derive(Debug, Clone)]
+pub enum TokenScopeGrant {
+    /// Authenticated identity only, no permission scopes.
+    AuthOnly,
+    /// Explicit scopes snapshot.
+    Explicit(Vec<String>),
+    /// Full wildcard scope (`*`).
+    Wildcard,
+}
+
+impl TokenScopeGrant {
+    pub fn to_abilities(self) -> Vec<String> {
+        match self {
+            Self::AuthOnly => Vec::new(),
+            Self::Explicit(values) => normalize_abilities(values),
+            Self::Wildcard => vec!["*".to_string()],
+        }
+    }
+}
+
 /// Opaque token issuance result.
 #[derive(Debug, Clone)]
-pub struct IssuedToken {
-    pub plain_text: String,
-    pub token_id: Uuid,
-    pub expires_at: Option<OffsetDateTime>,
+pub struct IssuedTokenPair {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub access_token_id: Uuid,
+    pub refresh_token_id: Uuid,
+    pub family_id: Uuid,
+    pub access_expires_at: Option<OffsetDateTime>,
+    pub refresh_expires_at: Option<OffsetDateTime>,
+    pub abilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -177,47 +211,245 @@ pub fn guard_config<'a>(
         .ok_or_else(|| AppError::Unauthorized(format!("Guard '{guard_name}' is not configured")))
 }
 
-/// Issue PAT token for a guard using guard TTL settings.
-pub async fn issue_guard_token<G: Guard>(
+fn normalize_abilities(values: Vec<String>) -> Vec<String> {
+    let mut normalized = values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized.dedup();
+    normalized
+}
+
+async fn issue_token_row(
+    repo: &PatRepo<'_>,
+    tokenable_type: &str,
+    tokenable_id: &str,
+    name: &str,
+    token_kind: PersonalAccessTokenKind,
+    family_id: Uuid,
+    parent_token_id: Option<Uuid>,
+    abilities: Option<Vec<String>>,
+    expires_at: Option<OffsetDateTime>,
+) -> anyhow::Result<(String, PersonalAccessTokenRow)> {
+    let plain = generate_token();
+    let token_hash = hash_token(&plain);
+
+    let row = repo
+        .create(CreatePatInput {
+            tokenable_type: tokenable_type.to_string(),
+            tokenable_id: tokenable_id.to_string(),
+            name: name.to_string(),
+            token_hash,
+            token_kind,
+            family_id,
+            parent_token_id,
+            abilities,
+            expires_at,
+        })
+        .await?;
+
+    Ok((plain, row))
+}
+
+/// Issue an OAuth2-style access+refresh pair in one session family.
+pub async fn issue_guard_session<G: Guard>(
     db: &sqlx::PgPool,
     auth: &core_config::AuthSettings,
     user_id: impl ToString,
     name: &str,
-    abilities: Option<Vec<String>>,
-) -> anyhow::Result<IssuedToken> {
+    scope_grant: TokenScopeGrant,
+) -> anyhow::Result<IssuedTokenPair> {
     let cfg = guard_config(auth, G::name())
         .map_err(|e| anyhow::anyhow!("Invalid guard config: {:?}", e))?;
 
-    let ttl_min =
+    let access_ttl_min =
         i64::try_from(cfg.ttl_min).map_err(|_| anyhow::anyhow!("ttl_min is too large"))?;
-    let expires_at = Some(OffsetDateTime::now_utc() + Duration::minutes(ttl_min));
+    let refresh_ttl_days = i64::try_from(cfg.refresh_ttl_days)
+        .map_err(|_| anyhow::anyhow!("refresh_ttl_days is too large"))?;
 
-    let plain = generate_token();
-    let token_hash = hash_token(&plain);
+    let access_expires_at = Some(OffsetDateTime::now_utc() + Duration::minutes(access_ttl_min));
+    let refresh_expires_at = Some(OffsetDateTime::now_utc() + Duration::days(refresh_ttl_days));
+
     let tokenable_type = G::tokenable_type().unwrap_or_else(G::name);
     let tokenable_id = user_id.to_string();
+    let abilities = scope_grant.to_abilities();
+    let family_id = Uuid::new_v4();
 
     let repo = PatRepo::new(DbConn::pool(db));
-    let row = repo
-        .create(
-            tokenable_type,
-            &tokenable_id,
-            name,
-            &token_hash,
-            abilities,
-            expires_at,
-        )
-        .await?;
 
-    Ok(IssuedToken {
-        plain_text: plain,
-        token_id: row.id,
-        expires_at: row.expires_at,
+    let (access_token, access_row) = issue_token_row(
+        &repo,
+        tokenable_type,
+        &tokenable_id,
+        name,
+        PersonalAccessTokenKind::Access,
+        family_id,
+        None,
+        Some(abilities.clone()),
+        access_expires_at,
+    )
+    .await?;
+
+    let (refresh_token, refresh_row) = issue_token_row(
+        &repo,
+        tokenable_type,
+        &tokenable_id,
+        name,
+        PersonalAccessTokenKind::Refresh,
+        family_id,
+        None,
+        Some(abilities.clone()),
+        refresh_expires_at,
+    )
+    .await?;
+
+    Ok(IssuedTokenPair {
+        access_token,
+        refresh_token,
+        access_token_id: access_row.id,
+        refresh_token_id: refresh_row.id,
+        family_id,
+        access_expires_at: access_row.expires_at,
+        refresh_expires_at: refresh_row.expires_at,
+        abilities,
+    })
+}
+
+fn assert_token_row_valid<G: Guard>(
+    pat: &PersonalAccessTokenRow,
+    expected_kind: PersonalAccessTokenKind,
+) -> Result<(), AppError> {
+    if pat.kind() != Some(expected_kind) {
+        return Err(AppError::Unauthorized("Invalid token kind".to_string()));
+    }
+
+    if pat.is_revoked() {
+        return Err(AppError::Unauthorized("Token has been revoked".to_string()));
+    }
+
+    if pat.is_expired(OffsetDateTime::now_utc()) {
+        return Err(AppError::Unauthorized("Token has expired".to_string()));
+    }
+
+    if let Some(expected) = G::tokenable_type() {
+        if !pat.tokenable_type.eq_ignore_ascii_case(expected) {
+            return Err(AppError::Unauthorized("Token guard mismatch".to_string()));
+        }
+    }
+
+    Ok(())
+}
+
+/// Rotate refresh token (one-time-use) and issue new access+refresh pair.
+pub async fn refresh_guard_session<G: Guard>(
+    db: &sqlx::PgPool,
+    auth: &core_config::AuthSettings,
+    refresh_plain_token: &str,
+    name: &str,
+) -> Result<IssuedTokenPair, AppError> {
+    let token_hash = hash_token(refresh_plain_token);
+    let repo = PatRepo::new(DbConn::pool(db));
+
+    let refresh_row = repo
+        .find_by_token_and_kind(&token_hash, PersonalAccessTokenKind::Refresh)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("Invalid refresh token".to_string()))?;
+
+    if refresh_row.is_revoked() {
+        let _ = repo.revoke_family(refresh_row.family_id).await;
+        return Err(AppError::Unauthorized(
+            "Refresh token has already been used".to_string(),
+        ));
+    }
+
+    assert_token_row_valid::<G>(&refresh_row, PersonalAccessTokenKind::Refresh)?;
+
+    let _ = G::fetch_user(DbConn::pool(db), &refresh_row.tokenable_id)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("Token subject not found".to_string()))?;
+
+    repo.revoke_by_id(refresh_row.id).await?;
+
+    let cfg = guard_config(auth, G::name())?;
+    let access_ttl_min = i64::try_from(cfg.ttl_min)
+        .map_err(|_| AppError::Internal(anyhow::anyhow!("ttl_min is too large")))?;
+    let refresh_ttl_days = i64::try_from(cfg.refresh_ttl_days)
+        .map_err(|_| AppError::Internal(anyhow::anyhow!("refresh_ttl_days is too large")))?;
+
+    let access_expires_at = Some(OffsetDateTime::now_utc() + Duration::minutes(access_ttl_min));
+    let refresh_expires_at = Some(OffsetDateTime::now_utc() + Duration::days(refresh_ttl_days));
+
+    let abilities = refresh_row.abilities_vec();
+    let family_id = refresh_row.family_id;
+    let tokenable_type = refresh_row.tokenable_type.clone();
+    let tokenable_id = refresh_row.tokenable_id.clone();
+
+    let (access_token, access_row) = issue_token_row(
+        &repo,
+        &tokenable_type,
+        &tokenable_id,
+        name,
+        PersonalAccessTokenKind::Access,
+        family_id,
+        Some(refresh_row.id),
+        Some(abilities.clone()),
+        access_expires_at,
+    )
+    .await
+    .map_err(AppError::from)?;
+
+    let (refresh_token, new_refresh_row) = issue_token_row(
+        &repo,
+        &tokenable_type,
+        &tokenable_id,
+        name,
+        PersonalAccessTokenKind::Refresh,
+        family_id,
+        Some(refresh_row.id),
+        Some(abilities.clone()),
+        refresh_expires_at,
+    )
+    .await
+    .map_err(AppError::from)?;
+
+    Ok(IssuedTokenPair {
+        access_token,
+        refresh_token,
+        access_token_id: access_row.id,
+        refresh_token_id: new_refresh_row.id,
+        family_id,
+        access_expires_at: access_row.expires_at,
+        refresh_expires_at: new_refresh_row.expires_at,
+        abilities,
     })
 }
 
 pub async fn revoke_token(db: &sqlx::PgPool, token_id: Uuid) -> anyhow::Result<()> {
-    PatRepo::new(DbConn::pool(db)).delete_by_id(token_id).await
+    PatRepo::new(DbConn::pool(db)).revoke_by_id(token_id).await
+}
+
+pub async fn revoke_session_by_refresh_token<G: Guard>(
+    db: &sqlx::PgPool,
+    refresh_plain_token: &str,
+) -> Result<(), AppError> {
+    let token_hash = hash_token(refresh_plain_token);
+    let repo = PatRepo::new(DbConn::pool(db));
+
+    let refresh_row = repo
+        .find_by_token_and_kind(&token_hash, PersonalAccessTokenKind::Refresh)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("Invalid refresh token".to_string()))?;
+
+    if let Some(expected) = G::tokenable_type() {
+        if !refresh_row.tokenable_type.eq_ignore_ascii_case(expected) {
+            return Err(AppError::Unauthorized("Token guard mismatch".to_string()));
+        }
+    }
+
+    repo.revoke_family(refresh_row.family_id).await?;
+    Ok(())
 }
 
 pub fn ensure_ability<G: Guard>(auth: &AuthUser<G>, ability: &str) -> Result<(), AppError> {
@@ -238,23 +470,11 @@ pub async fn authenticate_token<G: Guard>(
     let repo = PatRepo::new(DbConn::pool(db));
 
     let pat = repo
-        .find_by_token(&token_hash)
+        .find_by_token_and_kind(&token_hash, PersonalAccessTokenKind::Access)
         .await?
         .ok_or_else(|| AppError::Unauthorized("Invalid access token".to_string()))?;
 
-    if let Some(exp) = pat.expires_at {
-        if exp <= OffsetDateTime::now_utc() {
-            return Err(AppError::Unauthorized(
-                "Access token has expired".to_string(),
-            ));
-        }
-    }
-
-    if let Some(expected) = G::tokenable_type() {
-        if !pat.tokenable_type.eq_ignore_ascii_case(expected) {
-            return Err(AppError::Unauthorized("Token guard mismatch".to_string()));
-        }
-    }
+    assert_token_row_valid::<G>(&pat, PersonalAccessTokenKind::Access)?;
 
     let user = G::fetch_user(DbConn::pool(db), &pat.tokenable_id)
         .await?
@@ -264,15 +484,7 @@ pub async fn authenticate_token<G: Guard>(
         tracing::warn!("Failed to update token last_used_at: {}", e);
     }
 
-    let subject_repo = AuthSubjectPermissionRepo::new(DbConn::pool(db));
-    let mut abilities = subject_repo
-        .list_permission_strings(G::name(), &pat.tokenable_id)
-        .await?;
-
-    // Backward-compat bridge: PAT abilities are only used when subject permission rows are absent.
-    if abilities.is_empty() {
-        abilities = pat.abilities.map(|a| a.0).unwrap_or_default();
-    }
+    let abilities = pat.abilities_vec();
 
     Ok(AuthUser::new(
         user,
@@ -284,7 +496,7 @@ pub async fn authenticate_token<G: Guard>(
 }
 
 /// Framework auth middleware.
-/// Reads Bearer token first, then `access_token` cookie fallback.
+/// Reads Authorization Bearer access token only.
 pub async fn require_auth<G, S>(
     State(state): State<S>,
     mut request: Request,
@@ -294,7 +506,7 @@ where
     G: Guard,
     S: AuthState + Send + Sync,
 {
-    let token = extract_request_token(request.headers())
+    let token = extract_bearer_token(request.headers())
         .ok_or_else(|| AppError::Unauthorized("Missing access token".to_string()))?;
 
     let auth_user = authenticate_token::<G>(state.auth_db(), &token).await?;
@@ -303,17 +515,33 @@ where
     Ok(next.run(request).await)
 }
 
-fn extract_request_token(headers: &HeaderMap) -> Option<String> {
-    extract_bearer_token(headers).or_else(|| extract_cookie_token(headers, "access_token"))
-}
-
-fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
+pub fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     let raw = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
     let (scheme, token) = raw.trim().split_once(' ')?;
     if scheme.eq_ignore_ascii_case("bearer") && !token.trim().is_empty() {
         Some(token.trim().to_string())
     } else {
         None
+    }
+}
+
+pub fn extract_refresh_cookie(headers: &HeaderMap, guard: &str) -> Option<String> {
+    let cookie_name = crate::utils::cookie::guard_refresh_cookie_name(guard);
+    extract_cookie_token(headers, &cookie_name)
+}
+
+pub fn extract_refresh_token_for_client(
+    headers: &HeaderMap,
+    guard: &str,
+    client_type: AuthClientType,
+    mobile_refresh_token: Option<&str>,
+) -> Option<String> {
+    match client_type {
+        AuthClientType::Web => extract_refresh_cookie(headers, guard),
+        AuthClientType::Mobile => mobile_refresh_token
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
     }
 }
 

@@ -1,6 +1,24 @@
 use time::Duration;
 use tower_cookies::{cookie::SameSite, Cookie, Cookies};
 
+fn sanitize_guard_for_cookie(guard: &str) -> String {
+    let value = guard
+        .trim()
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect::<String>();
+
+    if value.is_empty() {
+        "default".to_string()
+    } else {
+        value
+    }
+}
+
+pub fn guard_refresh_cookie_name(guard: &str) -> String {
+    format!("rf_{}_refresh_token", sanitize_guard_for_cookie(guard))
+}
+
 /// Sets a highly secure authentication cookie (access_token).
 /// - HttpOnly: YES (Prevent XSS)
 /// - Secure: YES (Prevent Sniffing)
@@ -54,4 +72,28 @@ pub fn remove(cookies: &Cookies, name: &str) {
     let mut c = Cookie::new(name.to_string(), "");
     c.set_path("/");
     cookies.remove(c);
+}
+
+pub fn set_guard_refresh(
+    cookies: &Cookies,
+    guard: &str,
+    refresh_token: &str,
+    ttl: Duration,
+    path: &str,
+) {
+    let mut cookie = Cookie::new(guard_refresh_cookie_name(guard), refresh_token.to_string());
+    cookie.set_http_only(true);
+    cookie.set_secure(true);
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_path(path.to_string());
+    cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(
+        ttl.whole_seconds(),
+    ));
+    cookies.add(cookie);
+}
+
+pub fn remove_guard_refresh(cookies: &Cookies, guard: &str, path: &str) {
+    let mut cookie = Cookie::new(guard_refresh_cookie_name(guard), "");
+    cookie.set_path(path.to_string());
+    cookies.remove(cookie);
 }

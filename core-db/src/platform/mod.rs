@@ -1,5 +1,4 @@
 pub mod attachments;
-pub mod auth_subject_permissions;
 pub mod countries;
 pub mod localized;
 pub mod meta;

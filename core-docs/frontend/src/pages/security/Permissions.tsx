@@ -4,7 +4,7 @@ export function Permissions() {
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">Permissions &amp; AuthZ</h1>
                 <p className="text-xl text-gray-500">
-                    Single-source permission catalog with typed generation and runtime enforcement.
+                    Typed permission catalog with PAT-scope runtime enforcement.
                 </p>
             </div>
 
@@ -40,12 +40,19 @@ description = "Create, update, and delete articles."`}</code>
                     </li>
                 </ul>
 
-                <h2>3) Runtime Model</h2>
+                <h2>3) Runtime Source of Truth</h2>
                 <p>
-                    Runtime permission rows are stored in <code>auth_subject_permissions</code>
-                    (guard + subject_id + permission). Auth middleware reads these rows on each
-                    request.
+                    Runtime checks read scopes from <code>personal_access_tokens.abilities</code>{' '}
+                    only. There is no per-request permission-table join.
                 </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
+                    <code className="language-rust">{`use core_web::auth::TokenScopeGrant;
+
+let scope = match admin.admin_type {
+    AdminType::Developer | AdminType::SuperAdmin => TokenScopeGrant::Wildcard,
+    AdminType::Admin => TokenScopeGrant::AuthOnly,
+};`}</code>
+                </pre>
 
                 <h2>4) AuthZ Helpers</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
@@ -77,22 +84,7 @@ core_web::authz::ensure_permissions(
                     <code>article.export</code>).
                 </p>
 
-                <h2>5) Admin Model Extension Pattern</h2>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
-                    <code className="language-rust">{`use models::admin_ext::{admin_has_permission, AdminViewExt};
-
-if admin.is_super_admin() {
-    // type shortcut
-}
-
-let can_write = admin_has_permission(
-    &db,
-    admin.id,
-    generated::permissions::Permission::ArticleManage,
-).await?;`}</code>
-                </pre>
-
-                <h2>6) OpenAPI Contract</h2>
+                <h2>5) OpenAPI Contract</h2>
                 <p>
                     Use <code>with_permission_check_*</code> helpers so OpenAPI includes authz
                     metadata: <code>x-required-guard</code>,{' '}

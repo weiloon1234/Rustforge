@@ -19,6 +19,7 @@ clap = { version = "4", features = ["derive"] }
 toml = "0.9"
 uuid = { version = "1", features = ["serde", "v4"] }
 time = { version = "0.3", features = ["serde"] }
+tower-cookies = "0.11"
 
 bootstrap = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 core-config = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
@@ -1211,6 +1212,8 @@ schemars = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true }
 uuid = { workspace = true }
+time = { workspace = true }
+tower-cookies = { workspace = true }
 "#;
 
 pub const APP_LIB_RS: &str = r#"pub mod contracts;
@@ -1414,6 +1417,8 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
 pub const APP_CONTRACTS_API_V1_ADMIN_AUTH_RS: &str = r#"use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
+use core_web::auth::AuthClientType;
+use generated::models::AdminType;
 
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminLoginInput {
@@ -1424,11 +1429,53 @@ pub struct AdminLoginInput {
     #[validate(length(min = 8, max = 128))]
     #[schemars(length(min = 8, max = 128))]
     pub password: String,
+
+    pub client_type: AuthClientType,
+}
+
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct AdminRefreshInput {
+    pub client_type: AuthClientType,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 256))]
+    #[schemars(length(min = 1, max = 256))]
+    pub refresh_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct AdminLogoutInput {
+    pub client_type: AuthClientType,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 256))]
+    #[schemars(length(min = 1, max = 256))]
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct AdminLoginOutput {
+pub struct AdminAuthOutput {
+    pub token_type: String,
     pub access_token: String,
+    #[schemars(with = "Option<String>")]
+    pub access_expires_at: Option<time::OffsetDateTime>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct AdminMeOutput {
+    pub id: i64,
+    pub email: String,
+    pub name: String,
+    pub admin_type: AdminType,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct AdminLogoutOutput {
+    pub revoked: bool,
 }
 "#;
 
@@ -1565,6 +1612,7 @@ use core_web::datatable::DataTableEmailExportManager;
 #[derive(Clone)]
 pub struct AppApiState {
     pub db: sqlx::PgPool,
+    pub auth: core_config::AuthSettings,
     pub storage: Arc<dyn Storage>,
     pub mailer: Arc<core_mailer::Mailer>,
     pub datatable_registry: Arc<DataTableRegistry>,
@@ -1591,6 +1639,7 @@ impl AppApiState {
 
         Ok(Self {
             db: ctx.db.clone(),
+            auth: ctx.settings.auth.clone(),
             storage: ctx.storage.clone(),
             mailer: ctx.mailer.clone(),
             datatable_registry,
@@ -1692,6 +1741,8 @@ use core_web::openapi::{
 
 use crate::internal::api::{datatable, state::AppApiState};
 
+mod admin_auth;
+
 pub fn router(state: AppApiState) -> ApiRouter {
     ApiRouter::new()
         .nest("/user", user_router())
@@ -1703,6 +1754,12 @@ fn user_router() -> ApiRouter {
 }
 
 fn admin_router(state: AppApiState) -> ApiRouter {
+    ApiRouter::new()
+        .nest("/auth", admin_auth::router(state.clone()))
+        .merge(admin_guarded_router(state))
+}
+
+fn admin_guarded_router(state: AppApiState) -> ApiRouter {
     ApiRouter::new()
         .api_route("/health", get(admin_health))
         .merge(datatable::router(state.clone()))
@@ -1718,6 +1775,182 @@ async fn user_health() -> &'static str {
 
 async fn admin_health() -> &'static str {
     "ok"
+}
+"#;
+
+pub const APP_INTERNAL_API_V1_ADMIN_AUTH_RS: &str = r#"use axum::{
+    http::HeaderMap,
+    middleware::from_fn_with_state,
+    routing::{get, post},
+};
+use core_i18n::t;
+use core_web::{
+    auth::{self, AuthClientType, AuthUser, Guard},
+    contracts::ContractJson,
+    error::AppError,
+    openapi::ApiRouter,
+    response::ApiResponse,
+    utils::cookie,
+};
+use generated::guards::AdminGuard;
+use time::Duration;
+use tower_cookies::Cookies;
+
+use crate::{
+    contracts::api::v1::admin_auth::{
+        AdminAuthOutput, AdminLoginInput, AdminLogoutInput, AdminLogoutOutput, AdminMeOutput,
+        AdminRefreshInput,
+    },
+    internal::{api::state::AppApiState, workflows::admin_auth as workflow},
+};
+
+const REFRESH_COOKIE_PATH: &str = "/api/v1/admin/auth";
+
+pub fn router(state: AppApiState) -> ApiRouter {
+    let protected_state = state.clone();
+    let protected = ApiRouter::new()
+        .route("/me", get(me))
+        .route("/logout", post({
+            let state = protected_state.clone();
+            move |headers: HeaderMap,
+                  cookies: Cookies,
+                  auth: AuthUser<AdminGuard>,
+                  req: ContractJson<AdminLogoutInput>| { logout(state.clone(), headers, cookies, auth, req) }
+        }))
+        .layer(from_fn_with_state(
+            protected_state,
+            crate::internal::middleware::auth::require_admin,
+        ));
+
+    ApiRouter::new()
+        .route("/login", post({
+            let state = state.clone();
+            move |cookies: Cookies, req: ContractJson<AdminLoginInput>| {
+                login(state.clone(), cookies, req)
+            }
+        }))
+        .route("/refresh", post({
+            let state = state.clone();
+            move |headers: HeaderMap, cookies: Cookies, req: ContractJson<AdminRefreshInput>| {
+                refresh(state.clone(), headers, cookies, req)
+            }
+        }))
+        .merge(protected)
+}
+
+async fn login(
+    state: AppApiState,
+    cookies: Cookies,
+    req: ContractJson<AdminLoginInput>,
+) -> Result<ApiResponse<AdminAuthOutput>, AppError> {
+    let req = req.0;
+    let (_admin, tokens) = workflow::login(&state, &req.username, &req.password).await?;
+    let output = to_auth_output(&state, &cookies, req.client_type, tokens);
+    Ok(ApiResponse::success(output, &t("Login successful")))
+}
+
+async fn refresh(
+    state: AppApiState,
+    headers: HeaderMap,
+    cookies: Cookies,
+    req: ContractJson<AdminRefreshInput>,
+) -> Result<ApiResponse<AdminAuthOutput>, AppError> {
+    let req = req.0;
+    let refresh_token = auth::extract_refresh_token_for_client(
+        &headers,
+        AdminGuard::name(),
+        req.client_type,
+        req.refresh_token.as_deref(),
+    )
+    .ok_or_else(|| AppError::BadRequest(t("Missing refresh token")))?;
+
+    let tokens = workflow::refresh(&state, &refresh_token).await?;
+    let output = to_auth_output(&state, &cookies, req.client_type, tokens);
+    Ok(ApiResponse::success(output, &t("Token refreshed")))
+}
+
+async fn logout(
+    state: AppApiState,
+    headers: HeaderMap,
+    cookies: Cookies,
+    _auth: AuthUser<AdminGuard>,
+    req: ContractJson<AdminLogoutInput>,
+) -> Result<ApiResponse<AdminLogoutOutput>, AppError> {
+    let req = req.0;
+    let refresh_token = auth::extract_refresh_token_for_client(
+        &headers,
+        AdminGuard::name(),
+        req.client_type,
+        req.refresh_token.as_deref(),
+    )
+    .ok_or_else(|| AppError::BadRequest(t("Missing refresh token")))?;
+
+    workflow::revoke_session(&state, &refresh_token).await?;
+
+    if matches!(req.client_type, AuthClientType::Web) {
+        cookie::remove_guard_refresh(&cookies, AdminGuard::name(), REFRESH_COOKIE_PATH);
+    }
+
+    Ok(ApiResponse::success(
+        AdminLogoutOutput { revoked: true },
+        &t("Logout successful"),
+    ))
+}
+
+async fn me(auth: AuthUser<AdminGuard>) -> Result<ApiResponse<AdminMeOutput>, AppError> {
+    let user = auth.user;
+    Ok(ApiResponse::success(
+        AdminMeOutput {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            admin_type: user.admin_type,
+            scopes: auth.abilities,
+        },
+        &t("Profile loaded"),
+    ))
+}
+
+fn to_auth_output(
+    state: &AppApiState,
+    cookies: &Cookies,
+    client_type: AuthClientType,
+    tokens: core_web::auth::IssuedTokenPair,
+) -> AdminAuthOutput {
+    match client_type {
+        AuthClientType::Web => {
+            if let Some(ttl) = refresh_cookie_ttl(state) {
+                cookie::set_guard_refresh(
+                    cookies,
+                    AdminGuard::name(),
+                    &tokens.refresh_token,
+                    ttl,
+                    REFRESH_COOKIE_PATH,
+                );
+            }
+
+            AdminAuthOutput {
+                token_type: "Bearer".to_string(),
+                access_token: tokens.access_token,
+                access_expires_at: tokens.access_expires_at,
+                refresh_token: None,
+                scopes: tokens.abilities,
+            }
+        }
+        AuthClientType::Mobile => AdminAuthOutput {
+            token_type: "Bearer".to_string(),
+            access_token: tokens.access_token,
+            access_expires_at: tokens.access_expires_at,
+            refresh_token: Some(tokens.refresh_token),
+            scopes: tokens.abilities,
+        },
+    }
+}
+
+fn refresh_cookie_ttl(state: &AppApiState) -> Option<Duration> {
+    let days = state.auth.guard(AdminGuard::name())?.refresh_ttl_days;
+    let days = i64::try_from(days).ok()?;
+    Some(Duration::days(days))
 }
 "#;
 
@@ -1743,7 +1976,72 @@ pub async fn require_admin(
 }
 "#;
 
-pub const APP_INTERNAL_WORKFLOWS_MOD_RS: &str = r#"// Put domain workflows here.
+pub const APP_INTERNAL_WORKFLOWS_MOD_RS: &str = r#"pub mod admin_auth;
+"#;
+
+pub const APP_INTERNAL_WORKFLOWS_ADMIN_AUTH_RS: &str = r#"use core_db::common::{
+    auth::hash::verify_password,
+    sql::{DbConn, Op},
+};
+use core_i18n::t;
+use core_web::{
+    auth::{self, IssuedTokenPair, TokenScopeGrant},
+    error::AppError,
+};
+use generated::{
+    guards::AdminGuard,
+    models::{AdminQuery, AdminType, AdminView},
+};
+
+use crate::internal::api::state::AppApiState;
+
+pub fn resolve_scope_grant(admin: &AdminView) -> TokenScopeGrant {
+    match admin.admin_type {
+        AdminType::Developer | AdminType::SuperAdmin => TokenScopeGrant::Wildcard,
+        AdminType::Admin => TokenScopeGrant::AuthOnly,
+    }
+}
+
+pub async fn login(
+    state: &AppApiState,
+    username: &str,
+    password: &str,
+) -> Result<(AdminView, IssuedTokenPair), AppError> {
+    let email = username.trim().to_ascii_lowercase();
+    let admin = AdminQuery::new(DbConn::pool(&state.db), None)
+        .where_email(Op::Eq, email)
+        .first()
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::Unauthorized(t("Invalid credentials")))?;
+
+    let valid = verify_password(password, &admin.password).map_err(AppError::from)?;
+    if !valid {
+        return Err(AppError::Unauthorized(t("Invalid credentials")));
+    }
+
+    let scope_grant = resolve_scope_grant(&admin);
+    let tokens = auth::issue_guard_session::<AdminGuard>(
+        &state.db,
+        &state.auth,
+        admin.id,
+        "admin-session",
+        scope_grant,
+    )
+    .await
+    .map_err(AppError::from)?;
+
+    Ok((admin, tokens))
+}
+
+pub async fn refresh(state: &AppApiState, refresh_token: &str) -> Result<IssuedTokenPair, AppError> {
+    auth::refresh_guard_session::<AdminGuard>(&state.db, &state.auth, refresh_token, "admin-session")
+        .await
+}
+
+pub async fn revoke_session(state: &AppApiState, refresh_token: &str) -> Result<(), AppError> {
+    auth::revoke_session_by_refresh_token::<AdminGuard>(&state.db, refresh_token).await
+}
 "#;
 
 pub const APP_INTERNAL_REALTIME_MOD_RS: &str = r#"// Put realtime channel policies/authorizers here.
@@ -1795,11 +2093,7 @@ impl Seeder for CountriesSeeder {
 
 pub const APP_SEEDS_ADMIN_BOOTSTRAP_RS: &str = r#"use async_trait::async_trait;
 use core_db::{
-    common::{
-        auth::hash::hash_password,
-        sql::DbConn,
-    },
-    platform::auth_subject_permissions::repo::AuthSubjectPermissionRepo,
+    common::auth::hash::hash_password,
     seeder::Seeder,
 };
 
@@ -1813,7 +2107,7 @@ impl Seeder for AdminBootstrapSeeder {
             return Ok(());
         }
 
-        let developer_id = upsert_admin(
+        upsert_admin(
             db,
             &env_or("SEED_ADMIN_DEVELOPER_EMAIL", "developer@example.com"),
             &env_or("SEED_ADMIN_DEVELOPER_PASSWORD", "password123"),
@@ -1822,7 +2116,7 @@ impl Seeder for AdminBootstrapSeeder {
         )
         .await?;
 
-        let superadmin_id = upsert_admin(
+        upsert_admin(
             db,
             &env_or("SEED_ADMIN_SUPERADMIN_EMAIL", "superadmin@example.com"),
             &env_or("SEED_ADMIN_SUPERADMIN_PASSWORD", "password123"),
@@ -1830,19 +2124,6 @@ impl Seeder for AdminBootstrapSeeder {
             "superadmin",
         )
         .await?;
-
-        let repo = AuthSubjectPermissionRepo::new(DbConn::pool(db));
-        let developer_subject_id = developer_id.to_string();
-        repo.replace("admin", &developer_subject_id, &["*".to_string()])
-            .await?;
-
-        let super_permissions = generated::permissions::Permission::all()
-            .iter()
-            .map(|permission| permission.as_str().to_string())
-            .collect::<Vec<_>>();
-        let superadmin_subject_id = superadmin_id.to_string();
-        repo.replace("admin", &superadmin_subject_id, &super_permissions)
-            .await?;
 
         Ok(())
     }
