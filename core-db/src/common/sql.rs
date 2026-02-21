@@ -57,6 +57,7 @@ pub enum BindValue {
     F64(f64),
     Bool(bool),
     String(String),
+    StringOpt(Option<String>),
     Time(OffsetDateTime),
     TimeOpt(Option<OffsetDateTime>),
     Uuid(Uuid),
@@ -245,6 +246,12 @@ impl From<bool> for BindValue {
 impl From<String> for BindValue {
     fn from(v: String) -> Self {
         BindValue::String(v)
+    }
+}
+
+impl From<Option<String>> for BindValue {
+    fn from(v: Option<String>) -> Self {
+        BindValue::StringOpt(v)
     }
 }
 
@@ -559,6 +566,7 @@ pub fn bind<'q, T>(q: PgQueryAs<'q, T>, value: BindValue) -> PgQueryAs<'q, T> {
         BindValue::F64(v) => q.bind(v),
         BindValue::Bool(v) => q.bind(v),
         BindValue::String(v) => q.bind(v),
+        BindValue::StringOpt(v) => q.bind(v),
         BindValue::Time(v) => q.bind(v),
         BindValue::TimeOpt(v) => q.bind(v),
         BindValue::Uuid(v) => q.bind(v),
@@ -574,6 +582,7 @@ pub fn bind_query<'q>(q: PgQuery<'q>, value: BindValue) -> PgQuery<'q> {
         BindValue::F64(v) => q.bind(v),
         BindValue::Bool(v) => q.bind(v),
         BindValue::String(v) => q.bind(v),
+        BindValue::StringOpt(v) => q.bind(v),
         BindValue::Time(v) => q.bind(v),
         BindValue::TimeOpt(v) => q.bind(v),
         BindValue::Uuid(v) => q.bind(v),
@@ -589,6 +598,7 @@ pub fn bind_scalar<'q, T>(q: PgQueryScalar<'q, T>, value: BindValue) -> PgQueryS
         BindValue::F64(v) => q.bind(v),
         BindValue::Bool(v) => q.bind(v),
         BindValue::String(v) => q.bind(v),
+        BindValue::StringOpt(v) => q.bind(v),
         BindValue::Time(v) => q.bind(v),
         BindValue::TimeOpt(v) => q.bind(v),
         BindValue::Uuid(v) => q.bind(v),

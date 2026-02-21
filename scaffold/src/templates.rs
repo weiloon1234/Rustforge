@@ -179,10 +179,12 @@ WORKER_SWEEP_INTERVAL=30
 # Admin Bootstrap Seeder
 # ----------------------------
 SEED_ADMIN_BOOTSTRAP_IN_PROD=false
-SEED_ADMIN_DEVELOPER_EMAIL=developer@example.com
+SEED_ADMIN_DEVELOPER_USERNAME=developer
+SEED_ADMIN_DEVELOPER_EMAIL=
 SEED_ADMIN_DEVELOPER_PASSWORD=password123
 SEED_ADMIN_DEVELOPER_NAME=Developer
-SEED_ADMIN_SUPERADMIN_EMAIL=superadmin@example.com
+SEED_ADMIN_SUPERADMIN_USERNAME=superadmin
+SEED_ADMIN_SUPERADMIN_EMAIL=
 SEED_ADMIN_SUPERADMIN_PASSWORD=password123
 SEED_ADMIN_SUPERADMIN_NAME=Super Admin
 "#;
@@ -427,14 +429,44 @@ For production stability, pin to a tag in `Cargo.toml`.
 "#;
 
 pub const ROOT_I18N_EN_JSON: &str = r#"{
+  "Admin list loaded": "Admin list loaded",
+  "Admin loaded": "Admin loaded",
+  "Admin created": "Admin created",
+  "Admin updated": "Admin updated",
+  "Admin deleted": "Admin deleted",
+  "Username is already taken": "Username is already taken",
+  "Cannot assign permissions you do not have": "Cannot assign permissions you do not have",
+  "Profile loaded": "Profile loaded",
+  "Login successful": "Login successful",
+  "Token refreshed": "Token refreshed",
+  "Logout successful": "Logout successful",
   "Profile updated successfully": "Profile updated successfully",
+  "Password updated successfully": "Password updated successfully",
+  "Current password is incorrect": "Current password is incorrect",
+  "Admin not found": "Admin not found",
+  "Missing refresh token": "Missing refresh token",
   "Invalid credentials": "Invalid credentials",
   "Access denied": "Access denied"
 }
 "#;
 
 pub const ROOT_I18N_ZH_JSON: &str = r#"{
+  "Admin list loaded": "管理员列表已加载",
+  "Admin loaded": "管理员资料已加载",
+  "Admin created": "管理员创建成功",
+  "Admin updated": "管理员更新成功",
+  "Admin deleted": "管理员删除成功",
+  "Username is already taken": "用户名已被使用",
+  "Cannot assign permissions you do not have": "不能分配你没有的权限",
+  "Profile loaded": "个人资料已加载",
+  "Login successful": "登录成功",
+  "Token refreshed": "令牌已刷新",
+  "Logout successful": "登出成功",
   "Profile updated successfully": "个人资料更新成功",
+  "Password updated successfully": "密码更新成功",
+  "Current password is incorrect": "当前密码不正确",
+  "Admin not found": "找不到管理员",
+  "Missing refresh token": "缺少刷新令牌",
   "Invalid credentials": "凭证无效",
   "Access denied": "拒绝访问"
 }
@@ -1132,15 +1164,19 @@ presence_enabled = false
 "#;
 
 pub const APP_PERMISSIONS_TOML: &str = r#"# Permission catalog (single source of truth).
-# Keep empty if your project does not need permissions yet.
-#
-# Example:
-# [[permissions]]
-# key = "article.manage"
-# guard = "admin"
-# label = "Manage Articles"
-# group = "article"
-# description = "Create/update/delete article resources."
+[[permissions]]
+key = "admin.read"
+guard = "admin"
+label = "Read Admins"
+group = "admin"
+description = "View admin profile and datatable records."
+
+[[permissions]]
+key = "admin.manage"
+guard = "admin"
+label = "Manage Admins"
+group = "admin"
+description = "Create/update/delete admin records and perform management actions."
 "#;
 
 pub const APP_SCHEMA_ADMIN_TOML: &str = r#"[AdminType]
@@ -1159,10 +1195,12 @@ id_strategy = "snowflake"
 soft_delete = true
 fields = [
   "id:i64",
-  "email:string",
+  "username:string",
+  "email:Option<String>",
   "password:hashed",
   "name:string",
   "admin_type:AdminType",
+  "abilities:serde_json::Value",
   "created_at:datetime",
   "updated_at:datetime"
 ]
@@ -1172,14 +1210,21 @@ pub const MIGRATION_ADMIN_AUTH_SQL: &str = r#"CREATE EXTENSION IF NOT EXISTS pgc
 
 CREATE TABLE IF NOT EXISTS admin (
     id BIGINT PRIMARY KEY CHECK (id > 0),
-    email TEXT NOT NULL UNIQUE,
+    username TEXT NOT NULL UNIQUE,
+    email TEXT,
     password TEXT NOT NULL,
     name TEXT NOT NULL,
     admin_type TEXT NOT NULL CHECK (admin_type IN ('developer', 'superadmin', 'admin')),
+    abilities JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at TIMESTAMPTZ
+    deleted_at TIMESTAMPTZ,
+    CHECK (username = lower(username))
 );
+
+CREATE INDEX IF NOT EXISTS idx_admin_username ON admin (username);
+CREATE INDEX IF NOT EXISTS idx_admin_admin_type ON admin (admin_type);
+CREATE INDEX IF NOT EXISTS idx_admin_email ON admin (email);
 "#;
 
 pub const APP_CARGO_TOML: &str = r#"[package]
@@ -1229,7 +1274,8 @@ pub mod datatable;
 pub const APP_CONTRACTS_API_MOD_RS: &str = r#"pub mod v1;
 "#;
 
-pub const APP_CONTRACTS_API_V1_MOD_RS: &str = r#"pub mod admin_auth;
+pub const APP_CONTRACTS_API_V1_MOD_RS: &str = r#"pub mod admin;
+pub mod admin_auth;
 "#;
 
 pub const APP_CONTRACTS_DATATABLE_MOD_RS: &str = r#"pub mod admin;
@@ -1260,6 +1306,10 @@ pub struct AdminDatatableQueryInput {
     #[schemars(length(min = 1, max = 120))]
     pub q: Option<String>,
     #[serde(default)]
+    #[validate(length(min = 3, max = 64))]
+    #[schemars(length(min = 3, max = 64))]
+    pub username: Option<String>,
+    #[serde(default)]
     #[validate(length(min = 1, max = 120))]
     #[schemars(length(min = 1, max = 120))]
     pub email: Option<String>,
@@ -1274,6 +1324,17 @@ impl AdminDatatableQueryInput {
 
         if let Some(q) = self.q.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
             params.insert("q".to_string(), q.to_string());
+        }
+        if let Some(username) = self
+            .username
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            params.insert(
+                "f-like-username".to_string(),
+                username.to_ascii_lowercase(),
+            );
         }
         if let Some(email) = self
             .email
@@ -1301,6 +1362,10 @@ pub struct AdminDatatableEmailExportInput {
     #[schemars(length(min = 1, max = 120))]
     pub q: Option<String>,
     #[serde(default)]
+    #[validate(length(min = 3, max = 64))]
+    #[schemars(length(min = 3, max = 64))]
+    pub username: Option<String>,
+    #[serde(default)]
     #[validate(length(min = 1, max = 120))]
     #[schemars(length(min = 1, max = 120))]
     pub email: Option<String>,
@@ -1315,6 +1380,17 @@ impl AdminDatatableEmailExportInput {
 
         if let Some(q) = self.q.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
             params.insert("q".to_string(), q.to_string());
+        }
+        if let Some(username) = self
+            .username
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            params.insert(
+                "f-like-username".to_string(),
+                username.to_ascii_lowercase(),
+            );
         }
         if let Some(email) = self
             .email
@@ -1378,7 +1454,7 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
                     filter_key: "q".to_string(),
                     field_type: DataTableFilterFieldType::Text,
                     label: "Keyword".to_string(),
-                    placeholder: Some("Search name/email".to_string()),
+                    placeholder: Some("Search name/username/email".to_string()),
                     description: None,
                     options: None,
                 },
@@ -1392,6 +1468,15 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
                     options: None,
                 },
             ],
+            vec![DataTableFilterFieldDto {
+                field: "username".to_string(),
+                filter_key: "f-like-username".to_string(),
+                field_type: DataTableFilterFieldType::Text,
+                label: "Username".to_string(),
+                placeholder: Some("Contains".to_string()),
+                description: None,
+                options: None,
+            }],
             vec![DataTableFilterFieldDto {
                 field: "admin_type".to_string(),
                 filter_key: "f-admin_type".to_string(),
@@ -1414,6 +1499,109 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
 }
 "#;
 
+pub const APP_CONTRACTS_API_V1_ADMIN_RS: &str = r#"use generated::{models::AdminType, permissions::Permission};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use validator::Validate;
+
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct CreateAdminInput {
+    #[validate(custom(function = "crate::validation::username::validate_username"))]
+    #[validate(length(min = 3, max = 64))]
+    #[schemars(length(min = 3, max = 64))]
+    pub username: String,
+    #[serde(default)]
+    #[validate(email)]
+    #[schemars(email)]
+    pub email: Option<String>,
+    #[validate(length(min = 1, max = 120))]
+    #[schemars(length(min = 1, max = 120))]
+    pub name: String,
+    pub admin_type: AdminType,
+    #[validate(length(min = 8, max = 128))]
+    #[schemars(length(min = 8, max = 128))]
+    pub password: String,
+    #[serde(default)]
+    pub abilities: Vec<Permission>,
+}
+
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct UpdateAdminInput {
+    #[serde(default)]
+    #[validate(custom(function = "crate::validation::username::validate_username"))]
+    #[validate(length(min = 3, max = 64))]
+    #[schemars(length(min = 3, max = 64))]
+    pub username: Option<String>,
+    #[serde(default)]
+    #[validate(email)]
+    #[schemars(email)]
+    pub email: Option<String>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 120))]
+    #[schemars(length(min = 1, max = 120))]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub admin_type: Option<AdminType>,
+    #[serde(default)]
+    pub abilities: Option<Vec<Permission>>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct AdminOutput {
+    pub id: i64,
+    pub username: String,
+    pub email: Option<String>,
+    pub name: String,
+    pub admin_type: AdminType,
+    #[serde(default)]
+    pub abilities: Vec<String>,
+    #[schemars(with = "String")]
+    pub created_at: time::OffsetDateTime,
+    #[schemars(with = "String")]
+    pub updated_at: time::OffsetDateTime,
+}
+
+impl From<generated::models::AdminView> for AdminOutput {
+    fn from(value: generated::models::AdminView) -> Self {
+        let abilities = value
+            .abilities
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(ToString::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        Self {
+            id: value.id,
+            username: value.username,
+            email: value.email,
+            name: value.name,
+            admin_type: value.admin_type,
+            abilities,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct AdminListOutput {
+    pub data: Vec<AdminOutput>,
+    pub total: i64,
+    pub per_page: i64,
+    pub current_page: i64,
+    pub last_page: i64,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct AdminDeleteOutput {
+    pub deleted: bool,
+}
+"#;
+
 pub const APP_CONTRACTS_API_V1_ADMIN_AUTH_RS: &str = r#"use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -1422,6 +1610,7 @@ use generated::models::AdminType;
 
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminLoginInput {
+    #[validate(custom(function = "crate::validation::username::validate_username"))]
     #[validate(length(min = 3, max = 64))]
     #[schemars(length(min = 3, max = 64))]
     pub username: String,
@@ -1451,6 +1640,31 @@ pub struct AdminLogoutInput {
     pub refresh_token: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct AdminProfileUpdateInput {
+    #[validate(length(min = 1, max = 120))]
+    #[schemars(length(min = 1, max = 120))]
+    pub name: String,
+    #[serde(default)]
+    #[validate(email)]
+    #[schemars(email)]
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct AdminPasswordUpdateInput {
+    #[validate(length(min = 8, max = 128))]
+    #[schemars(length(min = 8, max = 128))]
+    pub current_password: String,
+    #[validate(length(min = 8, max = 128))]
+    #[validate(must_match(other = "password_confirmation"))]
+    #[schemars(length(min = 8, max = 128))]
+    pub password: String,
+    #[validate(length(min = 8, max = 128))]
+    #[schemars(length(min = 8, max = 128))]
+    pub password_confirmation: String,
+}
+
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct AdminAuthOutput {
     pub token_type: String,
@@ -1466,11 +1680,26 @@ pub struct AdminAuthOutput {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct AdminMeOutput {
     pub id: i64,
-    pub email: String,
+    pub username: String,
+    pub email: Option<String>,
     pub name: String,
     pub admin_type: AdminType,
     #[serde(default)]
     pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct AdminProfileUpdateOutput {
+    pub id: i64,
+    pub username: String,
+    pub email: Option<String>,
+    pub name: String,
+    pub admin_type: AdminType,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct AdminPasswordUpdateOutput {
+    pub updated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -1481,6 +1710,7 @@ pub struct AdminLogoutOutput {
 
 pub const APP_VALIDATION_MOD_RS: &str = r#"pub mod db;
 pub mod sync;
+pub mod username;
 "#;
 
 pub const APP_VALIDATION_SYNC_RS: &str = r#"use std::borrow::Cow;
@@ -1496,6 +1726,32 @@ pub fn required_trimmed(value: &str) -> Result<(), ValidationError> {
 
 pub fn alpha_dash(value: &str) -> Result<(), ValidationError> {
     core_web::rules::alpha_dash(value)
+}
+"#;
+
+pub const APP_VALIDATION_USERNAME_RS: &str = r#"use std::borrow::Cow;
+use validator::ValidationError;
+
+fn err(code: &'static str, msg: &'static str) -> ValidationError {
+    ValidationError::new(code).with_message(Cow::Borrowed(msg))
+}
+
+pub fn validate_username(value: &str) -> Result<(), ValidationError> {
+    let trimmed = value.trim();
+
+    core_web::rules::required_trimmed(trimmed)
+        .map_err(|_| err("required", "This field is required."))?;
+    core_web::rules::alpha_dash(trimmed)
+        .map_err(|_| err("alpha_dash", "Only lowercase letters, numbers, '-' and '_' are allowed."))?;
+
+    if trimmed != trimmed.to_ascii_lowercase() {
+        return Err(err(
+            "lowercase",
+            "Username must be lowercase.",
+        ));
+    }
+
+    Ok(())
 }
 "#;
 
@@ -1674,12 +1930,16 @@ pub const APP_INTERNAL_API_DATATABLE_RS: &str = r#"use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::http::HeaderMap;
-use core_datatable::{DataTableAsyncExportManager, DataTableContext, DataTableRegistry};
+use core_datatable::{DataTableActor, DataTableAsyncExportManager, DataTableContext, DataTableRegistry};
 use core_db::infra::storage::Storage;
 use core_web::datatable::{
     DataTableEmailExportManager, DataTableRouteOptions, DataTableRouteState,
 };
+use core_web::auth::Guard;
 use core_web::openapi::ApiRouter;
+use serde_json::Value;
+
+use generated::guards::AdminGuard;
 
 use crate::contracts::datatable::admin::admin::AdminAdminDataTableContract;
 use crate::internal::api::state::AppApiState;
@@ -1722,14 +1982,36 @@ impl DataTableRouteState for AppApiState {
     }
 
     async fn datatable_context(&self, headers: &HeaderMap) -> DataTableContext {
+        let actor = build_admin_actor(&self.db, headers).await;
         DataTableContext {
             default_per_page: self.datatable_default_per_page,
             app_timezone: self.app_timezone.clone(),
             user_timezone: core_web::utils::datatable::parse_timezone_from_headers(headers),
-            actor: None,
+            actor,
             unknown_filter_mode: self.datatable_unknown_filter_mode,
         }
     }
+}
+
+async fn build_admin_actor(db: &sqlx::PgPool, headers: &HeaderMap) -> Option<DataTableActor> {
+    let token = core_web::auth::extract_bearer_token(headers)?;
+    let auth = core_web::auth::authenticate_token::<AdminGuard>(db, &token)
+        .await
+        .ok()?;
+
+    let mut attributes = std::collections::BTreeMap::new();
+    attributes.insert(
+        "admin_type".to_string(),
+        Value::String(auth.user.admin_type.as_str().to_string()),
+    );
+
+    Some(DataTableActor {
+        id: auth.subject_id.clone(),
+        guard: Some(AdminGuard::name().to_string()),
+        roles: Vec::new(),
+        permissions: auth.abilities,
+        attributes,
+    })
 }
 "#;
 
@@ -1741,6 +2023,7 @@ use core_web::openapi::{
 
 use crate::internal::api::{datatable, state::AppApiState};
 
+mod admin;
 mod admin_auth;
 
 pub fn router(state: AppApiState) -> ApiRouter {
@@ -1762,6 +2045,7 @@ fn admin_router(state: AppApiState) -> ApiRouter {
 fn admin_guarded_router(state: AppApiState) -> ApiRouter {
     ApiRouter::new()
         .api_route("/health", get(admin_health))
+        .nest("/admins", admin::router(state.clone()))
         .merge(datatable::router(state.clone()))
         .layer(from_fn_with_state(
             state,
@@ -1778,10 +2062,132 @@ async fn admin_health() -> &'static str {
 }
 "#;
 
+pub const APP_INTERNAL_API_V1_ADMIN_RS: &str = r#"use axum::extract::{Path, State};
+use core_i18n::t;
+use core_web::{
+    auth::AuthUser,
+    authz::PermissionMode,
+    contracts::ContractJson,
+    error::AppError,
+    openapi::{
+        with_permission_check_delete, with_permission_check_get, with_permission_check_patch,
+        with_permission_check_post, ApiRouter,
+    },
+    response::ApiResponse,
+};
+use generated::{guards::AdminGuard, permissions::Permission};
+
+use crate::{
+    contracts::api::v1::admin::{
+        AdminDeleteOutput, AdminListOutput, AdminOutput, CreateAdminInput, UpdateAdminInput,
+    },
+    internal::{api::state::AppApiState, workflows::admin as workflow},
+};
+
+pub fn router(state: AppApiState) -> ApiRouter {
+    ApiRouter::new()
+        .api_route(
+            "/",
+            with_permission_check_get(
+                list,
+                AdminGuard,
+                PermissionMode::Any,
+                [Permission::AdminRead.as_str(), Permission::AdminManage.as_str()],
+            )
+            .merge(with_permission_check_post(
+                create,
+                AdminGuard,
+                PermissionMode::Any,
+                [Permission::AdminManage.as_str()],
+            )),
+        )
+        .api_route(
+            "/{id}",
+            with_permission_check_get(
+                detail,
+                AdminGuard,
+                PermissionMode::Any,
+                [Permission::AdminRead.as_str(), Permission::AdminManage.as_str()],
+            )
+            .merge(with_permission_check_patch(
+                update,
+                AdminGuard,
+                PermissionMode::Any,
+                [Permission::AdminManage.as_str()],
+            ))
+            .merge(with_permission_check_delete(
+                remove,
+                AdminGuard,
+                PermissionMode::Any,
+                [Permission::AdminManage.as_str()],
+            )),
+        )
+        .with_state(state)
+}
+
+async fn list(
+    State(state): State<AppApiState>,
+    _auth: AuthUser<AdminGuard>,
+) -> Result<ApiResponse<AdminListOutput>, AppError> {
+    let page = workflow::list(&state).await?;
+    let data = page.data.into_iter().map(AdminOutput::from).collect::<Vec<_>>();
+    Ok(ApiResponse::success(
+        AdminListOutput {
+            data,
+            total: page.total,
+            per_page: page.per_page,
+            current_page: page.current_page,
+            last_page: page.last_page,
+        },
+        &t("Admin list loaded"),
+    ))
+}
+
+async fn detail(
+    State(state): State<AppApiState>,
+    _auth: AuthUser<AdminGuard>,
+    Path(id): Path<i64>,
+) -> Result<ApiResponse<AdminOutput>, AppError> {
+    let admin = workflow::detail(&state, id).await?;
+    Ok(ApiResponse::success(AdminOutput::from(admin), &t("Admin loaded")))
+}
+
+async fn create(
+    State(state): State<AppApiState>,
+    auth: AuthUser<AdminGuard>,
+    req: ContractJson<CreateAdminInput>,
+) -> Result<ApiResponse<AdminOutput>, AppError> {
+    let admin = workflow::create(&state, &auth, req.0).await?;
+    Ok(ApiResponse::success(AdminOutput::from(admin), &t("Admin created")))
+}
+
+async fn update(
+    State(state): State<AppApiState>,
+    auth: AuthUser<AdminGuard>,
+    Path(id): Path<i64>,
+    req: ContractJson<UpdateAdminInput>,
+) -> Result<ApiResponse<AdminOutput>, AppError> {
+    let admin = workflow::update(&state, &auth, id, req.0).await?;
+    Ok(ApiResponse::success(AdminOutput::from(admin), &t("Admin updated")))
+}
+
+async fn remove(
+    State(state): State<AppApiState>,
+    _auth: AuthUser<AdminGuard>,
+    Path(id): Path<i64>,
+) -> Result<ApiResponse<AdminDeleteOutput>, AppError> {
+    workflow::remove(&state, id).await?;
+    Ok(ApiResponse::success(
+        AdminDeleteOutput { deleted: true },
+        &t("Admin deleted"),
+    ))
+}
+"#;
+
 pub const APP_INTERNAL_API_V1_ADMIN_AUTH_RS: &str = r#"use axum::{
     http::HeaderMap,
     middleware::from_fn_with_state,
-    routing::{get, post},
+    routing::{get, patch, post},
 };
 use core_i18n::t;
 use core_web::{
@@ -1799,7 +2205,8 @@ use tower_cookies::Cookies;
 use crate::{
     contracts::api::v1::admin_auth::{
         AdminAuthOutput, AdminLoginInput, AdminLogoutInput, AdminLogoutOutput, AdminMeOutput,
-        AdminRefreshInput,
+        AdminPasswordUpdateInput, AdminPasswordUpdateOutput, AdminProfileUpdateInput,
+        AdminProfileUpdateOutput, AdminRefreshInput,
     },
     internal::{api::state::AppApiState, workflows::admin_auth as workflow},
 };
@@ -1816,6 +2223,18 @@ pub fn router(state: AppApiState) -> ApiRouter {
                   cookies: Cookies,
                   auth: AuthUser<AdminGuard>,
                   req: ContractJson<AdminLogoutInput>| { logout(state.clone(), headers, cookies, auth, req) }
+        }))
+        .route("/profile_update", patch({
+            let state = protected_state.clone();
+            move |auth: AuthUser<AdminGuard>, req: ContractJson<AdminProfileUpdateInput>| {
+                profile_update(state.clone(), auth, req)
+            }
+        }))
+        .route("/password_update", patch({
+            let state = protected_state.clone();
+            move |auth: AuthUser<AdminGuard>, req: ContractJson<AdminPasswordUpdateInput>| {
+                password_update(state.clone(), auth, req)
+            }
         }))
         .layer(from_fn_with_state(
             protected_state,
@@ -1902,12 +2321,45 @@ async fn me(auth: AuthUser<AdminGuard>) -> Result<ApiResponse<AdminMeOutput>, Ap
     Ok(ApiResponse::success(
         AdminMeOutput {
             id: user.id,
+            username: user.username,
             email: user.email,
             name: user.name,
             admin_type: user.admin_type,
             scopes: auth.abilities,
         },
         &t("Profile loaded"),
+    ))
+}
+
+async fn profile_update(
+    state: AppApiState,
+    auth: AuthUser<AdminGuard>,
+    req: ContractJson<AdminProfileUpdateInput>,
+) -> Result<ApiResponse<AdminProfileUpdateOutput>, AppError> {
+    let req = req.0;
+    let admin = workflow::profile_update(&state, auth.user.id, req).await?;
+    Ok(ApiResponse::success(
+        AdminProfileUpdateOutput {
+            id: admin.id,
+            username: admin.username,
+            email: admin.email,
+            name: admin.name,
+            admin_type: admin.admin_type,
+        },
+        &t("Profile updated successfully"),
+    ))
+}
+
+async fn password_update(
+    state: AppApiState,
+    auth: AuthUser<AdminGuard>,
+    req: ContractJson<AdminPasswordUpdateInput>,
+) -> Result<ApiResponse<AdminPasswordUpdateOutput>, AppError> {
+    let req = req.0;
+    workflow::password_update(&state, auth.user.id, req).await?;
+    Ok(ApiResponse::success(
+        AdminPasswordUpdateOutput { updated: true },
+        &t("Password updated successfully"),
     ))
 }
 
@@ -1976,7 +2428,189 @@ pub async fn require_admin(
 }
 "#;
 
-pub const APP_INTERNAL_WORKFLOWS_MOD_RS: &str = r#"pub mod admin_auth;
+pub const APP_INTERNAL_WORKFLOWS_MOD_RS: &str = r#"pub mod admin;
+pub mod admin_auth;
+"#;
+
+pub const APP_INTERNAL_WORKFLOWS_ADMIN_RS: &str = r#"use core_db::common::sql::{
+    DbConn, Op, OrderDir, generate_snowflake_i64,
+};
+use core_i18n::t;
+use core_web::{auth::AuthUser, error::AppError};
+use generated::{
+    guards::AdminGuard,
+    models::{Admin, AdminCol, AdminQuery, AdminType, AdminView, Page},
+    permissions::Permission,
+};
+
+use crate::{
+    contracts::api::v1::admin::{CreateAdminInput, UpdateAdminInput},
+    internal::api::state::AppApiState,
+};
+
+pub async fn list(state: &AppApiState) -> Result<Page<AdminView>, AppError> {
+    Admin::new(DbConn::pool(&state.db), None)
+        .query()
+        .order_by(AdminCol::Id, OrderDir::Desc)
+        .paginate(1, 50)
+        .await
+        .map_err(AppError::from)
+}
+
+pub async fn detail(state: &AppApiState, id: i64) -> Result<AdminView, AppError> {
+    Admin::new(DbConn::pool(&state.db), None)
+        .find(id)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::NotFound(t("Admin not found")))
+}
+
+pub async fn create(
+    state: &AppApiState,
+    auth: &AuthUser<AdminGuard>,
+    req: CreateAdminInput,
+) -> Result<AdminView, AppError> {
+    let username = req.username.trim().to_ascii_lowercase();
+    ensure_username_available(&state.db, &username, None).await?;
+
+    let abilities = ensure_assignable_permissions(auth, &req.abilities)?;
+
+    let mut insert = Admin::new(DbConn::pool(&state.db), None)
+        .insert()
+        .set_id(generate_snowflake_i64())
+        .set_username(username)
+        .set_name(req.name.trim().to_string())
+        .set_admin_type(req.admin_type)
+        .set_abilities(permissions_to_json(&abilities));
+
+    if let Some(email) = normalize_optional_email(req.email) {
+        insert = insert.set_email(Some(email));
+    }
+
+    let insert = insert.set_password(&req.password).map_err(AppError::from)?;
+    insert.save().await.map_err(AppError::from)
+}
+
+pub async fn update(
+    state: &AppApiState,
+    auth: &AuthUser<AdminGuard>,
+    id: i64,
+    req: UpdateAdminInput,
+) -> Result<AdminView, AppError> {
+    let existing = detail(state, id).await?;
+    let mut update = Admin::new(DbConn::pool(&state.db), None).update().where_id(Op::Eq, id);
+    let mut touched = false;
+
+    if let Some(username) = req.username {
+        let username = username.trim().to_ascii_lowercase();
+        if username != existing.username {
+            ensure_username_available(&state.db, &username, Some(id)).await?;
+            update = update.set_username(username);
+            touched = true;
+        }
+    }
+
+    if let Some(name) = req.name {
+        update = update.set_name(name.trim().to_string());
+        touched = true;
+    }
+
+    if let Some(email) = normalize_optional_email(req.email) {
+        update = update.set_email(Some(email));
+        touched = true;
+    }
+
+    if let Some(admin_type) = req.admin_type {
+        update = update.set_admin_type(admin_type);
+        touched = true;
+    }
+
+    if let Some(abilities) = req.abilities {
+        let abilities = ensure_assignable_permissions(auth, &abilities)?;
+        update = update.set_abilities(permissions_to_json(&abilities));
+        touched = true;
+    }
+
+    if !touched {
+        return Ok(existing);
+    }
+
+    let affected = update.save().await.map_err(AppError::from)?;
+    if affected == 0 {
+        return Err(AppError::NotFound(t("Admin not found")));
+    }
+
+    detail(state, id).await
+}
+
+pub async fn remove(state: &AppApiState, id: i64) -> Result<(), AppError> {
+    let affected = Admin::new(DbConn::pool(&state.db), None)
+        .delete(id)
+        .await
+        .map_err(AppError::from)?;
+    if affected == 0 {
+        return Err(AppError::NotFound(t("Admin not found")));
+    }
+    Ok(())
+}
+
+async fn ensure_username_available(
+    db: &sqlx::PgPool,
+    username: &str,
+    exclude_id: Option<i64>,
+) -> Result<(), AppError> {
+    let mut query = AdminQuery::new(DbConn::pool(db), None).where_username(Op::Eq, username.to_string());
+    if let Some(id) = exclude_id {
+        query = query.where_id(Op::Ne, id);
+    }
+    let exists = query.first().await.map_err(AppError::from)?.is_some();
+    if exists {
+        return Err(AppError::BadRequest(t("Username is already taken")));
+    }
+    Ok(())
+}
+
+fn normalize_optional_email(email: Option<String>) -> Option<String> {
+    email
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase)
+}
+
+fn ensure_assignable_permissions(
+    auth: &AuthUser<AdminGuard>,
+    requested: &[Permission],
+) -> Result<Vec<String>, AppError> {
+    let requested = requested
+        .iter()
+        .map(|permission| permission.as_str().to_string())
+        .collect::<Vec<_>>();
+
+    if matches!(auth.user.admin_type, AdminType::Developer | AdminType::SuperAdmin) {
+        return Ok(requested);
+    }
+
+    if requested
+        .iter()
+        .all(|permission| auth.has_permission(permission.as_str()))
+    {
+        return Ok(requested);
+    }
+
+    Err(AppError::Forbidden(t(
+        "Cannot assign permissions you do not have",
+    )))
+}
+
+fn permissions_to_json(values: &[String]) -> serde_json::Value {
+    serde_json::Value::Array(
+        values
+            .iter()
+            .map(|value| serde_json::Value::String(value.clone()))
+            .collect(),
+    )
+}
 "#;
 
 pub const APP_INTERNAL_WORKFLOWS_ADMIN_AUTH_RS: &str = r#"use core_db::common::{
@@ -1990,16 +2624,52 @@ use core_web::{
 };
 use generated::{
     guards::AdminGuard,
-    models::{AdminQuery, AdminType, AdminView},
+    models::{Admin, AdminQuery, AdminType, AdminView},
+    permissions::Permission,
 };
 
+use crate::contracts::api::v1::admin_auth::{AdminPasswordUpdateInput, AdminProfileUpdateInput};
 use crate::internal::api::state::AppApiState;
 
 pub fn resolve_scope_grant(admin: &AdminView) -> TokenScopeGrant {
     match admin.admin_type {
         AdminType::Developer | AdminType::SuperAdmin => TokenScopeGrant::Wildcard,
-        AdminType::Admin => TokenScopeGrant::AuthOnly,
+        AdminType::Admin => {
+            let explicit = admin_permissions(admin);
+            if explicit.is_empty() {
+                TokenScopeGrant::AuthOnly
+            } else {
+                TokenScopeGrant::Explicit(explicit)
+            }
+        }
     }
+}
+
+fn admin_permissions(admin: &AdminView) -> Vec<String> {
+    let mut out = Vec::new();
+
+    if let Some(items) = admin.abilities.as_array() {
+        for item in items {
+            let Some(raw) = item.as_str() else {
+                continue;
+            };
+            let value = raw.trim();
+            if value.is_empty() {
+                continue;
+            }
+            if value == "*" {
+                out.push("*".to_string());
+                continue;
+            }
+            if let Some(permission) = Permission::from_str(value) {
+                out.push(permission.as_str().to_string());
+            }
+        }
+    }
+
+    out.sort();
+    out.dedup();
+    out
 }
 
 pub async fn login(
@@ -2007,9 +2677,9 @@ pub async fn login(
     username: &str,
     password: &str,
 ) -> Result<(AdminView, IssuedTokenPair), AppError> {
-    let email = username.trim().to_ascii_lowercase();
+    let username = username.trim().to_ascii_lowercase();
     let admin = AdminQuery::new(DbConn::pool(&state.db), None)
-        .where_email(Op::Eq, email)
+        .where_username(Op::Eq, username)
         .first()
         .await
         .map_err(AppError::from)?
@@ -2042,6 +2712,65 @@ pub async fn refresh(state: &AppApiState, refresh_token: &str) -> Result<IssuedT
 pub async fn revoke_session(state: &AppApiState, refresh_token: &str) -> Result<(), AppError> {
     auth::revoke_session_by_refresh_token::<AdminGuard>(&state.db, refresh_token).await
 }
+
+pub async fn profile_update(
+    state: &AppApiState,
+    admin_id: i64,
+    req: AdminProfileUpdateInput,
+) -> Result<AdminView, AppError> {
+    let mut update = Admin::new(DbConn::pool(&state.db), None)
+        .update()
+        .where_id(Op::Eq, admin_id)
+        .set_name(req.name.trim().to_string());
+
+    if let Some(email) = req.email {
+        let email = email.trim().to_ascii_lowercase();
+        if !email.is_empty() {
+            update = update.set_email(Some(email));
+        }
+    }
+
+    let affected = update.save().await.map_err(AppError::from)?;
+    if affected == 0 {
+        return Err(AppError::NotFound(t("Admin not found")));
+    }
+
+    Admin::new(DbConn::pool(&state.db), None)
+        .find(admin_id)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::NotFound(t("Admin not found")))
+}
+
+pub async fn password_update(
+    state: &AppApiState,
+    admin_id: i64,
+    req: AdminPasswordUpdateInput,
+) -> Result<(), AppError> {
+    let admin = Admin::new(DbConn::pool(&state.db), None)
+        .find(admin_id)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::NotFound(t("Admin not found")))?;
+
+    let valid = verify_password(&req.current_password, &admin.password).map_err(AppError::from)?;
+    if !valid {
+        return Err(AppError::Unauthorized(t("Current password is incorrect")));
+    }
+
+    let update = Admin::new(DbConn::pool(&state.db), None)
+        .update()
+        .where_id(Op::Eq, admin_id)
+        .set_password(&req.password)
+        .map_err(AppError::from)?;
+
+    let affected = update.save().await.map_err(AppError::from)?;
+    if affected == 0 {
+        return Err(AppError::NotFound(t("Admin not found")));
+    }
+
+    Ok(())
+}
 "#;
 
 pub const APP_INTERNAL_REALTIME_MOD_RS: &str = r#"// Put realtime channel policies/authorizers here.
@@ -2057,6 +2786,83 @@ pub fn register_schedules(scheduler: &mut core_jobs::cron::Scheduler) {}
 "#;
 
 pub const APP_INTERNAL_DATATABLES_MOD_RS: &str = r#"include!("mod.generated.rs");
+"#;
+
+pub const APP_INTERNAL_DATATABLES_ADMIN_RS: &str = r#"use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
+use core_db::common::sql::Op;
+use core_web::authz::{has_required_permissions, PermissionMode};
+use generated::{
+    models::{AdminDataTable, AdminDataTableConfig, AdminDataTableHooks, AdminQuery, AdminType},
+    permissions::Permission,
+};
+
+#[derive(Default, Clone)]
+pub struct AdminDataTableAppHooks;
+
+impl AdminDataTableHooks for AdminDataTableAppHooks {
+    fn scope<'db>(
+        &'db self,
+        query: AdminQuery<'db>,
+        _input: &DataTableInput,
+        ctx: &DataTableContext,
+    ) -> AdminQuery<'db> {
+        let Some(actor) = ctx.actor.as_ref() else {
+            return query.where_id(Op::Eq, -1);
+        };
+
+        let admin_type = actor
+            .attributes
+            .get("admin_type")
+            .and_then(|value| value.as_str())
+            .and_then(parse_admin_type);
+
+        match admin_type {
+            Some(AdminType::Developer) => query,
+            Some(AdminType::SuperAdmin) => query.where_admin_type(Op::Ne, AdminType::Developer),
+            Some(AdminType::Admin) => query.where_admin_type(Op::Eq, AdminType::Admin),
+            None => query.where_id(Op::Eq, -1),
+        }
+    }
+
+    fn authorize(&self, _input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {
+        let Some(actor) = ctx.actor.as_ref() else {
+            return Ok(false);
+        };
+        Ok(has_required_permissions(
+            &actor.permissions,
+            &[Permission::AdminRead.as_str(), Permission::AdminManage.as_str()],
+            PermissionMode::Any,
+        ))
+    }
+}
+
+fn parse_admin_type(value: &str) -> Option<AdminType> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "developer" => Some(AdminType::Developer),
+        "superadmin" => Some(AdminType::SuperAdmin),
+        "admin" => Some(AdminType::Admin),
+        _ => None,
+    }
+}
+
+pub type AppAdminDataTable = AdminDataTable<AdminDataTableAppHooks>;
+
+pub fn app_admin_datatable(db: sqlx::PgPool) -> AppAdminDataTable {
+    AdminDataTable::new(db).with_hooks(AdminDataTableAppHooks::default())
+}
+
+pub fn app_admin_datatable_with_config(
+    db: sqlx::PgPool,
+    config: AdminDataTableConfig,
+) -> AppAdminDataTable {
+    AdminDataTable::new(db)
+        .with_hooks(AdminDataTableAppHooks::default())
+        .with_config(config)
+}
+
+pub fn register_admin_datatable(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
+    registry.register(app_admin_datatable(db));
+}
 "#;
 
 pub const APP_SEEDS_MOD_RS: &str = r#"pub mod admin_bootstrap_seeder;
@@ -2109,7 +2915,8 @@ impl Seeder for AdminBootstrapSeeder {
 
         upsert_admin(
             db,
-            &env_or("SEED_ADMIN_DEVELOPER_EMAIL", "developer@example.com"),
+            &env_or("SEED_ADMIN_DEVELOPER_USERNAME", "developer"),
+            optional_env("SEED_ADMIN_DEVELOPER_EMAIL"),
             &env_or("SEED_ADMIN_DEVELOPER_PASSWORD", "password123"),
             &env_or("SEED_ADMIN_DEVELOPER_NAME", "Developer"),
             "developer",
@@ -2118,7 +2925,8 @@ impl Seeder for AdminBootstrapSeeder {
 
         upsert_admin(
             db,
-            &env_or("SEED_ADMIN_SUPERADMIN_EMAIL", "superadmin@example.com"),
+            &env_or("SEED_ADMIN_SUPERADMIN_USERNAME", "superadmin"),
+            optional_env("SEED_ADMIN_SUPERADMIN_EMAIL"),
             &env_or("SEED_ADMIN_SUPERADMIN_PASSWORD", "password123"),
             &env_or("SEED_ADMIN_SUPERADMIN_NAME", "Super Admin"),
             "superadmin",
@@ -2164,20 +2972,33 @@ fn env_or(key: &str, default: &str) -> String {
     default.to_string()
 }
 
+fn optional_env(key: &str) -> Option<String> {
+    if let Ok(value) = std::env::var(key) {
+        let value = value.trim();
+        if !value.is_empty() {
+            return Some(value.to_ascii_lowercase());
+        }
+    }
+    None
+}
+
 async fn upsert_admin(
     db: &sqlx::PgPool,
-    email: &str,
+    username: &str,
+    email: Option<String>,
     password_plain: &str,
     name: &str,
     admin_type: &str,
 ) -> anyhow::Result<i64> {
     let password = hash_password(password_plain)?;
     let id_to_insert = core_db::common::sql::generate_snowflake_i64();
+    let username = username.trim().to_ascii_lowercase();
 
     let id = sqlx::query_scalar::<_, i64>(
-        "\n        INSERT INTO admin (id, email, password, name, admin_type)\n        VALUES ($1, $2, $3, $4, $5)\n        ON CONFLICT (email) DO UPDATE\n        SET\n            password = EXCLUDED.password,\n            name = EXCLUDED.name,\n            admin_type = EXCLUDED.admin_type,\n            updated_at = NOW()\n        RETURNING id\n        ",
+        "\n        INSERT INTO admin (id, username, email, password, name, admin_type, abilities)\n        VALUES ($1, $2, $3, $4, $5, $6, '[]'::jsonb)\n        ON CONFLICT (username) DO UPDATE\n        SET\n            email = EXCLUDED.email,\n            password = EXCLUDED.password,\n            name = EXCLUDED.name,\n            admin_type = EXCLUDED.admin_type,\n            updated_at = NOW()\n        RETURNING id\n        ",
     )
     .bind(id_to_insert)
+    .bind(username)
     .bind(email)
     .bind(password)
     .bind(name)

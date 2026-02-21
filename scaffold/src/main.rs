@@ -245,6 +245,11 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: "app/src/contracts/api/v1/admin.rs",
+            content: templates::APP_CONTRACTS_API_V1_ADMIN_RS,
+            executable: false,
+        },
+        FileTemplate {
             path: "app/src/contracts/api/v1/admin_auth.rs",
             content: templates::APP_CONTRACTS_API_V1_ADMIN_AUTH_RS,
             executable: false,
@@ -257,6 +262,11 @@ fn file_templates() -> Vec<FileTemplate> {
         FileTemplate {
             path: "app/src/validation/sync.rs",
             content: templates::APP_VALIDATION_SYNC_RS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/validation/username.rs",
+            content: templates::APP_VALIDATION_USERNAME_RS,
             executable: false,
         },
         FileTemplate {
@@ -290,6 +300,11 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: "app/src/internal/api/v1/admin.rs",
+            content: templates::APP_INTERNAL_API_V1_ADMIN_RS,
+            executable: false,
+        },
+        FileTemplate {
             path: "app/src/internal/api/v1/admin_auth.rs",
             content: templates::APP_INTERNAL_API_V1_ADMIN_AUTH_RS,
             executable: false,
@@ -310,6 +325,11 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: "app/src/internal/workflows/admin.rs",
+            content: templates::APP_INTERNAL_WORKFLOWS_ADMIN_RS,
+            executable: false,
+        },
+        FileTemplate {
             path: "app/src/internal/workflows/admin_auth.rs",
             content: templates::APP_INTERNAL_WORKFLOWS_ADMIN_AUTH_RS,
             executable: false,
@@ -327,6 +347,11 @@ fn file_templates() -> Vec<FileTemplate> {
         FileTemplate {
             path: "app/src/internal/datatables/mod.rs",
             content: templates::APP_INTERNAL_DATATABLES_MOD_RS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/internal/datatables/admin.rs",
+            content: templates::APP_INTERNAL_DATATABLES_ADMIN_RS,
             executable: false,
         },
         FileTemplate {

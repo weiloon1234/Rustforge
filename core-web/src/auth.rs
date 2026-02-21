@@ -202,6 +202,8 @@ where
     }
 }
 
+impl<G> aide::OperationInput for AuthUser<G> where G: Guard {}
+
 pub fn guard_config<'a>(
     auth: &'a core_config::AuthSettings,
     guard_name: &str,
