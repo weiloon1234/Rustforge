@@ -92,24 +92,7 @@ where
         );
     }
 
-    let mut notes = Vec::new();
-    if !guard.trim().is_empty() {
-        notes.push(format!("Required guard: {}.", guard.trim()));
-    }
-    if !permission_vec.is_empty() {
-        notes.push(format!(
-            "Required permissions ({}): {}.",
-            mode.as_str(),
-            permission_vec.join(", ")
-        ));
-    }
-
-    if notes.is_empty() {
-        return op;
-    }
-
-    let note_refs = notes.iter().map(String::as_str).collect::<Vec<_>>();
-    with_route_notes(op, &note_refs)
+    op
 }
 
 #[derive(Debug, Clone)]
