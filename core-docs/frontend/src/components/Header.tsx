@@ -15,7 +15,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
                 <Menu className="w-6 h-6 text-gray-600" />
             </button>
             <span className="ml-3 text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-orange-600 to-amber-600">
-                RS-Core
+                Rustforge
             </span>
         </header>
     )

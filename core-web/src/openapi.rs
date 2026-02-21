@@ -277,7 +277,7 @@ pub fn with_route_notes<'t>(
     }
 
     let block = {
-        let mut out = String::from("### Notes\n");
+        let mut out = String::from("Notes:\n");
         for note in unique {
             out.push_str("- ");
             out.push_str(&note);

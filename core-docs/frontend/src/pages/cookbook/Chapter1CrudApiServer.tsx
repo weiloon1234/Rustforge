@@ -168,7 +168,7 @@ description = "Create, update, and delete categories."`}</code>
                     becomes single-source for both runtime enforcement and OpenAPI extensions.
                 </p>
                 <h3>
-                    File: <code>app/src/api/v1/article.rs</code> (admin excerpt)
+                    File: <code>app/src/internal/api/v1/article.rs</code> (admin excerpt)
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use core_web::{
@@ -228,7 +228,7 @@ with_permission_check_get(
 
                 <h2>Step 6: Portal Composer</h2>
                 <h3>
-                    File: <code>app/src/api/v1/mod.rs</code>
+                    File: <code>app/src/internal/api/v1/mod.rs</code>
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`pub fn router(state: AppApiState) -> ApiRouter {
@@ -287,7 +287,7 @@ with_permission_check_get(
                         <ul className="text-sm text-gray-700 list-disc pl-5">
                             <li>
                                 Keep one canonical app state in{' '}
-                                <code>app/src/api/state.rs</code>.
+                                <code>app/src/internal/api/state.rs</code>.
                             </li>
                             <li>
                                 Keep API DTO contracts in{' '}
@@ -337,14 +337,14 @@ pub struct ArticleCreateInput {
                                 Create these files:
                             </p>
                             <h3 className="text-sm font-semibold text-gray-900">
-                                File: <code>app/src/workflows/article/mod.rs</code>
+                                File: <code>app/src/internal/workflows/article/mod.rs</code>
                             </h3>
                             <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                                 <code className="language-rust">{`pub mod create_article;`}</code>
                             </pre>
 
                             <h3 className="text-sm font-semibold text-gray-900">
-                                File: <code>app/src/workflows/article/create_article.rs</code>
+                                File: <code>app/src/internal/workflows/article/create_article.rs</code>
                             </h3>
                             <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                                 <code className="language-rust">{`use core_i18n::t;
@@ -357,7 +357,7 @@ use generated::{
     models::Article,
 };
 
-use crate::api::state::AppApiState;
+use crate::internal::api::state::AppApiState;
 
 fn to_lang_map(value: &MultiLang) -> std::collections::BTreeMap<String, String> {
     std::collections::BTreeMap::from([
@@ -410,7 +410,7 @@ pub async fn run(
                             </pre>
 
                             <h3 className="text-sm font-semibold text-gray-900">
-                                File: <code>app/src/api/v1/article.rs</code>
+                                File: <code>app/src/internal/api/v1/article.rs</code>
                             </h3>
                             <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                                 <code className="language-rust">{`use axum::extract::State;
@@ -423,7 +423,7 @@ use core_web::{
     response::ApiResponse,
 };
 use generated::{guards::AdminGuard, permissions::Permission};
-use crate::api::state::AppApiState;
+use crate::internal::api::state::AppApiState;
 
 pub fn admin_routes(state: AppApiState) -> ApiRouter<AppApiState> {
     ApiRouter::new()
@@ -458,7 +458,7 @@ async fn create(
                                 Create this file:
                             </p>
                             <h3 className="text-sm font-semibold text-gray-900">
-                                File: <code>app/src/api/v1/article.rs</code>
+                                File: <code>app/src/internal/api/v1/article.rs</code>
                             </h3>
                             <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                                 <code className="language-rust">{`use axum::extract::State;
@@ -473,7 +473,7 @@ use core_web::{
     response::ApiResponse,
 };
 use generated::{guards::AdminGuard, localized::MultiLang, models::Article, permissions::Permission};
-use crate::api::state::AppApiState;
+use crate::internal::api::state::AppApiState;
 
 fn to_lang_map(value: &MultiLang) -> std::collections::BTreeMap<String, String> {
     std::collections::BTreeMap::from([

@@ -23,8 +23,8 @@ export function QuickStart() {
                 <div className="bg-gray-900 rounded-lg p-4 font-mono text-sm text-gray-100">
                     {`cd /tmp/rustforge-starter
 cp .env.example .env
-./bin/console migrate pump
-./bin/console migrate run`}
+./console migrate pump
+./console migrate run`}
                 </div>
             </div>
 
@@ -33,7 +33,7 @@ cp .env.example .env
                 <div className="bg-gray-900 rounded-lg p-4 font-mono text-sm text-gray-100">
                     {`cargo check --workspace
 ./bin/api-server
-./bin/console route list`}
+./console route list`}
                 </div>
             </div>
         </div>

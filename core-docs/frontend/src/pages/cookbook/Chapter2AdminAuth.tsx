@@ -48,6 +48,7 @@ use validator::Validate;
 
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminLoginInput {
+    #[validate(custom(function = "crate::validation::username::validate_username"))]
     #[validate(length(min = 3, max = 64))]
     #[schemars(length(min = 3, max = 64))]
     pub username: String,
@@ -68,6 +69,31 @@ pub struct AdminRefreshInput {
     pub refresh_token: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct AdminProfileUpdateInput {
+    #[validate(length(min = 1, max = 120))]
+    #[schemars(length(min = 1, max = 120))]
+    pub name: String,
+    #[serde(default)]
+    #[validate(email)]
+    #[schemars(email)]
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct AdminPasswordUpdateInput {
+    #[validate(length(min = 8, max = 128))]
+    #[schemars(length(min = 8, max = 128))]
+    pub current_password: String,
+    #[validate(length(min = 8, max = 128))]
+    #[validate(must_match(other = "password_confirmation"))]
+    #[schemars(length(min = 8, max = 128))]
+    pub password: String,
+    #[validate(length(min = 8, max = 128))]
+    #[schemars(length(min = 8, max = 128))]
+    pub password_confirmation: String,
+}
+
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct AdminAuthOutput {
     pub token_type: String,
@@ -83,7 +109,8 @@ pub struct AdminAuthOutput {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct AdminMeOutput {
     pub id: i64,
-    pub email: String,
+    pub username: String,
+    pub email: Option<String>,
     pub name: String,
     pub admin_type: AdminType,
     #[serde(default)]
@@ -97,12 +124,30 @@ pub struct AdminMeOutput {
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use core_web::auth::{self, IssuedTokenPair, TokenScopeGrant};
-use generated::{guards::AdminGuard, models::{AdminType, AdminView}};
+use generated::{guards::AdminGuard, models::{AdminType, AdminView}, permissions::Permission};
 
 pub fn resolve_scope_grant(admin: &AdminView) -> TokenScopeGrant {
     match admin.admin_type {
         AdminType::Developer | AdminType::SuperAdmin => TokenScopeGrant::Wildcard,
-        AdminType::Admin => TokenScopeGrant::AuthOnly,
+        AdminType::Admin => {
+            let mut explicit = Vec::new();
+            if let Some(items) = admin.abilities.as_array() {
+                for item in items {
+                    if let Some(raw) = item.as_str() {
+                        if let Some(permission) = Permission::from_str(raw.trim()) {
+                            explicit.push(permission.as_str().to_string());
+                        }
+                    }
+                }
+            }
+            explicit.sort();
+            explicit.dedup();
+            if explicit.is_empty() {
+                TokenScopeGrant::AuthOnly
+            } else {
+                TokenScopeGrant::Explicit(explicit)
+            }
+        }
     }
 }
 
@@ -124,6 +169,8 @@ pub fn resolve_scope_grant(admin: &AdminView) -> TokenScopeGrant {
     let protected = ApiRouter::new()
         .api_route("/me", get(me))
         .api_route("/logout", post(logout))
+        .api_route("/profile_update", patch(profile_update))
+        .api_route("/password_update", patch(password_update))
         .layer(from_fn_with_state(
             state.clone(),
             crate::internal::middleware::auth::require_admin,
@@ -179,7 +226,7 @@ fn admin_router(state: AppApiState) -> ApiRouter {
 # login
 curl -sS -X POST http://127.0.0.1:3000/api/v1/admin/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"developer@example.com","password":"password123","client_type":"mobile"}'`}</code>
+  -d '{"username":"developer","password":"password123","client_type":"mobile"}'`}</code>
                 </pre>
             </div>
         </div>

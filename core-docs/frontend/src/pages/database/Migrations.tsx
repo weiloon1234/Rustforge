@@ -24,7 +24,8 @@ export function Migrations() {
                 <h2>Framework Migrations</h2>
                 <p>
                     The framework automatically pumps (generates) a set of core migrations into your
-                    <code>migrations/</code> folder when you run <code>make dev</code> or the migration command.
+                    <code>migrations/</code> folder when you run migration commands from
+                    <code> ./console</code>.
                     These provide the necessary schema for framework features.
                 </p>
 
@@ -66,30 +67,27 @@ export function Migrations() {
 
                 <h3>Create a New Migration</h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-bash">{`# Using Make (Recommended)
-make migrate-new name=create_posts
+                    <code className="language-bash">{`# Recommended wrapper
+./console migrate add create_posts
 
-# Or using raw sqlx
+# (Optional) raw sqlx
 sqlx migrate add create_posts`}</code>
                 </pre>
 
                 <h3>Run Migrations</h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-bash">{`# Using Make
-make migrate
-
-# Using CLI Wrapper
+                    <code className="language-bash">{`./console migrate pump
 ./console migrate run`}</code>
                 </pre>
 
                 <h3>Revert Last Migration</h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-bash">{`make migrate-revert`}</code>
+                    <code className="language-bash">{`./console migrate revert`}</code>
                 </pre>
 
                 <h3>Check Status</h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-bash">{`make migrate-info`}</code>
+                    <code className="language-bash">{`./console migrate info`}</code>
                 </pre>
             </div>
         </div>

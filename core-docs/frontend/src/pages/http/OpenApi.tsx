@@ -65,8 +65,8 @@ let api_router = ApiRouter::new().api_route(
                     </li>
                 </ul>
                 <p>
-                    It also adds bearer security + notes, and applies runtime permission middleware
-                    on the route.
+                    It also adds bearer security + machine-readable authz metadata, and applies
+                    runtime permission middleware on the route.
                 </p>
 
                 <h2>Validation vs OpenAPI Constraints</h2>

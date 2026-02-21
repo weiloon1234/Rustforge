@@ -71,7 +71,7 @@ impl Job for ArticlePublishedFanoutJob {
             email: self.recipient_email.clone(),
         };
         let mail = WelcomeMail {
-            app_name: "RS-Core".to_string(),
+            app_name: "Rustforge".to_string(),
         };
         MailChannel::dispatch_now(&mailer, &user, &mail).await?;
 

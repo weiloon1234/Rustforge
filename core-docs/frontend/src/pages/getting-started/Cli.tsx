@@ -19,20 +19,20 @@ export function Cli() {
                 <h2>Usage</h2>
                 <p>
                     Entry point is <code>app/src/bin/console.rs</code>. Use wrapper
-                    <code> ./bin/console</code> in starter root.
+                    <code> ./console</code> in starter root.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-bash">{`# help
-./bin/console --help
+./console --help
 
 # framework db commands
-./bin/console migrate run
-./bin/console db seed
-./bin/console make seeder UserSeeder --dir app/src/seeds
+./console migrate run
+./console db seed
+./console make seeder UserSeeder --dir app/src/seeds
 
 # discover routes/realtime
-./bin/console route list
-./bin/console realtime list`}</code>
+./console route list
+./console realtime list`}</code>
                 </pre>
 
                 <h2>Adding Project Commands</h2>

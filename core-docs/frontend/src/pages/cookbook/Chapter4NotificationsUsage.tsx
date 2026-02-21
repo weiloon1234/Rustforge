@@ -129,7 +129,7 @@ use crate::internal::notifications::channels::{MailUser, WelcomeMail};
 pub async fn send_welcome_now(mailer: &Arc<Mailer>, user_id: String, email: String) -> Result<()> {
     let user = MailUser { id: user_id, email };
     let mail = WelcomeMail {
-        app_name: "RS-Core".to_string(),
+        app_name: "Rustforge".to_string(),
     };
 
     MailChannel::dispatch_now(mailer.as_ref(), &user, &mail).await
@@ -142,7 +142,7 @@ pub async fn send_welcome_queued(
 ) -> Result<()> {
     let user = MailUser { id: user_id, email };
     let mail = WelcomeMail {
-        app_name: "RS-Core".to_string(),
+        app_name: "Rustforge".to_string(),
     };
 
     MailChannel::dispatch(mailer.as_ref(), &user, &mail).await

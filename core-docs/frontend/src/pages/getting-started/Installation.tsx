@@ -39,14 +39,23 @@ export function Installation() {
                     2. Setup Infrastructure
                 </h2>
                 <div className="bg-gray-900 rounded-lg p-4 font-mono text-sm text-gray-100 overflow-x-auto">
-                    <span className="text-gray-500"># 1. Clone the repo</span>
+                    <span className="text-gray-500"># Option A: clone starter repository</span>
                     <br />
-                    git clone https://github.com/your-org/rs-core.git
+                    git clone https://github.com/weiloon1234/Rustforge-Starter.git
                     <br />
-                    cd rs-core
+                    cd Rustforge-Starter
                     <br />
                     <br />
-                    <span className="text-gray-500"># 2. Configure Environment</span>
+                    <span className="text-gray-500"># Option B: scaffold a fresh starter</span>
+                    <br />
+                    cargo install --git https://github.com/weiloon1234/Rustforge.git scaffold
+                    <br />
+                    scaffold --output /tmp/rustforge-starter --force
+                    <br />
+                    cd /tmp/rustforge-starter
+                    <br />
+                    <br />
+                    <span className="text-gray-500"># Configure environment</span>
                     <br />
                     cp .env.example .env
                     <br />
@@ -70,7 +79,8 @@ export function Installation() {
                     Run migrations to initialize your database schema.
                 </p>
                 <div className="bg-gray-900 rounded-lg p-4 font-mono text-sm text-gray-100">
-                    make migrate
+                    {`./console migrate pump
+./console migrate run`}
                 </div>
             </div>
 

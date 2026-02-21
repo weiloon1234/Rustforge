@@ -86,7 +86,7 @@ bootstrap::console::start_console::<ProjectCommands, fn(&mut Vec<Box<dyn core_db
 Static asset publish (from starter console):
 
 ```bash
-./bin/console assets publish --from frontend/dist --clean
+./console assets publish --from frontend/dist --clean
 ```
 
 ### 4. Keep starter single sources of truth
@@ -102,8 +102,8 @@ Static asset publish (from starter console):
 ```bash
 # in starter repo
 cargo build -p generated
-./bin/console migrate pump
-./bin/console migrate run
+./console migrate pump
+./console migrate run
 ./bin/api-server
 ```
 
@@ -147,6 +147,8 @@ make framework-docs-build
 3. Rustforge crate-local `core-docs/frontend/dist`
 
 ## Framework Development
+
+Run these only inside the Rustforge framework repository root:
 
 ```bash
 make check

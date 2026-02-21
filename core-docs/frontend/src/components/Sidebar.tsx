@@ -29,7 +29,7 @@ const sections = [
         items: [
             { title: 'Overview', href: '#/cookbook' },
             { title: 'Chapter 1: CRUD API', href: '#/cookbook-chapter-1-crud-api-server' },
-            { title: 'Chapter 2: DTO + Validation', href: '#/cookbook-chapter-2-validation-dto' },
+            { title: 'Chapter 2: Admin Auth', href: '#/cookbook-chapter-2-admin-auth' },
             { title: 'Chapter 3: Jobs Usage', href: '#/cookbook-chapter-3-jobs-usage' },
             { title: 'Chapter 4: Notifications', href: '#/cookbook-chapter-4-notifications' },
             { title: 'Chapter 5: WebSocket Channel', href: '#/cookbook-chapter-5-websocket-channel' },
@@ -122,7 +122,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             >
                 <div className="h-16 flex items-center px-6 border-b border-gray-200">
                     <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-orange-600 to-amber-600">
-                        RS-Core
+                        Rustforge
                     </span>
                 </div>
 

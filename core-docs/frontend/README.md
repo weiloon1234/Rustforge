@@ -1,6 +1,6 @@
-# RS-Core Documentation Frontend
+# Rustforge Documentation Frontend
 
-This is the React 19 + Vite frontend for the RS-Core framework documentation.
+This is the React 19 + Vite frontend for Rustforge framework documentation.
 
 ## Recommended IDE Setup
 
