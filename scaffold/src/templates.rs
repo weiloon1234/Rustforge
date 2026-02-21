@@ -1598,15 +1598,6 @@ impl From<generated::models::AdminView> for AdminOutput {
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct AdminListOutput {
-    pub data: Vec<AdminOutput>,
-    pub total: i64,
-    pub per_page: i64,
-    pub current_page: i64,
-    pub last_page: i64,
-}
-
-#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct AdminDeleteOutput {
     pub deleted: bool,
 }
@@ -2095,7 +2086,7 @@ use generated::{guards::AdminGuard, permissions::Permission};
 
 use crate::{
     contracts::api::v1::admin::{
-        AdminDeleteOutput, AdminListOutput, AdminOutput, CreateAdminInput, UpdateAdminInput,
+        AdminDeleteOutput, AdminOutput, CreateAdminInput, UpdateAdminInput,
     },
     internal::{api::state::AppApiState, workflows::admin as workflow},
 };
@@ -2104,20 +2095,13 @@ pub fn router(state: AppApiState) -> ApiRouter {
     ApiRouter::new()
         .api_route(
             "/",
-            with_permission_check_get_with(
-                list,
-                AdminGuard,
-                PermissionMode::Any,
-                [Permission::AdminRead.as_str(), Permission::AdminManage.as_str()],
-                |op| op.summary("List admins").tag("Admin Account"),
-            )
-            .merge(with_permission_check_post_with(
+            with_permission_check_post_with(
                 create,
                 AdminGuard,
                 PermissionMode::Any,
                 [Permission::AdminManage.as_str()],
                 |op| op.summary("Create admin").tag("Admin Account"),
-            )),
+            ),
         )
         .api_route(
             "/{id}",
@@ -2144,24 +2128,6 @@ pub fn router(state: AppApiState) -> ApiRouter {
             )),
         )
         .with_state(state)
-}
-
-async fn list(
-    State(state): State<AppApiState>,
-    _auth: AuthUser<AdminGuard>,
-) -> Result<ApiResponse<AdminListOutput>, AppError> {
-    let page = workflow::list(&state).await?;
-    let data = page.data.into_iter().map(AdminOutput::from).collect::<Vec<_>>();
-    Ok(ApiResponse::success(
-        AdminListOutput {
-            data,
-            total: page.total,
-            per_page: page.per_page,
-            current_page: page.current_page,
-            last_page: page.last_page,
-        },
-        &t("Admin list loaded"),
-    ))
 }
 
 async fn detail(
@@ -2488,13 +2454,13 @@ pub mod admin_auth;
 "#;
 
 pub const APP_INTERNAL_WORKFLOWS_ADMIN_RS: &str = r#"use core_db::common::sql::{
-    DbConn, Op, OrderDir, generate_snowflake_i64,
+    DbConn, Op, generate_snowflake_i64,
 };
 use core_i18n::t;
 use core_web::{auth::AuthUser, error::AppError};
 use generated::{
     guards::AdminGuard,
-    models::{Admin, AdminCol, AdminQuery, AdminType, AdminView, Page},
+    models::{Admin, AdminQuery, AdminType, AdminView},
     permissions::Permission,
 };
 
@@ -2502,15 +2468,6 @@ use crate::{
     contracts::api::v1::admin::{CreateAdminInput, UpdateAdminInput},
     internal::api::state::AppApiState,
 };
-
-pub async fn list(state: &AppApiState) -> Result<Page<AdminView>, AppError> {
-    Admin::new(DbConn::pool(&state.db), None)
-        .query()
-        .order_by(AdminCol::Id, OrderDir::Desc)
-        .paginate(1, 50)
-        .await
-        .map_err(AppError::from)
-}
 
 pub async fn detail(state: &AppApiState, id: i64) -> Result<AdminView, AppError> {
     Admin::new(DbConn::pool(&state.db), None)
