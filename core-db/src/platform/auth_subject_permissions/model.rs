@@ -5,6 +5,6 @@ use uuid::Uuid;
 pub struct AuthSubjectPermissionRow {
     pub id: Uuid,
     pub guard: String,
-    pub subject_id: Uuid,
+    pub subject_id: String,
     pub permission: String,
 }

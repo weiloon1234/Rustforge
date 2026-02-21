@@ -382,7 +382,11 @@ supported = ["en"]
     )
     .expect("failed to load config");
 
-    generate_auth(&cfgs, &out_dir).expect("auth generation should succeed");
+    let empty_schema = schema::Schema {
+        models: std::collections::BTreeMap::new(),
+        extra_sections: std::collections::BTreeMap::new(),
+    };
+    generate_auth(&cfgs, &empty_schema, &out_dir).expect("auth generation should succeed");
     let mod_rs = fs::read_to_string(out_dir.join("mod.rs")).expect("mod.rs should exist");
 
     assert!(mod_rs.contains("pub async fn authenticate_any_guard("));

@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS localized (
 CREATE TABLE IF NOT EXISTS personal_access_tokens (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tokenable_type TEXT NOT NULL,
-    tokenable_id UUID NOT NULL,
+    tokenable_id TEXT NOT NULL,
     name TEXT NOT NULL,
     token TEXT NOT NULL UNIQUE,
     abilities JSONB,
@@ -169,7 +169,7 @@ CREATE INDEX IF NOT EXISTS idx_http_client_logs_status ON http_client_logs(respo
 CREATE TABLE IF NOT EXISTS auth_subject_permissions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     guard TEXT NOT NULL,
-    subject_id UUID NOT NULL,
+    subject_id TEXT NOT NULL,
     permission TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_auth_subject_permissions_guard_subject_permission

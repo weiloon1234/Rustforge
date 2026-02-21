@@ -1153,11 +1153,11 @@ auth_model = "admin"
 [model.admin]
 table = "admin"
 pk = "id"
-pk_type = "uuid"
-id_strategy = "manual"
+pk_type = "i64"
+id_strategy = "snowflake"
 soft_delete = true
 fields = [
-  "id:uuid",
+  "id:i64",
   "email:string",
   "password:hashed",
   "name:string",
@@ -1170,7 +1170,7 @@ fields = [
 pub const MIGRATION_ADMIN_AUTH_SQL: &str = r#"CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS admin (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id BIGINT PRIMARY KEY CHECK (id > 0),
     email TEXT NOT NULL UNIQUE,
     password TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -1802,7 +1802,6 @@ use core_db::{
     platform::auth_subject_permissions::repo::AuthSubjectPermissionRepo,
     seeder::Seeder,
 };
-use uuid::Uuid;
 
 #[derive(Debug, Default)]
 pub struct AdminBootstrapSeeder;
@@ -1833,13 +1832,17 @@ impl Seeder for AdminBootstrapSeeder {
         .await?;
 
         let repo = AuthSubjectPermissionRepo::new(DbConn::pool(db));
-        repo.replace("admin", developer_id, &["*".to_string()]).await?;
+        let developer_subject_id = developer_id.to_string();
+        repo.replace("admin", &developer_subject_id, &["*".to_string()])
+            .await?;
 
         let super_permissions = generated::permissions::Permission::all()
             .iter()
             .map(|permission| permission.as_str().to_string())
             .collect::<Vec<_>>();
-        repo.replace("admin", superadmin_id, &super_permissions).await?;
+        let superadmin_subject_id = superadmin_id.to_string();
+        repo.replace("admin", &superadmin_subject_id, &super_permissions)
+            .await?;
 
         Ok(())
     }
@@ -1886,12 +1889,14 @@ async fn upsert_admin(
     password_plain: &str,
     name: &str,
     admin_type: &str,
-) -> anyhow::Result<Uuid> {
+) -> anyhow::Result<i64> {
     let password = hash_password(password_plain)?;
+    let id_to_insert = core_db::common::sql::generate_snowflake_i64();
 
-    let id = sqlx::query_scalar::<_, Uuid>(
-        "\n        INSERT INTO admin (email, password, name, admin_type)\n        VALUES ($1, $2, $3, $4)\n        ON CONFLICT (email) DO UPDATE\n        SET\n            password = EXCLUDED.password,\n            name = EXCLUDED.name,\n            admin_type = EXCLUDED.admin_type,\n            updated_at = NOW()\n        RETURNING id\n        ",
+    let id = sqlx::query_scalar::<_, i64>(
+        "\n        INSERT INTO admin (id, email, password, name, admin_type)\n        VALUES ($1, $2, $3, $4, $5)\n        ON CONFLICT (email) DO UPDATE\n        SET\n            password = EXCLUDED.password,\n            name = EXCLUDED.name,\n            admin_type = EXCLUDED.admin_type,\n            updated_at = NOW()\n        RETURNING id\n        ",
     )
+    .bind(id_to_insert)
     .bind(email)
     .bind(password)
     .bind(name)
@@ -2035,7 +2040,7 @@ pub const GENERATED_BUILD_RS: &str = r##"fn main() {
     if !guards_out.exists() {
         std::fs::create_dir_all(&guards_out).expect("Failed to create guards out");
     }
-    db_gen::generate_auth(&cfgs, &guards_out).expect("Failed to gen auth");
+    db_gen::generate_auth(&cfgs, &schema, &guards_out).expect("Failed to gen auth");
     db_gen::generate_permissions(&permissions, &out_dir.join("permissions.rs"))
         .expect("Failed to gen permissions");
 

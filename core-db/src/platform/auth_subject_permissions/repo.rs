@@ -18,7 +18,7 @@ impl<'a> AuthSubjectPermissionRepo<'a> {
     pub async fn list(
         &self,
         guard: &str,
-        subject_id: Uuid,
+        subject_id: &str,
     ) -> Result<Vec<AuthSubjectPermissionRow>> {
         #[cfg(feature = "sqlx-checked")]
         let _ = sqlx::query!(
@@ -51,7 +51,7 @@ impl<'a> AuthSubjectPermissionRepo<'a> {
     pub async fn list_permission_strings(
         &self,
         guard: &str,
-        subject_id: Uuid,
+        subject_id: &str,
     ) -> Result<Vec<String>> {
         let rows = self.list(guard, subject_id).await?;
         Ok(rows.into_iter().map(|row| row.permission).collect())
@@ -60,7 +60,7 @@ impl<'a> AuthSubjectPermissionRepo<'a> {
     pub async fn has_permission(
         &self,
         guard: &str,
-        subject_id: Uuid,
+        subject_id: &str,
         required: &str,
     ) -> Result<bool> {
         let granted = self.list_permission_strings(guard, subject_id).await?;
@@ -70,7 +70,7 @@ impl<'a> AuthSubjectPermissionRepo<'a> {
     pub async fn replace(
         &self,
         guard: &str,
-        subject_id: Uuid,
+        subject_id: &str,
         permissions: &[String],
     ) -> Result<()> {
         let mut unique = BTreeSet::new();
@@ -108,7 +108,7 @@ impl<'a> AuthSubjectPermissionRepo<'a> {
         Ok(())
     }
 
-    pub async fn grant(&self, guard: &str, subject_id: Uuid, permission: &str) -> Result<()> {
+    pub async fn grant(&self, guard: &str, subject_id: &str, permission: &str) -> Result<()> {
         let permission = permission.trim();
         if permission.is_empty() {
             return Ok(());
@@ -142,7 +142,7 @@ impl<'a> AuthSubjectPermissionRepo<'a> {
         Ok(())
     }
 
-    pub async fn revoke(&self, guard: &str, subject_id: Uuid, permission: &str) -> Result<()> {
+    pub async fn revoke(&self, guard: &str, subject_id: &str, permission: &str) -> Result<()> {
         let permission = permission.trim();
         if permission.is_empty() {
             return Ok(());

@@ -17,7 +17,7 @@ impl<'a> PatRepo<'a> {
     pub async fn create(
         &self,
         tokenable_type: &str,
-        tokenable_id: Uuid,
+        tokenable_id: &str,
         name: &str,
         token_hash: &str,
         abilities: Option<Vec<String>>,
@@ -136,7 +136,7 @@ impl<'a> PatRepo<'a> {
     pub async fn list_by_subject(
         &self,
         tokenable_type: &str,
-        tokenable_id: Uuid,
+        tokenable_id: &str,
     ) -> Result<Vec<PersonalAccessTokenRow>> {
         #[cfg(feature = "sqlx-checked")]
         let _ = sqlx::query!(
@@ -166,7 +166,7 @@ impl<'a> PatRepo<'a> {
         self.db.fetch_all(q).await.map_err(Into::into)
     }
 
-    pub async fn revoke_by_subject(&self, tokenable_type: &str, tokenable_id: Uuid) -> Result<u64> {
+    pub async fn revoke_by_subject(&self, tokenable_type: &str, tokenable_id: &str) -> Result<u64> {
         #[cfg(feature = "sqlx-checked")]
         let _ = sqlx::query!(
             r#"

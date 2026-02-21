@@ -37,7 +37,7 @@ pub trait Guard: Send + Sync + 'static {
     }
 
     /// Resolve authenticated user by ID.
-    async fn fetch_user<'a>(db: DbConn<'a>, id: Uuid) -> anyhow::Result<Option<Self::User>>;
+    async fn fetch_user<'a>(db: DbConn<'a>, id: &str) -> anyhow::Result<Option<Self::User>>;
 }
 
 /// State contract required by framework auth middleware.
@@ -73,7 +73,7 @@ impl AuthIdentity {
 #[derive(Debug)]
 pub struct AuthUser<G: Guard> {
     pub user: G::User,
-    pub subject_id: Option<Uuid>,
+    pub subject_id: Option<String>,
     pub token_id: Option<Uuid>,
     pub token_exp: Option<usize>,
     pub abilities: Vec<String>,
@@ -84,7 +84,7 @@ impl<G: Guard> Clone for AuthUser<G> {
     fn clone(&self) -> Self {
         Self {
             user: self.user.clone(),
-            subject_id: self.subject_id,
+            subject_id: self.subject_id.clone(),
             token_id: self.token_id,
             token_exp: self.token_exp,
             abilities: self.abilities.clone(),
@@ -96,7 +96,7 @@ impl<G: Guard> Clone for AuthUser<G> {
 impl<G: Guard> AuthUser<G> {
     pub fn new(
         user: G::User,
-        subject_id: Option<Uuid>,
+        subject_id: Option<String>,
         token_id: Option<Uuid>,
         token_exp: Option<usize>,
         abilities: Vec<String>,
@@ -142,7 +142,7 @@ impl<G: Guard> AuthUser<G> {
 
     pub fn as_identity(&self) -> Option<AuthIdentity> {
         Some(AuthIdentity {
-            subject_id: self.subject_id?.to_string(),
+            subject_id: self.subject_id.clone()?,
             guard: G::name().to_string(),
             abilities: self.abilities.clone(),
             token_id: self.token_id,
@@ -181,7 +181,7 @@ pub fn guard_config<'a>(
 pub async fn issue_guard_token<G: Guard>(
     db: &sqlx::PgPool,
     auth: &core_config::AuthSettings,
-    user_id: Uuid,
+    user_id: impl ToString,
     name: &str,
     abilities: Option<Vec<String>>,
 ) -> anyhow::Result<IssuedToken> {
@@ -195,12 +195,13 @@ pub async fn issue_guard_token<G: Guard>(
     let plain = generate_token();
     let token_hash = hash_token(&plain);
     let tokenable_type = G::tokenable_type().unwrap_or_else(G::name);
+    let tokenable_id = user_id.to_string();
 
     let repo = PatRepo::new(DbConn::pool(db));
     let row = repo
         .create(
             tokenable_type,
-            user_id,
+            &tokenable_id,
             name,
             &token_hash,
             abilities,
@@ -255,7 +256,7 @@ pub async fn authenticate_token<G: Guard>(
         }
     }
 
-    let user = G::fetch_user(DbConn::pool(db), pat.tokenable_id)
+    let user = G::fetch_user(DbConn::pool(db), &pat.tokenable_id)
         .await?
         .ok_or_else(|| AppError::Unauthorized("Token subject not found".to_string()))?;
 
@@ -265,7 +266,7 @@ pub async fn authenticate_token<G: Guard>(
 
     let subject_repo = AuthSubjectPermissionRepo::new(DbConn::pool(db));
     let mut abilities = subject_repo
-        .list_permission_strings(G::name(), pat.tokenable_id)
+        .list_permission_strings(G::name(), &pat.tokenable_id)
         .await?;
 
     // Backward-compat bridge: PAT abilities are only used when subject permission rows are absent.

@@ -7,7 +7,7 @@ use uuid::Uuid;
 pub struct PersonalAccessTokenRow {
     pub id: Uuid,
     pub tokenable_type: String,
-    pub tokenable_id: Uuid,
+    pub tokenable_id: String,
     pub name: String,
     pub token: String,
     pub abilities: Option<sqlx::types::Json<Vec<String>>>, // JSON List of strings
