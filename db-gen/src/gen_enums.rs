@@ -18,6 +18,11 @@ pub fn generate_enum(name: &str, spec: &EnumSpec) -> String {
 fn generate_string_enum(name: &str, spec: &EnumSpec) -> String {
     let variants = extract_variant_names(&spec.variants);
     let variant_list = variants.join(",\n    ");
+    let variant_self_list = variants
+        .iter()
+        .map(|variant| format!("Self::{}", variant))
+        .collect::<Vec<_>>()
+        .join(", ");
 
     // Get value mappings
     let value_map: Vec<(String, String)> = match &spec.variants {
@@ -60,6 +65,7 @@ fn generate_string_enum(name: &str, spec: &EnumSpec) -> String {
     let encode_arms_str = encode_arms.join("\n");
     let decode_arms_str = decode_arms.join("\n");
     let encode_arms_str_qualified = encode_arms_qualified.join("\n");
+    let as_str_arms_str = encode_arms.join("\n");
 
     format!(
         r#"#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -71,6 +77,18 @@ pub enum {name} {{
 impl Default for {name} {{
     fn default() -> Self {{
         Self::{default_variant}
+    }}
+}}
+
+impl {name} {{
+    pub const fn as_str(self) -> &'static str {{
+        match self {{
+{as_str_arms_str}
+        }}
+    }}
+
+    pub const fn variants() -> &'static [Self] {{
+        &[{variant_self_list}]
     }}
 }}
 
@@ -142,6 +160,16 @@ fn generate_integer_enum(name: &str, spec: &EnumSpec) -> String {
 
     let default_variant = &value_map[0].0;
     let decode_match = generate_int_decode_match(&value_map, name);
+    let as_str_arms = value_map
+        .iter()
+        .map(|(variant, value)| format!("            Self::{} => \"{}\",", variant, value))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let variant_self_list = value_map
+        .iter()
+        .map(|(variant, _)| format!("Self::{}", variant))
+        .collect::<Vec<_>>()
+        .join(", ");
 
     format!(
         r#"#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -153,6 +181,18 @@ pub enum {name} {{
 impl Default for {name} {{
     fn default() -> Self {{
         Self::{default_variant}
+    }}
+}}
+
+impl {name} {{
+    pub const fn as_str(self) -> &'static str {{
+        match self {{
+{as_str_arms}
+        }}
+    }}
+
+    pub const fn variants() -> &'static [Self] {{
+        &[{variant_self_list}]
     }}
 }}
 

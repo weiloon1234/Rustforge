@@ -41,11 +41,7 @@ where
     }
 
     /// Generic response constructor.
-    pub fn make_response(
-        status: StatusCode,
-        data: T,
-        message: Option<&str>,
-    ) -> Self {
+    pub fn make_response(status: StatusCode, data: T, message: Option<&str>) -> Self {
         let message = message
             .map(str::trim)
             .filter(|value| !value.is_empty())

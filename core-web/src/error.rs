@@ -73,24 +73,16 @@ impl IntoResponse for AppError {
                 )
             }
             AppError::NotFound(m) => (StatusCode::NOT_FOUND, Some(m), Some("NOT_FOUND"), None),
-            AppError::BadRequest(m) => (
-                StatusCode::BAD_REQUEST,
-                Some(m),
-                Some("BAD_REQUEST"),
-                None,
-            ),
+            AppError::BadRequest(m) => {
+                (StatusCode::BAD_REQUEST, Some(m), Some("BAD_REQUEST"), None)
+            }
             AppError::Unauthorized(m) => (
                 StatusCode::UNAUTHORIZED,
                 Some(m),
                 Some("UNAUTHORIZED"),
                 None,
             ),
-            AppError::Forbidden(m) => (
-                StatusCode::FORBIDDEN,
-                Some(m),
-                Some("FORBIDDEN"),
-                None,
-            ),
+            AppError::Forbidden(m) => (StatusCode::FORBIDDEN, Some(m), Some("FORBIDDEN"), None),
             AppError::TooManyRequests(m) => (
                 StatusCode::TOO_MANY_REQUESTS,
                 Some(m),
@@ -140,7 +132,10 @@ impl OperationOutput for AppError {
         _operation: &mut Operation,
     ) -> Vec<(Option<u16>, OpenApiResponse)> {
         vec![
-            (Some(400), error_response(ctx, StatusCode::BAD_REQUEST, "BAD_REQUEST", false)),
+            (
+                Some(400),
+                error_response(ctx, StatusCode::BAD_REQUEST, "BAD_REQUEST", false),
+            ),
             (
                 Some(401),
                 error_response(ctx, StatusCode::UNAUTHORIZED, "UNAUTHORIZED", false),
@@ -149,7 +144,10 @@ impl OperationOutput for AppError {
                 Some(403),
                 error_response(ctx, StatusCode::FORBIDDEN, "FORBIDDEN", false),
             ),
-            (Some(404), error_response(ctx, StatusCode::NOT_FOUND, "NOT_FOUND", false)),
+            (
+                Some(404),
+                error_response(ctx, StatusCode::NOT_FOUND, "NOT_FOUND", false),
+            ),
             (
                 Some(422),
                 error_response(

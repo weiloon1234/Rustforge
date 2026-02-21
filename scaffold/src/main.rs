@@ -215,6 +215,21 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: "app/src/contracts/datatable/mod.rs",
+            content: templates::APP_CONTRACTS_DATATABLE_MOD_RS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/contracts/datatable/admin/mod.rs",
+            content: templates::APP_CONTRACTS_DATATABLE_ADMIN_MOD_RS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/contracts/datatable/admin/admin.rs",
+            content: templates::APP_CONTRACTS_DATATABLE_ADMIN_ADMIN_RS,
+            executable: false,
+        },
+        FileTemplate {
             path: "app/src/contracts/api/mod.rs",
             content: templates::APP_CONTRACTS_API_MOD_RS,
             executable: false,

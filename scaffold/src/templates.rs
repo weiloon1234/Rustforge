@@ -24,6 +24,7 @@ bootstrap = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "ma
 core-config = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 core-db = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 core-datatable = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
+core-mailer = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 core-i18n = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 core-jobs = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 core-notify = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
@@ -43,6 +44,7 @@ APP_TIMEZONE=+08:00
 RUST_LOG=info
 DEFAULT_PER_PAGE=30
 DATATABLE_UNKNOWN_FILTER_MODE=ignore
+DATATABLE_EXPORT_LINK_TTL_SECS=604800
 # Used by scripts/install-ubuntu.sh to run services under an isolated Linux user.
 # Leave empty for local dev; installer will prompt and persist it.
 PROJECT_USER=
@@ -1037,6 +1039,7 @@ bootstrap = { workspace = true }
 core-config = { workspace = true }
 core-db = { workspace = true }
 core-datatable = { workspace = true }
+core-mailer = { workspace = true }
 core-i18n = { workspace = true }
 core-jobs = { workspace = true }
 core-notify = { workspace = true }
@@ -1065,12 +1068,242 @@ pub mod validation;
 "#;
 
 pub const APP_CONTRACTS_MOD_RS: &str = r#"pub mod api;
+pub mod datatable;
 "#;
 
 pub const APP_CONTRACTS_API_MOD_RS: &str = r#"pub mod v1;
 "#;
 
 pub const APP_CONTRACTS_API_V1_MOD_RS: &str = r#"pub mod admin_auth;
+"#;
+
+pub const APP_CONTRACTS_DATATABLE_MOD_RS: &str = r#"pub mod admin;
+"#;
+
+pub const APP_CONTRACTS_DATATABLE_ADMIN_MOD_RS: &str = r#"pub mod admin;
+"#;
+
+pub const APP_CONTRACTS_DATATABLE_ADMIN_ADMIN_RS: &str = r#"use std::collections::BTreeMap;
+
+use core_datatable::DataTableInput;
+use core_web::datatable::{
+    DataTableEmailExportRequestBase, DataTableFilterFieldDto, DataTableFilterFieldType,
+    DataTableFilterOptionDto, DataTableQueryRequestBase, DataTableScopedContract,
+};
+use generated::models::{AdminType, AdminView};
+use schemars::JsonSchema;
+use serde::Deserialize;
+use validator::Validate;
+
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct AdminDatatableQueryInput {
+    #[validate(nested)]
+    pub base: DataTableQueryRequestBase,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 120))]
+    #[schemars(length(min = 1, max = 120))]
+    pub q: Option<String>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 120))]
+    #[schemars(length(min = 1, max = 120))]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub admin_type: Option<AdminType>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 40))]
+    #[schemars(length(min = 1, max = 40))]
+    pub created_at_from: Option<String>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 40))]
+    #[schemars(length(min = 1, max = 40))]
+    pub created_at_to: Option<String>,
+}
+
+impl AdminDatatableQueryInput {
+    pub fn to_input(&self) -> DataTableInput {
+        let mut input = self.base.to_input();
+        let mut params = BTreeMap::new();
+
+        if let Some(q) = self.q.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            params.insert("q".to_string(), q.to_string());
+        }
+        if let Some(email) = self
+            .email
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            params.insert("f-like-email".to_string(), email.to_string());
+        }
+        if let Some(admin_type) = self.admin_type {
+            params.insert("f-admin_type".to_string(), admin_type.as_str().to_string());
+        }
+        if let Some(from) = self
+            .created_at_from
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            params.insert("f-date-from-created_at".to_string(), from.to_string());
+        }
+        if let Some(to) = self
+            .created_at_to
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            params.insert("f-date-to-created_at".to_string(), to.to_string());
+        }
+
+        input.params.extend(params);
+        input
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct AdminDatatableEmailExportInput {
+    #[validate(nested)]
+    pub base: DataTableEmailExportRequestBase,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 120))]
+    #[schemars(length(min = 1, max = 120))]
+    pub q: Option<String>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 120))]
+    #[schemars(length(min = 1, max = 120))]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub admin_type: Option<AdminType>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 40))]
+    #[schemars(length(min = 1, max = 40))]
+    pub created_at_from: Option<String>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 40))]
+    #[schemars(length(min = 1, max = 40))]
+    pub created_at_to: Option<String>,
+}
+
+impl AdminDatatableEmailExportInput {
+    pub fn to_input(&self) -> DataTableInput {
+        let mut input = self.base.query.to_input();
+        let mut params = BTreeMap::new();
+
+        if let Some(q) = self.q.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            params.insert("q".to_string(), q.to_string());
+        }
+        if let Some(email) = self
+            .email
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            params.insert("f-like-email".to_string(), email.to_string());
+        }
+        if let Some(admin_type) = self.admin_type {
+            params.insert("f-admin_type".to_string(), admin_type.as_str().to_string());
+        }
+        if let Some(from) = self
+            .created_at_from
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            params.insert("f-date-from-created_at".to_string(), from.to_string());
+        }
+        if let Some(to) = self
+            .created_at_to
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            params.insert("f-date-to-created_at".to_string(), to.to_string());
+        }
+
+        input.params.extend(params);
+        input.export_file_name = self.base.export_file_name.clone();
+        input
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AdminAdminDataTableContract;
+
+impl DataTableScopedContract for AdminAdminDataTableContract {
+    type QueryRequest = AdminDatatableQueryInput;
+    type EmailRequest = AdminDatatableEmailExportInput;
+    type Row = AdminView;
+
+    fn scoped_key(&self) -> &'static str {
+        "admin.admin"
+    }
+
+    fn query_to_input(&self, req: &Self::QueryRequest) -> DataTableInput {
+        req.to_input()
+    }
+
+    fn email_to_input(&self, req: &Self::EmailRequest) -> DataTableInput {
+        req.to_input()
+    }
+
+    fn email_recipients(&self, req: &Self::EmailRequest) -> Vec<String> {
+        req.base.recipients.clone()
+    }
+
+    fn email_subject(&self, req: &Self::EmailRequest) -> Option<String> {
+        req.base.subject.clone()
+    }
+
+    fn export_file_name(&self, req: &Self::EmailRequest) -> Option<String> {
+        req.base.export_file_name.clone()
+    }
+
+    fn include_meta(&self, req: &Self::QueryRequest) -> bool {
+        req.base.include_meta
+    }
+
+    fn filter_rows(&self) -> Vec<Vec<DataTableFilterFieldDto>> {
+        vec![
+            vec![
+                DataTableFilterFieldDto {
+                    field: "q".to_string(),
+                    filter_key: "q".to_string(),
+                    field_type: DataTableFilterFieldType::Text,
+                    label: "Keyword".to_string(),
+                    placeholder: Some("Search name/email".to_string()),
+                    description: None,
+                    options: None,
+                },
+                DataTableFilterFieldDto {
+                    field: "email".to_string(),
+                    filter_key: "f-like-email".to_string(),
+                    field_type: DataTableFilterFieldType::Text,
+                    label: "Email".to_string(),
+                    placeholder: Some("Contains".to_string()),
+                    description: None,
+                    options: None,
+                },
+            ],
+            vec![DataTableFilterFieldDto {
+                field: "admin_type".to_string(),
+                filter_key: "f-admin_type".to_string(),
+                field_type: DataTableFilterFieldType::Select,
+                label: "Admin Type".to_string(),
+                placeholder: Some("Choose type".to_string()),
+                description: None,
+                options: Some(
+                    AdminType::variants()
+                        .iter()
+                        .map(|ty| DataTableFilterOptionDto {
+                            label: ty.as_str().to_string(),
+                            value: ty.as_str().to_string(),
+                        })
+                        .collect(),
+                ),
+            }],
+        ]
+    }
+}
 "#;
 
 pub const APP_CONTRACTS_API_V1_ADMIN_AUTH_RS: &str = r#"use schemars::JsonSchema;
@@ -1221,14 +1454,20 @@ pub const APP_INTERNAL_API_STATE_RS: &str = r#"use std::sync::Arc;
 use bootstrap::boot::BootContext;
 use core_config::DataTableUnknownFilterMode as ConfigUnknownFilterMode;
 use core_datatable::{DataTableAsyncExportManager, DataTableRegistry, DataTableUnknownFilterMode};
+use core_db::infra::storage::Storage;
+use core_web::datatable::DataTableEmailExportManager;
 
 #[derive(Clone)]
 pub struct AppApiState {
     pub db: sqlx::PgPool,
+    pub storage: Arc<dyn Storage>,
+    pub mailer: Arc<core_mailer::Mailer>,
     pub datatable_registry: Arc<DataTableRegistry>,
     pub datatable_async_exports: Arc<DataTableAsyncExportManager>,
+    pub datatable_email_exports: Arc<DataTableEmailExportManager>,
     pub datatable_default_per_page: i64,
     pub datatable_unknown_filter_mode: DataTableUnknownFilterMode,
+    pub datatable_export_link_ttl_secs: u64,
     pub app_timezone: String,
 }
 
@@ -1236,6 +1475,10 @@ impl AppApiState {
     pub fn new(ctx: &BootContext) -> anyhow::Result<Self> {
         let mut datatable_registry = DataTableRegistry::new();
         crate::internal::datatables::register_all_generated_datatables(&mut datatable_registry, &ctx.db);
+        datatable_registry.register_as(
+            "admin.admin",
+            crate::internal::datatables::app_admin_datatable(ctx.db.clone()),
+        );
 
         let datatable_registry = Arc::new(datatable_registry);
         let datatable_async_exports =
@@ -1243,12 +1486,16 @@ impl AppApiState {
 
         Ok(Self {
             db: ctx.db.clone(),
+            storage: ctx.storage.clone(),
+            mailer: ctx.mailer.clone(),
             datatable_registry,
             datatable_async_exports,
+            datatable_email_exports: Arc::new(DataTableEmailExportManager::new()),
             datatable_default_per_page: ctx.settings.app.default_per_page as i64,
             datatable_unknown_filter_mode: map_unknown_filter_mode(
                 ctx.settings.app.datatable_unknown_filter_mode,
             ),
+            datatable_export_link_ttl_secs: ctx.settings.app.datatable_export_link_ttl_secs,
             app_timezone: ctx.settings.i18n.default_timezone_str.clone(),
         })
     }
@@ -1274,18 +1521,21 @@ pub const APP_INTERNAL_API_DATATABLE_RS: &str = r#"use std::sync::Arc;
 use async_trait::async_trait;
 use axum::http::HeaderMap;
 use core_datatable::{DataTableAsyncExportManager, DataTableContext, DataTableRegistry};
-use core_web::datatable::{DataTableRouteOptions, DataTableRouteState};
+use core_db::infra::storage::Storage;
+use core_web::datatable::{
+    DataTableEmailExportManager, DataTableRouteOptions, DataTableRouteState,
+};
 use core_web::openapi::ApiRouter;
 
+use crate::contracts::datatable::admin::admin::AdminAdminDataTableContract;
 use crate::internal::api::state::AppApiState;
 
 pub fn router(state: AppApiState) -> ApiRouter {
-    core_web::datatable::routes_for_model_with_options(
+    core_web::datatable::routes_for_scoped_contract_with_options(
         "/datatable/admin",
-        "Admin",
         state,
+        AdminAdminDataTableContract,
         DataTableRouteOptions {
-            include_multipart_endpoints: true,
             require_bearer_auth: true,
         },
     )
@@ -1299,6 +1549,22 @@ impl DataTableRouteState for AppApiState {
 
     fn datatable_async_exports(&self) -> &Arc<DataTableAsyncExportManager> {
         &self.datatable_async_exports
+    }
+
+    fn datatable_storage(&self) -> &Arc<dyn Storage> {
+        &self.storage
+    }
+
+    fn datatable_mailer(&self) -> &Arc<core_mailer::Mailer> {
+        &self.mailer
+    }
+
+    fn datatable_email_exports(&self) -> &Arc<DataTableEmailExportManager> {
+        &self.datatable_email_exports
+    }
+
+    fn datatable_export_link_ttl_secs(&self) -> u64 {
+        self.datatable_export_link_ttl_secs
     }
 
     async fn datatable_context(&self, headers: &HeaderMap) -> DataTableContext {

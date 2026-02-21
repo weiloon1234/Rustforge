@@ -1,22 +1,27 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::body::Body;
-use axum::extract::{Form, Multipart, Query, State};
+use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
-use axum::Json;
+use bytes::Bytes;
 use core_datatable::{
-    DataTableAsyncExportManager, DataTableContext, DataTableExecution, DataTableExportMode,
-    DataTableInput, DataTableRegistry,
+    DataTableAsyncExportManager, DataTableAsyncExportState, DataTableContext, DataTableExecution,
+    DataTableExportMode, DataTableInput, DataTableRegistry,
 };
+use core_db::infra::storage::Storage;
+use core_mailer::MailPayload;
 use schemars::JsonSchema;
-use serde::Deserialize;
-use serde_json::{json, Value};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::Value;
+use tokio::sync::RwLock;
+use tokio::time::{sleep, Duration};
 use tokio_util::io::ReaderStream;
-use tracing::info;
+use validator::Validate;
 
+use crate::contracts::{ContractJson, RequestContract, ResponseContract};
 use crate::error::AppError;
 use crate::extract::request_headers::RequestHeaders;
 use crate::openapi::{
@@ -27,125 +32,333 @@ use crate::openapi::{
     require_bearer_auth, with_route_notes, ApiRouter,
 };
 use crate::response::ApiResponse;
-use crate::utils::datatable::datatable_input_from_form;
 
-pub const DEFAULT_DATATABLE_PREFIX: &str = "/admin/dt";
+pub const DEFAULT_DATATABLE_PREFIX: &str = "/api/v1/admin/datatable";
 
 #[derive(Debug, Clone)]
 pub struct DataTableRouteOptions {
-    pub include_multipart_endpoints: bool,
     pub require_bearer_auth: bool,
 }
 
 impl Default for DataTableRouteOptions {
     fn default() -> Self {
         Self {
-            include_multipart_endpoints: true,
             require_bearer_auth: false,
         }
     }
 }
 
-#[async_trait]
-pub trait DataTableRouteState: Clone + Send + Sync + 'static {
-    fn datatable_registry(&self) -> &Arc<DataTableRegistry>;
-    fn datatable_async_exports(&self) -> &Arc<DataTableAsyncExportManager>;
-    async fn datatable_context(&self, headers: &HeaderMap) -> DataTableContext;
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DataTablePaginationModeDto {
+    Offset,
+    Cursor,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
-pub struct DataTableRequestDto {
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default, alias = "p")]
-    pub page: Option<i64>,
-    #[serde(default, alias = "per_page")]
-    pub ipp: Option<i64>,
-    #[serde(default)]
-    pub cursor: Option<String>,
-    #[serde(default, alias = "paginate_mode")]
-    pub pagination_mode: Option<String>,
-    #[serde(default)]
-    pub sorting_column: Option<String>,
-    #[serde(default)]
-    pub sorting: Option<String>,
-    #[serde(default)]
-    pub export: Option<String>,
-    #[serde(default)]
-    pub export_file_name: Option<String>,
-    #[serde(default)]
-    pub timezone: Option<String>,
-    #[serde(default, flatten)]
-    pub params: BTreeMap<String, String>,
-}
-
-impl DataTableRequestDto {
-    fn into_input(self) -> DataTableInput {
-        let mut params = self.params;
-        insert_opt_string(&mut params, "model", self.model);
-        insert_opt_i64(&mut params, "p", self.page);
-        insert_opt_i64(&mut params, "ipp", self.ipp);
-        insert_opt_string(&mut params, "cursor", self.cursor);
-        insert_opt_string(&mut params, "pagination_mode", self.pagination_mode);
-        insert_opt_string(&mut params, "sorting_column", self.sorting_column);
-        insert_opt_string(&mut params, "sorting", self.sorting);
-        insert_opt_string(&mut params, "export", self.export);
-        insert_opt_string(&mut params, "export_file_name", self.export_file_name);
-        insert_opt_string(&mut params, "timezone", self.timezone);
-        DataTableInput::from_pairs(params)
+impl DataTablePaginationModeDto {
+    fn to_core(self) -> core_datatable::DataTablePaginationMode {
+        match self {
+            Self::Offset => core_datatable::DataTablePaginationMode::Offset,
+            Self::Cursor => core_datatable::DataTablePaginationMode::Cursor,
+        }
     }
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
-pub struct BoundDataTableRequestDto {
-    #[serde(default, alias = "p")]
-    pub page: Option<i64>,
-    #[serde(default, alias = "per_page")]
-    pub ipp: Option<i64>,
-    #[serde(default)]
-    pub cursor: Option<String>,
-    #[serde(default, alias = "paginate_mode")]
-    pub pagination_mode: Option<String>,
-    #[serde(default)]
-    pub sorting_column: Option<String>,
-    #[serde(default)]
-    pub sorting: Option<String>,
-    #[serde(default)]
-    pub export: Option<String>,
-    #[serde(default)]
-    pub export_file_name: Option<String>,
-    #[serde(default)]
-    pub timezone: Option<String>,
-    #[serde(default, flatten)]
-    pub params: BTreeMap<String, String>,
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DataTableSortDirectionDto {
+    Asc,
+    Desc,
 }
 
-impl BoundDataTableRequestDto {
-    fn into_input(self, model: &str) -> DataTableInput {
-        let mut params = self.params;
-        insert_opt_string(&mut params, "model", Some(model.to_string()));
-        insert_opt_i64(&mut params, "p", self.page);
-        insert_opt_i64(&mut params, "ipp", self.ipp);
-        insert_opt_string(&mut params, "cursor", self.cursor);
-        insert_opt_string(&mut params, "pagination_mode", self.pagination_mode);
-        insert_opt_string(&mut params, "sorting_column", self.sorting_column);
-        insert_opt_string(&mut params, "sorting", self.sorting);
-        insert_opt_string(&mut params, "export", self.export);
-        insert_opt_string(&mut params, "export_file_name", self.export_file_name);
-        insert_opt_string(&mut params, "timezone", self.timezone);
-        DataTableInput::from_pairs(params)
+impl DataTableSortDirectionDto {
+    fn to_core(self) -> core_datatable::SortDirection {
+        match self {
+            Self::Asc => core_datatable::SortDirection::Asc,
+            Self::Desc => core_datatable::SortDirection::Desc,
+        }
     }
 }
 
-#[derive(Debug, Clone)]
-struct BoundDataTableState<S> {
-    inner: S,
-    model: String,
+#[derive(Debug, Clone, Deserialize, Serialize, Validate, JsonSchema)]
+pub struct DataTableQueryRequestBase {
+    #[serde(default = "default_include_meta")]
+    pub include_meta: bool,
+    #[serde(default)]
+    #[validate(range(min = 1))]
+    #[schemars(range(min = 1))]
+    pub page: Option<i64>,
+    #[serde(default)]
+    #[validate(range(min = 1, max = 500))]
+    #[schemars(range(min = 1, max = 500))]
+    pub per_page: Option<i64>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 256))]
+    #[schemars(length(min = 1, max = 256))]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub pagination_mode: Option<DataTablePaginationModeDto>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 128))]
+    #[schemars(length(min = 1, max = 128))]
+    pub sorting_column: Option<String>,
+    #[serde(default)]
+    pub sorting: Option<DataTableSortDirectionDto>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 64))]
+    #[schemars(length(min = 1, max = 64))]
+    pub timezone: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct DataTableDescribeQueryDto {
-    pub model: String,
+impl Default for DataTableQueryRequestBase {
+    fn default() -> Self {
+        Self {
+            include_meta: true,
+            page: None,
+            per_page: None,
+            cursor: None,
+            pagination_mode: None,
+            sorting_column: None,
+            sorting: None,
+            timezone: None,
+        }
+    }
+}
+
+impl DataTableQueryRequestBase {
+    pub fn to_input(&self) -> DataTableInput {
+        let mut input = DataTableInput::default();
+        if let Some(page) = self.page {
+            input.page = page;
+        }
+        if let Some(per_page) = self.per_page {
+            input.ipp = per_page;
+        }
+        input.cursor = self.cursor.clone();
+        if let Some(mode) = self.pagination_mode {
+            input.pagination_mode = mode.to_core();
+        }
+        input.sorting_column = self.sorting_column.clone();
+        input.sorting = self.sorting.map(DataTableSortDirectionDto::to_core);
+        input.timezone = self.timezone.clone();
+        input
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Validate, JsonSchema)]
+pub struct DataTableEmailExportRequestBase {
+    #[validate(nested)]
+    pub query: DataTableQueryRequestBase,
+    #[validate(length(min = 1, max = 20))]
+    #[schemars(length(min = 1, max = 20))]
+    pub recipients: Vec<String>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 160))]
+    #[schemars(length(min = 1, max = 160))]
+    pub subject: Option<String>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 120))]
+    #[schemars(length(min = 1, max = 120))]
+    pub export_file_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DataTableFilterFieldType {
+    Text,
+    Select,
+    Number,
+    Date,
+    Datetime,
+    Boolean,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DataTableFilterOptionDto {
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DataTableFilterFieldDto {
+    pub field: String,
+    pub filter_key: String,
+    #[serde(rename = "type")]
+    pub field_type: DataTableFilterFieldType,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<DataTableFilterOptionDto>>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct DataTableColumnMetaDto {
+    pub name: String,
+    pub data_type: String,
+    pub sortable: bool,
+    pub localized: bool,
+    pub filter_ops: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct DataTableRelationColumnMetaDto {
+    pub relation: String,
+    pub column: String,
+    pub data_type: String,
+    pub filter_ops: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct DataTableDefaultsDto {
+    pub sorting_column: String,
+    pub sorted: String,
+    pub per_page: i64,
+    pub export_ignore_columns: Vec<String>,
+    pub timestamp_columns: Vec<String>,
+    pub unsortable: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct DataTableMetaDto {
+    pub model_key: String,
+    pub defaults: DataTableDefaultsDto,
+    pub columns: Vec<DataTableColumnMetaDto>,
+    pub relation_columns: Vec<DataTableRelationColumnMetaDto>,
+    pub filter_rows: Vec<Vec<DataTableFilterFieldDto>>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct DataTableDiagnosticsDto {
+    pub duration_ms: u64,
+    pub auto_filters_applied: usize,
+    pub unknown_filters: Vec<String>,
+    pub unknown_filter_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[schemars(bound = "Row: JsonSchema")]
+pub struct DataTableQueryResponseDto<Row>
+where
+    Row: Serialize + JsonSchema,
+{
+    pub records: Vec<Row>,
+    pub per_page: i64,
+    pub total_records: i64,
+    pub total_pages: i64,
+    pub page: i64,
+    pub pagination_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_more: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    pub diagnostics: DataTableDiagnosticsDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<DataTableMetaDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DataTableEmailExportState {
+    WaitingCsv,
+    Uploading,
+    Sending,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DataTableEmailExportStatusDto {
+    pub state: DataTableEmailExportState,
+    pub recipients: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub updated_at_unix: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_at_unix: Option<i64>,
+}
+
+#[derive(Default, Clone)]
+pub struct DataTableEmailExportManager {
+    jobs: Arc<RwLock<HashMap<String, DataTableEmailExportStatusDto>>>,
+}
+
+impl DataTableEmailExportManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn init(&self, job_id: &str, recipients: Vec<String>, subject: Option<String>) {
+        let mut jobs = self.jobs.write().await;
+        jobs.insert(
+            job_id.to_string(),
+            DataTableEmailExportStatusDto {
+                state: DataTableEmailExportState::WaitingCsv,
+                recipients,
+                subject,
+                link_url: None,
+                error: None,
+                updated_at_unix: now_unix(),
+                sent_at_unix: None,
+            },
+        );
+    }
+
+    pub async fn status(&self, job_id: &str) -> Option<DataTableEmailExportStatusDto> {
+        let jobs = self.jobs.read().await;
+        jobs.get(job_id).cloned()
+    }
+
+    pub async fn set_state(
+        &self,
+        job_id: &str,
+        state: DataTableEmailExportState,
+        link_url: Option<String>,
+        error: Option<String>,
+    ) {
+        let mut jobs = self.jobs.write().await;
+        if let Some(job) = jobs.get_mut(job_id) {
+            job.state = state;
+            job.updated_at_unix = now_unix();
+            if let Some(link) = link_url {
+                job.link_url = Some(link);
+            }
+            job.error = error;
+            if matches!(job.state, DataTableEmailExportState::Completed) {
+                job.sent_at_unix = Some(now_unix());
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct DataTableEmailExportQueuedDto {
+    pub job_id: String,
+    pub csv_state: String,
+    pub email_state: DataTableEmailExportState,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct DataTableExportStatusResponseDto {
+    pub job_id: String,
+    pub model_key: String,
+    pub csv_state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub csv_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub csv_file_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub csv_content_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub csv_total_records: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<DataTableEmailExportStatusDto>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -156,437 +369,150 @@ pub struct DataTableExportStatusQueryDto {
     pub id: Option<String>,
 }
 
-pub fn routes<S>(state: S) -> ApiRouter
+#[async_trait]
+pub trait DataTableRouteState: Clone + Send + Sync + 'static {
+    fn datatable_registry(&self) -> &Arc<DataTableRegistry>;
+    fn datatable_async_exports(&self) -> &Arc<DataTableAsyncExportManager>;
+    fn datatable_storage(&self) -> &Arc<dyn Storage>;
+    fn datatable_mailer(&self) -> &Arc<core_mailer::Mailer>;
+    fn datatable_email_exports(&self) -> &Arc<DataTableEmailExportManager>;
+    fn datatable_export_link_ttl_secs(&self) -> u64;
+    async fn datatable_context(&self, headers: &HeaderMap) -> DataTableContext;
+}
+
+pub trait DataTableScopedContract: Clone + Send + Sync + 'static {
+    type QueryRequest: RequestContract;
+    type EmailRequest: RequestContract;
+    type Row: ResponseContract + DeserializeOwned + Send + Sync + 'static;
+
+    fn scoped_key(&self) -> &'static str;
+
+    fn query_to_input(&self, req: &Self::QueryRequest) -> DataTableInput;
+
+    fn email_to_input(&self, req: &Self::EmailRequest) -> DataTableInput;
+
+    fn email_recipients(&self, req: &Self::EmailRequest) -> Vec<String>;
+
+    fn email_subject(&self, _req: &Self::EmailRequest) -> Option<String> {
+        None
+    }
+
+    fn export_file_name(&self, _req: &Self::EmailRequest) -> Option<String> {
+        None
+    }
+
+    fn include_meta(&self, _req: &Self::QueryRequest) -> bool {
+        true
+    }
+
+    fn include_default_created_at_range(&self) -> bool {
+        true
+    }
+
+    fn filter_rows(&self) -> Vec<Vec<DataTableFilterFieldDto>> {
+        Vec::new()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ScopedDataTableState<S, C> {
+    inner: S,
+    contract: C,
+    scoped_key: String,
+}
+
+pub fn routes_for_scoped_contract<S, C>(prefix: &str, state: S, contract: C) -> ApiRouter
 where
     S: DataTableRouteState,
+    C: DataTableScopedContract,
 {
-    routes_with_prefix_and_options(
-        DEFAULT_DATATABLE_PREFIX,
+    routes_for_scoped_contract_with_options(
+        prefix,
         state,
+        contract,
         DataTableRouteOptions::default(),
     )
 }
 
-pub fn routes_with_options<S>(state: S, options: DataTableRouteOptions) -> ApiRouter
-where
-    S: DataTableRouteState,
-{
-    routes_with_prefix_and_options(DEFAULT_DATATABLE_PREFIX, state, options)
-}
-
-pub fn routes_with_prefix<S>(prefix: &str, state: S) -> ApiRouter
-where
-    S: DataTableRouteState,
-{
-    routes_with_prefix_and_options(prefix, state, DataTableRouteOptions::default())
-}
-
-pub fn routes_with_prefix_and_options<S>(
+pub fn routes_for_scoped_contract_with_options<S, C>(
     prefix: &str,
     state: S,
+    contract: C,
     options: DataTableRouteOptions,
 ) -> ApiRouter
 where
     S: DataTableRouteState,
+    C: DataTableScopedContract,
 {
-    let root = prefix.to_string();
-    let describe = format!("{prefix}/describe");
-    let export_stream = format!("{prefix}/export/stream");
-    let export_async = format!("{prefix}/export/async");
-    let export_async_form = format!("{prefix}/export/async/form");
-    let export_async_json = format!("{prefix}/export/async/json");
-    let export_status = format!("{prefix}/export/status");
-    let form_path = format!("{prefix}/form");
-    let json_path = format!("{prefix}/json");
+    let query_path = format!("{prefix}/query");
+    let export_csv_path = format!("{prefix}/export/csv");
+    let export_email_path = format!("{prefix}/export/email");
+    let export_status_path = format!("{prefix}/export/status");
+    let scoped_key = contract.scoped_key().trim().to_string();
+    let op_scope = datatable_operation_scope(prefix, scoped_key.as_str());
 
-    let root_route = {
-        let route = get_with(load_datatable_query::<S>, |op| {
-            datatable_operation(
-                op,
-                "datatable_execute_query",
-                "Datatable execute (query)",
-                "Execute datatable via query params.",
-                &[],
-                options.require_bearer_auth,
-            )
-        });
-        if options.include_multipart_endpoints {
-            route.post_with(load_datatable_multipart::<S>, |op| {
-                datatable_operation(
-                    op,
-                    "datatable_execute_multipart",
-                    "Datatable execute (multipart)",
-                    "Execute datatable via multipart payload.",
-                    &["Use /admin/dt/json for OpenAPI-friendly request schema docs."],
-                    options.require_bearer_auth,
-                )
-            })
-        } else {
-            route
-        }
-    };
-
-    let export_stream_route = {
-        let route = get_with(stream_csv_query::<S>, |op| {
-            datatable_operation(
-                op,
-                "datatable_csv_stream_query",
-                "Datatable CSV stream (query)",
-                "Stream CSV export directly.",
-                &["Response content-type is text/csv."],
-                options.require_bearer_auth,
-            )
-        });
-        if options.include_multipart_endpoints {
-            route.post_with(stream_csv_multipart::<S>, |op| {
-                datatable_operation(
-                    op,
-                    "datatable_csv_stream_multipart",
-                    "Datatable CSV stream (multipart)",
-                    "Stream CSV export directly from multipart request.",
-                    &[
-                        "Response content-type is text/csv.",
-                        "Use /admin/dt/json + export=csv for OpenAPI-friendly request schema docs.",
-                    ],
-                    options.require_bearer_auth,
-                )
-            })
-        } else {
-            route
-        }
-    };
-
-    let export_async_route = {
-        let route = get_with(queue_csv_export_query::<S>, |op| {
-            datatable_operation(
-                op,
-                "datatable_csv_queue_query",
-                "Datatable CSV queue (query)",
-                "Queue async CSV export job.",
-                &[],
-                options.require_bearer_auth,
-            )
-        });
-        if options.include_multipart_endpoints {
-            route.post_with(queue_csv_export_multipart::<S>, |op| {
-                datatable_operation(
-                    op,
-                    "datatable_csv_queue_multipart",
-                    "Datatable CSV queue (multipart)",
-                    "Queue async CSV export job from multipart payload.",
-                    &["Use /admin/dt/export/async/json for OpenAPI-friendly request schema docs."],
-                    options.require_bearer_auth,
-                )
-            })
-        } else {
-            route
-        }
+    let state = ScopedDataTableState {
+        inner: state,
+        contract,
+        scoped_key,
     };
 
     ApiRouter::new()
-        .api_route(root.as_str(), root_route)
         .api_route(
-            describe.as_str(),
-            get_with(describe_datatable::<S>, |op| {
+            query_path.as_str(),
+            post_with(query_scoped::<S, C>, |op| {
                 datatable_operation(
                     op,
-                    "datatable_describe",
-                    "Datatable describe",
-                    "Return datatable metadata (columns, filters, defaults).",
-                    &[],
-                    options.require_bearer_auth,
-                )
-            }),
-        )
-        .api_route(export_stream.as_str(), export_stream_route)
-        .api_route(export_async.as_str(), export_async_route)
-        .api_route(
-            export_async_form.as_str(),
-            post_with(queue_csv_export_form::<S>, |op| {
-                datatable_operation(
-                    op,
-                    "datatable_csv_queue_form",
-                    "Datatable CSV queue (form)",
-                    "Queue async CSV export job from form payload.",
-                    &[],
+                    &format!("datatable_{}_query", op_scope),
+                    "Datatable query",
+                    "Execute datatable query and optionally include metadata.",
+                    &["Use include_meta=true on first request to fetch filters + shape metadata."],
                     options.require_bearer_auth,
                 )
             }),
         )
         .api_route(
-            export_async_json.as_str(),
-            post_with(queue_csv_export_json::<S>, |op| {
+            export_csv_path.as_str(),
+            post_with(export_csv_scoped::<S, C>, |op| {
                 datatable_operation(
                     op,
-                    "datatable_csv_queue_json",
-                    "Datatable CSV queue (json)",
-                    "Queue async CSV export job from JSON payload.",
-                    &[],
+                    &format!("datatable_{}_export_csv", op_scope),
+                    "Datatable CSV export",
+                    "Generate and stream CSV export for scoped datatable query.",
+                    &["Response content-type is text/csv."],
                     options.require_bearer_auth,
                 )
             }),
         )
         .api_route(
-            export_status.as_str(),
-            get_with(async_export_status::<S>, |op| {
+            export_email_path.as_str(),
+            post_with(export_email_scoped::<S, C>, |op| {
                 datatable_operation(
                     op,
-                    "datatable_csv_status",
-                    "Datatable CSV status",
-                    "Get async export job status.",
-                    &[],
+                    &format!("datatable_{}_export_email", op_scope),
+                    "Datatable CSV email export",
+                    "Queue CSV export email delivery (link-based).",
+                    &[
+                        "CSV is generated async, uploaded to storage, then email sends presigned download link.",
+                    ],
                     options.require_bearer_auth,
                 )
             }),
         )
         .api_route(
-            form_path.as_str(),
-            post_with(load_datatable_form::<S>, |op| {
+            export_status_path.as_str(),
+            get_with(export_status_scoped::<S, C>, |op| {
                 datatable_operation(
                     op,
-                    "datatable_execute_form",
-                    "Datatable execute (form)",
-                    "Execute datatable via form payload.",
-                    &[],
-                    options.require_bearer_auth,
-                )
-            }),
-        )
-        .api_route(
-            json_path.as_str(),
-            post_with(load_datatable_json::<S>, |op| {
-                datatable_operation(
-                    op,
-                    "datatable_execute_json",
-                    "Datatable execute (json)",
-                    "Execute datatable via JSON payload.",
+                    &format!("datatable_{}_export_status", op_scope),
+                    "Datatable export status",
+                    "Get status for CSV export and email delivery by job id.",
                     &[],
                     options.require_bearer_auth,
                 )
             }),
         )
         .with_state(state)
-}
-
-pub fn routes_for_model<S>(prefix: &str, model: &str, state: S) -> ApiRouter
-where
-    S: DataTableRouteState,
-{
-    routes_for_model_with_options(prefix, model, state, DataTableRouteOptions::default())
-}
-
-pub fn routes_for_model_with_options<S>(
-    prefix: &str,
-    model: &str,
-    state: S,
-    options: DataTableRouteOptions,
-) -> ApiRouter
-where
-    S: DataTableRouteState,
-{
-    let root = prefix.to_string();
-    let describe = format!("{prefix}/describe");
-    let export_stream = format!("{prefix}/export/stream");
-    let export_async = format!("{prefix}/export/async");
-    let export_async_form = format!("{prefix}/export/async/form");
-    let export_async_json = format!("{prefix}/export/async/json");
-    let export_status = format!("{prefix}/export/status");
-    let form_path = format!("{prefix}/form");
-    let json_path = format!("{prefix}/json");
-
-    let op_scope = datatable_operation_scope(prefix, model);
-    let model_name = model.trim().to_string();
-    let bound_state = BoundDataTableState {
-        inner: state,
-        model: model_name.clone(),
-    };
-
-    let root_route = {
-        let route = get_with(load_bound_datatable_query::<S>, |op| {
-            datatable_operation(
-                op,
-                &format!("datatable_{}_execute_query", op_scope),
-                &format!("{} datatable execute (query)", model_name),
-                "Execute datatable via query params.",
-                &[&format!("Model is bound to `{}` by route.", model_name)],
-                options.require_bearer_auth,
-            )
-        });
-        if options.include_multipart_endpoints {
-            route.post_with(load_bound_datatable_multipart::<S>, |op| {
-                datatable_operation(
-                    op,
-                    &format!("datatable_{}_execute_multipart", op_scope),
-                    &format!("{} datatable execute (multipart)", model_name),
-                    "Execute datatable via multipart payload.",
-                    &[
-                        &format!("Model is bound to `{}` by route.", model_name),
-                        &format!(
-                            "Use {}/json for OpenAPI-friendly request schema docs.",
-                            prefix
-                        ),
-                    ],
-                    options.require_bearer_auth,
-                )
-            })
-        } else {
-            route
-        }
-    };
-
-    let export_stream_route = {
-        let route = get_with(stream_bound_csv_query::<S>, |op| {
-            datatable_operation(
-                op,
-                &format!("datatable_{}_csv_stream_query", op_scope),
-                &format!("{} datatable CSV stream (query)", model_name),
-                "Stream CSV export directly.",
-                &[
-                    "Response content-type is text/csv.",
-                    &format!("Model is bound to `{}` by route.", model_name),
-                ],
-                options.require_bearer_auth,
-            )
-        });
-        if options.include_multipart_endpoints {
-            route.post_with(stream_bound_csv_multipart::<S>, |op| {
-                datatable_operation(
-                    op,
-                    &format!("datatable_{}_csv_stream_multipart", op_scope),
-                    &format!("{} datatable CSV stream (multipart)", model_name),
-                    "Stream CSV export directly from multipart request.",
-                    &[
-                        "Response content-type is text/csv.",
-                        &format!("Model is bound to `{}` by route.", model_name),
-                        &format!(
-                            "Use {}/json + export=csv for OpenAPI-friendly request schema docs.",
-                            prefix
-                        ),
-                    ],
-                    options.require_bearer_auth,
-                )
-            })
-        } else {
-            route
-        }
-    };
-
-    let export_async_route = {
-        let route = get_with(queue_bound_csv_export_query::<S>, |op| {
-            datatable_operation(
-                op,
-                &format!("datatable_{}_csv_queue_query", op_scope),
-                &format!("{} datatable CSV queue (query)", model_name),
-                "Queue async CSV export job.",
-                &[&format!("Model is bound to `{}` by route.", model_name)],
-                options.require_bearer_auth,
-            )
-        });
-        if options.include_multipart_endpoints {
-            route.post_with(queue_bound_csv_export_multipart::<S>, |op| {
-                datatable_operation(
-                    op,
-                    &format!("datatable_{}_csv_queue_multipart", op_scope),
-                    &format!("{} datatable CSV queue (multipart)", model_name),
-                    "Queue async CSV export job from multipart payload.",
-                    &[
-                        &format!("Model is bound to `{}` by route.", model_name),
-                        &format!(
-                            "Use {}/export/async/json for OpenAPI-friendly request schema docs.",
-                            prefix
-                        ),
-                    ],
-                    options.require_bearer_auth,
-                )
-            })
-        } else {
-            route
-        }
-    };
-
-    ApiRouter::new()
-        .api_route(root.as_str(), root_route)
-        .api_route(
-            describe.as_str(),
-            get_with(describe_bound_datatable::<S>, |op| {
-                datatable_operation(
-                    op,
-                    &format!("datatable_{}_describe", op_scope),
-                    &format!("{} datatable describe", model_name),
-                    "Return datatable metadata (columns, filters, defaults).",
-                    &[&format!("Model is bound to `{}` by route.", model_name)],
-                    options.require_bearer_auth,
-                )
-            }),
-        )
-        .api_route(export_stream.as_str(), export_stream_route)
-        .api_route(export_async.as_str(), export_async_route)
-        .api_route(
-            export_async_form.as_str(),
-            post_with(queue_bound_csv_export_form::<S>, |op| {
-                datatable_operation(
-                    op,
-                    &format!("datatable_{}_csv_queue_form", op_scope),
-                    &format!("{} datatable CSV queue (form)", model_name),
-                    "Queue async CSV export job from form payload.",
-                    &[&format!("Model is bound to `{}` by route.", model_name)],
-                    options.require_bearer_auth,
-                )
-            }),
-        )
-        .api_route(
-            export_async_json.as_str(),
-            post_with(queue_bound_csv_export_json::<S>, |op| {
-                datatable_operation(
-                    op,
-                    &format!("datatable_{}_csv_queue_json", op_scope),
-                    &format!("{} datatable CSV queue (json)", model_name),
-                    "Queue async CSV export job from JSON payload.",
-                    &[&format!("Model is bound to `{}` by route.", model_name)],
-                    options.require_bearer_auth,
-                )
-            }),
-        )
-        .api_route(
-            export_status.as_str(),
-            get_with(async_bound_export_status::<S>, |op| {
-                datatable_operation(
-                    op,
-                    &format!("datatable_{}_csv_status", op_scope),
-                    &format!("{} datatable CSV status", model_name),
-                    "Get async export job status.",
-                    &[&format!("Model is bound to `{}` by route.", model_name)],
-                    options.require_bearer_auth,
-                )
-            }),
-        )
-        .api_route(
-            form_path.as_str(),
-            post_with(load_bound_datatable_form::<S>, |op| {
-                datatable_operation(
-                    op,
-                    &format!("datatable_{}_execute_form", op_scope),
-                    &format!("{} datatable execute (form)", model_name),
-                    "Execute datatable via form payload.",
-                    &[&format!("Model is bound to `{}` by route.", model_name)],
-                    options.require_bearer_auth,
-                )
-            }),
-        )
-        .api_route(
-            json_path.as_str(),
-            post_with(load_bound_datatable_json::<S>, |op| {
-                datatable_operation(
-                    op,
-                    &format!("datatable_{}_execute_json", op_scope),
-                    &format!("{} datatable execute (json)", model_name),
-                    "Execute datatable via JSON payload.",
-                    &[&format!("Model is bound to `{}` by route.", model_name)],
-                    options.require_bearer_auth,
-                )
-            }),
-        )
-        .with_state(bound_state)
 }
 
 fn datatable_operation<'t>(
@@ -597,10 +523,7 @@ fn datatable_operation<'t>(
     extra_notes: &[&str],
     needs_bearer_auth: bool,
 ) -> TransformOperation<'t> {
-    let mut notes = vec![
-        "Framework-provided datatable route collection (core_web::datatable).",
-        "Apply app-level auth middleware when mounting admin datatable routes.",
-    ];
+    let mut notes = vec!["Framework-provided datatable route collection (core_web::datatable)."];
     notes.extend_from_slice(extra_notes);
     let op = op
         .id(operation_id)
@@ -615,8 +538,8 @@ fn datatable_operation<'t>(
     with_route_notes(op, &notes)
 }
 
-fn datatable_operation_scope(prefix: &str, model: &str) -> String {
-    let raw = format!("{prefix}_{model}");
+fn datatable_operation_scope(prefix: &str, scoped_key: &str) -> String {
+    let raw = format!("{prefix}_{scoped_key}");
     let mut out = String::new();
     let mut last_was_sep = false;
     for ch in raw.chars() {
@@ -631,477 +554,87 @@ fn datatable_operation_scope(prefix: &str, model: &str) -> String {
     out.trim_matches('_').to_string()
 }
 
-fn bind_model(mut input: DataTableInput, model: &str) -> DataTableInput {
-    input.model = Some(model.to_string());
-    input.params.insert("model".to_string(), model.to_string());
-    input
-}
-
-async fn load_bound_datatable_query<S>(
-    State(state): State<BoundDataTableState<S>>,
-    Query(params): Query<BoundDataTableRequestDto>,
+async fn query_scoped<S, C>(
+    State(state): State<ScopedDataTableState<S, C>>,
     headers: RequestHeaders,
-) -> Result<ApiResponse<Value>, AppError>
+    req: ContractJson<C::QueryRequest>,
+) -> Result<ApiResponse<DataTableQueryResponseDto<C::Row>>, AppError>
 where
     S: DataTableRouteState,
+    C: DataTableScopedContract,
 {
-    let input = params.into_input(state.model.as_str());
-    execute_datatable(&state.inner, input, &headers).await
-}
+    let mut input = state.contract.query_to_input(&req.0);
+    input = bind_scoped_key(input, state.scoped_key.as_str());
+    input.export = DataTableExportMode::None;
 
-async fn load_bound_datatable_multipart<S>(
-    State(state): State<BoundDataTableState<S>>,
-    headers: RequestHeaders,
-    multipart: Multipart,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let params = multipart_to_params(multipart).await?;
-    let input = bind_model(datatable_input_from_form(&params), state.model.as_str());
-    execute_datatable(&state.inner, input, &headers).await
-}
-
-async fn load_bound_datatable_form<S>(
-    State(state): State<BoundDataTableState<S>>,
-    headers: RequestHeaders,
-    Form(params): Form<BoundDataTableRequestDto>,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let input = params.into_input(state.model.as_str());
-    execute_datatable(&state.inner, input, &headers).await
-}
-
-async fn load_bound_datatable_json<S>(
-    State(state): State<BoundDataTableState<S>>,
-    headers: RequestHeaders,
-    Json(body): Json<BoundDataTableRequestDto>,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let input = body.into_input(state.model.as_str());
-    execute_datatable(&state.inner, input, &headers).await
-}
-
-async fn describe_bound_datatable<S>(
-    State(state): State<BoundDataTableState<S>>,
-    headers: RequestHeaders,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
     let ctx = state.inner.datatable_context(&headers).await;
-    let describe = state
-        .inner
-        .datatable_registry()
-        .describe(state.model.as_str(), &ctx)
-        .map_err(map_datatable_error)?;
-    Ok(ApiResponse::success(
-        serde_json::to_value(describe)?,
-        "datatable describe",
-    ))
-}
-
-async fn queue_bound_csv_export_query<S>(
-    State(state): State<BoundDataTableState<S>>,
-    Query(params): Query<BoundDataTableRequestDto>,
-    headers: RequestHeaders,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let input = params.into_input(state.model.as_str());
-    queue_csv_export(&state.inner, input, &headers).await
-}
-
-async fn queue_bound_csv_export_multipart<S>(
-    State(state): State<BoundDataTableState<S>>,
-    headers: RequestHeaders,
-    multipart: Multipart,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let params = multipart_to_params(multipart).await?;
-    let input = bind_model(datatable_input_from_form(&params), state.model.as_str());
-    queue_csv_export(&state.inner, input, &headers).await
-}
-
-async fn queue_bound_csv_export_form<S>(
-    State(state): State<BoundDataTableState<S>>,
-    headers: RequestHeaders,
-    Form(params): Form<BoundDataTableRequestDto>,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let input = params.into_input(state.model.as_str());
-    queue_csv_export(&state.inner, input, &headers).await
-}
-
-async fn queue_bound_csv_export_json<S>(
-    State(state): State<BoundDataTableState<S>>,
-    headers: RequestHeaders,
-    Json(body): Json<BoundDataTableRequestDto>,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let input = body.into_input(state.model.as_str());
-    queue_csv_export(&state.inner, input, &headers).await
-}
-
-async fn async_bound_export_status<S>(
-    State(state): State<BoundDataTableState<S>>,
-    Query(params): Query<DataTableExportStatusQueryDto>,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let job_id = params
-        .job_id
-        .or(params.id)
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| AppError::BadRequest("Missing export job id".to_string()))?;
-
-    let status = state
-        .inner
-        .datatable_async_exports()
-        .status(&job_id)
-        .await
-        .ok_or_else(|| AppError::NotFound(format!("Unknown export job '{}'", job_id)))?;
-
-    Ok(ApiResponse::success(
-        serde_json::to_value(status)?,
-        "datatable export status",
-    ))
-}
-
-async fn stream_bound_csv_query<S>(
-    State(state): State<BoundDataTableState<S>>,
-    Query(params): Query<BoundDataTableRequestDto>,
-    headers: RequestHeaders,
-) -> Result<Response, AppError>
-where
-    S: DataTableRouteState,
-{
-    let input = params.into_input(state.model.as_str());
-    stream_csv_export(&state.inner, input, &headers).await
-}
-
-async fn stream_bound_csv_multipart<S>(
-    State(state): State<BoundDataTableState<S>>,
-    headers: RequestHeaders,
-    multipart: Multipart,
-) -> Result<Response, AppError>
-where
-    S: DataTableRouteState,
-{
-    let params = multipart_to_params(multipart).await?;
-    let input = bind_model(datatable_input_from_form(&params), state.model.as_str());
-    stream_csv_export(&state.inner, input, &headers).await
-}
-
-async fn load_datatable_query<S>(
-    State(state): State<S>,
-    Query(params): Query<DataTableRequestDto>,
-    headers: RequestHeaders,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let input = params.into_input();
-    execute_datatable(&state, input, &headers).await
-}
-
-async fn load_datatable_multipart<S>(
-    State(state): State<S>,
-    headers: RequestHeaders,
-    multipart: Multipart,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let params = multipart_to_params(multipart).await?;
-    let input = datatable_input_from_form(&params);
-    execute_datatable(&state, input, &headers).await
-}
-
-async fn load_datatable_form<S>(
-    State(state): State<S>,
-    headers: RequestHeaders,
-    Form(params): Form<DataTableRequestDto>,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let input = params.into_input();
-    execute_datatable(&state, input, &headers).await
-}
-
-async fn load_datatable_json<S>(
-    State(state): State<S>,
-    headers: RequestHeaders,
-    Json(body): Json<DataTableRequestDto>,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let input = body.into_input();
-    execute_datatable(&state, input, &headers).await
-}
-
-async fn describe_datatable<S>(
-    State(state): State<S>,
-    Query(params): Query<DataTableDescribeQueryDto>,
-    headers: RequestHeaders,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let model = params.model.trim();
-    if model.is_empty() {
-        return Err(AppError::BadRequest(
-            "Missing datatable model key".to_string(),
-        ));
-    }
-    let ctx = state.datatable_context(&headers).await;
-    let describe = state
-        .datatable_registry()
-        .describe(model, &ctx)
-        .map_err(map_datatable_error)?;
-    Ok(ApiResponse::success(
-        serde_json::to_value(describe)?,
-        "datatable describe",
-    ))
-}
-
-async fn queue_csv_export_query<S>(
-    State(state): State<S>,
-    Query(params): Query<DataTableRequestDto>,
-    headers: RequestHeaders,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let input = params.into_input();
-    queue_csv_export(&state, input, &headers).await
-}
-
-async fn queue_csv_export_multipart<S>(
-    State(state): State<S>,
-    headers: RequestHeaders,
-    multipart: Multipart,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let params = multipart_to_params(multipart).await?;
-    let input = datatable_input_from_form(&params);
-    queue_csv_export(&state, input, &headers).await
-}
-
-async fn queue_csv_export_form<S>(
-    State(state): State<S>,
-    headers: RequestHeaders,
-    Form(params): Form<DataTableRequestDto>,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let input = params.into_input();
-    queue_csv_export(&state, input, &headers).await
-}
-
-async fn queue_csv_export_json<S>(
-    State(state): State<S>,
-    headers: RequestHeaders,
-    Json(body): Json<DataTableRequestDto>,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let input = body.into_input();
-    queue_csv_export(&state, input, &headers).await
-}
-
-async fn async_export_status<S>(
-    State(state): State<S>,
-    Query(params): Query<DataTableExportStatusQueryDto>,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let job_id = params
-        .job_id
-        .or(params.id)
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| AppError::BadRequest("Missing export job id".to_string()))?;
-
-    let status = state
-        .datatable_async_exports()
-        .status(&job_id)
-        .await
-        .ok_or_else(|| AppError::NotFound(format!("Unknown export job '{}'", job_id)))?;
-
-    Ok(ApiResponse::success(
-        serde_json::to_value(status)?,
-        "datatable export status",
-    ))
-}
-
-async fn stream_csv_query<S>(
-    State(state): State<S>,
-    Query(params): Query<DataTableRequestDto>,
-    headers: RequestHeaders,
-) -> Result<Response, AppError>
-where
-    S: DataTableRouteState,
-{
-    let input = params.into_input();
-    stream_csv_export(&state, input, &headers).await
-}
-
-async fn stream_csv_multipart<S>(
-    State(state): State<S>,
-    headers: RequestHeaders,
-    multipart: Multipart,
-) -> Result<Response, AppError>
-where
-    S: DataTableRouteState,
-{
-    let params = multipart_to_params(multipart).await?;
-    let input = datatable_input_from_form(&params);
-    stream_csv_export(&state, input, &headers).await
-}
-
-async fn execute_datatable<S>(
-    state: &S,
-    input: DataTableInput,
-    headers: &HeaderMap,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    let model = input
-        .model
-        .clone()
-        .unwrap_or_else(|| "<missing>".to_string());
-    let ctx = state.datatable_context(headers).await;
     let exec = state
+        .inner
         .datatable_registry()
         .execute(&input, &ctx)
         .await
         .map_err(map_datatable_error)?;
 
-    let data = match exec {
-        DataTableExecution::Page(page) => json!({
-            "model": model,
-            "mode": "page",
-            "records": page.records,
-            "per_page": page.per_page,
-            "total_records": page.total_records,
-            "total_pages": page.total_pages,
-            "page": page.page,
-            "pagination_mode": page.pagination_mode,
-            "has_more": page.has_more,
-            "next_cursor": page.next_cursor,
-            "diagnostics": page.diagnostics,
-        }),
-        DataTableExecution::Csv(csv) => json!({
-            "model": model,
-            "mode": "csv",
-            "file_path": csv.file_path,
-            "file_name": csv.file_name,
-            "content_type": csv.content_type,
-            "total_records": csv.total_records,
-            "diagnostics": csv.diagnostics,
-        }),
+    let page = match exec {
+        DataTableExecution::Page(page) => page,
+        DataTableExecution::Csv(_) => {
+            return Err(AppError::BadRequest(
+                "Query endpoint does not support CSV export mode".to_string(),
+            ));
+        }
     };
 
-    if let Some(diagnostics) = data.get("diagnostics") {
-        info!(
-            target: "datatable",
-            model = %model,
-            mode = %data.get("mode").and_then(|v| v.as_str()).unwrap_or("unknown"),
-            duration_ms = diagnostics.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0),
-            auto_filters_applied = diagnostics
-                .get("auto_filters_applied")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0),
-            unknown_filters = diagnostics
-                .get("unknown_filters")
-                .and_then(|v| v.as_array())
-                .map(|a| a.len())
-                .unwrap_or(0),
-            "datatable execution"
-        );
-    }
+    let records = decode_records::<C::Row>(page.records, state.scoped_key.as_str())?;
 
-    Ok(ApiResponse::make_response(
-        StatusCode::OK,
-        data,
-        Some("datatable executed"),
-    ))
+    let meta = if state.contract.include_meta(&req.0) {
+        let describe = state
+            .inner
+            .datatable_registry()
+            .describe(state.scoped_key.as_str(), &ctx)
+            .map_err(map_datatable_error)?;
+        Some(build_meta(&state.contract, describe))
+    } else {
+        None
+    };
+
+    let payload = DataTableQueryResponseDto {
+        records,
+        per_page: page.per_page,
+        total_records: page.total_records,
+        total_pages: page.total_pages,
+        page: page.page,
+        pagination_mode: pagination_mode_to_str(page.pagination_mode).to_string(),
+        has_more: page.has_more,
+        next_cursor: page.next_cursor,
+        diagnostics: DataTableDiagnosticsDto {
+            duration_ms: page.diagnostics.duration_ms,
+            auto_filters_applied: page.diagnostics.auto_filters_applied,
+            unknown_filters: page.diagnostics.unknown_filters,
+            unknown_filter_mode: unknown_filter_mode_to_str(page.diagnostics.unknown_filter_mode)
+                .to_string(),
+        },
+        meta,
+    };
+
+    Ok(ApiResponse::success(payload, "datatable query"))
 }
 
-async fn queue_csv_export<S>(
-    state: &S,
-    mut input: DataTableInput,
-    headers: &HeaderMap,
-) -> Result<ApiResponse<Value>, AppError>
-where
-    S: DataTableRouteState,
-{
-    input.export = DataTableExportMode::Csv;
-    let ctx = state.datatable_context(headers).await;
-    let model = input
-        .model
-        .clone()
-        .unwrap_or_else(|| "<missing>".to_string());
-    let ticket = state
-        .datatable_async_exports()
-        .enqueue(input, ctx)
-        .await
-        .map_err(map_datatable_error)?;
-
-    info!(
-        target: "datatable",
-        model = %model,
-        job_id = %ticket.job_id,
-        state = ?ticket.state,
-        "datatable export queued"
-    );
-
-    Ok(ApiResponse::success(
-        json!({
-            "job_id": ticket.job_id,
-            "state": ticket.state,
-        }),
-        "datatable export queued",
-    ))
-}
-
-async fn stream_csv_export<S>(
-    state: &S,
-    mut input: DataTableInput,
-    headers: &HeaderMap,
+async fn export_csv_scoped<S, C>(
+    State(state): State<ScopedDataTableState<S, C>>,
+    headers: RequestHeaders,
+    req: ContractJson<C::QueryRequest>,
 ) -> Result<Response, AppError>
 where
     S: DataTableRouteState,
+    C: DataTableScopedContract,
 {
+    let mut input = state.contract.query_to_input(&req.0);
+    input = bind_scoped_key(input, state.scoped_key.as_str());
     input.export = DataTableExportMode::Csv;
-    let model = input
-        .model
-        .clone()
-        .unwrap_or_else(|| "<missing>".to_string());
-    let ctx = state.datatable_context(headers).await;
+
+    let ctx = state.inner.datatable_context(&headers).await;
     let exec = state
+        .inner
         .datatable_registry()
         .execute(&input, &ctx)
         .await
@@ -1111,15 +644,441 @@ where
         DataTableExecution::Csv(csv) => csv,
         DataTableExecution::Page(_) => {
             return Err(AppError::BadRequest(
-                "CSV export stream requires export mode".to_string(),
-            ))
+                "CSV export endpoint requires export mode".to_string(),
+            ));
         }
     };
 
-    let file = tokio::fs::File::open(&csv.file_path).await.map_err(|err| {
+    stream_csv_response(
+        csv.file_path.as_str(),
+        csv.file_name.as_str(),
+        csv.content_type.as_str(),
+    )
+    .await
+}
+
+async fn export_email_scoped<S, C>(
+    State(state): State<ScopedDataTableState<S, C>>,
+    headers: RequestHeaders,
+    req: ContractJson<C::EmailRequest>,
+) -> Result<ApiResponse<DataTableEmailExportQueuedDto>, AppError>
+where
+    S: DataTableRouteState,
+    C: DataTableScopedContract,
+{
+    let recipients = normalize_recipients(state.contract.email_recipients(&req.0));
+    if recipients.is_empty() {
+        return Err(AppError::BadRequest(
+            "At least one valid recipient is required".to_string(),
+        ));
+    }
+
+    let subject = state
+        .contract
+        .email_subject(&req.0)
+        .unwrap_or_else(|| format!("Datatable export ({})", state.scoped_key));
+
+    let mut input = state.contract.email_to_input(&req.0);
+    input = bind_scoped_key(input, state.scoped_key.as_str());
+    input.export = DataTableExportMode::Csv;
+    if input.export_file_name.is_none() {
+        input.export_file_name = state.contract.export_file_name(&req.0);
+    }
+
+    let ctx = state.inner.datatable_context(&headers).await;
+    let ticket = state
+        .inner
+        .datatable_async_exports()
+        .enqueue(input, ctx)
+        .await
+        .map_err(map_datatable_error)?;
+
+    state
+        .inner
+        .datatable_email_exports()
+        .init(&ticket.job_id, recipients.clone(), Some(subject.clone()))
+        .await;
+
+    spawn_email_delivery_task(
+        state.inner.clone(),
+        ticket.job_id.clone(),
+        state.scoped_key.clone(),
+        recipients,
+        subject,
+    );
+
+    Ok(ApiResponse::success(
+        DataTableEmailExportQueuedDto {
+            job_id: ticket.job_id,
+            csv_state: async_state_to_str(ticket.state).to_string(),
+            email_state: DataTableEmailExportState::WaitingCsv,
+        },
+        "datatable email export queued",
+    ))
+}
+
+async fn export_status_scoped<S, C>(
+    State(state): State<ScopedDataTableState<S, C>>,
+    Query(params): Query<DataTableExportStatusQueryDto>,
+) -> Result<ApiResponse<DataTableExportStatusResponseDto>, AppError>
+where
+    S: DataTableRouteState,
+    C: DataTableScopedContract,
+{
+    let job_id = params
+        .job_id
+        .or(params.id)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| AppError::BadRequest("Missing export job id".to_string()))?;
+
+    let csv_status = state
+        .inner
+        .datatable_async_exports()
+        .status(&job_id)
+        .await
+        .ok_or_else(|| AppError::NotFound(format!("Unknown export job '{}'", job_id)))?;
+
+    let email = state.inner.datatable_email_exports().status(&job_id).await;
+
+    Ok(ApiResponse::success(
+        DataTableExportStatusResponseDto {
+            job_id,
+            model_key: csv_status.model,
+            csv_state: async_state_to_str(csv_status.state).to_string(),
+            csv_error: csv_status.error,
+            csv_file_name: csv_status.csv.as_ref().map(|csv| csv.file_name.clone()),
+            csv_content_type: csv_status.csv.as_ref().map(|csv| csv.content_type.clone()),
+            csv_total_records: csv_status.csv.as_ref().map(|csv| csv.total_records),
+            email,
+        },
+        "datatable export status",
+    ))
+}
+
+fn spawn_email_delivery_task<S>(
+    state: S,
+    job_id: String,
+    scoped_key: String,
+    recipients: Vec<String>,
+    subject: String,
+) where
+    S: DataTableRouteState,
+{
+    tokio::spawn(async move {
+        if let Err(err) = run_email_delivery_task(
+            state.clone(),
+            job_id.clone(),
+            scoped_key,
+            recipients,
+            subject,
+        )
+        .await
+        {
+            state
+                .datatable_email_exports()
+                .set_state(
+                    &job_id,
+                    DataTableEmailExportState::Failed,
+                    None,
+                    Some(app_error_message(&err)),
+                )
+                .await;
+        }
+    });
+}
+
+async fn run_email_delivery_task<S>(
+    state: S,
+    job_id: String,
+    scoped_key: String,
+    recipients: Vec<String>,
+    subject: String,
+) -> Result<(), AppError>
+where
+    S: DataTableRouteState,
+{
+    loop {
+        let csv_status = state.datatable_async_exports().status(&job_id).await;
+        let Some(csv_status) = csv_status else {
+            return Err(AppError::NotFound(format!(
+                "Unknown export job '{}'",
+                job_id
+            )));
+        };
+
+        match csv_status.state {
+            DataTableAsyncExportState::Queued | DataTableAsyncExportState::Running => {
+                sleep(Duration::from_secs(1)).await;
+            }
+            DataTableAsyncExportState::Failed => {
+                state
+                    .datatable_email_exports()
+                    .set_state(
+                        &job_id,
+                        DataTableEmailExportState::Failed,
+                        None,
+                        csv_status
+                            .error
+                            .or_else(|| Some("CSV export failed".to_string())),
+                    )
+                    .await;
+                return Ok(());
+            }
+            DataTableAsyncExportState::Completed => {
+                let Some(csv) = csv_status.csv else {
+                    return Err(AppError::Internal(anyhow::anyhow!(
+                        "CSV export completed without csv payload"
+                    )));
+                };
+
+                state
+                    .datatable_email_exports()
+                    .set_state(&job_id, DataTableEmailExportState::Uploading, None, None)
+                    .await;
+
+                let file_data = tokio::fs::read(csv.file_path.as_str())
+                    .await
+                    .map_err(|err| {
+                        AppError::Internal(anyhow::anyhow!(
+                            "Failed to read csv export file '{}': {}",
+                            csv.file_path,
+                            err
+                        ))
+                    })?;
+
+                let safe_name = sanitize_file_name(csv.file_name.as_str());
+                let object_key = format!(
+                    "datatable/exports/{}/{}/{}",
+                    scoped_key.replace('.', "/"),
+                    job_id,
+                    safe_name
+                );
+
+                state
+                    .datatable_storage()
+                    .put(
+                        object_key.as_str(),
+                        Bytes::from(file_data),
+                        csv.content_type.as_str(),
+                    )
+                    .await
+                    .map_err(AppError::from)?;
+
+                let link = state
+                    .datatable_storage()
+                    .presign_get(
+                        object_key.as_str(),
+                        state.datatable_export_link_ttl_secs().max(1),
+                    )
+                    .await
+                    .map_err(AppError::from)?;
+
+                state
+                    .datatable_email_exports()
+                    .set_state(
+                        &job_id,
+                        DataTableEmailExportState::Sending,
+                        Some(link.clone()),
+                        None,
+                    )
+                    .await;
+
+                let body = format!(
+                    "Datatable export is ready.\n\nModel: {}\nDownload: {}",
+                    scoped_key, link
+                );
+
+                state
+                    .datatable_mailer()
+                    .queue_raw(MailPayload {
+                        to: recipients,
+                        subject,
+                        body,
+                    })
+                    .await
+                    .map_err(AppError::from)?;
+
+                state
+                    .datatable_email_exports()
+                    .set_state(
+                        &job_id,
+                        DataTableEmailExportState::Completed,
+                        Some(link),
+                        None,
+                    )
+                    .await;
+
+                return Ok(());
+            }
+        }
+    }
+}
+
+fn bind_scoped_key(mut input: DataTableInput, scoped_key: &str) -> DataTableInput {
+    input.model = Some(scoped_key.to_string());
+    input
+        .params
+        .insert("model".to_string(), scoped_key.to_string());
+    input
+}
+
+fn decode_records<Row>(records: Vec<Value>, scoped_key: &str) -> Result<Vec<Row>, AppError>
+where
+    Row: DeserializeOwned,
+{
+    let mut out = Vec::with_capacity(records.len());
+    for value in records {
+        let row = serde_json::from_value::<Row>(value).map_err(|err| {
+            AppError::Internal(anyhow::anyhow!(
+                "Datatable row shape mismatch for '{}': {}",
+                scoped_key,
+                err
+            ))
+        })?;
+        out.push(row);
+    }
+    Ok(out)
+}
+
+fn build_meta<C>(contract: &C, describe: core_datatable::DataTableDescribe) -> DataTableMetaDto
+where
+    C: DataTableScopedContract,
+{
+    let mut filter_rows = contract.filter_rows();
+    if contract.include_default_created_at_range() {
+        inject_default_created_at_range(&mut filter_rows, &describe.columns);
+    }
+
+    DataTableMetaDto {
+        model_key: describe.model,
+        defaults: DataTableDefaultsDto {
+            sorting_column: describe.defaults.sorting_column,
+            sorted: sort_direction_to_str(describe.defaults.sorted).to_string(),
+            per_page: describe.defaults.per_page,
+            export_ignore_columns: describe.defaults.export_ignore_columns,
+            timestamp_columns: describe.defaults.timestamp_columns,
+            unsortable: describe.defaults.unsortable,
+        },
+        columns: describe
+            .columns
+            .into_iter()
+            .map(|col| DataTableColumnMetaDto {
+                name: col.name,
+                data_type: col.data_type,
+                sortable: col.sortable,
+                localized: col.localized,
+                filter_ops: col.filter_ops,
+            })
+            .collect(),
+        relation_columns: describe
+            .relation_columns
+            .into_iter()
+            .map(|rel| DataTableRelationColumnMetaDto {
+                relation: rel.relation,
+                column: rel.column,
+                data_type: rel.data_type,
+                filter_ops: rel.filter_ops,
+            })
+            .collect(),
+        filter_rows,
+    }
+}
+
+fn inject_default_created_at_range(
+    filter_rows: &mut Vec<Vec<DataTableFilterFieldDto>>,
+    columns: &[core_datatable::DataTableColumnMeta],
+) {
+    let has_created_at = columns.iter().any(|col| col.name == "created_at");
+    if !has_created_at {
+        return;
+    }
+
+    let mut existing_keys = HashSet::new();
+    for row in filter_rows.iter() {
+        for field in row {
+            existing_keys.insert(field.filter_key.clone());
+        }
+    }
+
+    let mut row = Vec::new();
+    if !existing_keys.contains("f-date-from-created_at") {
+        row.push(DataTableFilterFieldDto {
+            field: "created_at_from".to_string(),
+            filter_key: "f-date-from-created_at".to_string(),
+            field_type: DataTableFilterFieldType::Datetime,
+            label: "Created At From".to_string(),
+            placeholder: Some("Start datetime".to_string()),
+            description: None,
+            options: None,
+        });
+    }
+
+    if !existing_keys.contains("f-date-to-created_at") {
+        row.push(DataTableFilterFieldDto {
+            field: "created_at_to".to_string(),
+            filter_key: "f-date-to-created_at".to_string(),
+            field_type: DataTableFilterFieldType::Datetime,
+            label: "Created At To".to_string(),
+            placeholder: Some("End datetime".to_string()),
+            description: None,
+            options: None,
+        });
+    }
+
+    if !row.is_empty() {
+        filter_rows.push(row);
+    }
+}
+
+fn normalize_recipients(recipients: Vec<String>) -> Vec<String> {
+    let mut unique = BTreeSet::new();
+    for recipient in recipients {
+        let email = recipient.trim().to_ascii_lowercase();
+        if !email.is_empty() {
+            unique.insert(email);
+        }
+    }
+    unique.into_iter().collect()
+}
+
+fn default_include_meta() -> bool {
+    true
+}
+
+fn sanitize_file_name(file_name: &str) -> String {
+    let fallback = "datatable-export.csv";
+    let trimmed = file_name.trim();
+    if trimmed.is_empty() {
+        return fallback.to_string();
+    }
+
+    let mut out = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        let valid = ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-');
+        out.push(if valid { ch } else { '_' });
+    }
+
+    let normalized = out
+        .trim_matches(|c: char| c == '.' || c == '_' || c == '-')
+        .to_string();
+
+    if normalized.is_empty() {
+        fallback.to_string()
+    } else {
+        normalized
+    }
+}
+
+async fn stream_csv_response(
+    file_path: &str,
+    file_name: &str,
+    content_type: &str,
+) -> Result<Response, AppError> {
+    let file = tokio::fs::File::open(file_path).await.map_err(|err| {
         AppError::Internal(anyhow::anyhow!(
             "Failed to open CSV export file '{}': {}",
-            csv.file_path,
+            file_path,
             err
         ))
     })?;
@@ -1127,83 +1086,84 @@ where
 
     let mut response = Response::new(Body::from_stream(stream));
     *response.status_mut() = StatusCode::OK;
-    let content_type = HeaderValue::from_str(&csv.content_type)
+
+    let content_type = HeaderValue::from_str(content_type)
         .unwrap_or_else(|_| HeaderValue::from_static("text/csv; charset=utf-8"));
     response
         .headers_mut()
         .insert(header::CONTENT_TYPE, content_type);
 
-    let safe_file_name = sanitize_file_name(&csv.file_name);
-    if let Ok(disposition) =
-        HeaderValue::from_str(&format!("attachment; filename=\"{}\"", safe_file_name))
-    {
+    if let Ok(disposition) = HeaderValue::from_str(&format!(
+        "attachment; filename=\"{}\"",
+        sanitize_file_name(file_name)
+    )) {
         response
             .headers_mut()
             .insert(header::CONTENT_DISPOSITION, disposition);
     }
 
-    info!(
-        target: "datatable",
-        model = %model,
-        file_name = %csv.file_name,
-        total_records = csv.total_records,
-        "datatable csv stream ready"
-    );
-
     Ok(response)
-}
-
-async fn multipart_to_params(multipart: Multipart) -> Result<BTreeMap<String, String>, AppError> {
-    let mut params = BTreeMap::new();
-    let mut multipart = multipart;
-    while let Some(field) = multipart.next_field().await? {
-        let Some(name) = field.name().map(ToString::to_string) else {
-            continue;
-        };
-        let value = String::from_utf8_lossy(&field.bytes().await?).to_string();
-        params.insert(name, value);
-    }
-    Ok(params)
-}
-
-fn sanitize_file_name(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return "datatable.csv".to_string();
-    }
-    trimmed
-        .chars()
-        .map(|ch| match ch {
-            '"' | '\\' | '/' | '\n' | '\r' => '_',
-            _ => ch,
-        })
-        .collect()
 }
 
 fn map_datatable_error(err: anyhow::Error) -> AppError {
     let msg = err.to_string();
+
     if msg.contains("Missing datatable model key")
         || msg.contains("Unknown datatable model")
         || msg.contains("Unknown datatable filter")
-        || msg.contains("Cursor mode is not supported")
+        || msg.contains("Permission denied")
         || msg.contains("Pagination mode")
     {
         return AppError::BadRequest(msg);
     }
+
     AppError::Internal(err)
 }
 
-fn insert_opt_string(params: &mut BTreeMap<String, String>, key: &str, value: Option<String>) {
-    if let Some(v) = value {
-        let trimmed = v.trim();
-        if !trimmed.is_empty() {
-            params.insert(key.to_string(), trimmed.to_string());
-        }
+fn sort_direction_to_str(dir: core_datatable::SortDirection) -> &'static str {
+    match dir {
+        core_datatable::SortDirection::Asc => "asc",
+        core_datatable::SortDirection::Desc => "desc",
     }
 }
 
-fn insert_opt_i64(params: &mut BTreeMap<String, String>, key: &str, value: Option<i64>) {
-    if let Some(v) = value {
-        params.insert(key.to_string(), v.to_string());
+fn pagination_mode_to_str(mode: core_datatable::DataTablePaginationMode) -> &'static str {
+    match mode {
+        core_datatable::DataTablePaginationMode::Offset => "offset",
+        core_datatable::DataTablePaginationMode::Cursor => "cursor",
+    }
+}
+
+fn unknown_filter_mode_to_str(mode: core_datatable::DataTableUnknownFilterMode) -> &'static str {
+    match mode {
+        core_datatable::DataTableUnknownFilterMode::Ignore => "ignore",
+        core_datatable::DataTableUnknownFilterMode::Warn => "warn",
+        core_datatable::DataTableUnknownFilterMode::Error => "error",
+    }
+}
+
+fn async_state_to_str(state: DataTableAsyncExportState) -> &'static str {
+    match state {
+        DataTableAsyncExportState::Queued => "queued",
+        DataTableAsyncExportState::Running => "running",
+        DataTableAsyncExportState::Completed => "completed",
+        DataTableAsyncExportState::Failed => "failed",
+    }
+}
+
+fn now_unix() -> i64 {
+    time::OffsetDateTime::now_utc().unix_timestamp()
+}
+
+fn app_error_message(err: &AppError) -> String {
+    match err {
+        AppError::Internal(inner) => inner.to_string(),
+        AppError::NotFound(msg)
+        | AppError::BadRequest(msg)
+        | AppError::Unauthorized(msg)
+        | AppError::Forbidden(msg)
+        | AppError::TooManyRequests(msg)
+        | AppError::UnprocessableEntity(msg) => msg.clone(),
+        AppError::Validation { message, .. } => message.clone(),
     }
 }

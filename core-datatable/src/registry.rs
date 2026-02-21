@@ -64,8 +64,28 @@ impl DataTableRegistry {
             .insert(key, Arc::new(AutoDataTableEntry { table }));
     }
 
+    pub fn register_as<T>(&mut self, key: impl Into<String>, table: T)
+    where
+        T: AutoDataTable,
+    {
+        let key = key.into().trim().to_ascii_lowercase();
+        if key.is_empty() {
+            return;
+        }
+        self.tables
+            .insert(key, Arc::new(AutoDataTableEntry { table }));
+    }
+
     pub fn register_dyn(&mut self, table: Arc<dyn DynDataTable>) {
         let key = table.model_key().to_ascii_lowercase();
+        self.tables.insert(key, table);
+    }
+
+    pub fn register_dyn_as(&mut self, key: impl Into<String>, table: Arc<dyn DynDataTable>) {
+        let key = key.into().trim().to_ascii_lowercase();
+        if key.is_empty() {
+            return;
+        }
         self.tables.insert(key, table);
     }
 

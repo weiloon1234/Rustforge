@@ -45,8 +45,8 @@ fn docs_dist_candidates() -> Vec<PathBuf> {
     }
 
     let public_path = read_env("PUBLIC_PATH").unwrap_or_else(|| "public".to_string());
-    let docs_route = read_env("FRAMEWORK_DOCS_PATH")
-        .unwrap_or_else(|| "/framework-documentation".to_string());
+    let docs_route =
+        read_env("FRAMEWORK_DOCS_PATH").unwrap_or_else(|| "/framework-documentation".to_string());
     let docs_route = docs_route.trim().trim_matches('/');
     if !docs_route.is_empty() {
         out.push(PathBuf::from(&public_path).join(docs_route));

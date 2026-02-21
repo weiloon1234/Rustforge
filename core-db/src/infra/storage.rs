@@ -8,6 +8,7 @@ use bytes::Bytes;
 use aws_credential_types::Credentials;
 use aws_sdk_s3::{
     config::{Builder as S3ConfigBuilder, Region},
+    presigning::PresigningConfig,
     primitives::ByteStream,
     Client,
 };
@@ -19,6 +20,7 @@ pub trait Storage: Send + Sync {
     async fn put(&self, key: &str, data: Bytes, content_type: &str) -> anyhow::Result<()>;
     async fn get(&self, key: &str) -> anyhow::Result<Bytes>;
     async fn delete(&self, key: &str) -> anyhow::Result<()>;
+    async fn presign_get(&self, key: &str, expires_secs: u64) -> anyhow::Result<String>;
 }
 
 pub struct S3Storage {
@@ -66,6 +68,19 @@ impl Storage for S3Storage {
             .send()
             .await?;
         Ok(())
+    }
+
+    async fn presign_get(&self, key: &str, expires_secs: u64) -> anyhow::Result<String> {
+        let expires = std::time::Duration::from_secs(expires_secs.max(1));
+        let config = PresigningConfig::expires_in(expires)?;
+        let presigned = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .presigned(config)
+            .await?;
+        Ok(presigned.uri().to_string())
     }
 }
 

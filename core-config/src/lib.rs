@@ -73,6 +73,7 @@ pub struct AppSettings {
     pub openapi_json_path: String,
     pub default_per_page: u64,
     pub datatable_unknown_filter_mode: DataTableUnknownFilterMode,
+    pub datatable_export_link_ttl_secs: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +115,7 @@ impl AppSettings {
                 "DATATABLE_UNKNOWN_FILTER_MODE",
                 "ignore",
             ))?,
+            datatable_export_link_ttl_secs: get_env_u64("DATATABLE_EXPORT_LINK_TTL_SECS", 604_800)?,
         })
     }
 }
