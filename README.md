@@ -137,9 +137,14 @@ http://127.0.0.1:4582/framework-documentation
 Build framework docs frontend assets first:
 
 ```bash
-# from Rustforge repo
-make docs-build
+# from starter repo (recommended)
+make framework-docs-build
 ```
+
+`core-docs` resolves assets in this order:
+1. `FRAMEWORK_DOCS_DIST_DIR` (if set)
+2. `PUBLIC_PATH + FRAMEWORK_DOCS_PATH` (starter default)
+3. Rustforge crate-local `core-docs/frontend/dist`
 
 ## Framework Development
 

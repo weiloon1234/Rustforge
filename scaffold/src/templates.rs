@@ -32,49 +32,153 @@ core-web = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "mai
 db-gen = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 "#;
 
-pub const ROOT_ENV_EXAMPLE: &str = r#"APP_NAME=starter
+pub const ROOT_ENV_EXAMPLE: &str = r#"# ----------------------------
+# App
+# ----------------------------
+APP_NAME=starter
 APP_ENV=local
 APP_DEBUG=false
-PROJECT_USER=
 APP_KEY=dev-only
 APP_TIMEZONE=+08:00
+RUST_LOG=info
+DEFAULT_PER_PAGE=30
+DATATABLE_UNKNOWN_FILTER_MODE=ignore
+# Used by scripts/install-ubuntu.sh to run services under an isolated Linux user.
+# Leave empty for local dev; installer will prompt and persist it.
+PROJECT_USER=
 
-# Starter-owned translation catalogs.
-I18N_DIR=i18n
-
-ENABLE_FRAMEWORK_DOCS=false
-FRAMEWORK_DOCS_PATH=/framework-documentation
-ENABLE_OPENAPI_DOCS=true
-OPENAPI_DOCS_PATH=/openapi
-OPENAPI_JSON_PATH=/openapi.json
-
+# ----------------------------
+# Paths
+# ----------------------------
 APP_CONFIGS_PATH=app/configs.toml
 APP_MIGRATIONS_DIR=migrations
 APP_SEEDERS_DIR=app/src/seeds
 PUBLIC_PATH=public
 
+# ----------------------------
+# i18n
+# ----------------------------
+I18N_DIR=i18n
+
+# ----------------------------
+# Framework docs / OpenAPI
+# ----------------------------
+ENABLE_FRAMEWORK_DOCS=false
+FRAMEWORK_DOCS_PATH=/framework-documentation
+# Optional explicit docs assets directory override.
+# Default resolution is PUBLIC_PATH + FRAMEWORK_DOCS_PATH.
+FRAMEWORK_DOCS_DIST_DIR=
+ENABLE_OPENAPI_DOCS=true
+OPENAPI_DOCS_PATH=/openapi
+OPENAPI_JSON_PATH=/openapi.json
+
+# ----------------------------
+# Server
+# ----------------------------
 SERVER_HOST=127.0.0.1
 SERVER_PORT=3000
 
+# ----------------------------
+# Realtime
+# ----------------------------
 REALTIME_ENABLED=true
 REALTIME_HOST=127.0.0.1
 REALTIME_PORT=3010
 REALTIME_REQUIRE_AUTH=false
+REALTIME_HEARTBEAT_SECS=20
+REALTIME_PRESENCE_TTL_SECS=60
+REALTIME_MAX_CONNECTIONS=10000
+REALTIME_MAX_MESSAGE_BYTES=65536
+REALTIME_MAX_FRAME_BYTES=65536
+REALTIME_MAX_MESSAGES_PER_SEC=150
+REALTIME_SEND_QUEUE_CAPACITY=1024
+REALTIME_CHECKPOINT_ENABLED=false
+REALTIME_CHECKPOINT_TTL_SECS=2592000
+REALTIME_DELIVERY_MODE=at_most_once
+REALTIME_STREAM_MAX_LEN=100000
+REALTIME_STREAM_RETENTION_SECS=0
+REALTIME_REPLAY_LIMIT_DEFAULT=200
+REALTIME_REPLAY_LIMIT_MAX=1000
+REALTIME_REPLAY_GAP_ALERT_THRESHOLD=100
+REALTIME_REPLAY_GAP_ALERT_WINDOW_SECS=60
 
+# ----------------------------
+# Database (Postgres)
+# ----------------------------
 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/starter
+DB_MAX_CONNECTIONS=10
+DB_CONNECT_TIMEOUT_SECS=5
+# Optional; 0..1023 typical for distributed Snowflake IDs.
+SNOWFLAKE_NODE_ID=1
+
+# ----------------------------
+# Redis
+# ----------------------------
+# REDIS_URL has priority. If empty, REDIS_HOST/PORT/PASSWORD/DB will be used.
 REDIS_URL=redis://127.0.0.1:6379/0
-# Optional override. Leave empty to auto-derive "{APP_NAME}_{APP_ENV}".
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_PASSWORD=
+REDIS_DB=0
+# Leave empty to auto-derive "{APP_NAME}_{APP_ENV}".
 REDIS_CACHE_PREFIX=
 
+# ----------------------------
+# Object Storage (S3/R2/MinIO)
+# ----------------------------
+S3_ENDPOINT=
+S3_REGION=auto
+S3_BUCKET=
+S3_ACCESS_KEY=
+S3_SECRET_KEY=
+S3_FORCE_PATH_STYLE=false
+# Public base URL for file access (CDN/CNAME).
+S3_URL=
+
+# ----------------------------
+# Mailer
+# ----------------------------
+MAIL_ENABLE=false
+MAIL_DRIVER=log
+MAIL_HOST=smtp.mailtrap.io
+MAIL_PORT=2525
+MAIL_USERNAME=
+MAIL_PASSWORD=
+MAIL_FROM_ADDRESS=hello@example.com
+
+# ----------------------------
+# Middleware
+# ----------------------------
+MW_RATE_LIMIT_PER_SEC=2
+MW_RATE_LIMIT_BURST=60
+MW_TIMEOUT_SECS=30
+MW_BODY_LIMIT_MB=10
+
+# ----------------------------
+# HTTP Logging
+# ----------------------------
+HTTP_LOG_WEBHOOK_ENABLED=false
+HTTP_LOG_WEBHOOK_PATHS=/wh/,/webhook/
+HTTP_LOG_CLIENT_ENABLED=false
+HTTP_LOG_RETENTION_DAYS=7
+
+# ----------------------------
+# Worker
+# ----------------------------
 RUN_WORKER=false
 WORKER_CONCURRENCY=10
 WORKER_SWEEP_INTERVAL=30
 
+# ----------------------------
+# Admin Bootstrap Seeder
+# ----------------------------
 SEED_ADMIN_BOOTSTRAP_IN_PROD=false
 SEED_ADMIN_DEVELOPER_EMAIL=developer@example.com
 SEED_ADMIN_DEVELOPER_PASSWORD=password123
+SEED_ADMIN_DEVELOPER_NAME=Developer
 SEED_ADMIN_SUPERADMIN_EMAIL=superadmin@example.com
 SEED_ADMIN_SUPERADMIN_PASSWORD=password123
+SEED_ADMIN_SUPERADMIN_NAME=Super Admin
 "#;
 
 pub const ROOT_GITIGNORE: &str = r#"target/
@@ -92,10 +196,21 @@ public/*
 pub const ROOT_MAKEFILE: &str = r#"SHELL := /bin/bash
 RUSTFORGE_PATH ?= ../Rustforge
 
+ifneq (,$(wildcard ./.env))
+	include ./.env
+	export
+endif
+
+PUBLIC_PATH ?= public
+FRAMEWORK_DOCS_PATH ?= /framework-documentation
+FRAMEWORK_DOCS_ROUTE := $(patsubst /%,%,$(FRAMEWORK_DOCS_PATH))
+FRAMEWORK_DOCS_DIR := $(PUBLIC_PATH)/$(FRAMEWORK_DOCS_ROUTE)
+
 .PHONY: help
 help:
 	@echo "Starter Makefile"
 	@echo "--------------"
+	@echo "  make dev"
 	@echo "  make run-api"
 	@echo "  make run-ws"
 	@echo "  make run-worker"
@@ -108,6 +223,15 @@ help:
 	@echo "  make framework-docs-build"
 	@echo "  make check"
 	@echo "  make gen"
+
+.PHONY: install-tools
+install-tools:
+	@command -v cargo-watch >/dev/null 2>&1 || cargo install cargo-watch
+
+.PHONY: dev
+dev:
+	@command -v cargo-watch >/dev/null 2>&1 || (echo "cargo-watch not found. Run: make install-tools" && exit 1)
+	RUN_WORKER=true cargo watch -x "run -p app --bin api-server"
 
 .PHONY: run-api
 run-api:
@@ -148,6 +272,10 @@ assets-publish:
 .PHONY: framework-docs-build
 framework-docs-build:
 	npm --prefix $(RUSTFORGE_PATH)/core-docs/frontend run build
+	@mkdir -p "$(FRAMEWORK_DOCS_DIR)"
+	@find "$(FRAMEWORK_DOCS_DIR)" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+	cp -R "$(RUSTFORGE_PATH)/core-docs/frontend/dist/." "$(FRAMEWORK_DOCS_DIR)/"
+	@echo "Published framework docs assets to $(FRAMEWORK_DOCS_DIR)"
 
 .PHONY: check
 check:
@@ -206,6 +334,20 @@ cargo build -p generated
 ./bin/worker
 ```
 
+## Daily Commands
+
+```bash
+make dev
+make check
+make run-api
+make run-ws
+make run-worker
+make migrate-pump
+make migrate-run
+make server-install
+make framework-docs-build
+```
+
 ## Ubuntu Server Install (Interactive)
 
 Run as root on Ubuntu 24/25:
@@ -251,6 +393,9 @@ Set `REDIS_CACHE_PREFIX` only when you need a custom prefix strategy.
 
 This starter uses git dependencies to Rustforge.
 For production stability, pin to a tag in `Cargo.toml`.
+
+`make framework-docs-build` publishes framework docs assets into
+`PUBLIC_PATH + FRAMEWORK_DOCS_PATH` (default: `public/framework-documentation`).
 "#;
 
 pub const ROOT_I18N_EN_JSON: &str = r#"{
@@ -856,6 +1001,7 @@ table = "admin"
 pk = "id"
 pk_type = "uuid"
 id_strategy = "manual"
+soft_delete = true
 fields = [
   "id:uuid",
   "email:string",
@@ -876,7 +1022,8 @@ CREATE TABLE IF NOT EXISTS admin (
     name TEXT NOT NULL,
     admin_type TEXT NOT NULL CHECK (admin_type IN ('developer', 'superadmin', 'admin')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
 );
 "#;
 
@@ -1299,7 +1446,7 @@ impl Seeder for AdminBootstrapSeeder {
             db,
             &env_or("SEED_ADMIN_DEVELOPER_EMAIL", "developer@example.com"),
             &env_or("SEED_ADMIN_DEVELOPER_PASSWORD", "password123"),
-            "Developer",
+            &env_or("SEED_ADMIN_DEVELOPER_NAME", "Developer"),
             "developer",
         )
         .await?;
@@ -1308,7 +1455,7 @@ impl Seeder for AdminBootstrapSeeder {
             db,
             &env_or("SEED_ADMIN_SUPERADMIN_EMAIL", "superadmin@example.com"),
             &env_or("SEED_ADMIN_SUPERADMIN_PASSWORD", "password123"),
-            "Super Admin",
+            &env_or("SEED_ADMIN_SUPERADMIN_NAME", "Super Admin"),
             "superadmin",
         )
         .await?;
@@ -1340,7 +1487,8 @@ fn should_skip_in_env() -> bool {
         return false;
     }
 
-    !is_truthy(&std::env::var("SEED_ADMIN_BOOTSTRAP_IN_PROD").unwrap_or_default())
+    let raw = env_or("SEED_ADMIN_BOOTSTRAP_IN_PROD", "");
+    !is_truthy(&raw)
 }
 
 fn is_truthy(raw: &str) -> bool {
@@ -1351,11 +1499,13 @@ fn is_truthy(raw: &str) -> bool {
 }
 
 fn env_or(key: &str, default: &str) -> String {
-    std::env::var(key)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| default.to_string())
+    if let Ok(value) = std::env::var(key) {
+        let value = value.trim();
+        if !value.is_empty() {
+            return value.to_string();
+        }
+    }
+    default.to_string()
 }
 
 async fn upsert_admin(
