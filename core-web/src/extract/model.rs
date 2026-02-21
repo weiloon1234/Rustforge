@@ -1,12 +1,11 @@
 use axum::{
     extract::{FromRequestParts, Path},
-    http::{request::Parts, StatusCode},
-    response::{IntoResponse, Response},
+    http::request::Parts,
 };
 use core_db::common::active_record::ActiveRecord;
 
+use crate::error::AppError;
 use crate::extract::validated_json::GetDb;
-use crate::response::ApiResponse;
 
 use serde::de::DeserializeOwned;
 
@@ -19,7 +18,7 @@ where
     T::Id: DeserializeOwned + Send, // Ensure ID can be deserialized from Path
     S: Send + Sync + GetDb,
 {
-    type Rejection = Response;
+    type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         // 1. Extract ID from Path
@@ -29,39 +28,18 @@ where
 
         let Path(id) = Path::<T::Id>::from_request_parts(parts, state)
             .await
-            .map_err(|e| {
-                // Return 404/400? If ID is malformed or missing.
-                ApiResponse::error(
-                    StatusCode::BAD_REQUEST,
-                    &format!("Invalid ID: {}", e),
-                    Some("INVALID_ID".to_string()),
-                    None,
-                )
-                .into_response()
-            })?;
+            .map_err(|e| AppError::BadRequest(format!("Invalid ID: {}", e)))?;
 
         // 2. Fetch from DB
         let db = state.db();
         let record = T::find(db, id).await.map_err(|e| {
             tracing::error!("Model binding error: {}", e);
-            ApiResponse::error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal Server Error",
-                Some("INTERNAL_ERROR".to_string()),
-                None,
-            )
-            .into_response()
+            AppError::from(e)
         })?;
 
         match record {
             Some(r) => Ok(Model(r)),
-            None => Err(ApiResponse::error(
-                StatusCode::NOT_FOUND,
-                "Resource not found",
-                Some("NOT_FOUND".to_string()),
-                None,
-            )
-            .into_response()),
+            None => Err(AppError::NotFound("Resource not found".to_string())),
         }
     }
 }

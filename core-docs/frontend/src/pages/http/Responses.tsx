@@ -9,35 +9,34 @@ export function Responses() {
             <div className="prose prose-orange max-w-none">
                 <p>
                     To ensure consistency across all endpoints, the framework enforces a
-                    unified JSON envelope for all API responses via{' '}
+                    unified success envelope via{' '}
                     <code className="language-rust">{'ApiResponse<T>'}</code>.
                 </p>
 
                 <h3>Success Response</h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-rust">{`{
-  "success": true,
-  "message": "OK",
   "data": { ... },        // The generic payload T
-  "meta": {               // Optional pagination metadata
-      "page": 1,
-      "per_page": 20,
-      "total": 100
-  }
+  "message": "User created" // optional
 }`}</code>
                 </pre>
 
-                <h3>Error Response</h3>
+                <h3>Error Response (RFC 9457 Problem Details)</h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-rust">{`{
-  "success": false,
+  "type": "about:blank",
+  "title": "Unprocessable Entity",
+  "status": 422,
+  "detail": "Validation failed",
   "error_code": "VALIDATION_ERROR",
-  "message": "Invalid email format",
   "errors": {
       "email": ["must be a valid email address"]
   }
 }`}</code>
                 </pre>
+                <p>
+                    Error content type is <code>application/problem+json</code>.
+                </p>
 
                 <h3>Response Fields</h3>
                 <div className="overflow-x-auto border rounded-lg mt-4">
@@ -57,29 +56,51 @@ export function Responses() {
                         </thead>
                         <tbody className="divide-y divide-gray-200 bg-white">
                             <tr>
-                                <td className="px-4 py-3 font-mono text-blue-600">success</td>
-                                <td className="px-4 py-3 text-gray-500">boolean</td>
-                                <td className="px-4 py-3 text-gray-700">
-                                    true for 2xx responses, false for errors
-                                </td>
+                                <td className="px-4 py-3 font-mono text-blue-600">data</td>
+                                <td className="px-4 py-3 text-gray-500">T</td>
+                                <td className="px-4 py-3 text-gray-700">Success payload</td>
                             </tr>
                             <tr>
                                 <td className="px-4 py-3 font-mono text-blue-600">message</td>
-                                <td className="px-4 py-3 text-gray-500">string</td>
-                                <td className="px-4 py-3 text-gray-700">Human-readable message</td>
+                                <td className="px-4 py-3 text-gray-500">string?</td>
+                                <td className="px-4 py-3 text-gray-700">Optional success message</td>
                             </tr>
                             <tr>
-                                <td className="px-4 py-3 font-mono text-blue-600">data</td>
-                                <td className="px-4 py-3 text-gray-500">T | null</td>
+                                <td className="px-4 py-3 font-mono text-blue-600">type</td>
+                                <td className="px-4 py-3 text-gray-500">string</td>
                                 <td className="px-4 py-3 text-gray-700">
-                                    Response payload (success only)
+                                    Problem type URI (defaults to <code>about:blank</code>)
+                                </td>
+                            </tr>
+                            <tr>
+                                <td className="px-4 py-3 font-mono text-blue-600">title</td>
+                                <td className="px-4 py-3 text-gray-500">string</td>
+                                <td className="px-4 py-3 text-gray-700">HTTP error title</td>
+                            </tr>
+                            <tr>
+                                <td className="px-4 py-3 font-mono text-blue-600">status</td>
+                                <td className="px-4 py-3 text-gray-500">number</td>
+                                <td className="px-4 py-3 text-gray-700">HTTP status code</td>
+                            </tr>
+                            <tr>
+                                <td className="px-4 py-3 font-mono text-blue-600">detail</td>
+                                <td className="px-4 py-3 text-gray-500">string?</td>
+                                <td className="px-4 py-3 text-gray-700">
+                                    Human-readable error detail
                                 </td>
                             </tr>
                             <tr>
                                 <td className="px-4 py-3 font-mono text-blue-600">error_code</td>
                                 <td className="px-4 py-3 text-gray-500">string?</td>
                                 <td className="px-4 py-3 text-gray-700">
-                                    Machine-readable error code (errors only)
+                                    Machine-readable app error code
+                                </td>
+                            </tr>
+                            <tr>
+                                <td className="px-4 py-3 font-mono text-blue-600">errors</td>
+                                <td className="px-4 py-3 text-gray-500">{'{field: string[]}?'} </td>
+                                <td className="px-4 py-3 text-gray-700">
+                                    Validation field errors (typically for 422)
                                 </td>
                             </tr>
                         </tbody>

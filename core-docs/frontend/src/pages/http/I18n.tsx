@@ -49,18 +49,13 @@ export function I18n() {
 
                 <h3 className="mt-6">✅ Correct: English Text as Key</h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`use axum::http::StatusCode;
-use core_i18n::t;
+                    <code className="language-rust">{`use core_i18n::t;
+use core_web::error::AppError;
 use core_web::response::ApiResponse;
 
 // ✅ English text is the key - no en.json needed!
-ApiResponse::error(
-    StatusCode::BAD_REQUEST,
-    &t("Username is already taken"),
-    Some("VALIDATION_ERROR".to_string()),
-    None,
-)
-ApiResponse::success(data, &t("Profile updated successfully"))`}</code>
+Err(AppError::BadRequest(t("Username is already taken")))
+Ok(ApiResponse::success(data, &t("Profile updated successfully")))`}</code>
                 </pre>
 
                 <h2 className="mt-10">Translation Files</h2>

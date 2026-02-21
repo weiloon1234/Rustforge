@@ -4,23 +4,14 @@ use axum::{
     Json,
 };
 use serde::Serialize;
-use std::collections::HashMap;
 
 use schemars::JsonSchema;
 
 #[derive(Serialize, JsonSchema)]
 pub struct ApiResponse<T> {
-    pub success: bool,
-    pub message: String,
-    // Provide a default for data if None, though skip_serializing_if might be better if optional.
-    // User requested "data: ...extra data, can be array can be object".
-    pub data: Option<T>,
+    pub data: T,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub errors: Option<HashMap<String, Vec<String>>>,
-
-    // We don't serialize status_code in JSON usually, but we need it for IntoResponse
+    pub message: Option<String>,
     #[serde(skip)]
     pub status_code: StatusCode,
 }
@@ -31,61 +22,37 @@ where
 {
     /// Success Response (200 OK)
     pub fn success(data: T, message: &str) -> Self {
+        let message = message.trim();
         Self {
-            success: true,
-            message: message.to_string(),
-            data: Some(data),
-            error_code: None,
-            errors: None,
+            data,
+            message: (!message.is_empty()).then(|| message.to_string()),
             status_code: StatusCode::OK,
         }
     }
 
     /// Created Response (201 Created)
     pub fn created(data: T, message: &str) -> Self {
+        let message = message.trim();
         Self {
-            success: true,
-            message: message.to_string(),
-            data: Some(data),
-            error_code: None,
-            errors: None,
+            data,
+            message: (!message.is_empty()).then(|| message.to_string()),
             status_code: StatusCode::CREATED,
         }
     }
 
-    /// Generic "Make Response" (Laravel style)
+    /// Generic response constructor.
     pub fn make_response(
         status: StatusCode,
-        message: &str,
-        data: Option<T>,
-        error_code: Option<String>,
-        errors: Option<HashMap<String, Vec<String>>>,
+        data: T,
+        message: Option<&str>,
     ) -> Self {
+        let message = message
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
         Self {
-            success: status.is_success(),
-            message: message.to_string(),
             data,
-            error_code,
-            errors,
-            status_code: status,
-        }
-    }
-}
-
-// Error Response Helper (No Data)
-impl ApiResponse<()> {
-    pub fn error(
-        status: StatusCode,
-        message: &str,
-        error_code: Option<String>,
-        errors: Option<HashMap<String, Vec<String>>>,
-    ) -> Self {
-        Self {
-            success: false,
-            message: message.to_string(),
-            data: None,
-            error_code,
-            errors,
+            message,
             status_code: status,
         }
     }

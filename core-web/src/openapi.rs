@@ -1,5 +1,3 @@
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::convert::Infallible;
 
@@ -15,13 +13,6 @@ pub use schemars;
 
 pub type AppRouter<S> = ApiRouter<S>;
 pub const BEARER_AUTH_SCHEME: &str = "bearerAuth";
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ApiErrorResponse {
-    pub success: bool,
-    pub message: String,
-    pub error_code: Option<String>,
-}
 
 /// Helper to create a new ApiRouter with default configuration if needed
 pub fn router<S>() -> ApiRouter<S>

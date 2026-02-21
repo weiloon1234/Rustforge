@@ -586,10 +586,8 @@ where
 
     Ok(ApiResponse::make_response(
         StatusCode::OK,
-        "datatable executed",
-        Some(data),
-        None,
-        None,
+        data,
+        Some("datatable executed"),
     ))
 }
 
