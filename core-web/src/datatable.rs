@@ -442,6 +442,12 @@ pub trait DataTableScopedContract: Clone + Send + Sync + 'static {
     fn filter_rows(&self) -> Vec<Vec<DataTableFilterFieldDto>> {
         Vec::new()
     }
+
+    /// OpenAPI tag used for datatable operations in docs menu grouping.
+    /// Default follows scoped_key (for example: `admin.article`).
+    fn openapi_tag(&self) -> &'static str {
+        self.scoped_key()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -479,6 +485,7 @@ where
     let export_email_path = format!("{prefix}/export/email");
     let export_status_path = format!("{prefix}/export/status");
     let scoped_key = contract.scoped_key().trim().to_string();
+    let openapi_tag = contract.openapi_tag().trim().to_string();
     let op_scope = datatable_operation_scope(prefix, scoped_key.as_str());
 
     let state = ScopedDataTableState {
@@ -494,6 +501,7 @@ where
                 datatable_operation(
                     op,
                     &format!("datatable_{}_query", op_scope),
+                    openapi_tag.as_str(),
                     "Datatable query",
                     "Execute datatable query and optionally include metadata.",
                     &["Use include_meta=true on first request to fetch filters + shape metadata."],
@@ -507,6 +515,7 @@ where
                 datatable_operation(
                     op,
                     &format!("datatable_{}_export_csv", op_scope),
+                    openapi_tag.as_str(),
                     "Datatable CSV export",
                     "Generate and stream CSV export for scoped datatable query.",
                     &["Response content-type is text/csv."],
@@ -520,6 +529,7 @@ where
                 datatable_operation(
                     op,
                     &format!("datatable_{}_export_email", op_scope),
+                    openapi_tag.as_str(),
                     "Datatable CSV email export",
                     "Queue CSV export email delivery (link-based).",
                     &[
@@ -535,6 +545,7 @@ where
                 datatable_operation(
                     op,
                     &format!("datatable_{}_export_status", op_scope),
+                    openapi_tag.as_str(),
                     "Datatable export status",
                     "Get status for CSV export and email delivery by job id.",
                     &[],
@@ -548,6 +559,7 @@ where
 fn datatable_operation<'t>(
     op: TransformOperation<'t>,
     operation_id: &str,
+    tag: &str,
     summary: &str,
     description: &str,
     extra_notes: &[&str],
@@ -558,7 +570,7 @@ fn datatable_operation<'t>(
     let op = op
         .id(operation_id)
         .summary(summary)
-        .tag("datatable")
+        .tag(tag)
         .description(description);
     let op = if needs_bearer_auth {
         require_bearer_auth(op)

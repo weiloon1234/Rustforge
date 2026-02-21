@@ -436,6 +436,9 @@ pub const ROOT_I18N_EN_JSON: &str = r#"{
   "Admin deleted": "Admin deleted",
   "Username is already taken": "Username is already taken",
   "Cannot assign permissions you do not have": "Cannot assign permissions you do not have",
+  "You cannot update your own admin account here": "You cannot update your own admin account here",
+  "You cannot delete your own admin account here": "You cannot delete your own admin account here",
+  "Normal admin cannot assign admin.read or admin.manage": "Normal admin cannot assign admin.read or admin.manage",
   "Profile loaded": "Profile loaded",
   "Login successful": "Login successful",
   "Token refreshed": "Token refreshed",
@@ -458,6 +461,9 @@ pub const ROOT_I18N_ZH_JSON: &str = r#"{
   "Admin deleted": "管理员删除成功",
   "Username is already taken": "用户名已被使用",
   "Cannot assign permissions you do not have": "不能分配你没有的权限",
+  "You cannot update your own admin account here": "不能在这里修改你自己的管理员账号",
+  "You cannot delete your own admin account here": "不能在这里删除你自己的管理员账号",
+  "Normal admin cannot assign admin.read or admin.manage": "普通管理员不能分配 admin.read 或 admin.manage",
   "Profile loaded": "个人资料已加载",
   "Login successful": "登录成功",
   "Token refreshed": "令牌已刷新",
@@ -1419,7 +1425,11 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
     type Row = AdminView;
 
     fn scoped_key(&self) -> &'static str {
-        "admin.admin"
+        "admin.account"
+    }
+
+    fn openapi_tag(&self) -> &'static str {
+        "Admin Account"
     }
 
     fn query_to_input(&self, req: &Self::QueryRequest) -> DataTableInput {
@@ -1885,7 +1895,7 @@ impl AppApiState {
         let mut datatable_registry = DataTableRegistry::new();
         crate::internal::datatables::register_all_generated_datatables(&mut datatable_registry, &ctx.db);
         datatable_registry.register_as(
-            "admin.admin",
+            "admin.account",
             crate::internal::datatables::app_admin_datatable(ctx.db.clone()),
         );
 
@@ -2017,7 +2027,7 @@ async fn build_admin_actor(db: &sqlx::PgPool, headers: &HeaderMap) -> Option<Dat
 
 pub const APP_INTERNAL_API_V1_MOD_RS: &str = r#"use axum::middleware::from_fn_with_state;
 use core_web::openapi::{
-    aide::axum::routing::get,
+    aide::axum::routing::get_with,
     ApiRouter,
 };
 
@@ -2033,7 +2043,10 @@ pub fn router(state: AppApiState) -> ApiRouter {
 }
 
 fn user_router() -> ApiRouter {
-    ApiRouter::new().api_route("/health", get(user_health))
+    ApiRouter::new().api_route(
+        "/health",
+        get_with(user_health, |op| op.summary("User health").tag("User system")),
+    )
 }
 
 fn admin_router(state: AppApiState) -> ApiRouter {
@@ -2044,7 +2057,10 @@ fn admin_router(state: AppApiState) -> ApiRouter {
 
 fn admin_guarded_router(state: AppApiState) -> ApiRouter {
     ApiRouter::new()
-        .api_route("/health", get(admin_health))
+        .api_route(
+            "/health",
+            get_with(admin_health, |op| op.summary("Admin health").tag("Admin system")),
+        )
         .nest("/admins", admin::router(state.clone()))
         .merge(datatable::router(state.clone()))
         .layer(from_fn_with_state(
@@ -2070,8 +2086,8 @@ use core_web::{
     contracts::ContractJson,
     error::AppError,
     openapi::{
-        with_permission_check_delete, with_permission_check_get, with_permission_check_patch,
-        with_permission_check_post, ApiRouter,
+        with_permission_check_delete_with, with_permission_check_get_with,
+        with_permission_check_patch_with, with_permission_check_post_with, ApiRouter,
     },
     response::ApiResponse,
 };
@@ -2088,38 +2104,43 @@ pub fn router(state: AppApiState) -> ApiRouter {
     ApiRouter::new()
         .api_route(
             "/",
-            with_permission_check_get(
+            with_permission_check_get_with(
                 list,
                 AdminGuard,
                 PermissionMode::Any,
                 [Permission::AdminRead.as_str(), Permission::AdminManage.as_str()],
+                |op| op.summary("List admins").tag("Admin Account"),
             )
-            .merge(with_permission_check_post(
+            .merge(with_permission_check_post_with(
                 create,
                 AdminGuard,
                 PermissionMode::Any,
                 [Permission::AdminManage.as_str()],
+                |op| op.summary("Create admin").tag("Admin Account"),
             )),
         )
         .api_route(
             "/{id}",
-            with_permission_check_get(
+            with_permission_check_get_with(
                 detail,
                 AdminGuard,
                 PermissionMode::Any,
                 [Permission::AdminRead.as_str(), Permission::AdminManage.as_str()],
+                |op| op.summary("Get admin detail").tag("Admin Account"),
             )
-            .merge(with_permission_check_patch(
+            .merge(with_permission_check_patch_with(
                 update,
                 AdminGuard,
                 PermissionMode::Any,
                 [Permission::AdminManage.as_str()],
+                |op| op.summary("Update admin").tag("Admin Account"),
             ))
-            .merge(with_permission_check_delete(
+            .merge(with_permission_check_delete_with(
                 remove,
                 AdminGuard,
                 PermissionMode::Any,
                 [Permission::AdminManage.as_str()],
+                |op| op.summary("Delete admin").tag("Admin Account"),
             )),
         )
         .with_state(state)
@@ -2173,10 +2194,10 @@ async fn update(
 
 async fn remove(
     State(state): State<AppApiState>,
-    _auth: AuthUser<AdminGuard>,
+    auth: AuthUser<AdminGuard>,
     Path(id): Path<i64>,
 ) -> Result<ApiResponse<AdminDeleteOutput>, AppError> {
-    workflow::remove(&state, id).await?;
+    workflow::remove(&state, &auth, id).await?;
     Ok(ApiResponse::success(
         AdminDeleteOutput { deleted: true },
         &t("Admin deleted"),
@@ -2185,20 +2206,25 @@ async fn remove(
 "#;
 
 pub const APP_INTERNAL_API_V1_ADMIN_AUTH_RS: &str = r#"use axum::{
-    http::HeaderMap,
+    extract::{FromRequestParts, State},
+    http::request::Parts,
     middleware::from_fn_with_state,
-    routing::{get, patch, post},
 };
 use core_i18n::t;
 use core_web::{
     auth::{self, AuthClientType, AuthUser, Guard},
     contracts::ContractJson,
     error::AppError,
-    openapi::ApiRouter,
+    extract::request_headers::RequestHeaders,
+    openapi::{
+        aide::axum::routing::{get_with, patch_with, post_with},
+        ApiRouter,
+    },
     response::ApiResponse,
     utils::cookie,
 };
 use generated::guards::AdminGuard;
+use std::ops::Deref;
 use time::Duration;
 use tower_cookies::Cookies;
 
@@ -2213,53 +2239,82 @@ use crate::{
 
 const REFRESH_COOKIE_PATH: &str = "/api/v1/admin/auth";
 
+#[derive(Debug, Clone)]
+struct RequestCookies(Cookies);
+
+impl Deref for RequestCookies {
+    type Target = Cookies;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<S> FromRequestParts<S> for RequestCookies
+where
+    S: Send + Sync,
+{
+    type Rejection = <Cookies as FromRequestParts<S>>::Rejection;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let cookies = Cookies::from_request_parts(parts, state).await?;
+        Ok(Self(cookies))
+    }
+}
+
+impl core_web::openapi::aide::OperationInput for RequestCookies {}
+
 pub fn router(state: AppApiState) -> ApiRouter {
-    let protected_state = state.clone();
     let protected = ApiRouter::new()
-        .route("/me", get(me))
-        .route("/logout", post({
-            let state = protected_state.clone();
-            move |headers: HeaderMap,
-                  cookies: Cookies,
-                  auth: AuthUser<AdminGuard>,
-                  req: ContractJson<AdminLogoutInput>| { logout(state.clone(), headers, cookies, auth, req) }
-        }))
-        .route("/profile_update", patch({
-            let state = protected_state.clone();
-            move |auth: AuthUser<AdminGuard>, req: ContractJson<AdminProfileUpdateInput>| {
-                profile_update(state.clone(), auth, req)
-            }
-        }))
-        .route("/password_update", patch({
-            let state = protected_state.clone();
-            move |auth: AuthUser<AdminGuard>, req: ContractJson<AdminPasswordUpdateInput>| {
-                password_update(state.clone(), auth, req)
-            }
-        }))
+        .api_route(
+            "/me",
+            get_with(me, |op| {
+                op.summary("Get current admin profile")
+                    .tag("Admin Authentication")
+            }),
+        )
+        .api_route(
+            "/logout",
+            post_with(logout, |op| op.summary("Logout admin").tag("Admin Authentication")),
+        )
+        .api_route(
+            "/profile_update",
+            patch_with(profile_update, |op| {
+                op.summary("Update own profile")
+                    .tag("Admin Authentication")
+            }),
+        )
+        .api_route(
+            "/password_update",
+            patch_with(password_update, |op| {
+                op.summary("Update own password")
+                    .tag("Admin Authentication")
+            }),
+        )
         .layer(from_fn_with_state(
-            protected_state,
+            state.clone(),
             crate::internal::middleware::auth::require_admin,
         ));
 
     ApiRouter::new()
-        .route("/login", post({
-            let state = state.clone();
-            move |cookies: Cookies, req: ContractJson<AdminLoginInput>| {
-                login(state.clone(), cookies, req)
-            }
-        }))
-        .route("/refresh", post({
-            let state = state.clone();
-            move |headers: HeaderMap, cookies: Cookies, req: ContractJson<AdminRefreshInput>| {
-                refresh(state.clone(), headers, cookies, req)
-            }
-        }))
+        .api_route(
+            "/login",
+            post_with(login, |op| op.summary("Login admin").tag("Admin Authentication")),
+        )
+        .api_route(
+            "/refresh",
+            post_with(refresh, |op| {
+                op.summary("Refresh admin access token")
+                    .tag("Admin Authentication")
+            }),
+        )
         .merge(protected)
+        .with_state(state)
 }
 
 async fn login(
-    state: AppApiState,
-    cookies: Cookies,
+    State(state): State<AppApiState>,
+    cookies: RequestCookies,
     req: ContractJson<AdminLoginInput>,
 ) -> Result<ApiResponse<AdminAuthOutput>, AppError> {
     let req = req.0;
@@ -2269,9 +2324,9 @@ async fn login(
 }
 
 async fn refresh(
-    state: AppApiState,
-    headers: HeaderMap,
-    cookies: Cookies,
+    State(state): State<AppApiState>,
+    headers: RequestHeaders,
+    cookies: RequestCookies,
     req: ContractJson<AdminRefreshInput>,
 ) -> Result<ApiResponse<AdminAuthOutput>, AppError> {
     let req = req.0;
@@ -2289,9 +2344,9 @@ async fn refresh(
 }
 
 async fn logout(
-    state: AppApiState,
-    headers: HeaderMap,
-    cookies: Cookies,
+    State(state): State<AppApiState>,
+    headers: RequestHeaders,
+    cookies: RequestCookies,
     _auth: AuthUser<AdminGuard>,
     req: ContractJson<AdminLogoutInput>,
 ) -> Result<ApiResponse<AdminLogoutOutput>, AppError> {
@@ -2332,7 +2387,7 @@ async fn me(auth: AuthUser<AdminGuard>) -> Result<ApiResponse<AdminMeOutput>, Ap
 }
 
 async fn profile_update(
-    state: AppApiState,
+    State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
     req: ContractJson<AdminProfileUpdateInput>,
 ) -> Result<ApiResponse<AdminProfileUpdateOutput>, AppError> {
@@ -2351,7 +2406,7 @@ async fn profile_update(
 }
 
 async fn password_update(
-    state: AppApiState,
+    State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
     req: ContractJson<AdminPasswordUpdateInput>,
 ) -> Result<ApiResponse<AdminPasswordUpdateOutput>, AppError> {
@@ -2497,6 +2552,12 @@ pub async fn update(
     id: i64,
     req: UpdateAdminInput,
 ) -> Result<AdminView, AppError> {
+    if auth.user.id == id {
+        return Err(AppError::Forbidden(t(
+            "You cannot update your own admin account here",
+        )));
+    }
+
     let existing = detail(state, id).await?;
     let mut update = Admin::new(DbConn::pool(&state.db), None).update().where_id(Op::Eq, id);
     let mut touched = false;
@@ -2543,7 +2604,17 @@ pub async fn update(
     detail(state, id).await
 }
 
-pub async fn remove(state: &AppApiState, id: i64) -> Result<(), AppError> {
+pub async fn remove(
+    state: &AppApiState,
+    auth: &AuthUser<AdminGuard>,
+    id: i64,
+) -> Result<(), AppError> {
+    if auth.user.id == id {
+        return Err(AppError::Forbidden(t(
+            "You cannot delete your own admin account here",
+        )));
+    }
+
     let affected = Admin::new(DbConn::pool(&state.db), None)
         .delete(id)
         .await
@@ -2582,6 +2653,16 @@ fn ensure_assignable_permissions(
     auth: &AuthUser<AdminGuard>,
     requested: &[Permission],
 ) -> Result<Vec<String>, AppError> {
+    if matches!(auth.user.admin_type, AdminType::Admin)
+        && requested
+            .iter()
+            .any(|permission| matches!(permission, Permission::AdminRead | Permission::AdminManage))
+    {
+        return Err(AppError::Forbidden(t(
+            "Normal admin cannot assign admin.read or admin.manage",
+        )));
+    }
+
     let requested = requested
         .iter()
         .map(|permission| permission.as_str().to_string())
