@@ -4,10 +4,7 @@ use aide::{
     operation::OperationOutput,
 };
 use axum::{
-    http::{
-        header::CONTENT_TYPE,
-        HeaderValue, StatusCode,
-    },
+    http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
@@ -31,32 +28,27 @@ pub enum AppError {
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct ProblemDetails {
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub title: String,
-    pub status: u16,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
+pub struct ErrorResponse {
+    pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub errors: Option<HashMap<String, Vec<String>>>,
 }
 
-impl ProblemDetails {
+impl ErrorResponse {
     fn from_parts(
         status: StatusCode,
-        title: &str,
-        detail: Option<String>,
+        message: Option<String>,
         error_code: Option<&str>,
         errors: Option<HashMap<String, Vec<String>>>,
     ) -> Self {
+        let message = message
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| status_title(status).to_string());
         Self {
-            kind: "about:blank".to_string(),
-            title: title.to_string(),
-            status: status.as_u16(),
-            detail: detail.filter(|value| !value.trim().is_empty()),
+            message,
             error_code: error_code.map(str::to_string),
             errors,
         }
@@ -65,80 +57,62 @@ impl ProblemDetails {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, title, detail, error_code, errors) = match self {
+        let (status, message, error_code, errors) = match self {
             AppError::Internal(e) => {
                 tracing::error!("Internal server error: {:#}", e);
-                let detail = if cfg!(debug_assertions) {
+                let message = if cfg!(debug_assertions) {
                     Some(e.to_string())
                 } else {
-                    Some("Internal server error".to_string())
+                    None
                 };
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal Server Error",
-                    detail,
+                    message,
                     Some("INTERNAL_ERROR"),
                     None,
                 )
             }
-            AppError::NotFound(m) => (
-                StatusCode::NOT_FOUND,
-                "Not Found",
-                Some(m),
-                Some("NOT_FOUND"),
-                None,
-            ),
+            AppError::NotFound(m) => (StatusCode::NOT_FOUND, Some(m), Some("NOT_FOUND"), None),
             AppError::BadRequest(m) => (
                 StatusCode::BAD_REQUEST,
-                "Bad Request",
                 Some(m),
                 Some("BAD_REQUEST"),
                 None,
             ),
             AppError::Unauthorized(m) => (
                 StatusCode::UNAUTHORIZED,
-                "Unauthorized",
                 Some(m),
                 Some("UNAUTHORIZED"),
                 None,
             ),
             AppError::Forbidden(m) => (
                 StatusCode::FORBIDDEN,
-                "Forbidden",
                 Some(m),
                 Some("FORBIDDEN"),
                 None,
             ),
             AppError::TooManyRequests(m) => (
                 StatusCode::TOO_MANY_REQUESTS,
-                "Too Many Requests",
                 Some(m),
                 Some("RATE_LIMITED"),
                 None,
             ),
             AppError::UnprocessableEntity(m) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "Unprocessable Entity",
                 Some(m),
                 Some("VALIDATION_ERROR"),
                 None,
             ),
             AppError::Validation { message, errors } => (
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "Unprocessable Entity",
                 Some(message),
                 Some("VALIDATION_ERROR"),
                 Some(errors),
             ),
         };
 
-        let problem = ProblemDetails::from_parts(status, title, detail, error_code, errors);
-        let mut response = (status, Json(problem)).into_response();
-        response.headers_mut().insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("application/problem+json"),
-        );
-        response
+        let payload = ErrorResponse::from_parts(status, message, error_code, errors);
+        (status, Json(payload)).into_response()
     }
 }
 
@@ -221,15 +195,13 @@ fn error_response(
     error_code: &str,
     include_validation_errors: bool,
 ) -> OpenApiResponse {
-    let schema = ctx.schema.subschema_for::<ProblemDetails>();
+    let schema = ctx.schema.subschema_for::<ErrorResponse>();
     let mut example = serde_json::json!({
-        "type": "about:blank",
-        "title": status_title(status),
-        "status": status.as_u16(),
-        "detail": status_title(status),
+        "message": status_title(status),
         "error_code": error_code
     });
     if include_validation_errors {
+        example["message"] = serde_json::Value::String("Validation failed".to_string());
         example["errors"] = serde_json::json!({
             "field": ["Validation failed"]
         });
@@ -237,7 +209,7 @@ fn error_response(
     OpenApiResponse {
         description: status_title(status).to_string(),
         content: [(
-            "application/problem+json".to_string(),
+            "application/json".to_string(),
             aide::openapi::MediaType {
                 schema: Some(aide::openapi::SchemaObject {
                     json_schema: schema,

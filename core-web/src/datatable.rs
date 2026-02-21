@@ -96,6 +96,53 @@ impl DataTableRequestDto {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+pub struct BoundDataTableRequestDto {
+    #[serde(default, alias = "p")]
+    pub page: Option<i64>,
+    #[serde(default, alias = "per_page")]
+    pub ipp: Option<i64>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default, alias = "paginate_mode")]
+    pub pagination_mode: Option<String>,
+    #[serde(default)]
+    pub sorting_column: Option<String>,
+    #[serde(default)]
+    pub sorting: Option<String>,
+    #[serde(default)]
+    pub export: Option<String>,
+    #[serde(default)]
+    pub export_file_name: Option<String>,
+    #[serde(default)]
+    pub timezone: Option<String>,
+    #[serde(default, flatten)]
+    pub params: BTreeMap<String, String>,
+}
+
+impl BoundDataTableRequestDto {
+    fn into_input(self, model: &str) -> DataTableInput {
+        let mut params = self.params;
+        insert_opt_string(&mut params, "model", Some(model.to_string()));
+        insert_opt_i64(&mut params, "p", self.page);
+        insert_opt_i64(&mut params, "ipp", self.ipp);
+        insert_opt_string(&mut params, "cursor", self.cursor);
+        insert_opt_string(&mut params, "pagination_mode", self.pagination_mode);
+        insert_opt_string(&mut params, "sorting_column", self.sorting_column);
+        insert_opt_string(&mut params, "sorting", self.sorting);
+        insert_opt_string(&mut params, "export", self.export);
+        insert_opt_string(&mut params, "export_file_name", self.export_file_name);
+        insert_opt_string(&mut params, "timezone", self.timezone);
+        DataTableInput::from_pairs(params)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct BoundDataTableState<S> {
+    inner: S,
+    model: String,
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct DataTableDescribeQueryDto {
     pub model: String,
@@ -321,6 +368,227 @@ where
         .with_state(state)
 }
 
+pub fn routes_for_model<S>(prefix: &str, model: &str, state: S) -> ApiRouter
+where
+    S: DataTableRouteState,
+{
+    routes_for_model_with_options(prefix, model, state, DataTableRouteOptions::default())
+}
+
+pub fn routes_for_model_with_options<S>(
+    prefix: &str,
+    model: &str,
+    state: S,
+    options: DataTableRouteOptions,
+) -> ApiRouter
+where
+    S: DataTableRouteState,
+{
+    let root = prefix.to_string();
+    let describe = format!("{prefix}/describe");
+    let export_stream = format!("{prefix}/export/stream");
+    let export_async = format!("{prefix}/export/async");
+    let export_async_form = format!("{prefix}/export/async/form");
+    let export_async_json = format!("{prefix}/export/async/json");
+    let export_status = format!("{prefix}/export/status");
+    let form_path = format!("{prefix}/form");
+    let json_path = format!("{prefix}/json");
+
+    let op_scope = datatable_operation_scope(prefix, model);
+    let model_name = model.trim().to_string();
+    let bound_state = BoundDataTableState {
+        inner: state,
+        model: model_name.clone(),
+    };
+
+    let root_route = {
+        let route = get_with(load_bound_datatable_query::<S>, |op| {
+            datatable_operation(
+                op,
+                &format!("datatable_{}_execute_query", op_scope),
+                &format!("{} datatable execute (query)", model_name),
+                "Execute datatable via query params.",
+                &[&format!("Model is bound to `{}` by route.", model_name)],
+                options.require_bearer_auth,
+            )
+        });
+        if options.include_multipart_endpoints {
+            route.post_with(load_bound_datatable_multipart::<S>, |op| {
+                datatable_operation(
+                    op,
+                    &format!("datatable_{}_execute_multipart", op_scope),
+                    &format!("{} datatable execute (multipart)", model_name),
+                    "Execute datatable via multipart payload.",
+                    &[
+                        &format!("Model is bound to `{}` by route.", model_name),
+                        &format!(
+                            "Use {}/json for OpenAPI-friendly request schema docs.",
+                            prefix
+                        ),
+                    ],
+                    options.require_bearer_auth,
+                )
+            })
+        } else {
+            route
+        }
+    };
+
+    let export_stream_route = {
+        let route = get_with(stream_bound_csv_query::<S>, |op| {
+            datatable_operation(
+                op,
+                &format!("datatable_{}_csv_stream_query", op_scope),
+                &format!("{} datatable CSV stream (query)", model_name),
+                "Stream CSV export directly.",
+                &[
+                    "Response content-type is text/csv.",
+                    &format!("Model is bound to `{}` by route.", model_name),
+                ],
+                options.require_bearer_auth,
+            )
+        });
+        if options.include_multipart_endpoints {
+            route.post_with(stream_bound_csv_multipart::<S>, |op| {
+                datatable_operation(
+                    op,
+                    &format!("datatable_{}_csv_stream_multipart", op_scope),
+                    &format!("{} datatable CSV stream (multipart)", model_name),
+                    "Stream CSV export directly from multipart request.",
+                    &[
+                        "Response content-type is text/csv.",
+                        &format!("Model is bound to `{}` by route.", model_name),
+                        &format!(
+                            "Use {}/json + export=csv for OpenAPI-friendly request schema docs.",
+                            prefix
+                        ),
+                    ],
+                    options.require_bearer_auth,
+                )
+            })
+        } else {
+            route
+        }
+    };
+
+    let export_async_route = {
+        let route = get_with(queue_bound_csv_export_query::<S>, |op| {
+            datatable_operation(
+                op,
+                &format!("datatable_{}_csv_queue_query", op_scope),
+                &format!("{} datatable CSV queue (query)", model_name),
+                "Queue async CSV export job.",
+                &[&format!("Model is bound to `{}` by route.", model_name)],
+                options.require_bearer_auth,
+            )
+        });
+        if options.include_multipart_endpoints {
+            route.post_with(queue_bound_csv_export_multipart::<S>, |op| {
+                datatable_operation(
+                    op,
+                    &format!("datatable_{}_csv_queue_multipart", op_scope),
+                    &format!("{} datatable CSV queue (multipart)", model_name),
+                    "Queue async CSV export job from multipart payload.",
+                    &[
+                        &format!("Model is bound to `{}` by route.", model_name),
+                        &format!(
+                            "Use {}/export/async/json for OpenAPI-friendly request schema docs.",
+                            prefix
+                        ),
+                    ],
+                    options.require_bearer_auth,
+                )
+            })
+        } else {
+            route
+        }
+    };
+
+    ApiRouter::new()
+        .api_route(root.as_str(), root_route)
+        .api_route(
+            describe.as_str(),
+            get_with(describe_bound_datatable::<S>, |op| {
+                datatable_operation(
+                    op,
+                    &format!("datatable_{}_describe", op_scope),
+                    &format!("{} datatable describe", model_name),
+                    "Return datatable metadata (columns, filters, defaults).",
+                    &[&format!("Model is bound to `{}` by route.", model_name)],
+                    options.require_bearer_auth,
+                )
+            }),
+        )
+        .api_route(export_stream.as_str(), export_stream_route)
+        .api_route(export_async.as_str(), export_async_route)
+        .api_route(
+            export_async_form.as_str(),
+            post_with(queue_bound_csv_export_form::<S>, |op| {
+                datatable_operation(
+                    op,
+                    &format!("datatable_{}_csv_queue_form", op_scope),
+                    &format!("{} datatable CSV queue (form)", model_name),
+                    "Queue async CSV export job from form payload.",
+                    &[&format!("Model is bound to `{}` by route.", model_name)],
+                    options.require_bearer_auth,
+                )
+            }),
+        )
+        .api_route(
+            export_async_json.as_str(),
+            post_with(queue_bound_csv_export_json::<S>, |op| {
+                datatable_operation(
+                    op,
+                    &format!("datatable_{}_csv_queue_json", op_scope),
+                    &format!("{} datatable CSV queue (json)", model_name),
+                    "Queue async CSV export job from JSON payload.",
+                    &[&format!("Model is bound to `{}` by route.", model_name)],
+                    options.require_bearer_auth,
+                )
+            }),
+        )
+        .api_route(
+            export_status.as_str(),
+            get_with(async_bound_export_status::<S>, |op| {
+                datatable_operation(
+                    op,
+                    &format!("datatable_{}_csv_status", op_scope),
+                    &format!("{} datatable CSV status", model_name),
+                    "Get async export job status.",
+                    &[&format!("Model is bound to `{}` by route.", model_name)],
+                    options.require_bearer_auth,
+                )
+            }),
+        )
+        .api_route(
+            form_path.as_str(),
+            post_with(load_bound_datatable_form::<S>, |op| {
+                datatable_operation(
+                    op,
+                    &format!("datatable_{}_execute_form", op_scope),
+                    &format!("{} datatable execute (form)", model_name),
+                    "Execute datatable via form payload.",
+                    &[&format!("Model is bound to `{}` by route.", model_name)],
+                    options.require_bearer_auth,
+                )
+            }),
+        )
+        .api_route(
+            json_path.as_str(),
+            post_with(load_bound_datatable_json::<S>, |op| {
+                datatable_operation(
+                    op,
+                    &format!("datatable_{}_execute_json", op_scope),
+                    &format!("{} datatable execute (json)", model_name),
+                    "Execute datatable via JSON payload.",
+                    &[&format!("Model is bound to `{}` by route.", model_name)],
+                    options.require_bearer_auth,
+                )
+            }),
+        )
+        .with_state(bound_state)
+}
+
 fn datatable_operation<'t>(
     op: TransformOperation<'t>,
     operation_id: &str,
@@ -345,6 +613,197 @@ fn datatable_operation<'t>(
         op
     };
     with_route_notes(op, &notes)
+}
+
+fn datatable_operation_scope(prefix: &str, model: &str) -> String {
+    let raw = format!("{prefix}_{model}");
+    let mut out = String::new();
+    let mut last_was_sep = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_was_sep = false;
+        } else if !last_was_sep {
+            out.push('_');
+            last_was_sep = true;
+        }
+    }
+    out.trim_matches('_').to_string()
+}
+
+fn bind_model(mut input: DataTableInput, model: &str) -> DataTableInput {
+    input.model = Some(model.to_string());
+    input.params.insert("model".to_string(), model.to_string());
+    input
+}
+
+async fn load_bound_datatable_query<S>(
+    State(state): State<BoundDataTableState<S>>,
+    Query(params): Query<BoundDataTableRequestDto>,
+    headers: RequestHeaders,
+) -> Result<ApiResponse<Value>, AppError>
+where
+    S: DataTableRouteState,
+{
+    let input = params.into_input(state.model.as_str());
+    execute_datatable(&state.inner, input, &headers).await
+}
+
+async fn load_bound_datatable_multipart<S>(
+    State(state): State<BoundDataTableState<S>>,
+    headers: RequestHeaders,
+    multipart: Multipart,
+) -> Result<ApiResponse<Value>, AppError>
+where
+    S: DataTableRouteState,
+{
+    let params = multipart_to_params(multipart).await?;
+    let input = bind_model(datatable_input_from_form(&params), state.model.as_str());
+    execute_datatable(&state.inner, input, &headers).await
+}
+
+async fn load_bound_datatable_form<S>(
+    State(state): State<BoundDataTableState<S>>,
+    headers: RequestHeaders,
+    Form(params): Form<BoundDataTableRequestDto>,
+) -> Result<ApiResponse<Value>, AppError>
+where
+    S: DataTableRouteState,
+{
+    let input = params.into_input(state.model.as_str());
+    execute_datatable(&state.inner, input, &headers).await
+}
+
+async fn load_bound_datatable_json<S>(
+    State(state): State<BoundDataTableState<S>>,
+    headers: RequestHeaders,
+    Json(body): Json<BoundDataTableRequestDto>,
+) -> Result<ApiResponse<Value>, AppError>
+where
+    S: DataTableRouteState,
+{
+    let input = body.into_input(state.model.as_str());
+    execute_datatable(&state.inner, input, &headers).await
+}
+
+async fn describe_bound_datatable<S>(
+    State(state): State<BoundDataTableState<S>>,
+    headers: RequestHeaders,
+) -> Result<ApiResponse<Value>, AppError>
+where
+    S: DataTableRouteState,
+{
+    let ctx = state.inner.datatable_context(&headers).await;
+    let describe = state
+        .inner
+        .datatable_registry()
+        .describe(state.model.as_str(), &ctx)
+        .map_err(map_datatable_error)?;
+    Ok(ApiResponse::success(
+        serde_json::to_value(describe)?,
+        "datatable describe",
+    ))
+}
+
+async fn queue_bound_csv_export_query<S>(
+    State(state): State<BoundDataTableState<S>>,
+    Query(params): Query<BoundDataTableRequestDto>,
+    headers: RequestHeaders,
+) -> Result<ApiResponse<Value>, AppError>
+where
+    S: DataTableRouteState,
+{
+    let input = params.into_input(state.model.as_str());
+    queue_csv_export(&state.inner, input, &headers).await
+}
+
+async fn queue_bound_csv_export_multipart<S>(
+    State(state): State<BoundDataTableState<S>>,
+    headers: RequestHeaders,
+    multipart: Multipart,
+) -> Result<ApiResponse<Value>, AppError>
+where
+    S: DataTableRouteState,
+{
+    let params = multipart_to_params(multipart).await?;
+    let input = bind_model(datatable_input_from_form(&params), state.model.as_str());
+    queue_csv_export(&state.inner, input, &headers).await
+}
+
+async fn queue_bound_csv_export_form<S>(
+    State(state): State<BoundDataTableState<S>>,
+    headers: RequestHeaders,
+    Form(params): Form<BoundDataTableRequestDto>,
+) -> Result<ApiResponse<Value>, AppError>
+where
+    S: DataTableRouteState,
+{
+    let input = params.into_input(state.model.as_str());
+    queue_csv_export(&state.inner, input, &headers).await
+}
+
+async fn queue_bound_csv_export_json<S>(
+    State(state): State<BoundDataTableState<S>>,
+    headers: RequestHeaders,
+    Json(body): Json<BoundDataTableRequestDto>,
+) -> Result<ApiResponse<Value>, AppError>
+where
+    S: DataTableRouteState,
+{
+    let input = body.into_input(state.model.as_str());
+    queue_csv_export(&state.inner, input, &headers).await
+}
+
+async fn async_bound_export_status<S>(
+    State(state): State<BoundDataTableState<S>>,
+    Query(params): Query<DataTableExportStatusQueryDto>,
+) -> Result<ApiResponse<Value>, AppError>
+where
+    S: DataTableRouteState,
+{
+    let job_id = params
+        .job_id
+        .or(params.id)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| AppError::BadRequest("Missing export job id".to_string()))?;
+
+    let status = state
+        .inner
+        .datatable_async_exports()
+        .status(&job_id)
+        .await
+        .ok_or_else(|| AppError::NotFound(format!("Unknown export job '{}'", job_id)))?;
+
+    Ok(ApiResponse::success(
+        serde_json::to_value(status)?,
+        "datatable export status",
+    ))
+}
+
+async fn stream_bound_csv_query<S>(
+    State(state): State<BoundDataTableState<S>>,
+    Query(params): Query<BoundDataTableRequestDto>,
+    headers: RequestHeaders,
+) -> Result<Response, AppError>
+where
+    S: DataTableRouteState,
+{
+    let input = params.into_input(state.model.as_str());
+    stream_csv_export(&state.inner, input, &headers).await
+}
+
+async fn stream_bound_csv_multipart<S>(
+    State(state): State<BoundDataTableState<S>>,
+    headers: RequestHeaders,
+    multipart: Multipart,
+) -> Result<Response, AppError>
+where
+    S: DataTableRouteState,
+{
+    let params = multipart_to_params(multipart).await?;
+    let input = bind_model(datatable_input_from_form(&params), state.model.as_str());
+    stream_csv_export(&state.inner, input, &headers).await
 }
 
 async fn load_datatable_query<S>(

@@ -1280,8 +1280,9 @@ use core_web::openapi::ApiRouter;
 use crate::internal::api::state::AppApiState;
 
 pub fn router(state: AppApiState) -> ApiRouter {
-    core_web::datatable::routes_with_prefix_and_options(
-        "/datatable",
+    core_web::datatable::routes_for_model_with_options(
+        "/datatable/admin",
+        "Admin",
         state,
         DataTableRouteOptions {
             include_multipart_endpoints: true,

@@ -112,7 +112,7 @@ impl DataTableRouteState for DataTableApiState {
 }`}</code>
                 </pre>
 
-                <h3>Step 4: Mount route collection under /api/v1/admin/datatable</h3>
+                <h3>Step 4: Mount model-bound route collection under /api/v1/admin/datatable/admin</h3>
                 <p>
                     Assume admin middleware already exists at app level. Apply it when mounting the
                     framework route collection.
@@ -123,8 +123,9 @@ use core_web::datatable::{self, DataTableRouteOptions};
 
 let datatable_state = DataTableApiState::new(ctx);
 
-let admin_dt_router = datatable::routes_with_prefix_and_options(
-    "/api/v1/admin/datatable",
+let admin_dt_router = datatable::routes_for_model_with_options(
+    "/api/v1/admin/datatable/admin",
+    "Article",
     datatable_state,
     DataTableRouteOptions {
         include_multipart_endpoints: true,
@@ -139,34 +140,34 @@ let api_router = ApiRouter::new().merge(admin_dt_router);`}</code>
                 <h2>Routes Provided By Collection</h2>
                 <ul>
                     <li>
-                        <code>GET /api/v1/admin/datatable</code> (query)
+                        <code>GET /api/v1/admin/datatable/admin</code> (query)
                     </li>
                     <li>
-                        <code>POST /api/v1/admin/datatable</code> (multipart, optional)
+                        <code>POST /api/v1/admin/datatable/admin</code> (multipart, optional)
                     </li>
                     <li>
-                        <code>POST /api/v1/admin/datatable/json</code>
+                        <code>POST /api/v1/admin/datatable/admin/json</code>
                     </li>
                     <li>
-                        <code>POST /api/v1/admin/datatable/form</code>
+                        <code>POST /api/v1/admin/datatable/admin/form</code>
                     </li>
                     <li>
-                        <code>GET /api/v1/admin/datatable/describe?model=Article</code>
+                        <code>GET /api/v1/admin/datatable/admin/describe</code>
                     </li>
                     <li>
-                        <code>GET|POST /api/v1/admin/datatable/export/stream</code>
+                        <code>GET|POST /api/v1/admin/datatable/admin/export/stream</code>
                     </li>
                     <li>
-                        <code>GET|POST /api/v1/admin/datatable/export/async</code>
+                        <code>GET|POST /api/v1/admin/datatable/admin/export/async</code>
                     </li>
                     <li>
-                        <code>POST /api/v1/admin/datatable/export/async/json</code>
+                        <code>POST /api/v1/admin/datatable/admin/export/async/json</code>
                     </li>
                     <li>
-                        <code>POST /api/v1/admin/datatable/export/async/form</code>
+                        <code>POST /api/v1/admin/datatable/admin/export/async/form</code>
                     </li>
                     <li>
-                        <code>GET /api/v1/admin/datatable/export/status?job_id=...</code>
+                        <code>GET /api/v1/admin/datatable/admin/export/status?job_id=...</code>
                     </li>
                 </ul>
 
@@ -174,7 +175,7 @@ let api_router = ApiRouter::new().merge(admin_dt_router);`}</code>
                 <ul>
                     <li>
                         <code>/json</code> and <code>/form</code> routes expose typed DTO schema
-                        in OpenAPI (<code>DataTableRequestDto</code>).
+                        in OpenAPI (<code>BoundDataTableRequestDto</code>, model fixed by route).
                     </li>
                     <li>
                         Query endpoints expose typed query parameters in OpenAPI.
@@ -190,7 +191,7 @@ let api_router = ApiRouter::new().merge(admin_dt_router);`}</code>
                 </ul>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-bash">{`./console route list --json
-# check /api/v1/admin/datatable routes and operation_id values`}</code>
+# check /api/v1/admin/datatable/admin routes and operation_id values`}</code>
                 </pre>
 
                 <h2>Request Grammar (Current)</h2>
@@ -228,16 +229,15 @@ let api_router = ApiRouter::new().merge(admin_dt_router);`}</code>
 
                 <h2>Admin Curl Examples</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-bash">{`curl 'http://127.0.0.1:3000/api/v1/admin/datatable?model=Article&p=1&ipp=30&sorting_column=id&sorting=desc' \\
+                    <code className="language-bash">{`curl 'http://127.0.0.1:3000/api/v1/admin/datatable/admin?p=1&ipp=30&sorting_column=id&sorting=desc' \\
   -H 'Authorization: Bearer <ACCESS_TOKEN>' \\
   -H 'X-Timezone: +08:00'`}</code>
                 </pre>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-bash">{`curl -X POST http://127.0.0.1:3000/api/v1/admin/datatable/json \\
+                    <code className="language-bash">{`curl -X POST http://127.0.0.1:3000/api/v1/admin/datatable/admin/json \\
   -H 'Authorization: Bearer <ACCESS_TOKEN>' \\
   -H 'Content-Type: application/json' \\
   -d '{
-    "model": "Article",
     "page": 1,
     "ipp": 30,
     "sorting_column": "id",
@@ -247,13 +247,13 @@ let api_router = ApiRouter::new().merge(admin_dt_router);`}</code>
                 </pre>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-bash">{`# queue async export
-curl -X POST http://127.0.0.1:3000/api/v1/admin/datatable/export/async/json \\
+curl -X POST http://127.0.0.1:3000/api/v1/admin/datatable/admin/export/async/json \\
   -H 'Authorization: Bearer <ACCESS_TOKEN>' \\
   -H 'Content-Type: application/json' \\
-  -d '{"model":"Article","sorting_column":"id","sorting":"desc"}'
+  -d '{"sorting_column":"id","sorting":"desc"}'
 
 # check status
-curl 'http://127.0.0.1:3000/api/v1/admin/datatable/export/status?job_id=<JOB_ID>' \\
+curl 'http://127.0.0.1:3000/api/v1/admin/datatable/admin/export/status?job_id=<JOB_ID>' \\
   -H 'Authorization: Bearer <ACCESS_TOKEN>'`}</code>
                 </pre>
             </div>

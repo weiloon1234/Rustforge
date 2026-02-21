@@ -21,13 +21,10 @@ export function Responses() {
 }`}</code>
                 </pre>
 
-                <h3>Error Response (RFC 9457 Problem Details)</h3>
+                <h3>Error Response</h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-rust">{`{
-  "type": "about:blank",
-  "title": "Unprocessable Entity",
-  "status": 422,
-  "detail": "Validation failed",
+  "message": "Validation failed", // always present
   "error_code": "VALIDATION_ERROR",
   "errors": {
       "email": ["must be a valid email address"]
@@ -35,7 +32,7 @@ export function Responses() {
 }`}</code>
                 </pre>
                 <p>
-                    Error content type is <code>application/problem+json</code>.
+                    Validation errors use the <code>errors</code> map (field to message array).
                 </p>
 
                 <h3>Response Fields</h3>
@@ -66,27 +63,10 @@ export function Responses() {
                                 <td className="px-4 py-3 text-gray-700">Optional success message</td>
                             </tr>
                             <tr>
-                                <td className="px-4 py-3 font-mono text-blue-600">type</td>
+                                <td className="px-4 py-3 font-mono text-blue-600">message</td>
                                 <td className="px-4 py-3 text-gray-500">string</td>
                                 <td className="px-4 py-3 text-gray-700">
-                                    Problem type URI (defaults to <code>about:blank</code>)
-                                </td>
-                            </tr>
-                            <tr>
-                                <td className="px-4 py-3 font-mono text-blue-600">title</td>
-                                <td className="px-4 py-3 text-gray-500">string</td>
-                                <td className="px-4 py-3 text-gray-700">HTTP error title</td>
-                            </tr>
-                            <tr>
-                                <td className="px-4 py-3 font-mono text-blue-600">status</td>
-                                <td className="px-4 py-3 text-gray-500">number</td>
-                                <td className="px-4 py-3 text-gray-700">HTTP status code</td>
-                            </tr>
-                            <tr>
-                                <td className="px-4 py-3 font-mono text-blue-600">detail</td>
-                                <td className="px-4 py-3 text-gray-500">string?</td>
-                                <td className="px-4 py-3 text-gray-700">
-                                    Human-readable error detail
+                                    Required in error payload. Defaults to HTTP status text when not provided.
                                 </td>
                             </tr>
                             <tr>
@@ -100,7 +80,7 @@ export function Responses() {
                                 <td className="px-4 py-3 font-mono text-blue-600">errors</td>
                                 <td className="px-4 py-3 text-gray-500">{'{field: string[]}?'} </td>
                                 <td className="px-4 py-3 text-gray-700">
-                                    Validation field errors (typically for 422)
+                                    Validation field errors (typically 422, Laravel-style)
                                 </td>
                             </tr>
                         </tbody>
