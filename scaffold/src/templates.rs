@@ -1249,6 +1249,7 @@ use validator::Validate;
 
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminDatatableQueryInput {
+    #[serde(default)]
     #[validate(nested)]
     pub base: DataTableQueryRequestBase,
     #[serde(default)]
@@ -1261,14 +1262,6 @@ pub struct AdminDatatableQueryInput {
     pub email: Option<String>,
     #[serde(default)]
     pub admin_type: Option<AdminType>,
-    #[serde(default)]
-    #[validate(length(min = 1, max = 40))]
-    #[schemars(length(min = 1, max = 40))]
-    pub created_at_from: Option<String>,
-    #[serde(default)]
-    #[validate(length(min = 1, max = 40))]
-    #[schemars(length(min = 1, max = 40))]
-    pub created_at_to: Option<String>,
 }
 
 impl AdminDatatableQueryInput {
@@ -1290,22 +1283,6 @@ impl AdminDatatableQueryInput {
         if let Some(admin_type) = self.admin_type {
             params.insert("f-admin_type".to_string(), admin_type.as_str().to_string());
         }
-        if let Some(from) = self
-            .created_at_from
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
-            params.insert("f-date-from-created_at".to_string(), from.to_string());
-        }
-        if let Some(to) = self
-            .created_at_to
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
-            params.insert("f-date-to-created_at".to_string(), to.to_string());
-        }
 
         input.params.extend(params);
         input
@@ -1326,14 +1303,6 @@ pub struct AdminDatatableEmailExportInput {
     pub email: Option<String>,
     #[serde(default)]
     pub admin_type: Option<AdminType>,
-    #[serde(default)]
-    #[validate(length(min = 1, max = 40))]
-    #[schemars(length(min = 1, max = 40))]
-    pub created_at_from: Option<String>,
-    #[serde(default)]
-    #[validate(length(min = 1, max = 40))]
-    #[schemars(length(min = 1, max = 40))]
-    pub created_at_to: Option<String>,
 }
 
 impl AdminDatatableEmailExportInput {
@@ -1354,22 +1323,6 @@ impl AdminDatatableEmailExportInput {
         }
         if let Some(admin_type) = self.admin_type {
             params.insert("f-admin_type".to_string(), admin_type.as_str().to_string());
-        }
-        if let Some(from) = self
-            .created_at_from
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
-            params.insert("f-date-from-created_at".to_string(), from.to_string());
-        }
-        if let Some(to) = self
-            .created_at_to
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
-            params.insert("f-date-to-created_at".to_string(), to.to_string());
         }
 
         input.params.extend(params);

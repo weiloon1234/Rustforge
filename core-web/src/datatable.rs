@@ -108,6 +108,14 @@ pub struct DataTableQueryRequestBase {
     #[validate(length(min = 1, max = 64))]
     #[schemars(length(min = 1, max = 64))]
     pub timezone: Option<String>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 40))]
+    #[schemars(length(min = 1, max = 40))]
+    pub created_at_from: Option<String>,
+    #[serde(default)]
+    #[validate(length(min = 1, max = 40))]
+    #[schemars(length(min = 1, max = 40))]
+    pub created_at_to: Option<String>,
 }
 
 impl Default for DataTableQueryRequestBase {
@@ -121,6 +129,8 @@ impl Default for DataTableQueryRequestBase {
             sorting_column: None,
             sorting: None,
             timezone: None,
+            created_at_from: None,
+            created_at_to: None,
         }
     }
 }
@@ -141,6 +151,26 @@ impl DataTableQueryRequestBase {
         input.sorting_column = self.sorting_column.clone();
         input.sorting = self.sorting.map(DataTableSortDirectionDto::to_core);
         input.timezone = self.timezone.clone();
+        if let Some(from) = self
+            .created_at_from
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            input
+                .params
+                .insert("f-date-from-created_at".to_string(), from.to_string());
+        }
+        if let Some(to) = self
+            .created_at_to
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            input
+                .params
+                .insert("f-date-to-created_at".to_string(), to.to_string());
+        }
         input
     }
 }
@@ -564,6 +594,9 @@ where
     C: DataTableScopedContract,
 {
     let mut input = state.contract.query_to_input(&req.0);
+    if !state.contract.include_default_created_at_range() {
+        strip_default_created_at_filters(&mut input);
+    }
     input = bind_scoped_key(input, state.scoped_key.as_str());
     input.export = DataTableExportMode::None;
 
@@ -629,6 +662,9 @@ where
     C: DataTableScopedContract,
 {
     let mut input = state.contract.query_to_input(&req.0);
+    if !state.contract.include_default_created_at_range() {
+        strip_default_created_at_filters(&mut input);
+    }
     input = bind_scoped_key(input, state.scoped_key.as_str());
     input.export = DataTableExportMode::Csv;
 
@@ -679,6 +715,9 @@ where
         .unwrap_or_else(|| format!("Datatable export ({})", state.scoped_key));
 
     let mut input = state.contract.email_to_input(&req.0);
+    if !state.contract.include_default_created_at_range() {
+        strip_default_created_at_filters(&mut input);
+    }
     input = bind_scoped_key(input, state.scoped_key.as_str());
     input.export = DataTableExportMode::Csv;
     if input.export_file_name.is_none() {
@@ -1029,6 +1068,11 @@ fn inject_default_created_at_range(
     if !row.is_empty() {
         filter_rows.push(row);
     }
+}
+
+fn strip_default_created_at_filters(input: &mut DataTableInput) {
+    input.params.remove("f-date-from-created_at");
+    input.params.remove("f-date-to-created_at");
 }
 
 fn normalize_recipients(recipients: Vec<String>) -> Vec<String> {
