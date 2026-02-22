@@ -1325,9 +1325,8 @@ rustforge_string_rule_type! {
     pub struct UsernameString {
         #[validate(custom(function = "crate::validation::username::validate_username"))]
         #[rf(length(min = 3, max = 64))]
-        #[rf(rule = "alpha_dash")]
-        #[rf(openapi_description = "Lowercase username using letters, numbers, underscore (_), and hyphen (-).")]
-        #[rf(openapi_example = "admin_user")]
+        #[rf(alpha_dash)]
+        #[rf(openapi(description = "Lowercase username using letters, numbers, underscore (_), and hyphen (-).", example = "admin_user"))]
     }
 }
 "#;
@@ -1355,11 +1354,9 @@ use core_web::datatable::{
 use core_web::contracts::rustforge_contract;
 use generated::models::{AdminType, AdminView};
 use schemars::JsonSchema;
-use serde::Deserialize;
 use validator::Validate;
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminDatatableQueryInput {
     #[serde(default)]
     #[rf(nested)]
@@ -1369,7 +1366,7 @@ pub struct AdminDatatableQueryInput {
     pub q: Option<String>,
     #[serde(default)]
     #[rf(length(min = 3, max = 64))]
-    #[rf(rule = "alpha_dash")]
+    #[rf(alpha_dash)]
     pub username: Option<String>,
     #[serde(default)]
     #[rf(length(min = 1, max = 120))]
@@ -1425,7 +1422,6 @@ impl DataTableQueryRequestContract for AdminDatatableQueryInput {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminDatatableEmailExportInput {
     #[rf(nested)]
     pub base: DataTableEmailExportRequestBase,
@@ -1434,7 +1430,7 @@ pub struct AdminDatatableEmailExportInput {
     pub q: Option<String>,
     #[serde(default)]
     #[rf(length(min = 3, max = 64))]
-    #[rf(rule = "alpha_dash")]
+    #[rf(alpha_dash)]
     pub username: Option<String>,
     #[serde(default)]
     #[rf(length(min = 1, max = 120))]
@@ -1561,11 +1557,10 @@ pub const APP_CONTRACTS_API_V1_ADMIN_RS: &str = r#"use crate::contracts::types::
 use core_web::contracts::rustforge_contract;
 use generated::{models::AdminType, permissions::Permission};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use validator::Validate;
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct CreateAdminInput {
     #[rf(nested)]
     #[rf(async_unique(table = "admin", column = "username"))]
@@ -1583,7 +1578,6 @@ pub struct CreateAdminInput {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct UpdateAdminInput {
     #[serde(skip, default)]
     __target_id: i64,
@@ -1664,13 +1658,12 @@ pub struct AdminDeleteOutput {
 pub const APP_CONTRACTS_API_V1_ADMIN_AUTH_RS: &str = r#"use crate::contracts::types::username::UsernameString;
 use core_web::contracts::rustforge_contract;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use validator::Validate;
 use core_web::auth::AuthClientType;
 use generated::models::AdminType;
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminLoginInput {
     #[rf(nested)]
     pub username: UsernameString,
@@ -1682,7 +1675,6 @@ pub struct AdminLoginInput {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminRefreshInput {
     pub client_type: AuthClientType,
     #[serde(default)]
@@ -1691,7 +1683,6 @@ pub struct AdminRefreshInput {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminLogoutInput {
     pub client_type: AuthClientType,
     #[serde(default)]
@@ -1700,7 +1691,6 @@ pub struct AdminLogoutInput {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminProfileUpdateInput {
     #[rf(length(min = 1, max = 120))]
     pub name: String,
@@ -1710,7 +1700,6 @@ pub struct AdminProfileUpdateInput {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminPasswordUpdateInput {
     #[rf(length(min = 8, max = 128))]
     pub current_password: String,
