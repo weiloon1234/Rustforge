@@ -39,8 +39,9 @@ export function CookbookOverview() {
                         User-facing API text should use <code>core_i18n::t("...")</code>.
                     </li>
                     <li>
-                        Input DTOs should declare runtime validation and OpenAPI constraints
-                        together: <code>#[validate(...)]</code> + <code>#[schemars(...)]</code>.
+                        Input DTO default style: <code>#[rustforge_contract]</code> +{' '}
+                        <code>#[rf(...)]</code> (raw <code>#[validate(...)]</code> +{' '}
+                        <code>#[schemars(...)]</code> is the escape hatch).
                     </li>
                     <li>
                         Prefer <code>core_web::contracts::ContractJson&lt;T&gt;</code> on handlers
@@ -129,6 +130,29 @@ with_permission_check_post(
                     <code>/openapi.json</code>.
                 </p>
 
+                <h2>Recommended Reading Order (No Renumber Needed)</h2>
+                <p>
+                    Current chapter numbering is still valid. For new teams, the clearest path is
+                    to read by dependency order instead of renumbering the cookbook again.
+                </p>
+                <ol>
+                    <li>
+                        Foundation docs: <a href="#/requests">Requests</a>,{' '}
+                        <a href="#/validation-rules">Validation Rules</a>,{' '}
+                        <a href="#/openapi">OpenAPI</a>, <a href="#/permissions">Permissions &amp; AuthZ</a>.
+                    </li>
+                    <li>Chapter 1 (CRUD API baseline + portal routing + DTO pattern).</li>
+                    <li>Chapter 2A (DTO + validation rules + wrapper types + OpenAPI alignment).</li>
+                    <li>Chapter 2B (Admin auth + token scopes + admin CRUD async validation patterns).</li>
+                    <li>Chapter 7 (CLI workflow) if the team is setting up daily commands early.</li>
+                    <li>Chapters 3-6 for async/jobs/notifications/realtime features.</li>
+                    <li>Chapter 8 then Chapter 9 for integration and hardening.</li>
+                </ol>
+                <p>
+                    Chapter numbering for 3-9 stays unchanged to avoid link churn. Chapter 2 is
+                    split as 2A/2B only.
+                </p>
+
                 <h2>Available Chapters</h2>
                 <div className="not-prose grid grid-cols-1 gap-3">
                     <a
@@ -141,7 +165,13 @@ with_permission_check_post(
                         href="#/cookbook-chapter-2-validation-dto"
                         className="px-4 py-3 border border-gray-200 rounded-md bg-white hover:bg-gray-50 text-sm font-medium text-gray-800"
                     >
-                        Chapter 2: Request/Response DTO + Validation
+                        Chapter 2A: Request/Response DTO + Validation
+                    </a>
+                    <a
+                        href="#/cookbook-chapter-2-admin-auth"
+                        className="px-4 py-3 border border-gray-200 rounded-md bg-white hover:bg-gray-50 text-sm font-medium text-gray-800"
+                    >
+                        Chapter 2B: Admin Auth + DTO Async Validation Patterns
                     </a>
                     <a
                         href="#/cookbook-chapter-3-jobs-usage"

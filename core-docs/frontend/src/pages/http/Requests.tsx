@@ -57,10 +57,10 @@ async fn create(
                 <h2>Sync + Async Validation</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use core_web::contracts::rustforge_contract;
-use core_web::extract::{AsyncValidate, AsyncValidatedJson};
+use core_web::extract::AsyncValidatedJson;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use validator::{Validate, ValidationErrors};
+use validator::Validate;
 
 #[rustforge_contract]
 #[derive(Debug, Deserialize, Validate, JsonSchema)]
@@ -68,15 +68,8 @@ pub struct RegisterInput {
     #[rf(length(min = 3, max = 32))]
     #[rf(rule = "alpha_dash")]
     pub username: String,
-}
-
-#[async_trait::async_trait]
-impl AsyncValidate for RegisterInput {
-    async fn validate_async(&self, db: &sqlx::PgPool) -> anyhow::Result<(), ValidationErrors> {
-        // optional DB-backed checks
-        let _ = db;
-        Ok(())
-    }
+    #[rf(async_unique(table = "admin", column = "username"))]
+    pub login_username: String,
 }
 
 async fn register(
@@ -84,6 +77,91 @@ async fn register(
 ) -> Result<ApiResponse<()>, AppError> {
     let _ = req;
     Ok(ApiResponse::success((), "ok"))
+}`}</code>
+                </pre>
+                <p>
+                    Rustforge can generate <code>AsyncValidate</code> automatically for simple DB
+                    checks with <code>rf(async_unique)</code>, <code>rf(async_exists)</code>, and{' '}
+                    <code>rf(async_not_exists)</code>. For complex multi-field DB logic, keep a
+                    manual <code>impl AsyncValidate</code>.
+                </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`#[rustforge_contract]
+#[derive(Debug, Deserialize, Validate, JsonSchema)]
+pub struct AdminUpdateInput {
+    pub id: i64,
+    pub tenant_id: i64,
+
+    #[rf(async_unique(
+        table = "admin",
+        column = "username",
+        ignore(column = "id", field = "id"),
+        where_eq(column = "tenant_id", field = "tenant_id"),
+        where_null(column = "deleted_at")
+    ))]
+    pub username: String,
+}`}</code>
+                </pre>
+                <p>
+                    For <code>PATCH /resource/{'{id}'}</code> updates, the ignore key often comes
+                    from the path, not the JSON body. Keep the path parameter as the source of
+                    truth, inject it into a hidden DTO field, then run async validation once.
+                </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`#[rustforge_contract]
+#[derive(Debug, Deserialize, Validate, JsonSchema)]
+pub struct UpdateAdminInput {
+    #[serde(skip, default)]
+    __target_id: i64,
+
+    #[serde(default)]
+    #[rf(async_unique(
+        table = "admin",
+        column = "username",
+        ignore(column = "id", field = "__target_id")
+    ))]
+    pub username: Option<String>,
+}
+
+impl UpdateAdminInput {
+    pub fn with_target_id(mut self, id: i64) -> Self {
+        self.__target_id = id;
+        self
+    }
+}`}</code>
+                </pre>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`use axum::extract::{Path, State};
+use core_i18n::t;
+use core_web::{
+    contracts::{AsyncContractJson, ContractJson},
+    error::AppError,
+    extract::{validation::transform_validation_errors, AsyncValidate},
+};
+
+async fn create(
+    State(state): State<AppApiState>,
+    req: AsyncContractJson<CreateAdminInput>,
+) -> Result<(), AppError> {
+    let _req = req.0; // async rf(...) already executed
+    let _ = state;
+    Ok(())
+}
+
+async fn update(
+    State(state): State<AppApiState>,
+    Path(id): Path<i64>,
+    req: ContractJson<UpdateAdminInput>,
+) -> Result<(), AppError> {
+    let req = req.0.with_target_id(id);
+    if let Err(e) = req.validate_async(&state.db).await {
+        return Err(AppError::Validation {
+            message: t("Validation failed"),
+            errors: transform_validation_errors(e),
+        });
+    }
+    // req is trusted here
+    Ok(())
 }`}</code>
                 </pre>
 
@@ -97,6 +175,10 @@ async fn register(
                     <li>
                         Default: use <code>#[rf(...)]</code> on fields and let the macro emit
                         runtime + OpenAPI hints.
+                    </li>
+                    <li>
+                        <code>#[rf(openapi_example = ...)]</code> accepts literals/expressions (for
+                        example numbers and booleans), not only strings.
                     </li>
                     <li>
                         Fallback/escape hatch: use raw <code>#[validate(...)]</code> and{' '}

@@ -10,7 +10,7 @@ export function Chapter2AdminAuth() {
         <div className="space-y-10">
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">
-                    Chapter 2: Admin Auth (PAT Scopes + Refresh Rotation)
+                    Chapter 2B: Admin Auth (PAT Scopes + Refresh Rotation)
                 </h1>
                 <p className="text-xl text-gray-500">
                     Build admin login/refresh/logout/me with PAT-only scopes and web/mobile token
@@ -19,6 +19,12 @@ export function Chapter2AdminAuth() {
             </div>
 
             <div className="prose prose-orange max-w-none">
+                <p>
+                    Read <a href="#/cookbook-chapter-2-validation-dto">Chapter 2A</a> first for
+                    DTO organization, wrapper types, and the PATCH async-uniqueness pattern. This
+                    chapter focuses on auth/session flow and admin auth wiring.
+                </p>
+
                 <h2>Step 0: Objective</h2>
                 <ul>
                     <li>
@@ -87,7 +93,7 @@ pub struct AdminPasswordUpdateInput {
     #[rf(length(min = 8, max = 128))]
     pub current_password: String,
     #[rf(length(min = 8, max = 128))]
-    #[validate(must_match(other = "password_confirmation"))]
+    #[rf(must_match(other = "password_confirmation"))]
     pub password: String,
     #[rf(length(min = 8, max = 128))]
     pub password_confirmation: String,
@@ -118,8 +124,8 @@ pub struct AdminMeOutput {
                 </pre>
                 <p className="text-sm text-gray-600">
                     Use raw <code>#[validate(...)]</code> / <code>#[schemars(...)]</code> only for
-                    rules not covered by <code>#[rf(...)]</code> yet (for example{' '}
-                    <code>must_match</code>) or for explicit overrides.
+                    explicit overrides or unsupported rule shapes (mainly schema-level validators
+                    and async DB checks).
                 </p>
 
                 <h2>Step 2: Workflow Scope Grant</h2>
@@ -219,6 +225,92 @@ fn admin_router(state: AppApiState) -> ApiRouter {
     [generated::permissions::Permission::ArticleManage],
 );`}</code>
                 </pre>
+
+                <h2>Step 5A: Admin CRUD DTO Async Uniqueness (Scaffold Pattern)</h2>
+                <p>
+                    The scaffolded admin CRUD module demonstrates how to keep username uniqueness
+                    in the DTO contract using <code>rf(async_unique)</code> while still handling
+                    <code>PATCH /admin/{'{id}'}</code> path IDs cleanly.
+                </p>
+                <h3>
+                    File: <code>app/src/contracts/api/v1/admin.rs</code> (excerpt)
+                </h3>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`#[rustforge_contract]
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct CreateAdminInput {
+    #[rf(nested)]
+    #[rf(async_unique(table = "admin", column = "username"))]
+    pub username: UsernameString,
+    // ...
+}
+
+#[rustforge_contract]
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct UpdateAdminInput {
+    #[serde(skip, default)]
+    __target_id: i64,
+
+    #[serde(default)]
+    #[rf(nested)]
+    #[rf(async_unique(
+        table = "admin",
+        column = "username",
+        ignore(column = "id", field = "__target_id")
+    ))]
+    pub username: Option<UsernameString>,
+    // ...
+}
+
+impl UpdateAdminInput {
+    pub fn with_target_id(mut self, id: i64) -> Self {
+        self.__target_id = id;
+        self
+    }
+}`}</code>
+                </pre>
+                <h3>
+                    File: <code>app/src/internal/api/v1/admin.rs</code> (excerpt)
+                </h3>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`use core_web::{
+    contracts::{AsyncContractJson, ContractJson},
+    extract::{validation::transform_validation_errors, AsyncValidate},
+    // ...
+};
+
+async fn create(
+    State(state): State<AppApiState>,
+    auth: AuthUser<AdminGuard>,
+    req: AsyncContractJson<CreateAdminInput>,
+) -> Result<ApiResponse<AdminOutput>, AppError> {
+    let admin = workflow::create(&state, &auth, req.0).await?;
+    Ok(ApiResponse::success(AdminOutput::from(admin), &t("Admin created")))
+}
+
+async fn update(
+    State(state): State<AppApiState>,
+    auth: AuthUser<AdminGuard>,
+    Path(id): Path<i64>,
+    req: ContractJson<UpdateAdminInput>,
+) -> Result<ApiResponse<AdminOutput>, AppError> {
+    let req = req.0.with_target_id(id);
+    if let Err(e) = req.validate_async(&state.db).await {
+        return Err(AppError::Validation {
+            message: t("Validation failed"),
+            errors: transform_validation_errors(e),
+        });
+    }
+
+    let admin = workflow::update(&state, &auth, id, req).await?;
+    Ok(ApiResponse::success(AdminOutput::from(admin), &t("Admin updated")))
+}`}</code>
+                </pre>
+                <p>
+                    Create can use <code>AsyncContractJson</code> directly because all async rule
+                    inputs are in the JSON body. Update needs one extra step because the ignore ID
+                    comes from the path parameter.
+                </p>
 
                 <h2>Step 6: Verify</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">

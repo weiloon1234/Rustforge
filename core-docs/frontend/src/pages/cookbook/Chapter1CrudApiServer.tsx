@@ -329,10 +329,18 @@ pub struct ArticleCreateInput {
     pub status: generated::models::ArticleStatus,
     pub title: generated::localized::MultiLang,
     pub summary: generated::localized::MultiLang,
-    #[validate(nested)]
+    #[rf(nested)]
     pub meta: ArticleMetaInput,
 }`}</code>
                         </pre>
+                        <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-900">
+                            PATCH uniqueness pattern (important): if async unique validation needs
+                            the current row ID from <code>Path(id)</code>, keep the path as SSOT,
+                            inject it into a hidden DTO field (for example <code>__target_id</code>
+                            ) via <code>with_target_id(id)</code>, then call{' '}
+                            <code>req.validate_async(&amp;state.db)</code> before workflow/update.
+                            Chapter 2 shows the full scaffolded admin example.
+                        </div>
                     </div>
 
                     {handlerPatternTab === 'thin' ? (

@@ -94,6 +94,12 @@ const RULE_ROWS: RuleRow[] = [
     },
     {
         category: 'Derive',
+        rule: 'contains / does_not_contain',
+        description: 'Checks substring presence/absence in string fields.',
+        sampleId: 'sample-derive-contains',
+    },
+    {
+        category: 'Derive',
         rule: 'phonenumber(field = ...)',
         description: 'Validates phone format against sibling country ISO2 field.',
         sampleId: 'sample-derive-phonenumber',
@@ -138,6 +144,7 @@ const SAMPLE_TITLE: Record<string, string> = {
     'sample-derive-range': 'derive range',
     'sample-derive-email': 'derive email',
     'sample-must-match': 'must_match',
+    'sample-derive-contains': 'contains + does_not_contain',
     'sample-derive-phonenumber': 'derive phonenumber',
     'sample-async-validate': 'AsyncValidate (Unique/Exists/NotExists/PhoneByCountryIso2)',
 }
@@ -232,6 +239,32 @@ export function ValidationRules() {
                     <code>UsernameString</code>) as the single source of truth for runtime
                     validation + OpenAPI schema.
                 </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`use core_web::contracts::rustforge_string_rule_type;
+
+rustforge_string_rule_type! {
+    pub struct UsernameString {
+        #[validate(custom(function = "crate::validation::username::validate_username"))]
+        #[rf(length(min = 3, max = 64))]
+        #[rf(rule = "alpha_dash")]
+        #[rf(openapi_description = "Lowercase username using letters, numbers, _ and -.")]
+    }
+}
+
+#[rustforge_contract]
+#[derive(Debug, Deserialize, Validate, JsonSchema)]
+pub struct AdminLoginInput {
+    #[rf(nested)]
+    pub username: UsernameString,
+    #[rf(length(min = 8, max = 128))]
+    pub password: String,
+}`}</code>
+                </pre>
+                <p>
+                    Wrapper types keep project-specific rules centralized. DTO fields then only
+                    need <code>#[rf(nested)]</code> instead of repeating custom validation and
+                    schema hints.
+                </p>
 
                 <h3>Rustforge Contract Macro (default)</h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
@@ -256,6 +289,36 @@ pub struct AdminCreateInput {
                     OpenAPI will include schema constraints plus field-level{' '}
                     <code>x-rf-rules</code> metadata. Use <code>#[schemars(...)]</code> for
                     explicit overrides when needed.
+                </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`#[rustforge_contract]
+#[derive(Debug, Deserialize, Validate, JsonSchema)]
+#[rf(schema(function = "validate_pair_not_same", skip_on_field_errors = false))]
+pub struct ExampleInput {
+    #[rf(length(min = 3, max = 32))]
+    #[rf(rule = "alpha_dash")]
+    #[rf(rule_override(rule = "alpha_dash", message = "Letters, numbers, _ and - only."))]
+    pub username: String,
+
+    #[rf(async_unique(table = "admin", column = "username"))]
+    pub db_username: String,
+
+    #[rf(openapi_example = 42)]
+    pub priority: i32,
+}`}</code>
+                </pre>
+                <p>
+                    <code>rf(schema(...))</code> generates a struct-level{' '}
+                    <code>#[validate(schema(...))]</code>. <code>rf(async_*)</code> generates an{' '}
+                    <code>AsyncValidate</code> implementation automatically. Use{' '}
+                    <code>rf(rule_override(...))</code> to set message/code for one specific rule
+                    without affecting other rules on the same field.
+                </p>
+                <p>
+                    For update routes where async unique checks must ignore the current row ID from
+                    a path parameter, keep the path ID as the source of truth and inject it into a
+                    hidden DTO field (for example <code>__target_id</code>) before calling{' '}
+                    <code>validate_async</code>.
                 </p>
 
                 <h2>Samples</h2>
@@ -545,6 +608,30 @@ pub struct ResetPasswordInput {
     pub password_confirmation: String,
 }`}</code>
                 </pre>
+
+                <h3 id="sample-derive-contains" className="scroll-mt-24">
+                    <code>contains</code> + <code>does_not_contain</code>
+                </h3>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`use core_web::contracts::rustforge_contract;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use validator::Validate;
+
+#[rustforge_contract]
+#[derive(Debug, Deserialize, Validate, JsonSchema)]
+pub struct InviteInput {
+    #[rf(contains(pattern = "@"))]
+    pub email_like: String,
+
+    #[rf(does_not_contain(pattern = " "))]
+    pub username: String,
+}`}</code>
+                </pre>
+                <p>
+                    These rules do not map to native OpenAPI string keywords, so Rustforge writes
+                    rule hints into field descriptions and <code>x-rf-rules</code> extensions.
+                </p>
 
                 <h3 id="sample-derive-phonenumber" className="scroll-mt-24">
                     <code>phonenumber(field = ...)</code>

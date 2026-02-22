@@ -1312,6 +1312,24 @@ pub mod validation;
 
 pub const APP_CONTRACTS_MOD_RS: &str = r#"pub mod api;
 pub mod datatable;
+pub mod types;
+"#;
+
+pub const APP_CONTRACTS_TYPES_MOD_RS: &str = r#"pub mod username;
+"#;
+
+pub const APP_CONTRACTS_TYPES_USERNAME_RS: &str = r#"use core_web::contracts::rustforge_string_rule_type;
+
+rustforge_string_rule_type! {
+    /// Lowercase username used for admin authentication and admin CRUD inputs.
+    pub struct UsernameString {
+        #[validate(custom(function = "crate::validation::username::validate_username"))]
+        #[rf(length(min = 3, max = 64))]
+        #[rf(rule = "alpha_dash")]
+        #[rf(openapi_description = "Lowercase username using letters, numbers, underscore (_), and hyphen (-).")]
+        #[rf(openapi_example = "admin_user")]
+    }
+}
 "#;
 
 pub const APP_CONTRACTS_API_MOD_RS: &str = r#"pub mod v1;
@@ -1334,27 +1352,27 @@ use core_web::datatable::{
     DataTableEmailExportRequestBase, DataTableFilterFieldDto, DataTableFilterFieldType,
     DataTableQueryRequestBase, DataTableQueryRequestContract, DataTableScopedContract,
 };
+use core_web::contracts::rustforge_contract;
 use generated::models::{AdminType, AdminView};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use validator::Validate;
 
+#[rustforge_contract]
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminDatatableQueryInput {
     #[serde(default)]
-    #[validate(nested)]
+    #[rf(nested)]
     pub base: DataTableQueryRequestBase,
     #[serde(default)]
-    #[validate(length(min = 1, max = 120))]
-    #[schemars(length(min = 1, max = 120))]
+    #[rf(length(min = 1, max = 120))]
     pub q: Option<String>,
     #[serde(default)]
-    #[validate(length(min = 3, max = 64))]
-    #[schemars(length(min = 3, max = 64))]
+    #[rf(length(min = 3, max = 64))]
+    #[rf(rule = "alpha_dash")]
     pub username: Option<String>,
     #[serde(default)]
-    #[validate(length(min = 1, max = 120))]
-    #[schemars(length(min = 1, max = 120))]
+    #[rf(length(min = 1, max = 120))]
     pub email: Option<String>,
     #[serde(default)]
     pub admin_type: Option<AdminType>,
@@ -1406,21 +1424,20 @@ impl DataTableQueryRequestContract for AdminDatatableQueryInput {
     }
 }
 
+#[rustforge_contract]
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminDatatableEmailExportInput {
-    #[validate(nested)]
+    #[rf(nested)]
     pub base: DataTableEmailExportRequestBase,
     #[serde(default)]
-    #[validate(length(min = 1, max = 120))]
-    #[schemars(length(min = 1, max = 120))]
+    #[rf(length(min = 1, max = 120))]
     pub q: Option<String>,
     #[serde(default)]
-    #[validate(length(min = 3, max = 64))]
-    #[schemars(length(min = 3, max = 64))]
+    #[rf(length(min = 3, max = 64))]
+    #[rf(rule = "alpha_dash")]
     pub username: Option<String>,
     #[serde(default)]
-    #[validate(length(min = 1, max = 120))]
-    #[schemars(length(min = 1, max = 120))]
+    #[rf(length(min = 1, max = 120))]
     pub email: Option<String>,
     #[serde(default)]
     pub admin_type: Option<AdminType>,
@@ -1540,51 +1557,61 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
 }
 "#;
 
-pub const APP_CONTRACTS_API_V1_ADMIN_RS: &str = r#"use generated::{models::AdminType, permissions::Permission};
+pub const APP_CONTRACTS_API_V1_ADMIN_RS: &str = r#"use crate::contracts::types::username::UsernameString;
+use core_web::contracts::rustforge_contract;
+use generated::{models::AdminType, permissions::Permission};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
+#[rustforge_contract]
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct CreateAdminInput {
-    #[validate(custom(function = "crate::validation::username::validate_username"))]
-    #[validate(length(min = 3, max = 64))]
-    #[schemars(length(min = 3, max = 64))]
-    pub username: String,
+    #[rf(nested)]
+    #[rf(async_unique(table = "admin", column = "username"))]
+    pub username: UsernameString,
     #[serde(default)]
-    #[validate(email)]
-    #[schemars(email)]
+    #[rf(email)]
     pub email: Option<String>,
-    #[validate(length(min = 1, max = 120))]
-    #[schemars(length(min = 1, max = 120))]
+    #[rf(length(min = 1, max = 120))]
     pub name: String,
     pub admin_type: AdminType,
-    #[validate(length(min = 8, max = 128))]
-    #[schemars(length(min = 8, max = 128))]
+    #[rf(length(min = 8, max = 128))]
     pub password: String,
     #[serde(default)]
     pub abilities: Vec<Permission>,
 }
 
+#[rustforge_contract]
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct UpdateAdminInput {
+    #[serde(skip, default)]
+    __target_id: i64,
     #[serde(default)]
-    #[validate(custom(function = "crate::validation::username::validate_username"))]
-    #[validate(length(min = 3, max = 64))]
-    #[schemars(length(min = 3, max = 64))]
-    pub username: Option<String>,
+    #[rf(nested)]
+    #[rf(async_unique(
+        table = "admin",
+        column = "username",
+        ignore(column = "id", field = "__target_id")
+    ))]
+    pub username: Option<UsernameString>,
     #[serde(default)]
-    #[validate(email)]
-    #[schemars(email)]
+    #[rf(email)]
     pub email: Option<String>,
     #[serde(default)]
-    #[validate(length(min = 1, max = 120))]
-    #[schemars(length(min = 1, max = 120))]
+    #[rf(length(min = 1, max = 120))]
     pub name: Option<String>,
     #[serde(default)]
     pub admin_type: Option<AdminType>,
     #[serde(default)]
     pub abilities: Option<Vec<Permission>>,
+}
+
+impl UpdateAdminInput {
+    pub fn with_target_id(mut self, id: i64) -> Self {
+        self.__target_id = id;
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -1634,66 +1661,63 @@ pub struct AdminDeleteOutput {
 }
 "#;
 
-pub const APP_CONTRACTS_API_V1_ADMIN_AUTH_RS: &str = r#"use schemars::JsonSchema;
+pub const APP_CONTRACTS_API_V1_ADMIN_AUTH_RS: &str = r#"use crate::contracts::types::username::UsernameString;
+use core_web::contracts::rustforge_contract;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 use core_web::auth::AuthClientType;
 use generated::models::AdminType;
 
+#[rustforge_contract]
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminLoginInput {
-    #[validate(custom(function = "crate::validation::username::validate_username"))]
-    #[validate(length(min = 3, max = 64))]
-    #[schemars(length(min = 3, max = 64))]
-    pub username: String,
+    #[rf(nested)]
+    pub username: UsernameString,
 
-    #[validate(length(min = 8, max = 128))]
-    #[schemars(length(min = 8, max = 128))]
+    #[rf(length(min = 8, max = 128))]
     pub password: String,
 
     pub client_type: AuthClientType,
 }
 
+#[rustforge_contract]
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminRefreshInput {
     pub client_type: AuthClientType,
     #[serde(default)]
-    #[validate(length(min = 1, max = 256))]
-    #[schemars(length(min = 1, max = 256))]
+    #[rf(length(min = 1, max = 256))]
     pub refresh_token: Option<String>,
 }
 
+#[rustforge_contract]
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminLogoutInput {
     pub client_type: AuthClientType,
     #[serde(default)]
-    #[validate(length(min = 1, max = 256))]
-    #[schemars(length(min = 1, max = 256))]
+    #[rf(length(min = 1, max = 256))]
     pub refresh_token: Option<String>,
 }
 
+#[rustforge_contract]
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminProfileUpdateInput {
-    #[validate(length(min = 1, max = 120))]
-    #[schemars(length(min = 1, max = 120))]
+    #[rf(length(min = 1, max = 120))]
     pub name: String,
     #[serde(default)]
-    #[validate(email)]
-    #[schemars(email)]
+    #[rf(email)]
     pub email: Option<String>,
 }
 
+#[rustforge_contract]
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminPasswordUpdateInput {
-    #[validate(length(min = 8, max = 128))]
-    #[schemars(length(min = 8, max = 128))]
+    #[rf(length(min = 8, max = 128))]
     pub current_password: String,
-    #[validate(length(min = 8, max = 128))]
-    #[validate(must_match(other = "password_confirmation"))]
-    #[schemars(length(min = 8, max = 128))]
+    #[rf(length(min = 8, max = 128))]
+    #[rf(must_match(other = "password_confirmation"))]
     pub password: String,
-    #[validate(length(min = 8, max = 128))]
-    #[schemars(length(min = 8, max = 128))]
+    #[rf(length(min = 8, max = 128))]
     pub password_confirmation: String,
 }
 
@@ -2105,8 +2129,9 @@ use core_i18n::t;
 use core_web::{
     auth::AuthUser,
     authz::PermissionMode,
-    contracts::ContractJson,
+    contracts::{AsyncContractJson, ContractJson},
     error::AppError,
+    extract::{validation::transform_validation_errors, AsyncValidate},
     openapi::{
         with_permission_check_delete_with, with_permission_check_get_with,
         with_permission_check_patch_with, with_permission_check_post_with, ApiRouter,
@@ -2173,7 +2198,7 @@ async fn detail(
 async fn create(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
-    req: ContractJson<CreateAdminInput>,
+    req: AsyncContractJson<CreateAdminInput>,
 ) -> Result<ApiResponse<AdminOutput>, AppError> {
     let admin = workflow::create(&state, &auth, req.0).await?;
     Ok(ApiResponse::success(AdminOutput::from(admin), &t("Admin created")))
@@ -2185,7 +2210,8 @@ async fn update(
     Path(id): Path<i64>,
     req: ContractJson<UpdateAdminInput>,
 ) -> Result<ApiResponse<AdminOutput>, AppError> {
-    let admin = workflow::update(&state, &auth, id, req.0).await?;
+    let req = validate_update_input(&state, id, req.0).await?;
+    let admin = workflow::update(&state, &auth, id, req).await?;
     Ok(ApiResponse::success(AdminOutput::from(admin), &t("Admin updated")))
 }
 
@@ -2199,6 +2225,21 @@ async fn remove(
         AdminDeleteOutput { deleted: true },
         &t("Admin deleted"),
     ))
+}
+
+async fn validate_update_input(
+    state: &AppApiState,
+    id: i64,
+    req: UpdateAdminInput,
+) -> Result<UpdateAdminInput, AppError> {
+    let req = req.with_target_id(id);
+    if let Err(e) = req.validate_async(&state.db).await {
+        return Err(AppError::Validation {
+            message: t("Validation failed"),
+            errors: transform_validation_errors(e),
+        });
+    }
+    Ok(req)
 }
 "#;
 
@@ -2491,7 +2532,7 @@ use core_i18n::t;
 use core_web::{auth::AuthUser, error::AppError};
 use generated::{
     guards::AdminGuard,
-    models::{Admin, AdminQuery, AdminType, AdminView},
+    models::{Admin, AdminType, AdminView},
     permissions::Permission,
 };
 
@@ -2514,7 +2555,6 @@ pub async fn create(
     req: CreateAdminInput,
 ) -> Result<AdminView, AppError> {
     let username = req.username.trim().to_ascii_lowercase();
-    ensure_username_available(&state.db, &username, None).await?;
 
     let abilities = ensure_assignable_permissions(auth, &req.abilities)?;
 
@@ -2553,7 +2593,6 @@ pub async fn update(
     if let Some(username) = req.username {
         let username = username.trim().to_ascii_lowercase();
         if username != existing.username {
-            ensure_username_available(&state.db, &username, Some(id)).await?;
             update = update.set_username(username);
             touched = true;
         }
@@ -2609,22 +2648,6 @@ pub async fn remove(
         .map_err(AppError::from)?;
     if affected == 0 {
         return Err(AppError::NotFound(t("Admin not found")));
-    }
-    Ok(())
-}
-
-async fn ensure_username_available(
-    db: &sqlx::PgPool,
-    username: &str,
-    exclude_id: Option<i64>,
-) -> Result<(), AppError> {
-    let mut query = AdminQuery::new(DbConn::pool(db), None).where_username(Op::Eq, username.to_string());
-    if let Some(id) = exclude_id {
-        query = query.where_id(Op::Ne, id);
-    }
-    let exists = query.first().await.map_err(AppError::from)?.is_some();
-    if exists {
-        return Err(AppError::BadRequest(t("Username is already taken")));
     }
     Ok(())
 }

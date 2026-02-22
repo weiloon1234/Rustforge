@@ -29,7 +29,14 @@ const sections = [
         items: [
             { title: 'Overview', href: '#/cookbook' },
             { title: 'Chapter 1: CRUD API', href: '#/cookbook-chapter-1-crud-api-server' },
-            { title: 'Chapter 2: Admin Auth', href: '#/cookbook-chapter-2-admin-auth' },
+            {
+                title: 'Chapter 2A: DTO + Validation',
+                href: '#/cookbook-chapter-2-validation-dto',
+            },
+            {
+                title: 'Chapter 2B: Admin Auth',
+                href: '#/cookbook-chapter-2-admin-auth',
+            },
             { title: 'Chapter 3: Jobs Usage', href: '#/cookbook-chapter-3-jobs-usage' },
             { title: 'Chapter 4: Notifications', href: '#/cookbook-chapter-4-notifications' },
             { title: 'Chapter 5: WebSocket Channel', href: '#/cookbook-chapter-5-websocket-channel' },

@@ -13,6 +13,7 @@ import { Cli } from './pages/getting-started/Cli'
 // Cookbook
 import { CookbookOverview } from './pages/cookbook/CookbookOverview'
 import { Chapter1CrudApiServer } from './pages/cookbook/Chapter1CrudApiServer'
+import { Chapter2ValidationDto } from './pages/cookbook/Chapter2ValidationDto'
 import { Chapter2AdminAuth } from './pages/cookbook/Chapter2AdminAuth'
 import { Chapter3JobsUsage } from './pages/cookbook/Chapter3JobsUsage'
 import { Chapter4NotificationsUsage } from './pages/cookbook/Chapter4NotificationsUsage'
@@ -79,8 +80,9 @@ const routeMap: Record<string, ComponentType> = {
     // Cookbook
     '#/cookbook': CookbookOverview,
     '#/cookbook-chapter-1-crud-api-server': Chapter1CrudApiServer,
-    '#/cookbook-chapter-2-validation-dto': Chapter2AdminAuth,
+    '#/cookbook-chapter-2-validation-dto': Chapter2ValidationDto,
     '#/cookbook-chapter-2-admin-auth': Chapter2AdminAuth,
+    '#/cookbook-chapter-2b-admin-auth': Chapter2AdminAuth,
     '#/cookbook-chapter-3-jobs-usage': Chapter3JobsUsage,
     '#/cookbook-chapter-4-notifications': Chapter4NotificationsUsage,
     '#/cookbook-chapter-5-websocket-channel': Chapter5WebsocketChannel,
