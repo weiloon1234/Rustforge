@@ -67,7 +67,8 @@ use std::collections::BTreeMap;
 use core_datatable::DataTableInput;
 use core_web::datatable::{
     DataTableEmailExportRequestBase, DataTableFilterFieldDto, DataTableFilterFieldType,
-    DataTableFilterOptionDto, DataTableQueryRequestBase, DataTableScopedContract,
+    DataTableFilterOptionDto, DataTableQueryRequestBase, DataTableQueryRequestContract,
+    DataTableScopedContract,
 };
 use generated::models::{ArticleStatus, ArticleView};
 use schemars::JsonSchema;
@@ -111,6 +112,16 @@ impl ArticleDatatableQueryInput {
     }
 }
 
+impl DataTableQueryRequestContract for ArticleDatatableQueryInput {
+    fn query_base(&self) -> &DataTableQueryRequestBase {
+        &self.base
+    }
+
+    fn datatable_query_to_input(&self) -> DataTableInput {
+        self.to_input()
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct ArticleDatatableEmailExportInput {
     #[validate(nested)]
@@ -129,10 +140,6 @@ impl DataTableScopedContract for AdminArticleDatatableContract {
 
     fn scoped_key(&self) -> &'static str {
         "admin.article"
-    }
-
-    fn query_to_input(&self, req: &Self::QueryRequest) -> DataTableInput {
-        req.to_input()
     }
 
     fn email_to_input(&self, req: &Self::EmailRequest) -> DataTableInput {
@@ -156,10 +163,6 @@ impl DataTableScopedContract for AdminArticleDatatableContract {
         req.base.export_file_name.clone()
     }
 
-    fn include_meta(&self, req: &Self::QueryRequest) -> bool {
-        req.base.include_meta
-    }
-
     fn filter_rows(&self) -> Vec<Vec<DataTableFilterFieldDto>> {
         vec![
             vec![DataTableFilterFieldDto {
@@ -169,15 +172,7 @@ impl DataTableScopedContract for AdminArticleDatatableContract {
                 label: "Status".to_string(),
                 placeholder: Some("Select status".to_string()),
                 description: None,
-                options: Some(
-                    ArticleStatus::variants()
-                        .iter()
-                        .map(|v| DataTableFilterOptionDto {
-                            label: v.as_str().to_string(),
-                            value: v.as_str().to_string(),
-                        })
-                        .collect(),
-                ),
+                options: Some(ArticleStatus::datatable_filter_options()),
             }],
         ]
     }

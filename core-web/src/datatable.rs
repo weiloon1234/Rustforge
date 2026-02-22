@@ -410,14 +410,34 @@ pub trait DataTableRouteState: Clone + Send + Sync + 'static {
     async fn datatable_context(&self, headers: &HeaderMap) -> DataTableContext;
 }
 
+/// Optional helper contract for query DTOs that embed `DataTableQueryRequestBase`.
+///
+/// Implement this on your query DTO once, then `DataTableScopedContract` can derive
+/// `query_to_input()` and `include_meta()` defaults automatically.
+pub trait DataTableQueryRequestContract: RequestContract {
+    fn query_base(&self) -> &DataTableQueryRequestBase;
+
+    /// Override when the DTO needs to map extra filter fields into `DataTableInput`.
+    fn datatable_query_to_input(&self) -> DataTableInput {
+        self.query_base().to_input()
+    }
+
+    /// Override only when metadata behavior differs from `base.include_meta`.
+    fn datatable_include_meta(&self) -> bool {
+        self.query_base().include_meta
+    }
+}
+
 pub trait DataTableScopedContract: Clone + Send + Sync + 'static {
-    type QueryRequest: RequestContract;
+    type QueryRequest: DataTableQueryRequestContract;
     type EmailRequest: RequestContract;
     type Row: ResponseContract + DeserializeOwned + Send + Sync + 'static;
 
     fn scoped_key(&self) -> &'static str;
 
-    fn query_to_input(&self, req: &Self::QueryRequest) -> DataTableInput;
+    fn query_to_input(&self, req: &Self::QueryRequest) -> DataTableInput {
+        req.datatable_query_to_input()
+    }
 
     fn email_to_input(&self, req: &Self::EmailRequest) -> DataTableInput;
 
@@ -431,8 +451,8 @@ pub trait DataTableScopedContract: Clone + Send + Sync + 'static {
         None
     }
 
-    fn include_meta(&self, _req: &Self::QueryRequest) -> bool {
-        true
+    fn include_meta(&self, req: &Self::QueryRequest) -> bool {
+        req.datatable_include_meta()
     }
 
     fn include_default_created_at_range(&self) -> bool {

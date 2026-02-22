@@ -1295,7 +1295,8 @@ pub const APP_CONTRACTS_DATATABLE_ADMIN_ADMIN_RS: &str = r#"use std::collections
 use core_datatable::DataTableInput;
 use core_web::datatable::{
     DataTableEmailExportRequestBase, DataTableFilterFieldDto, DataTableFilterFieldType,
-    DataTableFilterOptionDto, DataTableQueryRequestBase, DataTableScopedContract,
+    DataTableFilterOptionDto, DataTableQueryRequestBase, DataTableQueryRequestContract,
+    DataTableScopedContract,
 };
 use generated::models::{AdminType, AdminView};
 use schemars::JsonSchema;
@@ -1356,6 +1357,16 @@ impl AdminDatatableQueryInput {
 
         input.params.extend(params);
         input
+    }
+}
+
+impl DataTableQueryRequestContract for AdminDatatableQueryInput {
+    fn query_base(&self) -> &DataTableQueryRequestBase {
+        &self.base
+    }
+
+    fn datatable_query_to_input(&self) -> DataTableInput {
+        self.to_input()
     }
 }
 
@@ -1432,10 +1443,6 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
         "Admin Account"
     }
 
-    fn query_to_input(&self, req: &Self::QueryRequest) -> DataTableInput {
-        req.to_input()
-    }
-
     fn email_to_input(&self, req: &Self::EmailRequest) -> DataTableInput {
         req.to_input()
     }
@@ -1450,10 +1457,6 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
 
     fn export_file_name(&self, req: &Self::EmailRequest) -> Option<String> {
         req.base.export_file_name.clone()
-    }
-
-    fn include_meta(&self, req: &Self::QueryRequest) -> bool {
-        req.base.include_meta
     }
 
     fn filter_rows(&self) -> Vec<Vec<DataTableFilterFieldDto>> {
@@ -1494,15 +1497,7 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
                 label: "Admin Type".to_string(),
                 placeholder: Some("Choose type".to_string()),
                 description: None,
-                options: Some(
-                    AdminType::variants()
-                        .iter()
-                        .map(|ty| DataTableFilterOptionDto {
-                            label: ty.as_str().to_string(),
-                            value: ty.as_str().to_string(),
-                        })
-                        .collect(),
-                ),
+                options: Some(AdminType::datatable_filter_options()),
             }],
         ]
     }
