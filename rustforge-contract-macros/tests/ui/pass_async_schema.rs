@@ -1,6 +1,4 @@
 use rustforge_contract_macros::rustforge_contract;
-use serde::Deserialize;
-use validator::Validate;
 
 fn validate_pair(value: &DemoInput) -> Result<(), validator::ValidationError> {
     if value.a == value.b {
@@ -12,11 +10,9 @@ fn validate_pair(value: &DemoInput) -> Result<(), validator::ValidationError> {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, schemars::JsonSchema)]
 #[rf(schema(function = "validate_pair"))]
 struct DemoInput {
-    #[rf(async_unique(table = "demo", column = "a"))]
-    #[rf(rule_override(rule = "async_unique", message = "Already used"))]
+    #[rf(async_unique(table = "demo", column = "a", message = "Already used"))]
     a: String,
     b: String,
 }
