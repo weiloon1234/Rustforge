@@ -4,7 +4,7 @@ use anyhow::{bail, Context};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use clap::Parser;
 use colored::*;
-use rand::RngCore;
+use rand::Fill;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
 
 fn generate_app_key() -> String {
     let mut key = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut key);
+    key.fill(&mut rand::rng());
     format!("base64:{}", STANDARD.encode(key))
 }
 
