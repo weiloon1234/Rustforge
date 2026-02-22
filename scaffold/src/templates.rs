@@ -1332,8 +1332,7 @@ pub const APP_CONTRACTS_DATATABLE_ADMIN_ADMIN_RS: &str = r#"use std::collections
 use core_datatable::DataTableInput;
 use core_web::datatable::{
     DataTableEmailExportRequestBase, DataTableFilterFieldDto, DataTableFilterFieldType,
-    DataTableFilterOptionDto, DataTableQueryRequestBase, DataTableQueryRequestContract,
-    DataTableScopedContract,
+    DataTableQueryRequestBase, DataTableQueryRequestContract, DataTableScopedContract,
 };
 use generated::models::{AdminType, AdminView};
 use schemars::JsonSchema;

@@ -67,8 +67,7 @@ use std::collections::BTreeMap;
 use core_datatable::DataTableInput;
 use core_web::datatable::{
     DataTableEmailExportRequestBase, DataTableFilterFieldDto, DataTableFilterFieldType,
-    DataTableFilterOptionDto, DataTableQueryRequestBase, DataTableQueryRequestContract,
-    DataTableScopedContract,
+    DataTableQueryRequestBase, DataTableQueryRequestContract, DataTableScopedContract,
 };
 use generated::models::{ArticleStatus, ArticleView};
 use schemars::JsonSchema;

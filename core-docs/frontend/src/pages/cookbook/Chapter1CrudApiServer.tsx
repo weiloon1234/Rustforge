@@ -295,8 +295,9 @@ with_permission_check_get(
                                 <code>app/src/contracts/api/v1/article_category.rs</code>.
                             </li>
                             <li>
-                                DTO rule: declare runtime + OpenAPI constraints together using{' '}
-                                <code>#[validate(...)]</code> and <code>#[schemars(...)]</code>.
+                                DTO rule (default): use <code>#[rustforge_contract]</code> +{' '}
+                                <code>#[rf(...)]</code> so runtime validation + OpenAPI stay
+                                aligned from one field-attribute style.
                             </li>
                             <li>
                                 Write flows use explicit transaction scope:{' '}
@@ -308,17 +309,20 @@ with_permission_check_get(
                             File: <code>app/src/contracts/api/v1/article.rs</code> (input excerpt)
                         </h3>
                         <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                            <code className="language-rust">{`#[derive(Debug, Clone, serde::Deserialize, validator::Validate, schemars::JsonSchema)]
+                            <code className="language-rust">{`use core_web::contracts::rustforge_contract;
+
+#[rustforge_contract]
+#[derive(Debug, Clone, serde::Deserialize, validator::Validate, schemars::JsonSchema)]
 pub struct ArticleMetaInput {
-    #[validate(length(min = 1, max = 120))]
-    #[schemars(length(min = 1, max = 120))]
+    #[rf(length(min = 1, max = 120))]
+    #[rf(rule = "required_trimmed")]
     pub seo_title: String,
-    #[validate(range(min = 0, max = 600))]
-    #[schemars(range(min = 0, max = 600))]
+    #[rf(range(min = 0, max = 600))]
     pub reading_minutes: i32,
     pub is_featured: bool,
 }
 
+#[rustforge_contract]
 #[derive(Debug, Clone, serde::Deserialize, validator::Validate, schemars::JsonSchema)]
 pub struct ArticleCreateInput {
     pub category_id: i64,

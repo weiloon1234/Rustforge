@@ -1,0 +1,5 @@
+error: rf length(equal = ...) cannot be combined with min/max
+ --> tests/ui/fail_conflict_length.rs:8:5
+  |
+8 |     #[rf(length(min = 1, equal = 3))]
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

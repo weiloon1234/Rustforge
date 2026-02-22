@@ -1,9 +1,20 @@
 use std::borrow::Cow;
+pub mod meta;
 
 use anyhow::Result;
 use core_db::{common::sql::DbConn, platform::countries::repo::CountryRepo};
 use sqlx::Row;
 use validator::{ValidateEmail, ValidationError};
+
+pub fn regex_pattern(value: &str, pattern: &str) -> Result<(), ValidationError> {
+    let regex = regex::Regex::new(pattern)
+        .map_err(|_| validation_error("regex", "Invalid regex pattern."))?;
+    if regex.is_match(value) {
+        Ok(())
+    } else {
+        Err(validation_error("regex", "Invalid format."))
+    }
+}
 
 /// A trait for validation rules that require async database access.
 #[async_trait::async_trait]

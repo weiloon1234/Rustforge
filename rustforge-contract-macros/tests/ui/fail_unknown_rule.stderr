@@ -1,0 +1,5 @@
+error: Unknown Rustforge built-in rule `not_a_real_rule`
+ --> tests/ui/fail_unknown_rule.rs:8:5
+  |
+8 |     #[rf(rule = "not_a_real_rule")]
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

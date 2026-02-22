@@ -75,28 +75,30 @@ let api_router = ApiRouter::new().api_route(
                 </p>
                 <ul>
                     <li>
-                        Runtime checks come from <code>validator</code> attributes and optional async
-                        validation.
+                        Runtime checks come from <code>validator</code> attributes (often generated
+                        by <code>#[rustforge_contract]</code>) and optional async validation.
                     </li>
                     <li>
-                        OpenAPI request constraints come from <code>JsonSchema</code> and{' '}
-                        <code>#[schemars(...)]</code> annotations.
+                        OpenAPI request constraints come from <code>JsonSchema</code>, plus
+                        Rustforge-generated field hints/extensions (<code>x-rf-rules</code>) and
+                        optional <code>#[schemars(...)]</code> overrides.
                     </li>
                 </ul>
                 <p>
-                    <strong>Important:</strong> <code>#[validate(...)]</code> alone does not
-                    auto-write OpenAPI length/range constraints. Add matching{' '}
-                    <code>#[schemars(...)]</code> rules explicitly.
+                    <strong>Default:</strong> use <code>#[rustforge_contract]</code> +{' '}
+                    <code>#[rf(...)]</code>. Use raw <code>#[validate(...)]</code> +{' '}
+                    <code>#[schemars(...)]</code> only when you need full manual control.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`#[derive(Debug, Deserialize, Validate, JsonSchema)]
+                    <code className="language-rust">{`use core_web::contracts::rustforge_contract;
+
+#[rustforge_contract]
+#[derive(Debug, Deserialize, Validate, JsonSchema)]
 pub struct ArticleCreateInput {
-    #[validate(range(min = 1))]
-    #[schemars(range(min = 1))]
+    #[rf(range(min = 1))]
     pub category_id: i64,
 
-    #[validate(length(min = 1, max = 32))]
-    #[schemars(length(min = 1, max = 32))]
+    #[rf(length(min = 1, max = 32))]
     pub status: generated::models::ArticleStatus,
 
     pub title: generated::localized::MultiLang,
@@ -108,7 +110,8 @@ pub struct ArticleCreateInput {
                 </pre>
                 <p>
                     With this shape, OpenAPI can display enums, nested objects, and numeric/string
-                    constraints in request schemas.
+                    constraints in request schemas. Rustforge also adds field-level{' '}
+                    <code>x-rf-rules</code> extensions for frontend/tooling consumers.
                 </p>
 
                 <h2>Route Introspection</h2>

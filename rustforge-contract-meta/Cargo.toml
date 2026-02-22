@@ -1,0 +1,9 @@
+[package]
+name = "rustforge-contract-meta"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rustforge_contract_meta"
+path = "src/lib.rs"
+

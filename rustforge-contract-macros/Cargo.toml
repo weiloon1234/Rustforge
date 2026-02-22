@@ -1,0 +1,20 @@
+[package]
+name = "rustforge-contract-macros"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { workspace = true, features = ["full"] }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+rustforge-contract-meta = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+trybuild = "1"
+serde = { workspace = true, features = ["derive"] }
+schemars = { version = "0.8.21", features = ["uuid1", "chrono"] }
+validator = { workspace = true }

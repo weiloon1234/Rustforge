@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
+  "rustforge-contract-meta",
+  "rustforge-contract-macros",
   "core-i18n",
   "bootstrap",
   "core-config",
@@ -102,6 +104,7 @@ walkdir = "2"
 
 # --- internal crates ---
 core-jobs = { path = "core-jobs" }
+rustforge-contract-meta = { path = "rustforge-contract-meta" }
 
 [patch.crates-io]
 validator = { path = "vendor/validator" }

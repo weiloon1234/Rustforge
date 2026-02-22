@@ -25,6 +25,8 @@ sqlx = { workspace = true, features = [
     "runtime-tokio-rustls",
 ] }
 validator = { workspace = true }
+rustforge-contract-meta = { workspace = true }
+rustforge-contract-macros = { path = "../rustforge-contract-macros" }
 axum-extra = { version = "0.12.5", features = ["typed-header"] }
 async-trait.workspace = true
 uuid.workspace = true
@@ -46,3 +48,4 @@ axum-client-ip = "1.3.1"
 aide = { version = "0.14.1", features = ["axum", "macros", "redoc", "axum-json", "axum-form", "axum-query", "axum-multipart"] }
 schemars = { version = "0.8.21", features = ["uuid1", "chrono"] }
 core-mailer = { path = "../core-mailer" }
+regex = "1.10"

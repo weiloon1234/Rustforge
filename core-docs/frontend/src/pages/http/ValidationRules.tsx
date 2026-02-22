@@ -163,8 +163,8 @@ export function ValidationRules() {
                 <h2>Rule Index</h2>
                 <p>
                     Click <strong>Sample</strong> in any row to jump to runnable DTO examples.
-                    Every sample includes <code>schemars</code> so OpenAPI stays aligned with
-                    runtime validation.
+                    Most samples below intentionally use the raw <code>validator</code> +{' '}
+                    <code>schemars</code> style so you can see the underlying behavior directly.
                 </p>
 
                 <div className="not-prose overflow-x-auto">
@@ -221,8 +221,41 @@ export function ValidationRules() {
                     </li>
                 </ul>
                 <p>
-                    Rules like <code>#[validate(custom(...))]</code> are runtime-only. Add
-                    matching <code>#[schemars(...)]</code> hints so OpenAPI shows constraints.
+                    Rustforge default DTO style is <code>#[rustforge_contract]</code> +{' '}
+                    <code>#[rf(...)]</code>, which generates runtime validation attributes and
+                    OpenAPI hints/extensions from one field-attribute style. Raw{' '}
+                    <code>#[validate(...)]</code> + <code>#[schemars(...)]</code> remains the
+                    manual fallback.
+                </p>
+                <p>
+                    Project-specific reusable rules should use wrapper types (for example{' '}
+                    <code>UsernameString</code>) as the single source of truth for runtime
+                    validation + OpenAPI schema.
+                </p>
+
+                <h3>Rustforge Contract Macro (default)</h3>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`use core_web::contracts::rustforge_contract;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use validator::Validate;
+
+#[rustforge_contract]
+#[derive(Debug, Deserialize, Validate, JsonSchema)]
+pub struct AdminCreateInput {
+    #[rf(length(min = 3, max = 32))]
+    #[rf(rule = "alpha_dash")]
+    pub username: String,
+
+    #[rf(email)]
+    #[rf(length(min = 5, max = 120))]
+    pub email: Option<String>,
+}`}</code>
+                </pre>
+                <p>
+                    OpenAPI will include schema constraints plus field-level{' '}
+                    <code>x-rf-rules</code> metadata. Use <code>#[schemars(...)]</code> for
+                    explicit overrides when needed.
                 </p>
 
                 <h2>Samples</h2>

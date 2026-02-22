@@ -3,6 +3,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use validator::Validate;
 
 use crate::extract::{AsyncValidatedJson, ValidatedJson};
+pub use rustforge_contract_macros::rustforge_contract;
 
 /// Canonical request DTO contract for API boundaries.
 /// Use this as the app-level standard: one type drives runtime validation and OpenAPI schema.

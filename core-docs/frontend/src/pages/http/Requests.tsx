@@ -56,15 +56,17 @@ async fn create(
 
                 <h2>Sync + Async Validation</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`use core_web::extract::{AsyncValidate, AsyncValidatedJson};
+                    <code className="language-rust">{`use core_web::contracts::rustforge_contract;
+use core_web::extract::{AsyncValidate, AsyncValidatedJson};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use validator::{Validate, ValidationErrors};
 
+#[rustforge_contract]
 #[derive(Debug, Deserialize, Validate, JsonSchema)]
 pub struct RegisterInput {
-    #[validate(length(min = 3, max = 32))]
-    #[schemars(length(min = 3, max = 32))]
+    #[rf(length(min = 3, max = 32))]
+    #[rf(rule = "alpha_dash")]
     pub username: String,
 }
 
@@ -88,14 +90,17 @@ async fn register(
                 <h2>OpenAPI Mapping Rules</h2>
                 <p>
                     OpenAPI request schema is generated from <code>JsonSchema</code>. Runtime
-                    validation runs from <code>validator</code>.
+                    validation runs from <code>validator</code>. Rustforge default DTO style is
+                    <code>#[rustforge_contract]</code> + <code>#[rf(...)]</code>.
                 </p>
                 <ul className="list-disc pl-5">
                     <li>
-                        For runtime checks: use <code>#[validate(...)]</code>.
+                        Default: use <code>#[rf(...)]</code> on fields and let the macro emit
+                        runtime + OpenAPI hints.
                     </li>
                     <li>
-                        For OpenAPI constraints display: use <code>#[schemars(...)]</code>.
+                        Fallback/escape hatch: use raw <code>#[validate(...)]</code> and{' '}
+                        <code>#[schemars(...)]</code> manually.
                     </li>
                     <li>
                         For enum dropdown/options: use enum types that derive{' '}
@@ -103,20 +108,23 @@ async fn register(
                     </li>
                 </ul>
                 <p>
-                    <strong>Important:</strong> validator attributes alone do not automatically
-                    annotate OpenAPI constraints. Add schemars constraints explicitly.
+                    <strong>Important:</strong> raw <code>#[validate(...)]</code> does not always
+                    fully describe OpenAPI constraints. If you skip <code>#[rf(...)]</code>, add
+                    matching <code>#[schemars(...)]</code> hints explicitly.
                 </p>
 
                 <h2>Common Patterns</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`#[derive(Debug, Deserialize, Validate, JsonSchema)]
+                    <code className="language-rust">{`use core_web::contracts::rustforge_contract;
+
+#[rustforge_contract]
+#[derive(Debug, Deserialize, Validate, JsonSchema)]
 pub struct ExampleInput {
-    #[validate(range(min = 1))]
-    #[schemars(range(min = 1))]
+    #[rf(range(min = 1))]
     pub owner_id: i64,
 
-    #[validate(length(min = 1, max = 64))]
-    #[schemars(length(min = 1, max = 64))]
+    #[rf(length(min = 1, max = 64))]
+    #[rf(rule = "required_trimmed")]
     pub title: String,
 }`}</code>
                 </pre>

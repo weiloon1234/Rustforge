@@ -41,56 +41,55 @@ export function Chapter2AdminAuth() {
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use core_web::auth::AuthClientType;
+use core_web::contracts::rustforge_contract;
 use generated::models::AdminType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
+#[rustforge_contract]
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminLoginInput {
-    #[validate(custom(function = "crate::validation::username::validate_username"))]
-    #[validate(length(min = 3, max = 64))]
-    #[schemars(length(min = 3, max = 64))]
+    #[rf(length(min = 3, max = 64))]
+    #[rf(rule = "alpha_dash")]
+    #[rf(openapi_hint = "Use a project-level UsernameString wrapper type for reusable username rules.")]
     pub username: String,
 
-    #[validate(length(min = 8, max = 128))]
-    #[schemars(length(min = 8, max = 128))]
+    #[rf(length(min = 8, max = 128))]
     pub password: String,
 
     pub client_type: AuthClientType,
 }
 
+#[rustforge_contract]
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminRefreshInput {
     pub client_type: AuthClientType,
     #[serde(default)]
-    #[validate(length(min = 1, max = 256))]
-    #[schemars(length(min = 1, max = 256))]
+    #[rf(length(min = 1, max = 256))]
     pub refresh_token: Option<String>,
 }
 
+#[rustforge_contract]
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminProfileUpdateInput {
-    #[validate(length(min = 1, max = 120))]
-    #[schemars(length(min = 1, max = 120))]
+    #[rf(length(min = 1, max = 120))]
+    #[rf(rule = "required_trimmed")]
     pub name: String,
     #[serde(default)]
-    #[validate(email)]
-    #[schemars(email)]
+    #[rf(email)]
     pub email: Option<String>,
 }
 
+#[rustforge_contract]
 #[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminPasswordUpdateInput {
-    #[validate(length(min = 8, max = 128))]
-    #[schemars(length(min = 8, max = 128))]
+    #[rf(length(min = 8, max = 128))]
     pub current_password: String,
-    #[validate(length(min = 8, max = 128))]
+    #[rf(length(min = 8, max = 128))]
     #[validate(must_match(other = "password_confirmation"))]
-    #[schemars(length(min = 8, max = 128))]
     pub password: String,
-    #[validate(length(min = 8, max = 128))]
-    #[schemars(length(min = 8, max = 128))]
+    #[rf(length(min = 8, max = 128))]
     pub password_confirmation: String,
 }
 
@@ -117,6 +116,11 @@ pub struct AdminMeOutput {
     pub scopes: Vec<String>,
 }`}</code>
                 </pre>
+                <p className="text-sm text-gray-600">
+                    Use raw <code>#[validate(...)]</code> / <code>#[schemars(...)]</code> only for
+                    rules not covered by <code>#[rf(...)]</code> yet (for example{' '}
+                    <code>must_match</code>) or for explicit overrides.
+                </p>
 
                 <h2>Step 2: Workflow Scope Grant</h2>
                 <h3>
