@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote, ToTokens};
-use rustforge_contract_meta::{builtin_rule_meta, render_template, BuiltinRuleKind};
+use rustforge_contract_meta::{builtin_rule_meta, render_template, BuiltinRuleArgs, BuiltinRuleKind};
 use syn::{
     parse::Parser, parse_macro_input, punctuated::Punctuated, Attribute, Expr, Field, Fields,
     Ident, ItemStruct, Lit, LitBool, LitFloat, LitStr, Meta, MetaList, MetaNameValue, Path, Token,
@@ -40,6 +40,8 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
     let shadow_ident = format_ident!("__RustforgeContractSchema_{}", struct_ident);
     let (container_rf_cfg, item_attrs_without_rf) = parse_rf_container_attrs(&item.attrs)?;
 
+    let auto_inject_set = ["Debug", "Clone", "Deserialize", "Validate", "JsonSchema"];
+    let mut user_extra_derives: Vec<Meta> = Vec::new();
     let mut container_attrs_for_shadow: Vec<Attribute> = Vec::new();
     let mut original_container_attrs: Vec<Attribute> = Vec::new();
     for attr in item_attrs_without_rf.iter() {
@@ -47,8 +49,19 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
             continue;
         }
         if attr.path().is_ident("derive") {
-            if let Some(derive_attr) = strip_jsonschema_from_derive_attr(attr)? {
-                original_container_attrs.push(derive_attr);
+            let metas =
+                attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+            for m in metas {
+                if let Meta::Path(p) = &m {
+                    let ident = p
+                        .segments
+                        .last()
+                        .map(|s| s.ident.to_string())
+                        .unwrap_or_default();
+                    if !auto_inject_set.contains(&ident.as_str()) {
+                        user_extra_derives.push(m);
+                    }
+                }
             }
             continue;
         }
@@ -66,6 +79,11 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
     for schema_rule in &container_rf_cfg.schema_rules {
         original_container_attrs.push(build_validate_schema_attr(schema_rule)?);
     }
+    let extra_derives = if user_extra_derives.is_empty() {
+        quote! {}
+    } else {
+        quote! { , #(#user_extra_derives),* }
+    };
     item.attrs = original_container_attrs;
 
     let mut original_fields_tokens = Vec::new();
@@ -342,6 +360,38 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
             ));
         }
 
+        for custom in &rf_cfg.custom_rules {
+            let fn_path = &custom.function;
+            let mut nested = vec![quote! { function = #fn_path }];
+            if let Some(msg) = &custom.message {
+                nested.push(quote! { message = #msg });
+            }
+            if let Some(code) = &custom.code {
+                nested.push(quote! { code = #code });
+            }
+            generated_validate_attrs
+                .push(mk_attr(quote! { #[validate(custom(#(#nested),*))] })?);
+
+            let mut params = BTreeMap::new();
+            params.insert(
+                "function".to_string(),
+                JsonParam::String(fn_path.to_token_stream().to_string()),
+            );
+            field_rule_extensions.push(RuleExtensionSpec {
+                key: "custom".to_string(),
+                source: "app".to_string(),
+                params,
+                default_message: custom.message.clone(),
+                description: custom.description.clone(),
+            });
+            if let Some(desc) = &custom.description {
+                field_desc_parts.push(desc.clone());
+            }
+            if let Some(pat) = &custom.pattern {
+                field_pattern_patch.get_or_insert_with(|| pat.clone());
+            }
+        }
+
         for async_rule in &rf_cfg.async_rules {
             field_desc_parts.push(async_rule.kind.default_desc(&async_rule.table, &async_rule.column));
             field_rule_extensions.push(RuleExtensionSpec::async_db(async_rule));
@@ -505,6 +555,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
     let expanded = quote! {
         #(#helper_fns)*
 
+        #[derive(::std::fmt::Debug, ::std::clone::Clone, ::serde::Deserialize, ::validator::Validate #extra_derives)]
         #(#original_attrs)*
         #vis struct #struct_ident #original_generics {
             #(#original_fields_tokens,)*
@@ -1004,7 +1055,7 @@ fn parse_rf_field(
         }
         rf_attr_tokens.push(attr.to_token_stream());
         let metas = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
-        let mut pending_builtin: Option<BuiltinRuleUse> = None;
+        let mut local_builtin: Option<BuiltinRuleUse> = None;
         let mut local_length: Option<LengthArgs> = None;
         let mut local_range: Option<RangeArgs> = None;
         let mut local_regex: Option<String> = None;
@@ -1016,143 +1067,168 @@ fn parse_rf_field(
         let mut local_nested = false;
         let mut local_must_match: Option<String> = None;
         let mut local_async_rules: Vec<AsyncDbRuleUse> = Vec::new();
-        let mut local_values: Option<Vec<String>> = None;
         let mut local_message: Option<String> = None;
         let mut local_code: Option<String> = None;
         let mut local_rule_keys: Vec<String> = Vec::new();
 
         for meta in metas {
             match meta {
-                Meta::Path(path) if path.is_ident("email") => {
+                // --- Parameterless core rules ---
+                Meta::Path(ref path) if path.is_ident("email") => {
                     local_email = true;
                     local_rule_keys.push("email".to_string());
                 }
-                Meta::Path(path) if path.is_ident("url") => {
+                Meta::Path(ref path) if path.is_ident("url") => {
                     local_url = true;
                     local_rule_keys.push("url".to_string());
                 }
-                Meta::Path(path) if path.is_ident("required") => {
+                Meta::Path(ref path) if path.is_ident("required") => {
                     local_required = true;
                     local_rule_keys.push("required".to_string());
                 }
-                Meta::Path(path) if path.is_ident("nested") => {
+                Meta::Path(ref path) if path.is_ident("nested") => {
                     local_nested = true;
                     local_rule_keys.push("nested".to_string());
                 }
-                Meta::List(list) if list.path.is_ident("length") => {
+                // --- Parameterless builtins from registry ---
+                Meta::Path(ref path) => {
+                    let name = path.get_ident().map(|i| i.to_string()).unwrap_or_default();
+                    if let Some(meta_entry) = builtin_rule_meta(&name) {
+                        if meta_entry.args != BuiltinRuleArgs::None {
+                            return Err(syn::Error::new_spanned(
+                                path,
+                                format!("#[rf({})] requires arguments", name),
+                            ));
+                        }
+                        local_builtin = Some(BuiltinRuleUse {
+                            key: name.clone(),
+                            values: vec![],
+                            format: None,
+                            field: None,
+                        });
+                        local_rule_keys.push(name);
+                    } else {
+                        return Err(syn::Error::new_spanned(
+                            path,
+                            "unsupported #[rf(...)] syntax",
+                        ));
+                    }
+                }
+                // --- Parameterized core rules ---
+                Meta::List(ref list) if list.path.is_ident("length") => {
                     if local_length.is_some() || cfg.length.is_some() {
                         return Err(syn::Error::new_spanned(list, "duplicate rf length"));
                     }
-                    local_length = Some(parse_length_args(&list)?);
+                    local_length = Some(parse_length_args(list)?);
                     local_rule_keys.push("length".to_string());
                 }
-                Meta::List(list) if list.path.is_ident("range") => {
+                Meta::List(ref list) if list.path.is_ident("range") => {
                     if local_range.is_some() || cfg.range.is_some() {
                         return Err(syn::Error::new_spanned(list, "duplicate rf range"));
                     }
-                    local_range = Some(parse_range_args(&list)?);
+                    local_range = Some(parse_range_args(list)?);
                     local_rule_keys.push("range".to_string());
                 }
-                Meta::List(list) if list.path.is_ident("regex") => {
+                Meta::List(ref list) if list.path.is_ident("regex") => {
                     if local_regex.is_some() || cfg.regex_pattern.is_some() {
                         return Err(syn::Error::new_spanned(list, "duplicate rf regex"));
                     }
-                    local_regex = Some(parse_regex_pattern(&list)?);
+                    local_regex = Some(parse_regex_pattern(list)?);
                     local_rule_keys.push("regex".to_string());
                 }
-                Meta::List(list) if list.path.is_ident("contains") => {
+                Meta::List(ref list) if list.path.is_ident("contains") => {
                     if local_contains.is_some() || cfg.contains_pattern.is_some() {
                         return Err(syn::Error::new_spanned(list, "duplicate rf contains"));
                     }
-                    local_contains = Some(parse_contains_pattern(&list)?);
+                    local_contains = Some(parse_contains_pattern(list)?);
                     local_rule_keys.push("contains".to_string());
                 }
-                Meta::List(list) if list.path.is_ident("does_not_contain") => {
+                Meta::List(ref list) if list.path.is_ident("does_not_contain") => {
                     if local_does_not_contain.is_some() || cfg.does_not_contain_pattern.is_some() {
                         return Err(syn::Error::new_spanned(
                             list,
                             "duplicate rf does_not_contain",
                         ));
                     }
-                    local_does_not_contain = Some(parse_does_not_contain_pattern(&list)?);
+                    local_does_not_contain = Some(parse_does_not_contain_pattern(list)?);
                     local_rule_keys.push("does_not_contain".to_string());
                 }
-                Meta::List(list) if list.path.is_ident("must_match") => {
+                Meta::List(ref list) if list.path.is_ident("must_match") => {
                     if local_must_match.is_some() || cfg.must_match_other.is_some() {
                         return Err(syn::Error::new_spanned(list, "duplicate rf must_match"));
                     }
-                    local_must_match = Some(parse_must_match_other(&list)?);
+                    local_must_match = Some(parse_must_match_other(list)?);
                     local_rule_keys.push("must_match".to_string());
                 }
-                Meta::List(list) if list.path.is_ident("async_unique") => {
-                    local_async_rules.push(parse_async_db_rule(&list, AsyncDbRuleKind::Unique)?);
+                // --- Async DB rules ---
+                Meta::List(ref list) if list.path.is_ident("async_unique") => {
+                    local_async_rules.push(parse_async_db_rule(list, AsyncDbRuleKind::Unique)?);
                     local_rule_keys.push("async_unique".to_string());
                 }
-                Meta::List(list) if list.path.is_ident("async_exists") => {
-                    local_async_rules.push(parse_async_db_rule(&list, AsyncDbRuleKind::Exists)?);
+                Meta::List(ref list) if list.path.is_ident("async_exists") => {
+                    local_async_rules.push(parse_async_db_rule(list, AsyncDbRuleKind::Exists)?);
                     local_rule_keys.push("async_exists".to_string());
                 }
-                Meta::List(list) if list.path.is_ident("async_not_exists") => {
+                Meta::List(ref list) if list.path.is_ident("async_not_exists") => {
                     local_async_rules.push(parse_async_db_rule(
-                        &list,
+                        list,
                         AsyncDbRuleKind::NotExists,
                     )?);
                     local_rule_keys.push("async_not_exists".to_string());
                 }
-                Meta::List(list) if list.path.is_ident("rule_override") => {
-                    let (rule_key, override_spec) = parse_rule_override(&list)?;
-                    cfg.rule_overrides.insert(rule_key, override_spec);
+                // --- custom() rule ---
+                Meta::List(ref list) if list.path.is_ident("custom") => {
+                    cfg.custom_rules.push(parse_custom_rule(list)?);
                 }
-                Meta::List(list) if list.path.is_ident("values") => {
-                    local_values = Some(parse_values_list(&list)?);
+                // --- openapi() grouped ---
+                Meta::List(ref list) if list.path.is_ident("openapi") => {
+                    parse_openapi_group(list, &mut cfg)?;
                 }
-                Meta::NameValue(nv) if nv.path.is_ident("rule") => {
-                    let key = lit_str_from_expr(&nv.value, "rule")?.value();
-                    pending_builtin = Some(BuiltinRuleUse {
-                        key,
-                        values: Vec::new(),
-                        format: None,
-                        field: None,
-                    });
-                }
-                Meta::NameValue(nv) if nv.path.is_ident("format") => {
-                    let value = lit_str_from_expr(&nv.value, "format")?.value();
-                    if let Some(rule) = pending_builtin.as_mut() {
-                        rule.format = Some(value);
-                    } else {
-                        cfg.openapi_format = Some(value);
+                // --- Core rules in list form for message/code override ---
+                Meta::List(ref list)
+                    if list.path.is_ident("email")
+                        || list.path.is_ident("url")
+                        || list.path.is_ident("required")
+                        || list.path.is_ident("nested") =>
+                {
+                    let name = list.path.get_ident().unwrap().to_string();
+                    let (msg, code) = parse_message_code_from_list(list)?;
+                    match name.as_str() {
+                        "email" => local_email = true,
+                        "url" => local_url = true,
+                        "required" => local_required = true,
+                        "nested" => local_nested = true,
+                        _ => unreachable!(),
+                    }
+                    local_rule_keys.push(name.clone());
+                    let entry = cfg.rule_overrides.entry(name).or_default();
+                    if let Some(m) = msg {
+                        entry.message = Some(m);
+                    }
+                    if let Some(c) = code {
+                        entry.code = Some(c);
                     }
                 }
-                Meta::NameValue(nv) if nv.path.is_ident("field") => {
-                    let value = lit_str_from_expr(&nv.value, "field")?.value();
-                    if let Some(rule) = pending_builtin.as_mut() {
-                        rule.field = Some(value);
+                // --- Parameterized builtins from registry ---
+                Meta::List(ref list) => {
+                    let name = list.path.get_ident().map(|i| i.to_string()).unwrap_or_default();
+                    if let Some(meta_entry) = builtin_rule_meta(&name) {
+                        let builtin = parse_builtin_from_list(list, meta_entry)?;
+                        local_rule_keys.push(name);
+                        local_builtin = Some(builtin);
                     } else {
                         return Err(syn::Error::new_spanned(
-                            nv,
-                            "rf field = ... is only valid with rf(rule = \"phonenumber\")",
+                            list,
+                            format!("unknown #[rf({}(...))] rule", name),
                         ));
                     }
                 }
-                Meta::NameValue(nv) if nv.path.is_ident("message") => {
+                // --- Standalone message/code (field-level default) ---
+                Meta::NameValue(ref nv) if nv.path.is_ident("message") => {
                     local_message = Some(lit_str_from_expr(&nv.value, "message")?.value());
                 }
-                Meta::NameValue(nv) if nv.path.is_ident("code") => {
+                Meta::NameValue(ref nv) if nv.path.is_ident("code") => {
                     local_code = Some(lit_str_from_expr(&nv.value, "code")?.value());
-                }
-                Meta::NameValue(nv) if nv.path.is_ident("openapi_description") => {
-                    cfg.openapi_description =
-                        Some(lit_str_from_expr(&nv.value, "openapi_description")?.value());
-                }
-                Meta::NameValue(nv) if nv.path.is_ident("openapi_hint") => {
-                    cfg.openapi_hint = Some(lit_str_from_expr(&nv.value, "openapi_hint")?.value());
-                }
-                Meta::NameValue(nv) if nv.path.is_ident("openapi_example") => {
-                    cfg.openapi_example = Some(nv.value.clone());
-                }
-                Meta::NameValue(nv) if nv.path.is_ident("openapi_format") => {
-                    cfg.openapi_format =
-                        Some(lit_str_from_expr(&nv.value, "openapi_format")?.value());
                 }
                 other => {
                     return Err(syn::Error::new_spanned(
@@ -1193,17 +1269,9 @@ fn parse_rf_field(
         }
         cfg.async_rules.extend(local_async_rules);
 
-        if let Some(mut builtin) = pending_builtin {
-            if let Some(values) = local_values {
-                builtin.values = values;
-            }
+        if let Some(builtin) = local_builtin {
             local_rule_keys.push(builtin.key.clone());
             cfg.builtin_rules.push(builtin);
-        } else if local_values.is_some() {
-            return Err(syn::Error::new_spanned(
-                attr,
-                "rf values(...) requires rf(rule = \"one_of\"|\"none_of\") in the same attribute",
-            ));
         }
 
         if local_message.is_some() || local_code.is_some() {
@@ -1236,6 +1304,204 @@ fn parse_rf_field(
     }
 
     Ok((cfg, keep_attrs, rf_attr_tokens))
+}
+
+fn parse_builtin_from_list(
+    list: &MetaList,
+    meta: &rustforge_contract_meta::BuiltinRuleMeta,
+) -> syn::Result<BuiltinRuleUse> {
+    let mut values = Vec::new();
+    let mut format = None;
+    let mut field = None;
+    let mut message = None;
+    let mut code = None;
+
+    // For Values args, parse mixed positional strings + named args
+    if meta.args == BuiltinRuleArgs::Values {
+        let exprs = list.parse_args_with(Punctuated::<Expr, Token![,]>::parse_terminated)?;
+        for expr in &exprs {
+            match expr {
+                Expr::Lit(expr_lit) => {
+                    if let Lit::Str(s) = &expr_lit.lit {
+                        values.push(s.value());
+                    }
+                }
+                Expr::Assign(assign) => {
+                    if let Expr::Path(path) = &*assign.left {
+                        let key = path
+                            .path
+                            .get_ident()
+                            .map(|i| i.to_string())
+                            .unwrap_or_default();
+                        match key.as_str() {
+                            "message" => {
+                                message =
+                                    Some(lit_str_from_expr(&assign.right, "message")?.value());
+                            }
+                            "code" => {
+                                code = Some(lit_str_from_expr(&assign.right, "code")?.value());
+                            }
+                            _ => {
+                                return Err(syn::Error::new_spanned(
+                                    expr,
+                                    format!("unexpected argument `{}`", key),
+                                ));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    } else {
+        let metas = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+        for m in &metas {
+            match m {
+                Meta::NameValue(nv) if nv.path.is_ident("format") => {
+                    format = Some(lit_str_from_expr(&nv.value, "format")?.value());
+                }
+                Meta::NameValue(nv) if nv.path.is_ident("field") => {
+                    field = Some(lit_str_from_expr(&nv.value, "field")?.value());
+                }
+                Meta::NameValue(nv) if nv.path.is_ident("message") => {
+                    message = Some(lit_str_from_expr(&nv.value, "message")?.value());
+                }
+                Meta::NameValue(nv) if nv.path.is_ident("code") => {
+                    code = Some(lit_str_from_expr(&nv.value, "code")?.value());
+                }
+                _ => {
+                    return Err(syn::Error::new_spanned(m, "unexpected argument"));
+                }
+            }
+        }
+    }
+
+    // Validate required args based on meta.args
+    match meta.args {
+        BuiltinRuleArgs::Format if format.is_none() => {
+            return Err(syn::Error::new_spanned(
+                list,
+                format!("#[rf({}(...))] requires format = \"...\"", meta.key),
+            ));
+        }
+        BuiltinRuleArgs::Field if field.is_none() => {
+            return Err(syn::Error::new_spanned(
+                list,
+                format!("#[rf({}(...))] requires field = \"...\"", meta.key),
+            ));
+        }
+        BuiltinRuleArgs::Values if values.is_empty() => {
+            return Err(syn::Error::new_spanned(
+                list,
+                format!("#[rf({}(...))] requires at least one value", meta.key),
+            ));
+        }
+        _ => {}
+    }
+
+    // message and code are handled via rule_overrides at the caller level
+    // but we also support them inline for convenience
+    let _ = (message, code);
+
+    Ok(BuiltinRuleUse {
+        key: meta.key.to_string(),
+        values,
+        format,
+        field,
+    })
+}
+
+fn parse_custom_rule(list: &MetaList) -> syn::Result<CustomRuleUse> {
+    let metas = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+    let mut function: Option<Path> = None;
+    let mut description: Option<String> = None;
+    let mut pattern: Option<String> = None;
+    let mut custom_code: Option<String> = None;
+    let mut custom_message: Option<String> = None;
+
+    for m in metas {
+        match m {
+            Meta::NameValue(nv) if nv.path.is_ident("function") => {
+                function = Some(path_from_expr(&nv.value, "function")?);
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("description") => {
+                description = Some(lit_str_from_expr(&nv.value, "description")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("pattern") => {
+                pattern = Some(lit_str_from_expr(&nv.value, "pattern")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("code") => {
+                custom_code = Some(lit_str_from_expr(&nv.value, "code")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("message") => {
+                custom_message = Some(lit_str_from_expr(&nv.value, "message")?.value());
+            }
+            other => {
+                return Err(syn::Error::new_spanned(other, "unsupported custom(...) arg"))
+            }
+        }
+    }
+    let function = function
+        .ok_or_else(|| syn::Error::new_spanned(list, "custom(...) requires function = ..."))?;
+
+    Ok(CustomRuleUse {
+        function,
+        description,
+        pattern,
+        code: custom_code,
+        message: custom_message,
+    })
+}
+
+fn parse_openapi_group(list: &MetaList, cfg: &mut FieldRfConfig) -> syn::Result<()> {
+    let metas = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+    for m in metas {
+        match m {
+            Meta::NameValue(nv) if nv.path.is_ident("description") => {
+                cfg.openapi_description =
+                    Some(lit_str_from_expr(&nv.value, "description")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("hint") => {
+                cfg.openapi_hint = Some(lit_str_from_expr(&nv.value, "hint")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("example") => {
+                cfg.openapi_example = Some(nv.value.clone());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("format") => {
+                cfg.openapi_format = Some(lit_str_from_expr(&nv.value, "format")?.value());
+            }
+            other => {
+                return Err(syn::Error::new_spanned(
+                    other,
+                    "unsupported openapi(...) arg",
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_message_code_from_list(list: &MetaList) -> syn::Result<(Option<String>, Option<String>)> {
+    let metas = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+    let mut message = None;
+    let mut code = None;
+    for m in metas {
+        match m {
+            Meta::NameValue(nv) if nv.path.is_ident("message") => {
+                message = Some(lit_str_from_expr(&nv.value, "message")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("code") => {
+                code = Some(lit_str_from_expr(&nv.value, "code")?.value());
+            }
+            other => {
+                return Err(syn::Error::new_spanned(
+                    other,
+                    "expected message = \"...\" or code = \"...\"",
+                ))
+            }
+        }
+    }
+    Ok((message, code))
 }
 
 fn parse_rf_container_attrs(attrs: &[Attribute]) -> syn::Result<(ContainerRfConfig, Vec<Attribute>)> {
@@ -1448,39 +1714,6 @@ fn parse_async_db_modifier(list: &MetaList) -> syn::Result<AsyncDbModifier> {
     ))
 }
 
-fn parse_rule_override(list: &MetaList) -> syn::Result<(String, RuleMessageCode)> {
-    let metas = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
-    let mut rule: Option<String> = None;
-    let mut out = RuleMessageCode::default();
-    for meta in metas {
-        match meta {
-            Meta::NameValue(nv) if nv.path.is_ident("rule") => {
-                rule = Some(lit_str_from_expr(&nv.value, "rule")?.value());
-            }
-            Meta::NameValue(nv) if nv.path.is_ident("message") => {
-                out.message = Some(lit_str_from_expr(&nv.value, "message")?.value());
-            }
-            Meta::NameValue(nv) if nv.path.is_ident("code") => {
-                out.code = Some(lit_str_from_expr(&nv.value, "code")?.value());
-            }
-            other => {
-                return Err(syn::Error::new_spanned(
-                    other,
-                    "unsupported rf override(...) argument",
-                ));
-            }
-        }
-    }
-    let rule = rule.ok_or_else(|| syn::Error::new_spanned(list, "rf override(...) requires rule"))?;
-    if out.message.is_none() && out.code.is_none() {
-        return Err(syn::Error::new_spanned(
-            list,
-            "rf override(...) requires message and/or code",
-        ));
-    }
-    Ok((rule, out))
-}
-
 fn parse_length_args(list: &MetaList) -> syn::Result<LengthArgs> {
     let metas = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
     let mut out = LengthArgs::default();
@@ -1571,16 +1804,6 @@ fn parse_does_not_contain_pattern(list: &MetaList) -> syn::Result<String> {
         list,
         "rf does_not_contain(...) requires pattern = \"...\"",
     ))
-}
-
-fn parse_values_list(list: &MetaList) -> syn::Result<Vec<String>> {
-    let exprs = list.parse_args_with(Punctuated::<Expr, Token![,]>::parse_terminated)?;
-    let mut out = Vec::new();
-    for expr in exprs {
-        let lit = lit_str_from_expr(&expr, "values")?;
-        out.push(lit.value());
-    }
-    Ok(out)
 }
 
 fn parse_must_match_other(list: &MetaList) -> syn::Result<String> {
@@ -1721,29 +1944,6 @@ fn doc_comment_description(field: &Field) -> Option<String> {
     }
 }
 
-fn strip_jsonschema_from_derive_attr(attr: &Attribute) -> syn::Result<Option<Attribute>> {
-    let metas = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
-    let kept: Vec<Meta> = metas
-        .into_iter()
-        .filter(|m| match m {
-            Meta::Path(p) => !path_ends_with_ident(p, "JsonSchema"),
-            _ => true,
-        })
-        .collect();
-    if kept.is_empty() {
-        return Ok(None);
-    }
-    let tokens = quote! { #[derive(#(#kept),*)] };
-    mk_attr(tokens).map(Some)
-}
-
-fn path_ends_with_ident(path: &Path, ident: &str) -> bool {
-    path.segments
-        .last()
-        .map(|s| s.ident == ident)
-        .unwrap_or(false)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FieldKind {
     String,
@@ -1820,6 +2020,7 @@ struct FieldRfConfig {
     contains_pattern: Option<String>,
     does_not_contain_pattern: Option<String>,
     builtin_rules: Vec<BuiltinRuleUse>,
+    custom_rules: Vec<CustomRuleUse>,
     async_rules: Vec<AsyncDbRuleUse>,
     rule_overrides: BTreeMap<String, RuleMessageCode>,
     message: Option<String>,
@@ -1910,6 +2111,15 @@ struct BuiltinRuleUse {
     values: Vec<String>,
     format: Option<String>,
     field: Option<String>,
+}
+
+#[derive(Clone)]
+struct CustomRuleUse {
+    function: Path,
+    description: Option<String>,
+    pattern: Option<String>,
+    code: Option<String>,
+    message: Option<String>,
 }
 
 #[derive(Clone)]
