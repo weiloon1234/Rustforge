@@ -192,13 +192,50 @@ SEED_ADMIN_SUPERADMIN_NAME=Super Admin
 pub const ROOT_GITIGNORE: &str = r#"target/
 **/target/
 .env
+.env.local
+.env.*.local
 .DS_Store
+Thumbs.db
 *.log
 *.tmp
+*.pid
+logs/
+.idea/
+.vscode/
+node_modules/
+**/node_modules/
 
 # Keep the directory, ignore generated static files by default.
 public/*
 !public/.gitkeep
+"#;
+
+pub const ROOT_GITATTRIBUTES: &str = r#"* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.bmp binary
+*.tiff binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
+*.bz2 binary
+*.xz binary
+*.7z binary
+*.rar binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.mp3 binary
+*.mp4 binary
+*.mov binary
+*.avi binary
+*.webm binary
 "#;
 
 pub const ROOT_MAKEFILE: &str = r#"SHELL := /bin/bash

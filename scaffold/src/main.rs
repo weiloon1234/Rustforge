@@ -120,6 +120,11 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: ".gitattributes",
+            content: templates::ROOT_GITATTRIBUTES,
+            executable: false,
+        },
+        FileTemplate {
             path: "Makefile",
             content: templates::ROOT_MAKEFILE,
             executable: false,
