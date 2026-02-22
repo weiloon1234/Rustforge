@@ -75,4 +75,11 @@ pub trait Job: Serialize + DeserializeOwned + Send + Sync + Debug + 'static {
     async fn dispatch(&self, queue: &queue::RedisQueue) -> anyhow::Result<()> {
         queue.push(self).await
     }
+
+    /// Called when all retries are exhausted, before persisting to failed_jobs.
+    /// Use for cleanup, alerts, or state reversion.
+    /// Errors are logged but do not prevent failure persistence.
+    async fn failed(&self, _ctx: &JobContext, _error: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
 }

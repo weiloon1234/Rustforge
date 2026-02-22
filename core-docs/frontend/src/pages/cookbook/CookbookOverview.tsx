@@ -147,6 +147,7 @@ with_permission_check_post(
                     <li>Chapter 7 (CLI workflow) if the team is setting up daily commands early.</li>
                     <li>Chapters 3-6 for async/jobs/notifications/realtime features.</li>
                     <li>Chapter 8 then Chapter 9 for integration and hardening.</li>
+                    <li>Chapters 10-12 for caching, testing, and event fan-out patterns.</li>
                 </ol>
                 <p>
                     Chapter numbering for 3-9 stays unchanged to avoid link churn. Chapter 2 is
@@ -214,6 +215,24 @@ with_permission_check_post(
                         className="px-4 py-3 border border-gray-200 rounded-md bg-white hover:bg-gray-50 text-sm font-medium text-gray-800"
                     >
                         Chapter 9: Hardening
+                    </a>
+                    <a
+                        href="#/cookbook-chapter-10-caching"
+                        className="px-4 py-3 border border-gray-200 rounded-md bg-white hover:bg-gray-50 text-sm font-medium text-gray-800"
+                    >
+                        Chapter 10: Caching Recipe
+                    </a>
+                    <a
+                        href="#/cookbook-chapter-11-testing"
+                        className="px-4 py-3 border border-gray-200 rounded-md bg-white hover:bg-gray-50 text-sm font-medium text-gray-800"
+                    >
+                        Chapter 11: Testing Recipe
+                    </a>
+                    <a
+                        href="#/cookbook-chapter-12-event-fanout"
+                        className="px-4 py-3 border border-gray-200 rounded-md bg-white hover:bg-gray-50 text-sm font-medium text-gray-800"
+                    >
+                        Chapter 12: Event Fan-Out Recipe
                     </a>
                 </div>
             </div>

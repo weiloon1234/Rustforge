@@ -50,6 +50,12 @@ const sections = [
                 title: 'Chapter 9: Hardening',
                 href: '#/cookbook-chapter-9-production-hardening',
             },
+            { title: 'Chapter 10: Caching', href: '#/cookbook-chapter-10-caching' },
+            { title: 'Chapter 11: Testing', href: '#/cookbook-chapter-11-testing' },
+            {
+                title: 'Chapter 12: Event Fan-Out',
+                href: '#/cookbook-chapter-12-event-fanout',
+            },
         ],
     },
     {
@@ -112,6 +118,7 @@ const sections = [
             { title: 'Job Queue', href: '#/jobs' },
             { title: 'Notifications', href: '#/notifications' },
             { title: 'Cron Scheduler', href: '#/scheduler' },
+            { title: 'Caching', href: '#/caching' },
         ],
     },
 ]

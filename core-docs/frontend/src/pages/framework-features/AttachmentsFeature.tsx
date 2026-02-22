@@ -130,6 +130,71 @@ article_model
                     Pool-backed <code>save()</code> writes are auto-atomic: base row, localized
                     data, meta, and attachments run in one transaction by default.
                 </p>
+
+                <h2>End-to-End: Multipart Upload to Attachment</h2>
+                <p>
+                    The full flow starts with the client uploading a file via a multipart form request.
+                    The handler receives the multipart field, uploads the raw bytes to S3 through the
+                    Storage service, constructs an <code>AttachmentInput</code> with the resulting path
+                    and metadata, and passes it to the generated model setter. The model persists the
+                    attachment record atomically alongside any other field changes.
+                </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`use axum::extract::Multipart;
+use core_db::infra::storage::Storage;
+use core_db::platform::attachments::types::AttachmentInput;
+use core_web::error::AppError;
+
+async fn upload_article_cover(
+    State(state): State<AppApiState>,
+    Path(article_id): Path<i64>,
+    mut multipart: Multipart,
+) -> ApiResult<serde_json::Value> {
+    let field = multipart.next_field().await?.ok_or(
+        AppError::BadRequest("No file provided".to_string()),
+    )?;
+
+    let file_name = field.file_name().unwrap_or("upload").to_string();
+    let content_type = field.content_type().unwrap_or("application/octet-stream").to_string();
+    let data = field.bytes().await?;
+
+    // 1. Upload to S3
+    let path = format!("uploads/articles/{}/{}", article_id, file_name);
+    state.storage.put(&path, &data, &content_type).await?;
+
+    // 2. Build attachment input
+    let input = AttachmentInput::new(
+        &path,
+        &content_type,
+        data.len() as u64,
+        None,
+        None,
+    );
+
+    // 3. Attach to model
+    let article = Article::new(&state.db)
+        .update()
+        .where_id(Op::Eq, article_id)
+        .set_attachment_cover(input)
+        .save()
+        .await?;
+
+    Ok(ApiResponse::success(
+        serde_json::json!({ "cover_url": article.cover_url }),
+        &t("Cover uploaded"),
+    ))
+}`}</code>
+                </pre>
+
+                <h3>Route Registration</h3>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`Router::new()
+    .route("/articles/{id}/cover", post(upload_article_cover))`}</code>
+                </pre>
+                <p>
+                    The multipart body limit is controlled by <code>MIDDLEWARE_BODY_LIMIT</code> in{' '}
+                    <code>.env</code> (default 10MB).
+                </p>
             </div>
         </div>
     )

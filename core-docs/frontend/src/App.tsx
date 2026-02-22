@@ -22,6 +22,9 @@ import { Chapter6WebsocketAuthMiddleware } from './pages/cookbook/Chapter6Websoc
 import { Chapter7CliWorkflow } from './pages/cookbook/Chapter7CliWorkflow'
 import { Chapter8EndToEndFlow } from './pages/cookbook/Chapter8EndToEndFlow'
 import { Chapter9ProductionHardening } from './pages/cookbook/Chapter9ProductionHardening'
+import { Chapter10CachingRecipe } from './pages/cookbook/Chapter10CachingRecipe'
+import { Chapter11TestingRecipe } from './pages/cookbook/Chapter11TestingRecipe'
+import { Chapter12EventFanOutRecipe } from './pages/cookbook/Chapter12EventFanOutRecipe'
 
 // Framework Features
 import { FrameworkFeatures } from './pages/framework-features/FrameworkFeatures'
@@ -64,6 +67,7 @@ import { Permissions } from './pages/security/Permissions'
 import { Jobs } from './pages/async/Jobs'
 import { Notifications } from './pages/async/Notifications'
 import { Scheduler } from './pages/async/Scheduler'
+import { Caching } from './pages/async/Caching'
 
 import type { ComponentType } from 'react'
 
@@ -90,6 +94,9 @@ const routeMap: Record<string, ComponentType> = {
     '#/cookbook-chapter-7-cli-workflow': Chapter7CliWorkflow,
     '#/cookbook-chapter-8-end-to-end-flow': Chapter8EndToEndFlow,
     '#/cookbook-chapter-9-production-hardening': Chapter9ProductionHardening,
+    '#/cookbook-chapter-10-caching': Chapter10CachingRecipe,
+    '#/cookbook-chapter-11-testing': Chapter11TestingRecipe,
+    '#/cookbook-chapter-12-event-fanout': Chapter12EventFanOutRecipe,
 
     // Framework Features
     '#/framework-features': FrameworkFeatures,
@@ -133,6 +140,7 @@ const routeMap: Record<string, ComponentType> = {
     '#/jobs': Jobs,
     '#/notifications': Notifications,
     '#/scheduler': Scheduler,
+    '#/caching': Caching,
 }
 
 import { useEffect } from 'react'

@@ -31,6 +31,13 @@ trait JobHandler: Send + Sync {
         ctx: &JobContext,
         attempts: u32,
     ) -> anyhow::Result<JobResult>;
+
+    async fn on_failed(
+        &self,
+        json: Value,
+        ctx: &JobContext,
+        error: &str,
+    ) -> anyhow::Result<()>;
 }
 
 struct JobShim<J>(std::marker::PhantomData<J>);
@@ -52,6 +59,16 @@ impl<J: Job> JobHandler for JobShim<J> {
                 err: e.to_string(),
             }),
         }
+    }
+
+    async fn on_failed(
+        &self,
+        json: Value,
+        ctx: &JobContext,
+        error: &str,
+    ) -> anyhow::Result<()> {
+        let job: J = serde_json::from_value(json)?;
+        job.failed(ctx, error).await
     }
 }
 
@@ -273,6 +290,12 @@ impl Worker {
                                                 "Max retries reached for job in group {}",
                                                 group_id
                                             );
+                                            // Call job's failed() callback
+                                            if let Some(handler) = self.registry.get(wrapper.job.as_str()) {
+                                                if let Err(e) = handler.on_failed(wrapper.data.clone(), &self.context, &err).await {
+                                                    tracing::error!("Job failed() callback error: {}", e);
+                                                }
+                                            }
                                             // Permanently Failed
                                             self.persist_failure(&wrapper, Some(&group_id), &err)
                                                 .await;
@@ -327,6 +350,12 @@ impl Worker {
                                     .await
                                     .unwrap_or(());
                             } else {
+                                // Call job's failed() callback
+                                if let Some(handler) = self.registry.get(wrapper.job.as_str()) {
+                                    if let Err(e) = handler.on_failed(wrapper.data.clone(), &self.context, &err).await {
+                                        tracing::error!("Job failed() callback error: {}", e);
+                                    }
+                                }
                                 // Permanently Failed
                                 self.persist_failure(&wrapper, None, &err).await;
                             }
