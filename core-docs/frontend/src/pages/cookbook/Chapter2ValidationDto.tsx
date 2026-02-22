@@ -90,8 +90,8 @@ rustforge_string_rule_type! {
     pub struct UsernameString {
         #[validate(custom(function = "crate::validation::username::validate_username"))]
         #[rf(length(min = 3, max = 64))]
-        #[rf(rule = "alpha_dash")]
-        #[rf(openapi_description = "Lowercase username using letters, numbers, underscore (_), and hyphen (-).")]
+        #[rf(alpha_dash)]
+        #[rf(openapi(description = "Lowercase username using letters, numbers, underscore (_), and hyphen (-)."))]
     }
 }`}</code>
                 </pre>
@@ -114,7 +114,6 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminLoginInput {
     #[rf(nested)]
     pub username: UsernameString,
@@ -143,7 +142,6 @@ pub struct AdminMeOutput {
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`#[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct CreateAdminInput {
     #[rf(nested)]
     #[rf(async_unique(table = "admin", column = "username"))]
@@ -168,7 +166,6 @@ pub struct CreateAdminInput {
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`#[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct UpdateAdminInput {
     #[serde(skip, default)]
     __target_id: i64,

@@ -1,8 +1,10 @@
 mod templates;
 
 use anyhow::{bail, Context};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use clap::Parser;
 use colored::*;
+use rand::RngCore;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -36,6 +38,7 @@ async fn main() -> anyhow::Result<()> {
 
     ensure_output_ready(&output, cli.force)?;
 
+    let app_key = generate_app_key();
     let files = file_templates();
 
     for file in files {
@@ -45,7 +48,8 @@ async fn main() -> anyhow::Result<()> {
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
 
-        fs::write(&path, file.content)
+        let content = file.content.replace("{{APP_KEY}}", &app_key);
+        fs::write(&path, content)
             .with_context(|| format!("failed to write {}", path.display()))?;
 
         if file.executable {
@@ -59,6 +63,12 @@ async fn main() -> anyhow::Result<()> {
     println!("{}", "Next: cd <output> && cargo check".cyan());
 
     Ok(())
+}
+
+fn generate_app_key() -> String {
+    let mut key = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut key);
+    format!("base64:{}", STANDARD.encode(key))
 }
 
 fn normalize_output_path(output: &Path) -> anyhow::Result<PathBuf> {

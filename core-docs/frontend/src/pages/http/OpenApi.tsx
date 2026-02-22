@@ -93,7 +93,6 @@ let api_router = ApiRouter::new().api_route(
                     <code className="language-rust">{`use core_web::contracts::rustforge_contract;
 
 #[rustforge_contract]
-#[derive(Debug, Deserialize, Validate, JsonSchema)]
 pub struct ArticleCreateInput {
     #[rf(range(min = 1))]
     pub category_id: i64,

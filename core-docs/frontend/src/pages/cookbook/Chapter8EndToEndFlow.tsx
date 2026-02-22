@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import Prism from 'prismjs'
 
-export function Chapter7EndToEndFlow() {
+export function Chapter8EndToEndFlow() {
     useEffect(() => {
         Prism.highlightAll()
     }, [])

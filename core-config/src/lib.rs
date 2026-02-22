@@ -17,6 +17,7 @@ pub struct Settings {
     pub worker: WorkerSettings,
     pub i18n: core_i18n::config::I18nSettings,
     pub middleware: MiddlewareSettings,
+    pub cors: CorsSettings,
     pub auth: AuthSettings,
     pub mail: MailSettings,
     pub http_log: HttpLogSettings,
@@ -61,6 +62,48 @@ pub struct MiddlewareSettings {
     pub body_limit_mb: usize,
 }
 
+/// CORS configuration (loaded from `configs.toml` `[cors]` section).
+///
+/// Follows Laravel `config/cors.php` conventions:
+/// - `allowed_origins`: `["*"]` or explicit origins like `["https://app.example.com"]`
+/// - `allowed_methods`: `["*"]` or explicit methods like `["GET", "POST"]`
+/// - `allowed_headers`: `["*"]` or explicit headers
+/// - `exposed_headers`: headers the browser is allowed to read from the response
+/// - `max_age`: preflight cache duration in seconds (0 = no cache)
+/// - `supports_credentials`: if true, `allowed_origins` must not be `["*"]`
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct CorsSettings {
+    #[serde(default = "cors_default_wildcard")]
+    pub allowed_origins: Vec<String>,
+    #[serde(default = "cors_default_wildcard")]
+    pub allowed_methods: Vec<String>,
+    #[serde(default = "cors_default_wildcard")]
+    pub allowed_headers: Vec<String>,
+    #[serde(default)]
+    pub exposed_headers: Vec<String>,
+    #[serde(default)]
+    pub max_age: u64,
+    #[serde(default)]
+    pub supports_credentials: bool,
+}
+
+impl Default for CorsSettings {
+    fn default() -> Self {
+        Self {
+            allowed_origins: vec!["*".to_string()],
+            allowed_methods: vec!["*".to_string()],
+            allowed_headers: vec!["*".to_string()],
+            exposed_headers: vec![],
+            max_age: 0,
+            supports_credentials: false,
+        }
+    }
+}
+
+fn cors_default_wildcard() -> Vec<String> {
+    vec!["*".to_string()]
+}
+
 #[derive(Debug, Clone)]
 pub struct AppSettings {
     pub name: String,
@@ -101,10 +144,8 @@ impl AppSettings {
         Ok(Self {
             name: get_env("APP_NAME", "foundation"),
             env: get_env("APP_ENV", "local"),
-            key: get_env(
-                "APP_KEY",
-                "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-            ), // 32 bytes of zeros
+            key: get_env_required("APP_KEY")
+                .context("APP_KEY is required. Generate one with: openssl rand -base64 32 and prefix with 'base64:'")?,
             enable_docs: get_env_bool("ENABLE_FRAMEWORK_DOCS", false)?,
             docs_path: get_env("FRAMEWORK_DOCS_PATH", "/framework-documentation"),
             enable_openapi_docs: get_env_bool("ENABLE_OPENAPI_DOCS", false)?,
@@ -269,6 +310,8 @@ struct TomlConfig {
     auth: TomlAuth,
     #[serde(default)]
     realtime: TomlRealtime,
+    #[serde(default)]
+    cors: CorsSettings,
 }
 
 #[derive(Debug, serde::Deserialize, Default)]
@@ -397,9 +440,20 @@ impl Settings {
         let mut realtime = realtime;
         realtime.channels = toml_config.realtime.channels;
 
+        let cors = toml_config.cors;
+
         // Minimal sanity checks (optional but recommended)
         if db.url.is_empty() {
             return Err(anyhow!("DATABASE_URL is required"));
+        }
+
+        if cors.supports_credentials
+            && cors.allowed_origins.len() == 1
+            && cors.allowed_origins[0] == "*"
+        {
+            return Err(anyhow!(
+                "[cors] supports_credentials = true requires explicit allowed_origins (cannot use [\"*\"])"
+            ));
         }
 
         Ok(Self {
@@ -413,6 +467,7 @@ impl Settings {
             worker,
             i18n,
             middleware,
+            cors,
             auth,
             mail: MailSettings {
                 enable: get_env_bool("MAIL_ENABLE", true)?,

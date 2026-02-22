@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import Prism from 'prismjs'
 
-export function Chapter8ProductionHardening() {
+export function Chapter9ProductionHardening() {
     useEffect(() => {
         Prism.highlightAll()
     }, [])

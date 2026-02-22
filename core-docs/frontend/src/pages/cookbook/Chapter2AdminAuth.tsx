@@ -54,11 +54,10 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminLoginInput {
     #[rf(length(min = 3, max = 64))]
-    #[rf(rule = "alpha_dash")]
-    #[rf(openapi_hint = "Use a project-level UsernameString wrapper type for reusable username rules.")]
+    #[rf(alpha_dash)]
+    #[rf(openapi(hint = "Use a project-level UsernameString wrapper type for reusable username rules."))]
     pub username: String,
 
     #[rf(length(min = 8, max = 128))]
@@ -68,7 +67,6 @@ pub struct AdminLoginInput {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminRefreshInput {
     pub client_type: AuthClientType,
     #[serde(default)]
@@ -77,10 +75,9 @@ pub struct AdminRefreshInput {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminProfileUpdateInput {
     #[rf(length(min = 1, max = 120))]
-    #[rf(rule = "required_trimmed")]
+    #[rf(required_trimmed)]
     pub name: String,
     #[serde(default)]
     #[rf(email)]
@@ -88,7 +85,6 @@ pub struct AdminProfileUpdateInput {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
 pub struct AdminPasswordUpdateInput {
     #[rf(length(min = 8, max = 128))]
     pub current_password: String,
@@ -226,90 +222,15 @@ fn admin_router(state: AppApiState) -> ApiRouter {
 );`}</code>
                 </pre>
 
-                <h2>Step 5A: Admin CRUD DTO Async Uniqueness (Scaffold Pattern)</h2>
+                <h2>Step 5A: Admin CRUD DTO Async Uniqueness</h2>
                 <p>
-                    The scaffolded admin CRUD module demonstrates how to keep username uniqueness
-                    in the DTO contract using <code>rf(async_unique)</code> while still handling
-                    <code>PATCH /admin/{'{id}'}</code> path IDs cleanly.
-                </p>
-                <h3>
-                    File: <code>app/src/contracts/api/v1/admin.rs</code> (excerpt)
-                </h3>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`#[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
-pub struct CreateAdminInput {
-    #[rf(nested)]
-    #[rf(async_unique(table = "admin", column = "username"))]
-    pub username: UsernameString,
-    // ...
-}
-
-#[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
-pub struct UpdateAdminInput {
-    #[serde(skip, default)]
-    __target_id: i64,
-
-    #[serde(default)]
-    #[rf(nested)]
-    #[rf(async_unique(
-        table = "admin",
-        column = "username",
-        ignore(column = "id", field = "__target_id")
-    ))]
-    pub username: Option<UsernameString>,
-    // ...
-}
-
-impl UpdateAdminInput {
-    pub fn with_target_id(mut self, id: i64) -> Self {
-        self.__target_id = id;
-        self
-    }
-}`}</code>
-                </pre>
-                <h3>
-                    File: <code>app/src/internal/api/v1/admin.rs</code> (excerpt)
-                </h3>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`use core_web::{
-    contracts::{AsyncContractJson, ContractJson},
-    extract::{validation::transform_validation_errors, AsyncValidate},
-    // ...
-};
-
-async fn create(
-    State(state): State<AppApiState>,
-    auth: AuthUser<AdminGuard>,
-    req: AsyncContractJson<CreateAdminInput>,
-) -> Result<ApiResponse<AdminOutput>, AppError> {
-    let admin = workflow::create(&state, &auth, req.0).await?;
-    Ok(ApiResponse::success(AdminOutput::from(admin), &t("Admin created")))
-}
-
-async fn update(
-    State(state): State<AppApiState>,
-    auth: AuthUser<AdminGuard>,
-    Path(id): Path<i64>,
-    req: ContractJson<UpdateAdminInput>,
-) -> Result<ApiResponse<AdminOutput>, AppError> {
-    let req = req.0.with_target_id(id);
-    if let Err(e) = req.validate_async(&state.db).await {
-        return Err(AppError::Validation {
-            message: t("Validation failed"),
-            errors: transform_validation_errors(e),
-        });
-    }
-
-    let admin = workflow::update(&state, &auth, id, req).await?;
-    Ok(ApiResponse::success(AdminOutput::from(admin), &t("Admin updated")))
-}`}</code>
-                </pre>
-                <p>
-                    Create can use <code>AsyncContractJson</code> directly because all async rule
-                    inputs are in the JSON body. Update needs one extra step because the ignore ID
-                    comes from the path parameter.
+                    The scaffolded admin CRUD module uses <code>rf(async_unique)</code> for
+                    username uniqueness and the <code>__target_id</code> pattern for PATCH routes.
+                    See{' '}
+                    <a href="#/cookbook-chapter-2-validation-dto">Chapter 2A Steps 4-5</a> for the
+                    full DTO definitions, handler wiring, and the{' '}
+                    <code>AsyncContractJson</code> vs <code>ContractJson + validate_async</code>{' '}
+                    decision rule.
                 </p>
 
                 <h2>Step 6: Verify</h2>

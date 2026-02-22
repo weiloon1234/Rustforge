@@ -246,13 +246,12 @@ rustforge_string_rule_type! {
     pub struct UsernameString {
         #[validate(custom(function = "crate::validation::username::validate_username"))]
         #[rf(length(min = 3, max = 64))]
-        #[rf(rule = "alpha_dash")]
-        #[rf(openapi_description = "Lowercase username using letters, numbers, _ and -.")]
+        #[rf(alpha_dash)]
+        #[rf(openapi(description = "Lowercase username using letters, numbers, _ and -."))]
     }
 }
 
 #[rustforge_contract]
-#[derive(Debug, Deserialize, Validate, JsonSchema)]
 pub struct AdminLoginInput {
     #[rf(nested)]
     pub username: UsernameString,
@@ -269,15 +268,11 @@ pub struct AdminLoginInput {
                 <h3>Rustforge Contract Macro (default)</h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use core_web::contracts::rustforge_contract;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use validator::Validate;
 
 #[rustforge_contract]
-#[derive(Debug, Deserialize, Validate, JsonSchema)]
 pub struct AdminCreateInput {
     #[rf(length(min = 3, max = 32))]
-    #[rf(rule = "alpha_dash")]
+    #[rf(alpha_dash)]
     pub username: String,
 
     #[rf(email)]
@@ -292,18 +287,16 @@ pub struct AdminCreateInput {
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`#[rustforge_contract]
-#[derive(Debug, Deserialize, Validate, JsonSchema)]
 #[rf(schema(function = "validate_pair_not_same", skip_on_field_errors = false))]
 pub struct ExampleInput {
     #[rf(length(min = 3, max = 32))]
-    #[rf(rule = "alpha_dash")]
-    #[rf(rule_override(rule = "alpha_dash", message = "Letters, numbers, _ and - only."))]
+    #[rf(alpha_dash(message = "Letters, numbers, _ and - only."))]
     pub username: String,
 
     #[rf(async_unique(table = "admin", column = "username"))]
     pub db_username: String,
 
-    #[rf(openapi_example = 42)]
+    #[rf(openapi(example = 42))]
     pub priority: i32,
 }`}</code>
                 </pre>
@@ -311,8 +304,9 @@ pub struct ExampleInput {
                     <code>rf(schema(...))</code> generates a struct-level{' '}
                     <code>#[validate(schema(...))]</code>. <code>rf(async_*)</code> generates an{' '}
                     <code>AsyncValidate</code> implementation automatically. Use{' '}
-                    <code>rf(rule_override(...))</code> to set message/code for one specific rule
-                    without affecting other rules on the same field.
+                    per-rule <code>message</code> parameter (e.g.{' '}
+                    <code>rf(alpha_dash(message = "..."))</code>) to override the default message
+                    for one specific rule without affecting other rules on the same field.
                 </p>
                 <p>
                     For update routes where async unique checks must ignore the current row ID from
@@ -619,7 +613,6 @@ use serde::Deserialize;
 use validator::Validate;
 
 #[rustforge_contract]
-#[derive(Debug, Deserialize, Validate, JsonSchema)]
 pub struct InviteInput {
     #[rf(contains(pattern = "@"))]
     pub email_like: String,

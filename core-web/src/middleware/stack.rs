@@ -1,5 +1,6 @@
 use axum::{
     body::Body,
+    extract::DefaultBodyLimit,
     http::{Request, StatusCode},
 };
 use axum_client_ip::ClientIpSource;
@@ -46,12 +47,10 @@ pub fn apply_standard_middleware(router: axum::Router, settings: &Settings) -> a
                 Duration::from_secs(settings.middleware.timeout_secs),
             ))
             .layer(ClientIpSource::ConnectInfo.into_extension())
-            .layer(
-                CorsLayer::new()
-                    .allow_origin(Any)
-                    .allow_methods(Any)
-                    .allow_headers(Any),
-            )
+            .layer(build_cors_layer(settings))
+            .layer(DefaultBodyLimit::max(
+                settings.middleware.body_limit_mb * 1024 * 1024,
+            ))
             .layer(CompressionLayer::new())
             .layer(CookieManagerLayer::new())
             .layer(SetResponseHeaderLayer::overriding(
@@ -67,6 +66,71 @@ pub fn apply_standard_middleware(router: axum::Router, settings: &Settings) -> a
                 axum::http::HeaderValue::from_static("DENY"),
             )),
     )
+}
+
+fn build_cors_layer(settings: &Settings) -> CorsLayer {
+    use axum::http::Method;
+
+    let cors = &settings.cors;
+    let mut layer = CorsLayer::new();
+
+    // Origins
+    if cors.allowed_origins.len() == 1 && cors.allowed_origins[0] == "*" {
+        layer = layer.allow_origin(Any);
+    } else {
+        let parsed: Vec<axum::http::HeaderValue> = cors
+            .allowed_origins
+            .iter()
+            .filter_map(|o| o.parse().ok())
+            .collect();
+        layer = layer.allow_origin(parsed);
+    }
+
+    // Methods
+    if cors.allowed_methods.len() == 1 && cors.allowed_methods[0] == "*" {
+        layer = layer.allow_methods(Any);
+    } else {
+        let methods: Vec<Method> = cors
+            .allowed_methods
+            .iter()
+            .filter_map(|m| m.parse().ok())
+            .collect();
+        layer = layer.allow_methods(methods);
+    }
+
+    // Headers
+    if cors.allowed_headers.len() == 1 && cors.allowed_headers[0] == "*" {
+        layer = layer.allow_headers(Any);
+    } else {
+        let headers: Vec<axum::http::HeaderName> = cors
+            .allowed_headers
+            .iter()
+            .filter_map(|h| h.parse().ok())
+            .collect();
+        layer = layer.allow_headers(headers);
+    }
+
+    // Exposed headers
+    if !cors.exposed_headers.is_empty() {
+        let exposed: Vec<axum::http::HeaderName> = cors
+            .exposed_headers
+            .iter()
+            .filter_map(|h| h.parse().ok())
+            .collect();
+        layer = layer.expose_headers(exposed);
+    }
+
+    // Max age
+    if cors.max_age > 0 {
+        layer = layer.max_age(Duration::from_secs(cors.max_age));
+    }
+
+    // Credentials
+    if cors.supports_credentials {
+        layer = layer.allow_credentials(true);
+    }
+
+    layer
 }
 
 fn handle_panic(err: Box<dyn std::any::Any + Send + 'static>) -> axum::response::Response {

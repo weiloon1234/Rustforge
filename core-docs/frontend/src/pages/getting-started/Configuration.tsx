@@ -372,7 +372,18 @@ enabled = true
 guard = "admin"
 presence_enabled = true
 max_message_bytes = 32768
-max_frame_bytes = 32768`}</code>
+max_frame_bytes = 32768
+
+# ----------------------------
+# CORS (mirrors Laravel config/cors.php)
+# ----------------------------
+[cors]
+allowed_origins = ["*"]         # ["*"] or explicit origins
+allowed_methods = ["*"]         # ["*"] or ["GET","POST",...]
+allowed_headers = ["*"]         # ["*"] or explicit headers
+exposed_headers = []
+max_age = 0                     # Preflight cache (seconds)
+supports_credentials = false    # true requires explicit origins`}</code>
                 </pre>
                 <p className="text-sm text-gray-600 mt-3">
                     Guard names/providers are application choices. The framework does not define

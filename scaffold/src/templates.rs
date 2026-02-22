@@ -40,7 +40,7 @@ pub const ROOT_ENV_EXAMPLE: &str = r#"# ----------------------------
 APP_NAME=starter
 APP_ENV=local
 APP_DEBUG=false
-APP_KEY=dev-only
+APP_KEY={{APP_KEY}}
 APP_TIMEZONE=+08:00
 RUST_LOG=info
 DEFAULT_PER_PAGE=30
@@ -1204,6 +1204,17 @@ refresh_ttl_days = 30
 enabled = true
 guard = ""
 presence_enabled = false
+
+# ── CORS ──────────────────────────────────────────────────
+# Mirrors Laravel config/cors.php conventions.
+# Use ["*"] for development; set explicit origins for production.
+[cors]
+allowed_origins = ["*"]
+allowed_methods = ["*"]
+allowed_headers = ["*"]
+exposed_headers = []
+max_age = 0
+supports_credentials = false
 "#;
 
 pub const APP_PERMISSIONS_TOML: &str = r#"# Permission catalog (single source of truth).

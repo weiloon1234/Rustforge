@@ -20,8 +20,8 @@ import { Chapter4NotificationsUsage } from './pages/cookbook/Chapter4Notificatio
 import { Chapter5WebsocketChannel } from './pages/cookbook/Chapter5WebsocketChannel'
 import { Chapter6WebsocketAuthMiddleware } from './pages/cookbook/Chapter6WebsocketAuthMiddleware'
 import { Chapter7CliWorkflow } from './pages/cookbook/Chapter7CliWorkflow'
-import { Chapter7EndToEndFlow } from './pages/cookbook/Chapter7EndToEndFlow'
-import { Chapter8ProductionHardening } from './pages/cookbook/Chapter8ProductionHardening'
+import { Chapter8EndToEndFlow } from './pages/cookbook/Chapter8EndToEndFlow'
+import { Chapter9ProductionHardening } from './pages/cookbook/Chapter9ProductionHardening'
 
 // Framework Features
 import { FrameworkFeatures } from './pages/framework-features/FrameworkFeatures'
@@ -88,12 +88,8 @@ const routeMap: Record<string, ComponentType> = {
     '#/cookbook-chapter-5-websocket-channel': Chapter5WebsocketChannel,
     '#/cookbook-chapter-6-websocket-auth-middleware': Chapter6WebsocketAuthMiddleware,
     '#/cookbook-chapter-7-cli-workflow': Chapter7CliWorkflow,
-    '#/cookbook-chapter-8-end-to-end-flow': Chapter7EndToEndFlow,
-    '#/cookbook-chapter-9-production-hardening': Chapter8ProductionHardening,
-
-    // compatibility aliases for existing shared links
-    '#/cookbook-chapter-7-end-to-end-flow': Chapter7EndToEndFlow,
-    '#/cookbook-chapter-8-production-hardening': Chapter8ProductionHardening,
+    '#/cookbook-chapter-8-end-to-end-flow': Chapter8EndToEndFlow,
+    '#/cookbook-chapter-9-production-hardening': Chapter9ProductionHardening,
 
     // Framework Features
     '#/framework-features': FrameworkFeatures,

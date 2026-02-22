@@ -58,15 +58,11 @@ async fn create(
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use core_web::contracts::rustforge_contract;
 use core_web::extract::AsyncValidatedJson;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use validator::Validate;
 
 #[rustforge_contract]
-#[derive(Debug, Deserialize, Validate, JsonSchema)]
 pub struct RegisterInput {
     #[rf(length(min = 3, max = 32))]
-    #[rf(rule = "alpha_dash")]
+    #[rf(alpha_dash)]
     pub username: String,
     #[rf(async_unique(table = "admin", column = "username"))]
     pub login_username: String,
@@ -87,7 +83,6 @@ async fn register(
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`#[rustforge_contract]
-#[derive(Debug, Deserialize, Validate, JsonSchema)]
 pub struct AdminUpdateInput {
     pub id: i64,
     pub tenant_id: i64,
@@ -109,7 +104,6 @@ pub struct AdminUpdateInput {
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`#[rustforge_contract]
-#[derive(Debug, Deserialize, Validate, JsonSchema)]
 pub struct UpdateAdminInput {
     #[serde(skip, default)]
     __target_id: i64,
@@ -177,7 +171,7 @@ async fn update(
                         runtime + OpenAPI hints.
                     </li>
                     <li>
-                        <code>#[rf(openapi_example = ...)]</code> accepts literals/expressions (for
+                        <code>#[rf(openapi(example = ...))]</code> accepts literals/expressions (for
                         example numbers and booleans), not only strings.
                     </li>
                     <li>
@@ -200,13 +194,12 @@ async fn update(
                     <code className="language-rust">{`use core_web::contracts::rustforge_contract;
 
 #[rustforge_contract]
-#[derive(Debug, Deserialize, Validate, JsonSchema)]
 pub struct ExampleInput {
     #[rf(range(min = 1))]
     pub owner_id: i64,
 
     #[rf(length(min = 1, max = 64))]
-    #[rf(rule = "required_trimmed")]
+    #[rf(required_trimmed)]
     pub title: String,
 }`}</code>
                 </pre>

@@ -257,7 +257,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
                     let field_name = builtin.field.as_ref().ok_or_else(|| {
                         syn::Error::new_spanned(
                             &field_ident,
-                            "#[rf(rule = \"phonenumber\", field = \"...\")] requires field",
+                            "#[rf(phonenumber(field = \"...\"))] requires field",
                         )
                     })?;
                     let other_ident = Ident::new(field_name, Span::call_site());
@@ -273,7 +273,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
                     if builtin.values.is_empty() {
                         return Err(syn::Error::new_spanned(
                             &field_ident,
-                            "#[rf(rule = \"one_of\", values(...))] requires at least one value",
+                            "#[rf(one_of(\"a\", \"b\", ...))] requires at least one value",
                         ));
                     }
                     let helper_ident = format_ident!(
@@ -300,7 +300,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
                     if builtin.values.is_empty() {
                         return Err(syn::Error::new_spanned(
                             &field_ident,
-                            "#[rf(rule = \"none_of\", values(...))] requires at least one value",
+                            "#[rf(none_of(\"a\", \"b\", ...))] requires at least one value",
                         ));
                     }
                     let helper_ident = format_ident!(
@@ -327,7 +327,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
                         syn::Error::new_spanned(
                             &field_ident,
                             format!(
-                                "#[rf(rule = \"{}\", format = \"...\")] requires format",
+                                "#[rf({}(format = \"...\"))] requires format",
                                 builtin.key
                             ),
                         )
@@ -1308,7 +1308,7 @@ fn parse_rf_field(
     if cfg.regex_pattern.is_some() && cfg.builtin_rules.iter().any(|r| r.key == "one_of") {
         return Err(syn::Error::new_spanned(
             field,
-            "rf regex(...) cannot be combined with rf(rule = \"one_of\") on the same field",
+            "rf regex(...) cannot be combined with rf(one_of(...)) on the same field",
         ));
     }
 

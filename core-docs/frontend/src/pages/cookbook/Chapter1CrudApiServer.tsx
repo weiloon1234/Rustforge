@@ -312,10 +312,9 @@ with_permission_check_get(
                             <code className="language-rust">{`use core_web::contracts::rustforge_contract;
 
 #[rustforge_contract]
-#[derive(Debug, Clone, serde::Deserialize, validator::Validate, schemars::JsonSchema)]
 pub struct ArticleMetaInput {
     #[rf(length(min = 1, max = 120))]
-    #[rf(rule = "required_trimmed")]
+    #[rf(required_trimmed)]
     pub seo_title: String,
     #[rf(range(min = 0, max = 600))]
     pub reading_minutes: i32,
@@ -323,7 +322,6 @@ pub struct ArticleMetaInput {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, serde::Deserialize, validator::Validate, schemars::JsonSchema)]
 pub struct ArticleCreateInput {
     pub category_id: i64,
     pub status: generated::models::ArticleStatus,
