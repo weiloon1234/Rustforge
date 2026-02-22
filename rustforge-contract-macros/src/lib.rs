@@ -1213,7 +1213,17 @@ fn parse_rf_field(
                 Meta::List(ref list) => {
                     let name = list.path.get_ident().map(|i| i.to_string()).unwrap_or_default();
                     if let Some(meta_entry) = builtin_rule_meta(&name) {
-                        let builtin = parse_builtin_from_list(list, meta_entry)?;
+                        let (builtin, blt_msg, blt_code) =
+                            parse_builtin_from_list(list, meta_entry)?;
+                        if blt_msg.is_some() || blt_code.is_some() {
+                            let entry = cfg.rule_overrides.entry(name.clone()).or_default();
+                            if blt_msg.is_some() {
+                                entry.message = blt_msg;
+                            }
+                            if blt_code.is_some() {
+                                entry.code = blt_code;
+                            }
+                        }
                         local_rule_keys.push(name);
                         local_builtin = Some(builtin);
                     } else {
@@ -1270,7 +1280,6 @@ fn parse_rf_field(
         cfg.async_rules.extend(local_async_rules);
 
         if let Some(builtin) = local_builtin {
-            local_rule_keys.push(builtin.key.clone());
             cfg.builtin_rules.push(builtin);
         }
 
@@ -1309,7 +1318,7 @@ fn parse_rf_field(
 fn parse_builtin_from_list(
     list: &MetaList,
     meta: &rustforge_contract_meta::BuiltinRuleMeta,
-) -> syn::Result<BuiltinRuleUse> {
+) -> syn::Result<(BuiltinRuleUse, Option<String>, Option<String>)> {
     let mut values = Vec::new();
     let mut format = None;
     let mut field = None;
@@ -1399,16 +1408,16 @@ fn parse_builtin_from_list(
         _ => {}
     }
 
-    // message and code are handled via rule_overrides at the caller level
-    // but we also support them inline for convenience
-    let _ = (message, code);
-
-    Ok(BuiltinRuleUse {
-        key: meta.key.to_string(),
-        values,
-        format,
-        field,
-    })
+    Ok((
+        BuiltinRuleUse {
+            key: meta.key.to_string(),
+            values,
+            format,
+            field,
+        },
+        message,
+        code,
+    ))
 }
 
 fn parse_custom_rule(list: &MetaList) -> syn::Result<CustomRuleUse> {

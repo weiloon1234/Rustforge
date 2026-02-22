@@ -1,21 +1,19 @@
 use core_web::contracts::{rustforge_contract, rustforge_string_rule_type};
 use core_web::extract::AsyncValidate;
 use schemars::schema_for;
-use serde::Deserialize;
 use validator::Validate;
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, schemars::JsonSchema)]
 struct DemoInput {
     #[rf(length(min = 3, max = 32))]
-    #[rf(rule = "alpha_dash")]
+    #[rf(alpha_dash)]
     username: String,
 
-    #[rf(rule = "alpha_dash")]
+    #[rf(alpha_dash)]
     optional_handle: Option<String>,
 
-    #[rf(rule = "phonenumber", field = "contact_country_iso2")]
-    #[rf(openapi_hint = "Store raw input; server validates by country.")]
+    #[rf(phonenumber(field = "contact_country_iso2"))]
+    #[rf(openapi(hint = "Store raw input; server validates by country."))]
     phone: String,
 
     contact_country_iso2: String,
@@ -94,21 +92,18 @@ fn rustforge_contract_schema_contains_constraints_and_extensions() {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, schemars::JsonSchema)]
 struct NestedChildInput {
     #[rf(length(min = 1, max = 20))]
     label: String,
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, schemars::JsonSchema)]
 struct NestedParentInput {
     #[rf(nested)]
     child: NestedChildInput,
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, schemars::JsonSchema)]
 struct PasswordUpdateInput {
     #[rf(length(min = 8, max = 128))]
     password: String,
@@ -151,21 +146,18 @@ rustforge_string_rule_type! {
     pub struct UsernameString {
         #[validate(custom(function = "validate_username_wrapper"))]
         #[rf(length(min = 3, max = 64))]
-        #[rf(rule = "alpha_dash")]
-        #[rf(openapi_description = "Lowercase username using letters, numbers, _ and -.")]
-        #[rf(openapi_example = "admin_user")]
+        #[rf(alpha_dash)]
+        #[rf(openapi(description = "Lowercase username using letters, numbers, _ and -.", example = "admin_user"))]
     }
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, schemars::JsonSchema)]
 struct WrapperDemoInput {
     #[rf(nested)]
     username: UsernameString,
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, schemars::JsonSchema)]
 struct ContainsDemoInput {
     #[rf(contains(pattern = "@"))]
     email_like: String,
@@ -174,21 +166,17 @@ struct ContainsDemoInput {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, schemars::JsonSchema)]
 struct ExampleValueInput {
-    #[rf(openapi_example = 42)]
+    #[rf(openapi(example = 42))]
     count: i64,
-    #[rf(openapi_example = false)]
+    #[rf(openapi(example = false))]
     enabled: bool,
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, schemars::JsonSchema)]
 struct OverrideMessageInput {
-    #[rf(length(min = 3, max = 32))]
-    #[rf(rule = "alpha_dash")]
-    #[rf(message = "Field-level default message")]
-    #[rf(rule_override(rule = "alpha_dash", message = "Alpha-dash failed"))]
+    #[rf(length(min = 3, max = 32), message = "Field-level default message")]
+    #[rf(alpha_dash(message = "Alpha-dash failed"))]
     username: String,
 }
 
@@ -202,7 +190,6 @@ fn validate_pair_not_same(value: &SchemaRuleInput) -> Result<(), validator::Vali
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, schemars::JsonSchema)]
 #[rf(schema(function = "validate_pair_not_same", skip_on_field_errors = false))]
 struct SchemaRuleInput {
     #[rf(length(min = 1, max = 10))]
@@ -212,14 +199,12 @@ struct SchemaRuleInput {
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, schemars::JsonSchema)]
 struct AsyncRuleInput {
     #[rf(async_unique(table = "admin", column = "username"))]
     username: String,
 }
 
 #[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, schemars::JsonSchema)]
 struct AsyncRuleAdvancedInput {
     id: i64,
     tenant_id: i64,
