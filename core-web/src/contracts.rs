@@ -83,14 +83,6 @@ macro_rules! rustforge_string_rule_type {
 
         const _: () = {
             #[::core_web::contracts::rustforge_contract]
-            #[derive(
-                Debug,
-                Clone,
-                ::serde::Deserialize,
-                ::serde::Serialize,
-                ::validator::Validate,
-                ::schemars::JsonSchema
-            )]
             struct __RustforgeStringRuleTypeSchemaHelper {
                 $(#[$field_attr])*
                 value: String,
