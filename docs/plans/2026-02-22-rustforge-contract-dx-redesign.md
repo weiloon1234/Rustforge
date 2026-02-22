@@ -1,210 +1,573 @@
-# Rustforge Contract DX Redesign
+# Rustforge Contract DX Redesign - Implementation Plan
 
-## Goal
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-Redesign `#[rustforge_contract]` to eliminate boilerplate, make all rules first-class, simplify adding new rules (framework and app-level), and unify OpenAPI metadata. No backward compatibility needed.
+**Goal:** Redesign `#[rustforge_contract]` to eliminate derive boilerplate, make all rules first-class `#[rf(...)]` syntax, reduce adding new rules to 2 crates, support app-level custom rules with OpenAPI metadata, and group OpenAPI attributes. No backward compat.
 
-## Design Decisions
+**Architecture:** The proc macro (`rustforge-contract-macros`) is an attribute macro that generates a shadow struct for schemars + validator attributes on the original struct. The meta crate (`rustforge-contract-meta`) defines the rule registry. The rewrite changes the parsing layer to auto-discover rules from the registry rather than hardcoding ident matches, auto-injects derives, removes the `rule = "..."` dispatch, and adds `custom(...)` + `openapi(...)` grouped syntax.
 
-### 1. Auto-inject derives
+**Tech Stack:** syn 2, quote, proc-macro2, schemars 0.8, validator (vendored), aide 0.14
 
-`#[rustforge_contract]` auto-injects `Debug, Clone, serde::Deserialize, validator::Validate` on the original struct. `schemars::JsonSchema` goes only on the shadow struct (already the case). Users add extra derives if needed (`Serialize`, `PartialEq`, etc.) but never need the base set.
+---
 
-**Before:**
-```rust
-#[rustforge_contract]
-#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
-pub struct CreateUserInput { ... }
-```
+### Task 1: Update `rustforge-contract-meta` - add `BuiltinRuleArgs`
 
-**After:**
-```rust
-#[rustforge_contract]
-pub struct CreateUserInput { ... }
-```
+**Files:**
+- Modify: `rustforge-contract-meta/src/lib.rs`
 
-### 2. All builtin rules are first-class syntax
+**Step 1: Rewrite `rustforge-contract-meta/src/lib.rs`**
 
-Remove the `rule = "..."` string-key dispatch entirely. Every rule is a direct `#[rf(...)]` keyword.
-
-**Parameterless rules** (Meta::Path):
-- `required`, `required_trimmed`, `email`, `url`, `nested`
-- `strong_password`, `alpha_dash`, `lowercase_slug`
-
-**Parameterized rules** (Meta::List):
-- `length(min = N, max = N, equal = N)`
-- `range(min = N, max = N)`
-- `regex(pattern = "...")`
-- `contains(pattern = "...")`
-- `does_not_contain(pattern = "...")`
-- `must_match(other = "field_name")`
-- `one_of("a", "b", "c")`
-- `none_of("x", "y")`
-- `date(format = "...")`
-- `datetime(format = "...")`
-- `phonenumber(field = "country_field")`
-
-**Async DB rules** (Meta::List):
-- `async_unique(table = "...", column = "...", ...modifiers)`
-- `async_exists(table = "...", column = "...")`
-- `async_not_exists(table = "...", column = "...")`
-
-### 3. Inline `message` and `code` on any rule
-
-Every rule (parameterless or parameterized) accepts optional `message` and `code` when written in list form:
+Add `BuiltinRuleArgs` enum to tell the proc macro how to parse each rule's arguments. Update all `BuiltinRuleMeta` entries. The proc macro depends on this crate, so it can use `args` to generically handle any rule without hardcoded match arms.
 
 ```rust
-#[rf(email)]                                          // default message
-#[rf(email(message = "Please enter valid email"))]    // custom message
-#[rf(strong_password(message = "Too weak", code = "weak_pw"))]
-#[rf(one_of("a", "b", message = "Pick one"))]
-#[rf(length(min = 3, max = 32, message = "Bad length"))]
-```
-
-Remove `rule_override(...)` entirely. Per-rule message is always inline.
-
-For field-level fallback message (applies to all rules on that field if they don't have their own), keep `#[rf(message = "...")]` as a standalone attribute.
-
-### 4. Two-crate rule registration (eliminate proc macro changes)
-
-Adding a new framework rule requires only:
-1. Add validation fn in `core-web/src/rules/mod.rs`
-2. Add `BuiltinRuleMeta` entry in `rustforge-contract-meta/src/lib.rs`
-
-The proc macro uses the meta registry to auto-discover valid rule names. No match-arm additions needed in the proc macro.
-
-**Meta registry enhancement** - add `args` field to `BuiltinRuleMeta`:
-
-```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinRuleArgs {
-    None,                        // strong_password, alpha_dash
-    Values,                      // one_of, none_of
-    Format,                      // date, datetime
-    Field,                       // phonenumber
+    /// No arguments: `#[rf(strong_password)]`
+    /// With message only: `#[rf(strong_password(message = "..."))]`
+    None,
+    /// Accepts list of string values: `#[rf(one_of("a", "b"))]`
+    Values,
+    /// Accepts `format = "..."`: `#[rf(date(format = "..."))]`
+    Format,
+    /// Accepts `field = "..."`: `#[rf(phonenumber(field = "country_iso2"))]`
+    Field,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinRuleKind {
+    CustomFnPath(&'static str),
+    GeneratedOneOf,
+    GeneratedNoneOf,
+    GeneratedDate,
+    GeneratedDateTime,
+    PhoneNumberByIso2Field,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BuiltinRuleMeta {
+    pub key: &'static str,
+    pub kind: BuiltinRuleKind,
+    pub args: BuiltinRuleArgs,
+    pub default_code: &'static str,
+    pub default_message: &'static str,
+    pub openapi_description_template: &'static str,
+    pub pattern: Option<&'static str>,
+    pub format: Option<&'static str>,
 }
 ```
 
-The proc macro checks `builtin_rule_meta(name)` for any unknown ident. If found, it knows how to parse its args based on the `BuiltinRuleArgs` discriminant.
+Update all 8 entries to include `args`. E.g.:
+- `required_trimmed` -> `args: BuiltinRuleArgs::None`
+- `one_of` -> `args: BuiltinRuleArgs::Values`
+- `date` -> `args: BuiltinRuleArgs::Format`
+- `phonenumber` -> `args: BuiltinRuleArgs::Field`
 
-### 5. App-level custom rules with OpenAPI metadata
+**Step 2: Run `cargo check -p rustforge-contract-meta`**
 
-New `#[rf(custom(...))]` syntax for app-defined rules:
+Expected: PASS (no consumers changed yet; `args` field added, proc macro not yet updated to use it).
 
-```rust
-#[rf(custom(
-    function = "crate::validation::validate_tax_id",
-    description = "Valid tax identification number",
-    pattern = "^[A-Z]{2}[0-9]{8}$",
-    code = "tax_id",
-    message = "Invalid tax ID format"
-))]
-pub tax_id: String,
+**Step 3: Commit**
+
+```
+git add rustforge-contract-meta/src/lib.rs
+git commit -m "feat(meta): add BuiltinRuleArgs enum for generic rule parsing"
 ```
 
-Generates `#[validate(custom(function = ...))]` + OpenAPI metadata on the schema.
+---
 
-**App-level reusable rules via `rustforge_string_rule_type!`** already exist and keep working for wrapper types. For non-wrapper custom rules, `#[rf(custom(...))]` is the escape hatch with full OpenAPI support.
+### Task 2: Rewrite proc macro - auto-inject derives + new parsing
 
-### 6. Grouped OpenAPI attributes
+**Files:**
+- Rewrite: `rustforge-contract-macros/src/lib.rs`
 
-Replace flat `openapi_*` keys with grouped syntax:
+This is the largest task. The codegen layer (build_validate_*, build_patch_block, RuleExtensionSpec, JsonParam, generate_*_wrapper_fn, generate_async_db_rule_block, apply_async_db_modifier, mk_attr) stays mostly intact. The major changes are:
+
+**Step 1: Auto-inject derives in `expand_rustforge_contract`**
+
+Replace the derive-handling logic. Instead of preserving user's derives (minus JsonSchema), always ensure the required derives are present:
 
 ```rust
-#[rf(openapi(description = "...", hint = "...", example = "...", format = "..."))]
+// After parsing the struct, before emitting:
+// 1. Collect any user-supplied derives (strip JsonSchema, Validate, Deserialize, Debug, Clone)
+// 2. The original struct always gets: #[derive(Debug, Clone, serde::Deserialize, validator::Validate, {user_extras})]
+// 3. The shadow struct always gets: #[derive(schemars::JsonSchema)]
 ```
 
-Remove: `openapi_description`, `openapi_hint`, `openapi_example`, `openapi_format` as separate keys.
+The key change in the derive handling loop:
 
-### 7. End-state contract example
+```rust
+// Collect user extra derives (anything NOT in the auto-inject set)
+let auto_inject_set = ["Debug", "Clone", "Deserialize", "Validate", "JsonSchema"];
+let mut user_extra_derives: Vec<Meta> = Vec::new();
+
+for attr in item_attrs_without_rf.iter() {
+    if attr.path().is_ident("derive") {
+        let metas = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+        for m in metas {
+            if let Meta::Path(p) = &m {
+                let ident = p.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
+                if !auto_inject_set.contains(&ident.as_str()) {
+                    user_extra_derives.push(m);
+                }
+            }
+        }
+        continue; // Don't add raw derive to original_container_attrs
+    }
+    // ... rest of attr handling
+}
+
+// Build the derive attr for the original struct
+let extra_derives = if user_extra_derives.is_empty() {
+    quote! {}
+} else {
+    quote! { , #(#user_extra_derives),* }
+};
+
+// In the expanded output:
+// #[derive(::std::fmt::Debug, ::std::clone::Clone, ::serde::Deserialize, ::validator::Validate #extra_derives)]
+```
+
+**Step 2: Rewrite `parse_rf_field` - registry-driven builtin matching**
+
+Replace the giant match chain with registry-driven dispatch:
+
+```rust
+// For Meta::Path (parameterless):
+Meta::Path(path) => {
+    let name = path.get_ident().map(|i| i.to_string()).unwrap_or_default();
+    match name.as_str() {
+        // Core rules handled directly (they have special validator attrs)
+        "email" | "url" | "required" | "nested" => { /* existing logic */ }
+        // Everything else: check meta registry
+        _ => {
+            if let Some(meta) = builtin_rule_meta(&name) {
+                if meta.args != BuiltinRuleArgs::None {
+                    return Err(syn::Error::new_spanned(path,
+                        format!("#[rf({})] requires arguments", name)));
+                }
+                // Create BuiltinRuleUse with no args
+                local_builtin = Some(BuiltinRuleUse { key: name, values: vec![], format: None, field: None });
+            } else {
+                return Err(syn::Error::new_spanned(path, "unsupported #[rf(...)] syntax"));
+            }
+        }
+    }
+}
+
+// For Meta::List (parameterized):
+Meta::List(list) => {
+    let name = list.path.get_ident().map(|i| i.to_string()).unwrap_or_default();
+    match name.as_str() {
+        // Core parameterized rules handled directly
+        "length" | "range" | "regex" | "contains" | "does_not_contain" | "must_match" => { /* existing */ }
+        // Async DB rules
+        "async_unique" | "async_exists" | "async_not_exists" => { /* existing */ }
+        // New: custom(), openapi()
+        "custom" => { /* new: parse function, description, pattern, code, message */ }
+        "openapi" => { /* new: parse description, hint, example, format */ }
+        // Builtins that were previously string-key or parameterless-with-message
+        _ => {
+            if let Some(meta) = builtin_rule_meta(&name) {
+                // Parse args based on meta.args discriminant + optional message/code
+                let builtin = parse_builtin_from_list(&list, meta)?;
+                local_builtin = Some(builtin);
+            } else if name == "email" || name == "url" || name == "required" || name == "nested" {
+                // Core rules in list form for message override: #[rf(email(message = "..."))]
+                // Parse message/code from list args, set the bool flag + override
+            } else {
+                return Err(syn::Error::new_spanned(list, format!("unknown #[rf({}(...))] rule", name)));
+            }
+        }
+    }
+}
+```
+
+**Step 3: Add `parse_builtin_from_list` helper**
+
+```rust
+fn parse_builtin_from_list(list: &MetaList, meta: &BuiltinRuleMeta) -> syn::Result<BuiltinRuleUse> {
+    let metas = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+    let mut values = Vec::new();
+    let mut format = None;
+    let mut field = None;
+    let mut message = None;
+    let mut code = None;
+
+    for m in &metas {
+        match m {
+            // Bare string literals are values (for one_of/none_of)
+            // Named args: format, field, message, code
+            Meta::NameValue(nv) if nv.path.is_ident("format") => {
+                format = Some(lit_str_from_expr(&nv.value, "format")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("field") => {
+                field = Some(lit_str_from_expr(&nv.value, "field")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("message") => {
+                message = Some(lit_str_from_expr(&nv.value, "message")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("code") => {
+                code = Some(lit_str_from_expr(&nv.value, "code")?.value());
+            }
+            _ => {
+                return Err(syn::Error::new_spanned(m, "unexpected argument"));
+            }
+        }
+    }
+
+    // For Values args, parse positional string exprs from the list
+    if meta.args == BuiltinRuleArgs::Values {
+        // Re-parse as Expr list to capture bare strings: one_of("a", "b", message = "...")
+        let exprs = list.parse_args_with(Punctuated::<Expr, Token![,]>::parse_terminated)?;
+        for expr in &exprs {
+            // Only take string literals, skip named key=value
+            if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = expr {
+                values.push(s.value());
+            }
+        }
+    }
+
+    // Validate required args based on meta.args
+    match meta.args {
+        BuiltinRuleArgs::Format if format.is_none() => {
+            return Err(syn::Error::new_spanned(list,
+                format!("#[rf({}(...))] requires format = \"...\"", meta.key)));
+        }
+        BuiltinRuleArgs::Field if field.is_none() => {
+            return Err(syn::Error::new_spanned(list,
+                format!("#[rf({}(...))] requires field = \"...\"", meta.key)));
+        }
+        BuiltinRuleArgs::Values if values.is_empty() => {
+            return Err(syn::Error::new_spanned(list,
+                format!("#[rf({}(...))] requires at least one value", meta.key)));
+        }
+        _ => {}
+    }
+
+    Ok(BuiltinRuleUse { key: meta.key.to_string(), values, format, field })
+    // message and code handled via rule_overrides or inline
+}
+```
+
+Note: for `BuiltinRuleArgs::Values`, the list contains a mix of positional string exprs and named `message = "..."` args. The parser needs to handle this mixed form. Parse with `Punctuated<Expr, Token![,]>` first to get values, then re-parse with `Punctuated<Meta, Token![,]>` for named args. OR parse as a custom token stream that handles both.
+
+A cleaner approach for `one_of("a", "b", message = "...")`:
+- Parse the token stream manually: iterate tokens, string literals become values, `ident = lit` become named args.
+
+**Step 4: Add `custom(...)` parsing**
+
+```rust
+// In the Meta::List match for "custom":
+"custom" => {
+    let metas = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+    let mut function: Option<Path> = None;
+    let mut description: Option<String> = None;
+    let mut pattern: Option<String> = None;
+    let mut custom_code: Option<String> = None;
+    let mut custom_message: Option<String> = None;
+
+    for m in metas {
+        match m {
+            Meta::NameValue(nv) if nv.path.is_ident("function") => {
+                function = Some(path_from_expr(&nv.value, "function")?);
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("description") => {
+                description = Some(lit_str_from_expr(&nv.value, "description")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("pattern") => {
+                pattern = Some(lit_str_from_expr(&nv.value, "pattern")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("code") => {
+                custom_code = Some(lit_str_from_expr(&nv.value, "code")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("message") => {
+                custom_message = Some(lit_str_from_expr(&nv.value, "message")?.value());
+            }
+            other => return Err(syn::Error::new_spanned(other, "unsupported custom(...) arg")),
+        }
+    }
+    let function = function.ok_or_else(||
+        syn::Error::new_spanned(&list, "custom(...) requires function = \"...\""))?;
+
+    // Store as CustomRuleUse in FieldRfConfig
+    cfg.custom_rules.push(CustomRuleUse { function, description, pattern, code: custom_code, message: custom_message });
+}
+```
+
+**Step 5: Add `openapi(...)` grouped parsing**
+
+```rust
+"openapi" => {
+    let metas = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+    for m in metas {
+        match m {
+            Meta::NameValue(nv) if nv.path.is_ident("description") => {
+                cfg.openapi_description = Some(lit_str_from_expr(&nv.value, "description")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("hint") => {
+                cfg.openapi_hint = Some(lit_str_from_expr(&nv.value, "hint")?.value());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("example") => {
+                cfg.openapi_example = Some(nv.value.clone());
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("format") => {
+                cfg.openapi_format = Some(lit_str_from_expr(&nv.value, "format")?.value());
+            }
+            other => return Err(syn::Error::new_spanned(other, "unsupported openapi(...) arg")),
+        }
+    }
+}
+```
+
+**Step 6: Remove dead code**
+
+- Remove `rule = "..."` / `format = ...` / `field = ...` context-dependent NameValue handling
+- Remove `rule_override(...)` parsing
+- Remove `values(...)` as standalone Meta::List
+- Remove flat `openapi_*` NameValue keys
+- Remove `pending_builtin` pattern (replaced by `local_builtin`)
+
+**Step 7: Add `CustomRuleUse` to `FieldRfConfig` and codegen**
+
+```rust
+struct CustomRuleUse {
+    function: Path,
+    description: Option<String>,
+    pattern: Option<String>,
+    code: Option<String>,
+    message: Option<String>,
+}
+```
+
+In the codegen loop, for each `CustomRuleUse`:
+- Generate `#[validate(custom(function = <path>, message = "...", code = "..."))]`
+- Add `RuleExtensionSpec` with key = "custom", source = "app"
+- If `description` provided, add to `field_desc_parts`
+- If `pattern` provided, set `field_pattern_patch`
+
+**Step 8: Run `cargo check -p rustforge-contract-macros`**
+
+Expected: PASS (compiles but tests will fail since test code uses old syntax).
+
+**Step 9: Commit**
+
+```
+git add rustforge-contract-macros/src/lib.rs
+git commit -m "feat(macros): rewrite parsing for first-class rules, auto-derive, custom(), openapi()"
+```
+
+---
+
+### Task 3: Update `rustforge_string_rule_type!`
+
+**Files:**
+- Modify: `core-web/src/contracts.rs`
+
+**Step 1: Update the inner helper struct**
+
+The `rustforge_string_rule_type!` macro creates an inner struct with `#[rustforge_contract]` + derives. Since `#[rustforge_contract]` now auto-injects derives, remove the explicit derive list:
+
+```rust
+const _: () = {
+    #[::core_web::contracts::rustforge_contract]
+    struct __RustforgeStringRuleTypeSchemaHelper {
+        $(#[$field_attr])*
+        value: String,
+    }
+    // ... rest stays the same
+};
+```
+
+Remove `#[derive(Debug, Clone, ::serde::Deserialize, ::serde::Serialize, ::validator::Validate, ::schemars::JsonSchema)]` from the inner struct. The `#[rustforge_contract]` macro will auto-inject the needed derives.
+
+Note: the inner struct also needs `Serialize` since it derives it currently. Check if `Serialize` is actually needed by the helper - it's only used for `Validate` and `JsonSchema`. If not needed, just let auto-inject handle it. If needed, add `#[derive(::serde::Serialize)]` alongside the macro.
+
+**Step 2: Update `#[rf(...)]` syntax in consumer macro invocations**
+
+The macro body uses `#[rf(rule = "alpha_dash")]` syntax. Now it should use `#[rf(alpha_dash)]`.
+
+But wait - `rustforge_string_rule_type!` takes raw attributes from the user. The user's attributes will already use the new syntax. No change needed in the macro body itself, only the inner helper struct's derive handling.
+
+**Step 3: Run `cargo check -p core-web`**
+
+Expected: may fail until tests updated.
+
+**Step 4: Commit**
+
+```
+git add core-web/src/contracts.rs
+git commit -m "feat(contracts): simplify rustforge_string_rule_type inner struct"
+```
+
+---
+
+### Task 4: Rewrite tests to new syntax
+
+**Files:**
+- Rewrite: `core-web/tests/rustforge_contract.rs`
+
+**Step 1: Rewrite all test structs**
+
+Convert every test contract from old syntax to new:
+
+| Old | New |
+|-----|-----|
+| `#[derive(Debug, Clone, Deserialize, Validate, schemars::JsonSchema)]` | (removed - auto-injected) |
+| `#[rf(rule = "alpha_dash")]` | `#[rf(alpha_dash)]` |
+| `#[rf(rule = "phonenumber", field = "...")]` | `#[rf(phonenumber(field = "..."))]` |
+| `#[rf(openapi_hint = "...")]` | `#[rf(openapi(hint = "..."))]` |
+| `#[rf(openapi_description = "...")]` | `#[rf(openapi(description = "..."))]` |
+| `#[rf(openapi_example = ...)]` | `#[rf(openapi(example = ...))]` |
+| `#[rf(message = "Field-level default message")]` + `#[rf(rule_override(...))]` | `#[rf(alpha_dash(message = "Alpha-dash failed"))]` |
+
+Remove imports that are no longer needed: `schemars::JsonSchema`, `validator::Validate`, `serde::Deserialize` (all auto-injected).
+
+Keep `use core_web::contracts::{rustforge_contract, rustforge_string_rule_type};` and `use core_web::extract::AsyncValidate;`.
+
+Example of the first test struct rewritten:
 
 ```rust
 #[rustforge_contract]
-pub struct CreateUserInput {
-    #[rf(length(min = 1, max = 120))]
-    pub name: String,
+struct DemoInput {
+    #[rf(length(min = 3, max = 32))]
+    #[rf(alpha_dash)]
+    username: String,
 
-    #[rf(email(message = "Please enter a valid email"))]
-    #[rf(async_unique(table = "users", column = "email"))]
-    pub email: String,
+    #[rf(alpha_dash)]
+    optional_handle: Option<String>,
 
-    #[rf(strong_password)]
-    pub password: String,
+    #[rf(phonenumber(field = "contact_country_iso2"))]
+    #[rf(openapi(hint = "Store raw input; server validates by country."))]
+    phone: String,
 
-    #[rf(must_match(other = "password"))]
-    pub password_confirmation: String,
-
-    #[rf(one_of("admin", "editor", "viewer"))]
-    pub role: String,
-
-    #[rf(date(format = "[year]-[month]-[day]"))]
-    pub birth_date: String,
-
-    #[rf(phonenumber(field = "country_iso2"))]
-    #[rf(openapi(hint = "Raw input; server validates by country"))]
-    pub phone: String,
-
-    pub country_iso2: String,
-
-    #[rf(custom(
-        function = "crate::validation::validate_tax_id",
-        description = "Valid tax ID",
-        pattern = "^[A-Z]{2}[0-9]{8}$"
-    ))]
-    pub tax_id: String,
+    contact_country_iso2: String,
 }
 ```
 
-## Implementation Plan
+Rewrite `UsernameString` in the test:
 
-### Step 1: Update `rustforge-contract-meta`
+```rust
+rustforge_string_rule_type! {
+    /// Username wrapper type (project-level SSOT example).
+    pub struct UsernameString {
+        #[validate(custom(function = "validate_username_wrapper"))]
+        #[rf(length(min = 3, max = 64))]
+        #[rf(alpha_dash)]
+        #[rf(openapi(description = "Lowercase username using letters, numbers, _ and -.", example = "admin_user"))]
+    }
+}
+```
 
-- Add `BuiltinRuleArgs` enum to `BuiltinRuleMeta`
-- Update all 8 existing entries with their arg type
-- Remove: nothing yet (proc macro still references these)
+Rewrite `OverrideMessageInput`:
 
-### Step 2: Rewrite proc macro parsing layer
+```rust
+#[rustforge_contract]
+struct OverrideMessageInput {
+    #[rf(length(min = 3, max = 32, message = "Bad length"))]
+    #[rf(alpha_dash(message = "Alpha-dash failed"))]
+    username: String,
+}
+```
 
-- Auto-inject derives (Debug, Clone, Deserialize, Validate)
-- Remove `rule = "..."` string dispatch, `values(...)` as separate key, `format`/`field` as context-dependent keys
-- Remove `rule_override(...)` syntax
-- Remove flat `openapi_*` keys
-- Add registry-driven builtin matching: any `Meta::Path` or `Meta::List` ident checked against `builtin_rule_meta()`
-- Add `custom(...)` parsing
-- Add `openapi(...)` grouped parsing
-- Add inline `message`/`code` support on all parameterized rules
-- Parameterless rules with message become `Meta::List`: `strong_password(message = "...")`
+All test assertions stay the same - they test runtime behavior and schema output, which shouldn't change.
 
-### Step 3: Update code generation layer
+**Step 2: Run `cargo test -p core-web`**
 
-- Minimal changes needed - `build_validate_*` functions stay mostly the same
-- `build_rules_json_expr` and `RuleExtensionSpec` stay the same
-- Adjust how `BuiltinRuleUse` is constructed (from parsed list args instead of pending_builtin + loose keys)
+Expected: PASS
 
-### Step 4: Update all consumers
+**Step 3: Commit**
 
-- `core-web/tests/rustforge_contract.rs` - update all test contracts to new syntax
-- `scaffold/src/templates.rs` - update all template contracts
-- `core-web/src/datatable.rs` - update any contracts there
+```
+git add core-web/tests/rustforge_contract.rs
+git commit -m "test: rewrite contract tests to new #[rf(...)] syntax"
+```
 
-### Step 5: Update `rustforge_string_rule_type!` macro
+---
 
-- Remove the manual derive injection (now handled by `#[rustforge_contract]` auto-inject)
-- Update inner helper struct syntax to match new `#[rf(...)]` API
+### Task 5: Update scaffold templates
 
-### Step 6: Verify
+**Files:**
+- Modify: `scaffold/src/templates.rs`
 
-- `cargo test` across workspace
-- `cargo check` on scaffold output
-- Trybuild tests if any
+**Step 1: Update all template string constants**
 
-## Security note
+In every template constant that contains `#[rustforge_contract]` + `#[derive(...)]`:
 
-The `Unique`/`Exists`/`NotExists` rules in `core-web/src/rules/mod.rs` interpolate table/column names via `format!()`. Currently safe because they're `&'static str` from macro expansion. This design doesn't change that - table/column still come from string literals in `#[rf(async_unique(table = "...", column = "..."))]` which are compile-time constants. No new risk.
+1. Remove `#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]` lines
+2. Remove `use schemars::JsonSchema;`, `use serde::Deserialize;`, `use validator::Validate;` imports (keep Serialize imports for response DTOs)
+3. Replace `#[rf(rule = "alpha_dash")]` with `#[rf(alpha_dash)]`
+4. Replace `#[rf(openapi_description = "...")]` with `#[rf(openapi(description = "..."))]`
+5. Replace `#[rf(openapi_example = ...)]` with `#[rf(openapi(example = ...))]`
 
-## Files affected
+Affected constants:
+- `APP_CONTRACTS_TYPES_USERNAME_RS`
+- `APP_CONTRACTS_DATATABLE_ADMIN_ADMIN_RS`
+- `APP_CONTRACTS_API_V1_ADMIN_RS`
+- `APP_CONTRACTS_API_V1_ADMIN_AUTH_RS`
 
-- `rustforge-contract-meta/src/lib.rs` - add args enum, update entries
-- `rustforge-contract-macros/src/lib.rs` - major rewrite of parsing layer
-- `core-web/src/contracts.rs` - update `rustforge_string_rule_type!`
-- `core-web/tests/rustforge_contract.rs` - rewrite tests to new syntax
-- `scaffold/src/templates.rs` - update all template contracts
+Note: Response DTOs (`AdminOutput`, `AdminAuthOutput`, `AdminDeleteOutput`) are NOT contracts - they use `#[derive(Serialize, JsonSchema)]` directly and don't use `#[rustforge_contract]`. Leave those unchanged.
+
+**Step 2: Run `cargo check -p scaffold`**
+
+Expected: PASS (templates are string constants, not compiled Rust)
+
+**Step 3: Commit**
+
+```
+git add scaffold/src/templates.rs
+git commit -m "feat(scaffold): update templates to new contract syntax"
+```
+
+---
+
+### Task 6: Full workspace verification
+
+**Step 1: Run full workspace check**
+
+```
+cargo check --workspace
+```
+
+Expected: PASS
+
+**Step 2: Run full workspace tests**
+
+```
+cargo test --workspace
+```
+
+Expected: All tests PASS
+
+**Step 3: Verify trybuild tests if any exist**
+
+```
+ls target/tests/trybuild/rustforge-contract-macros/
+```
+
+If there are compile-fail test cases, update them to match new error messages.
+
+**Step 4: Final commit**
+
+```
+git commit -m "chore: verify full workspace builds and tests pass"
+```
+
+---
+
+## File Change Summary
+
+| File | Change |
+|------|--------|
+| `rustforge-contract-meta/src/lib.rs` | Add `BuiltinRuleArgs` enum, update all entries |
+| `rustforge-contract-macros/src/lib.rs` | Rewrite parsing: auto-derives, registry-driven builtins, custom(), openapi() |
+| `core-web/src/contracts.rs` | Simplify `rustforge_string_rule_type!` inner struct |
+| `core-web/tests/rustforge_contract.rs` | Rewrite all test contracts to new syntax |
+| `scaffold/src/templates.rs` | Update all template contracts to new syntax |
+
+## Estimated scope
+
+- Meta crate: ~30 lines changed
+- Proc macro: ~400 lines changed (mostly parsing; codegen stays)
+- Contracts: ~20 lines changed
+- Tests: ~100 lines changed (syntax only, assertions unchanged)
+- Scaffold: ~50 lines changed (string template syntax updates)
