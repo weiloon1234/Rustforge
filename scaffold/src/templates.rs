@@ -377,149 +377,164 @@ gen:
 
 pub const ROOT_README_MD: &str = r#"# Rustforge Starter
 
-Rustforge-Starter is the consumer application skeleton that depends on Rustforge framework crates.
-Use this repository to build real products. Keep framework changes in Rustforge, keep domain logic here.
+Full-stack application skeleton: **Rust API** (Axum + SQLx + Redis) + **React frontend** (Vite + Tailwind 4).
+Build your product here. Keep framework changes in [Rustforge](https://github.com/weiloon1234/Rustforge.git), keep domain logic in this repo.
+
+## Prerequisites
+
+- **Rust** (stable) + `cargo-watch` (`cargo install cargo-watch`)
+- **Node.js** (20+) + npm
+- **PostgreSQL** (15+)
+- **Redis** (7+)
+
+## Quick Start
+
+```bash
+# 1. Environment
+cp .env.example .env          # edit DB/Redis credentials
+
+# 2. Code generation
+cargo build -p generated
+
+# 3. Database
+./console migrate pump        # generate framework migrations
+./console migrate run         # apply all migrations
+
+# 4. Frontend
+make install-frontend         # npm install
+
+# 5. Run everything
+make dev                      # Rust API (:3000) + user portal (:5173) + admin portal (:5174)
+```
+
+Open [http://localhost:5173](http://localhost:5173) for the user portal and [http://localhost:5174](http://localhost:5174) for the admin portal during development.
 
 ## Repository Layout
 
-| Folder | Purpose |
-| --- | --- |
-| `app/` | Main application crate (API/websocket/worker/console binaries, internal modules, contracts, validation, seeds). |
-| `generated/` | Generated crate from `db-gen` using `app/schemas`, `app/permissions.toml`, `app/configs.toml`. |
-| `migrations/` | Application SQL migrations. |
-| `i18n/` | Project-owned translation catalogs (`en.json`, `zh.json`, ...). |
-| `frontend/` | Multi-portal React + Vite + Tailwind 4 frontend (user & admin portals). |
-| `public/` | Built frontend output and static assets (`PUBLIC_PATH`). |
-| `bin/` | Short wrappers to run API/websocket/worker/console with expected env defaults. |
-| `.env.example` | Runtime environment template. |
-| `Cargo.toml` | Workspace root and Rustforge dependency wiring. |
-
-## First Boot
-
-1. Copy env and adjust values:
-
-```bash
-cp .env.example .env
+```
+app/                    Rust application crate (API, websocket, worker, console)
+  configs.toml          Languages, auth guards, realtime, CORS
+  permissions.toml      Permission catalog
+  schemas/*.toml        Model definitions (code generation source)
+  src/
+    internal/api/       Route handlers + state
+    internal/workflows/ Business logic
+    internal/jobs/      Background jobs
+    contracts/          Request/response DTOs
+    validation/         Validation rules
+    seeds/              Database seeders
+frontend/               Multi-portal React + Vite + Tailwind 4
+  src/user/             User portal (served at /)
+  src/admin/            Admin portal (served at /admin/)
+  src/shared/           Shared components & utilities
+generated/              Auto-generated code — never edit directly
+migrations/             SQL migration files
+i18n/                   Translation catalogs (en.json, zh.json, ...)
+public/                 Built frontend output (git-ignored)
+bin/                    Shell wrappers for running services
+scripts/                Server install & update scripts
 ```
 
-2. Ensure PostgreSQL and Redis are running.
-3. Generate code:
+## Development
+
+### Make targets
+
+| Command | What it does |
+|---------|-------------|
+| `make dev` | Start Rust API + both Vite portals (all-in-one) |
+| `make dev-api` | Rust API only with cargo-watch (auto-reload) |
+| `make dev-frontend` | Both Vite portals |
+| `make dev-user` | Vite user portal only (port 5173) |
+| `make dev-admin` | Vite admin portal only (port 5174) |
+| `make build-frontend` | Production build all portals into `public/` |
+| `make install-frontend` | `npm install` for frontend |
+| `make check` | `cargo check --workspace` |
+| `make gen` | Rebuild generated code |
+| `make run-api` | Run API server (release) |
+| `make run-ws` | Run WebSocket server |
+| `make run-worker` | Run background worker |
+
+### Frontend architecture
+
+The frontend ships two independent SPA portals, each with its own Vite config, dev server, and CSS theme:
+
+| Portal | URL | Dev port | Vite config | Source |
+|--------|-----|----------|-------------|--------|
+| User | `/` | 5173 | `vite.config.user.ts` | `frontend/src/user/` |
+| Admin | `/admin/` | 5174 | `vite.config.admin.ts` | `frontend/src/admin/` |
+
+Both dev servers proxy `/api` to the Rust API on port 3000.
+
+**Tailwind 4**: No `tailwind.config.js` needed. Each portal customises design tokens via `@theme { }` in its own `app.css`.
+
+**Production build**: `make build-frontend` cleans `public/`, builds admin into `public/admin/`, then user into `public/`. The Rust API serves `public/admin/index.html` as the admin SPA fallback and `public/index.html` as the user SPA fallback.
+
+### Migrations
 
 ```bash
-cargo build -p generated
+./console migrate pump          # generate framework migrations
+./console migrate run           # apply pending migrations
+./console migrate revert        # revert last migration
+./console migrate add my_table  # create new migration file
 ```
 
-4. Build migration files and run them:
+### Seeds
 
 ```bash
-./console migrate pump
-./console migrate run
+./console db seed                         # run all seeders
+./console db seed --name AdminBootstrap   # run a specific seeder
 ```
 
-5. Install frontend dependencies:
+## Production Deployment
+
+### Ubuntu Server Install
 
 ```bash
-make install-frontend
+sudo ./scripts/install-ubuntu.sh   # or: make server-install
 ```
 
-6. Start services:
+Idempotent installer that configures: isolated Linux user, SSH access, `.env` values, nginx, Supervisor programs, and optional Let's Encrypt certificates.
+
+### Updates
 
 ```bash
-./bin/api-server
-./bin/websocket-server
-./bin/worker
+./scripts/update.sh                       # or: make server-update
+RUN_MIGRATIONS=false ./scripts/update.sh  # skip migrations
 ```
 
-Or start everything at once (API + frontend dev servers):
+Pulls latest code, compiles release binaries, builds frontend, runs migrations, and restarts Supervisor programs.
+
+## Key Concepts
+
+### Code Generation (SSOT)
+
+| Source file | Generates |
+|-------------|-----------|
+| `app/schemas/*.toml` | Model structs, enums, repos, query builders |
+| `app/permissions.toml` | `Permission` enum |
+| `app/configs.toml` | Typed `Settings` |
+
+Never edit `generated/src/generated.rs` — it's overwritten on every build. Put extensions in `generated/src/extensions.rs`.
+
+### i18n
+
+All user-facing strings go through `core_i18n::t()`. Translation files live in `i18n/`. Locale is resolved per-request from `X-Locale` or `Accept-Language` headers.
+
+### Redis
+
+`REDIS_CACHE_PREFIX` auto-derives from `{APP_NAME}_{APP_ENV}`. Leave empty unless you need custom namespacing.
+
+### Dependency Pinning
+
+This starter uses git dependencies to Rustforge `main` branch. For production stability, pin to a specific tag in `Cargo.toml`.
+
+### Framework Documentation
 
 ```bash
-make dev
-```
-
-## Daily Commands
-
-```bash
-make dev               # Rust API + Vite user (:5173) + Vite admin (:5174)
-make dev-api           # Rust API only (cargo-watch)
-make dev-frontend      # All Vite portals
-make dev-user          # Vite user portal only
-make dev-admin         # Vite admin portal only
-make build-frontend    # Production build → public/
-make check
-make run-api
-make run-ws
-make run-worker
-./console migrate pump
-./console migrate run
-make server-install
-make server-update
 make framework-docs-build
 ```
 
-## Ubuntu Server Install (Interactive)
-
-Run as root on Ubuntu 24/25:
-
-```bash
-sudo ./scripts/install-ubuntu.sh
-# or
-make server-install
-```
-
-The installer is idempotent (safe to run multiple times) and will:
-- create/reuse an isolated Linux user per project
-- configure SSH access (copy root key, manual key, or generated password)
-- recursively `chown` project files to the isolated user
-- upsert `.env` values (domain/env/db/redis/ports)
-- generate/update nginx site config
-- optionally configure Supervisor programs
-- optionally issue/renew Let's Encrypt certificates with cron renewal
-
-## Server Update Script
-
-Use the generated update helper for deploy-like updates:
-
-```bash
-./scripts/update.sh
-# optional opt-out
-RUN_MIGRATIONS=false ./scripts/update.sh
-```
-
-It will:
-- `git pull --ff-only`
-- compile release binaries (`cargo build --release --workspace`)
-- run migrations by default (set `RUN_MIGRATIONS=false` to skip)
-- reread/update and restart Supervisor programs from the installed supervisor config
-
-## i18n Ownership
-
-This starter owns translation files.
-`I18N_DIR=i18n` is set in `.env.example`, and API locale is resolved from `Accept-Language`/`x-locale` by framework middleware.
-
-## Static Assets (Optional)
-
-1. Keep `PUBLIC_PATH=public` (or set your own path in `.env`).
-2. Build your frontend project (for example Vite `dist` output).
-3. Publish files into `PUBLIC_PATH`:
-
-```bash
-./console assets publish --from frontend/dist --clean
-```
-
-When `PUBLIC_PATH/index.html` exists, API server serves that folder at `/` with SPA fallback.
-
-## Redis Key Isolation
-
-Keep `REDIS_CACHE_PREFIX` empty by default. Framework auto-derives `{APP_NAME}_{APP_ENV}` to namespace keys.
-Set `REDIS_CACHE_PREFIX` only when you need a custom prefix strategy.
-
-## Dependency Mode
-
-This starter uses git dependencies to Rustforge.
-For production stability, pin to a tag in `Cargo.toml`.
-
-`make framework-docs-build` publishes framework docs assets into
-`PUBLIC_PATH + FRAMEWORK_DOCS_PATH` (default: `public/framework-documentation`).
+Publishes framework docs to `public/framework-documentation/`.
 "#;
 
 pub const ROOT_I18N_EN_JSON: &str = r#"{
@@ -3584,6 +3599,54 @@ SQL files in `migrations/` with numeric prefix. After adding a schema, write the
 migrations/0000000001000_admin_auth.sql
 migrations/0000000002000_articles.sql
 ```
+
+## Frontend (React + Vite + Tailwind 4)
+
+The `frontend/` directory contains a multi-portal SPA setup. Each portal has its own Vite config, HTML entry, CSS theme, and source tree. See `frontend/AGENTS.md` for full details.
+
+| Portal | URL | Dev port | Vite config | Source |
+|--------|-----|----------|-------------|--------|
+| user | `/` | 5173 | `vite.config.user.ts` | `src/user/` |
+| admin | `/admin/` | 5174 | `vite.config.admin.ts` | `src/admin/` |
+
+### Dev servers
+
+```bash
+make dev            # Rust API (:3000) + Vite user (:5173) + Vite admin (:5174)
+make dev-api        # Rust API only
+make dev-user       # Vite user only
+make dev-admin      # Vite admin only
+```
+
+Both Vite dev servers proxy `/api` requests to the Rust API on `:3000`.
+
+### Production build
+
+```bash
+make build-frontend   # Cleans public/, builds admin → public/admin/, then user → public/
+```
+
+Build order matters: admin first (into `public/admin/`), then user (into `public/` with `emptyOutDir: false`) so the user build doesn't wipe the admin output.
+
+### Tailwind 4 — CSS-only theming
+
+No `tailwind.config.js`. Each portal's `app.css` uses `@import "tailwindcss"` and `@theme { }` for portal-specific design tokens. The shared `postcss.config.js` just enables `@tailwindcss/postcss`.
+
+### Production serving (Rust side)
+
+In `app/src/internal/api/mod.rs`, `build_router` mounts:
+1. `/admin/*` → `public/admin/index.html` via `nest_service` (admin SPA fallback)
+2. `/*` → `public/index.html` via `static_assets_router` (user SPA fallback)
+
+Admin is mounted first so `/admin/*` is matched before the catch-all user SPA.
+
+### Adding a new portal
+
+1. `frontend/vite.config.{name}.ts` — set `base: "/{name}/"`, unique port, `outDir: "../public/{name}"`
+2. `frontend/{name}.html` + `frontend/src/{name}/{main.tsx, App.tsx, app.css}`
+3. Add `dev:{name}` and `build:{name}` to `package.json` scripts
+4. Update `build` script ordering (nested portals before root)
+5. Add `nest_service("/{name}", ...)` in `build_router` (before the user SPA catch-all)
 
 ## New Feature Checklist
 
