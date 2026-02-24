@@ -1865,7 +1865,6 @@ pub struct AdminAuthOutput {
     #[schemars(with = "Option<String>")]
     #[ts(type = "string | null")]
     pub access_expires_at: Option<time::OffsetDateTime>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
     #[serde(default)]
     pub scopes: Vec<String>,
