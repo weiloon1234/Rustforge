@@ -3366,18 +3366,25 @@ t_args("Welcome :name", &[("name", &user.name)])
 
 ### Rules
 
-1. **Use English text as key.** It doubles as the fallback when translation is missing.
-2. **Every `t()` key must appear in all `i18n/*.json` files.**
-3. **Flat key-value JSON** — no nesting.
-4. **One file per locale**: `i18n/en.json`, `i18n/zh.json`, etc.
-5. Parameters use `:paramName` syntax in both key and translations.
+1. **Keys are English text.** The key itself is the fallback — if no translation is found, `t()` returns the key as-is.
+2. **Flat key-value JSON** — no nesting. One file per locale: `i18n/en.json`, `i18n/zh.json`, etc.
+3. **`en.json` only needs entries where key differs from display text**, or where the key has `:param` placeholders. If key and value are identical (e.g. `"Admin created": "Admin created"`), **omit it from `en.json`** — the fallback already returns the key.
+4. **Non-English locale files need every `t()` key** that appears in code.
+5. Parameters use `:paramName` syntax in both key and all translations.
 
 ```json
-// i18n/en.json
-{ "Article created": "Article created", "Welcome :name": "Welcome :name" }
+// i18n/en.json — only divergent or parameterized keys
+{
+  "Credit 1": "Cash Point",
+  "Welcome :name": "Welcome :name"
+}
 
-// i18n/zh.json
-{ "Article created": "文章创建成功", "Welcome :name": "欢迎 :name" }
+// i18n/zh.json — every key used in code
+{
+  "Article created": "文章创建成功",
+  "Credit 1": "现金积分",
+  "Welcome :name": "欢迎 :name"
+}
 ```
 
 ### Where translations are used
