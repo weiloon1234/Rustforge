@@ -293,23 +293,27 @@ dev-api:
 	@command -v cargo-watch >/dev/null 2>&1 || (echo "cargo-watch not found. Run: make install-tools" && exit 1)
 	RUN_WORKER=true cargo watch -x "run -p app --bin api-server"
 
+.PHONY: ensure-frontend-deps
+ensure-frontend-deps:
+	@test -d frontend/node_modules || (echo "Installing frontend dependencies..." && npm --prefix frontend install)
+
 .PHONY: dev-user
-dev-user:
+dev-user: ensure-frontend-deps
 	npm --prefix frontend run dev:user
 
 .PHONY: dev-admin
-dev-admin:
+dev-admin: ensure-frontend-deps
 	npm --prefix frontend run dev:admin
 
 .PHONY: dev-frontend
-dev-frontend:
+dev-frontend: ensure-frontend-deps
 	@trap 'kill 0' EXIT; \
 	npm --prefix frontend run dev:user & \
 	npm --prefix frontend run dev:admin & \
 	wait
 
 .PHONY: dev
-dev:
+dev: ensure-frontend-deps
 	@command -v cargo-watch >/dev/null 2>&1 || (echo "cargo-watch not found. Run: make install-tools" && exit 1)
 	@trap 'kill 0' EXIT; \
 	RUN_WORKER=true cargo watch -x "run -p app --bin api-server" & \
@@ -318,7 +322,7 @@ dev:
 	wait
 
 .PHONY: build-frontend
-build-frontend:
+build-frontend: ensure-frontend-deps
 	npm --prefix frontend run build
 
 .PHONY: run-api
