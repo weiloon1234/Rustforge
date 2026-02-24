@@ -539,6 +539,76 @@ fn file_templates() -> Vec<FileTemplate> {
             content: templates::FRONTEND_SRC_SHARED_GITKEEP,
             executable: false,
         },
+        FileTemplate {
+            path: "frontend/src/shared/i18n.ts",
+            content: templates::FRONTEND_SRC_SHARED_I18N_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/createApiClient.ts",
+            content: templates::FRONTEND_SRC_SHARED_CREATE_API_CLIENT_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/createAuthStore.ts",
+            content: templates::FRONTEND_SRC_SHARED_CREATE_AUTH_STORE_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/ProtectedRoute.tsx",
+            content: templates::FRONTEND_SRC_SHARED_PROTECTED_ROUTE_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/components/index.ts",
+            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_INDEX_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/components/TextInput.tsx",
+            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_TEXT_INPUT_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/components/TextArea.tsx",
+            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_TEXT_AREA_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/components/Select.tsx",
+            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_SELECT_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/components/Checkbox.tsx",
+            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_CHECKBOX_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/components/Radio.tsx",
+            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_RADIO_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/user/stores/auth.ts",
+            content: templates::FRONTEND_SRC_USER_STORES_AUTH_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/user/api.ts",
+            content: templates::FRONTEND_SRC_USER_API_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/stores/auth.ts",
+            content: templates::FRONTEND_SRC_ADMIN_STORES_AUTH_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/api.ts",
+            content: templates::FRONTEND_SRC_ADMIN_API_TS,
+            executable: false,
+        },
         // ── Agent guideline files ──────────────────────────────
         FileTemplate {
             path: "frontend/AGENTS.md",

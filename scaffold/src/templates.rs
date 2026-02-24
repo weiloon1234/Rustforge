@@ -4187,8 +4187,13 @@ pub const FRONTEND_PACKAGE_JSON: &str = r#"{
     "preview:admin": "vite preview --config vite.config.admin.ts"
   },
   "dependencies": {
+    "axios": "^1.7.0",
+    "i18next": "^24.0.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-i18next": "^15.0.0",
+    "react-router-dom": "^7.0.0",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
@@ -4346,17 +4351,25 @@ pub const FRONTEND_ADMIN_HTML: &str = r#"<!doctype html>
 
 pub const FRONTEND_SRC_USER_MAIN_TSX: &str = r#"import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
+import "../shared/i18n";
 import App from "./App";
 import "./app.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
   </StrictMode>,
 );
 "#;
 
-pub const FRONTEND_SRC_USER_APP_TSX: &str = r#"export default function App() {
+pub const FRONTEND_SRC_USER_APP_TSX: &str = r#"import { Routes, Route } from "react-router-dom";
+import { ProtectedRoute } from "../shared/ProtectedRoute";
+import { useAuthStore } from "./stores/auth";
+
+function DashboardPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
       <div className="text-center">
@@ -4364,6 +4377,28 @@ pub const FRONTEND_SRC_USER_APP_TSX: &str = r#"export default function App() {
         <p className="mt-2 text-lg text-muted">User Portal</p>
       </div>
     </div>
+  );
+}
+
+function LoginPage() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold tracking-tight">Login</h1>
+        <p className="mt-2 text-lg text-muted">Build your login form here.</p>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<ProtectedRoute useAuthStore={useAuthStore} />}>
+        <Route path="/*" element={<DashboardPage />} />
+      </Route>
+    </Routes>
   );
 }
 "#;
@@ -4374,24 +4409,119 @@ pub const FRONTEND_SRC_USER_APP_CSS: &str = r#"@import "tailwindcss";
   --color-background: #f8fafc;
   --color-foreground: #0f172a;
   --color-muted: #64748b;
+  --color-muted-foreground: #94a3b8;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f1f5f9;
+  --color-surface-active: #e2e8f0;
   --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
   --color-primary-foreground: #ffffff;
+  --color-border: #e2e8f0;
+  --color-border-hover: #cbd5e1;
+  --color-input: #ffffff;
+  --color-input-border: #d1d5db;
+  --color-input-border-hover: #9ca3af;
+  --color-input-focus: #2563eb;
+  --color-input-placeholder: #9ca3af;
+  --color-input-disabled: #f3f4f6;
+  --color-ring: #2563eb;
+  --color-error: #ef4444;
+  --color-error-muted: #fef2f2;
+  --color-warning: #f59e0b;
+  --color-warning-muted: #fffbeb;
+  --color-success: #22c55e;
+  --color-success-muted: #f0fdf4;
+  --color-info: #3b82f6;
+  --color-info-muted: #eff6ff;
+}
+
+@layer components {
+  .rf-field { @apply mb-4; }
+  .rf-label { @apply block mb-1.5 text-sm font-medium text-foreground; }
+  .rf-label-required::after { content: " *"; @apply text-error; }
+
+  .rf-input {
+    @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-foreground
+      placeholder:text-input-placeholder transition-colors duration-150
+      hover:border-input-border-hover focus:outline-none focus:ring-2 focus:ring-ring/40
+      focus:border-input-focus disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .rf-input-error {
+    @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
+  }
+
+  .rf-textarea {
+    @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-foreground
+      placeholder:text-input-placeholder transition-colors duration-150
+      hover:border-input-border-hover focus:outline-none focus:ring-2 focus:ring-ring/40
+      focus:border-input-focus disabled:opacity-50 disabled:cursor-not-allowed resize-y min-h-20;
+  }
+  .rf-textarea-error {
+    @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
+  }
+
+  .rf-select {
+    @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 pr-10 text-sm text-foreground
+      transition-colors duration-150 hover:border-input-border-hover focus:outline-none focus:ring-2
+      focus:ring-ring/40 focus:border-input-focus disabled:opacity-50 disabled:cursor-not-allowed
+      appearance-none bg-no-repeat;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-position: right 0.75rem center;
+    background-size: 1rem;
+  }
+  .rf-select-error {
+    @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
+  }
+  .rf-select-placeholder { @apply text-input-placeholder; }
+
+  .rf-checkbox-wrapper { @apply flex items-start gap-2; }
+  .rf-checkbox {
+    @apply mt-0.5 h-4 w-4 shrink-0 rounded border border-input-border bg-input
+      transition-colors duration-150 hover:border-input-border-hover focus:outline-none
+      focus:ring-2 focus:ring-ring/40 focus:ring-offset-0 disabled:opacity-50
+      disabled:cursor-not-allowed;
+    accent-color: var(--color-primary);
+  }
+  .rf-checkbox-error { @apply border-error; }
+  .rf-checkbox-label { @apply text-sm text-foreground select-none; }
+
+  .rf-radio-group { @apply flex flex-col gap-2; }
+  .rf-radio-wrapper { @apply flex items-center gap-2; }
+  .rf-radio {
+    @apply h-4 w-4 shrink-0 border border-input-border bg-input transition-colors duration-150
+      hover:border-input-border-hover focus:outline-none focus:ring-2 focus:ring-ring/40
+      focus:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed;
+    accent-color: var(--color-primary);
+  }
+  .rf-radio-error { @apply border-error; }
+  .rf-radio-label { @apply text-sm text-foreground select-none; }
+
+  .rf-error-message { @apply mt-1 text-xs text-error; }
+  .rf-note { @apply mt-1 text-xs text-muted; }
 }
 "#;
 
 pub const FRONTEND_SRC_ADMIN_MAIN_TSX: &str = r#"import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
+import "../shared/i18n";
 import App from "./App";
 import "./app.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <BrowserRouter basename="/admin">
+      <App />
+    </BrowserRouter>
   </StrictMode>,
 );
 "#;
 
-pub const FRONTEND_SRC_ADMIN_APP_TSX: &str = r#"export default function App() {
+pub const FRONTEND_SRC_ADMIN_APP_TSX: &str = r#"import { Routes, Route } from "react-router-dom";
+import { ProtectedRoute } from "../shared/ProtectedRoute";
+import { useAuthStore } from "./stores/auth";
+
+function DashboardPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
       <div className="text-center">
@@ -4401,20 +4531,790 @@ pub const FRONTEND_SRC_ADMIN_APP_TSX: &str = r#"export default function App() {
     </div>
   );
 }
+
+function LoginPage() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold tracking-tight">Admin Login</h1>
+        <p className="mt-2 text-lg text-muted">Build your login form here.</p>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<ProtectedRoute useAuthStore={useAuthStore} />}>
+        <Route path="/*" element={<DashboardPage />} />
+      </Route>
+    </Routes>
+  );
+}
 "#;
 
 pub const FRONTEND_SRC_ADMIN_APP_CSS: &str = r#"@import "tailwindcss";
 
 @theme {
   --color-background: #0f172a;
-  --color-foreground: #f8fafc;
+  --color-foreground: #f1f5f9;
   --color-muted: #94a3b8;
+  --color-muted-foreground: #64748b;
+  --color-surface: #1e293b;
+  --color-surface-hover: #334155;
+  --color-surface-active: #475569;
   --color-primary: #8b5cf6;
+  --color-primary-hover: #7c3aed;
   --color-primary-foreground: #ffffff;
+  --color-border: #334155;
+  --color-border-hover: #475569;
+  --color-input: #1e293b;
+  --color-input-border: #334155;
+  --color-input-border-hover: #475569;
+  --color-input-focus: #8b5cf6;
+  --color-input-placeholder: #64748b;
+  --color-input-disabled: #1a2332;
+  --color-ring: #8b5cf6;
+  --color-error: #ef4444;
+  --color-error-muted: #7f1d1d;
+  --color-warning: #f59e0b;
+  --color-warning-muted: #78350f;
+  --color-success: #22c55e;
+  --color-success-muted: #14532d;
+  --color-info: #3b82f6;
+  --color-info-muted: #1e3a5f;
+}
+
+@layer components {
+  .rf-field { @apply mb-4; }
+  .rf-label { @apply block mb-1.5 text-sm font-medium text-foreground; }
+  .rf-label-required::after { content: " *"; @apply text-error; }
+
+  .rf-input {
+    @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-foreground
+      placeholder:text-input-placeholder transition-colors duration-150
+      hover:border-input-border-hover focus:outline-none focus:ring-2 focus:ring-ring/40
+      focus:border-input-focus disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .rf-input-error {
+    @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
+  }
+
+  .rf-textarea {
+    @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-foreground
+      placeholder:text-input-placeholder transition-colors duration-150
+      hover:border-input-border-hover focus:outline-none focus:ring-2 focus:ring-ring/40
+      focus:border-input-focus disabled:opacity-50 disabled:cursor-not-allowed resize-y min-h-20;
+  }
+  .rf-textarea-error {
+    @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
+  }
+
+  .rf-select {
+    @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 pr-10 text-sm text-foreground
+      transition-colors duration-150 hover:border-input-border-hover focus:outline-none focus:ring-2
+      focus:ring-ring/40 focus:border-input-focus disabled:opacity-50 disabled:cursor-not-allowed
+      appearance-none bg-no-repeat;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-position: right 0.75rem center;
+    background-size: 1rem;
+  }
+  .rf-select-error {
+    @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
+  }
+  .rf-select-placeholder { @apply text-input-placeholder; }
+
+  .rf-checkbox-wrapper { @apply flex items-start gap-2; }
+  .rf-checkbox {
+    @apply mt-0.5 h-4 w-4 shrink-0 rounded border border-input-border bg-input
+      transition-colors duration-150 hover:border-input-border-hover focus:outline-none
+      focus:ring-2 focus:ring-ring/40 focus:ring-offset-0 disabled:opacity-50
+      disabled:cursor-not-allowed;
+    accent-color: var(--color-primary);
+  }
+  .rf-checkbox-error { @apply border-error; }
+  .rf-checkbox-label { @apply text-sm text-foreground select-none; }
+
+  .rf-radio-group { @apply flex flex-col gap-2; }
+  .rf-radio-wrapper { @apply flex items-center gap-2; }
+  .rf-radio {
+    @apply h-4 w-4 shrink-0 border border-input-border bg-input transition-colors duration-150
+      hover:border-input-border-hover focus:outline-none focus:ring-2 focus:ring-ring/40
+      focus:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed;
+    accent-color: var(--color-primary);
+  }
+  .rf-radio-error { @apply border-error; }
+  .rf-radio-label { @apply text-sm text-foreground select-none; }
+
+  .rf-error-message { @apply mt-1 text-xs text-error; }
+  .rf-note { @apply mt-1 text-xs text-muted; }
 }
 "#;
 
 pub const FRONTEND_SRC_SHARED_GITKEEP: &str = "";
+
+pub const FRONTEND_SRC_SHARED_I18N_TS: &str = r#"import i18n from "i18next";
+import { initReactI18next } from "react-i18next";
+import en from "../../../i18n/en.json";
+import zh from "../../../i18n/zh.json";
+
+/**
+ * Transform Rust-style `:param` placeholders to i18next `{{param}}` syntax.
+ * This lets both Rust and React share the same i18n JSON files.
+ */
+function transformParams(
+  obj: Record<string, string>,
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    result[key] = value.replace(/:([a-zA-Z_]+)/g, "{{$1}}");
+  }
+  return result;
+}
+
+i18n.use(initReactI18next).init({
+  fallbackLng: "en",
+  keySeparator: false,
+  nsSeparator: false,
+  interpolation: { escapeValue: false },
+  resources: {
+    en: { translation: transformParams(en) },
+    zh: { translation: transformParams(zh) },
+  },
+});
+
+export default i18n;
+"#;
+
+pub const FRONTEND_SRC_SHARED_CREATE_API_CLIENT_TS: &str = r#"import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from "axios";
+
+export interface ApiClientConfig {
+  /** Read the current access token (from auth store). */
+  getToken: () => string | null;
+  /** Attempt to refresh the session. Must throw on failure. */
+  refreshAuth: () => Promise<void>;
+  /** Called when refresh also fails — clear state and redirect. */
+  onAuthFailure: () => void;
+}
+
+/**
+ * Factory that creates an Axios instance with:
+ * - Request interceptor: attaches `Authorization: Bearer <token>`
+ * - Response interceptor: on 401, attempts a single token refresh then
+ *   retries the original request. Concurrent 401s share one refresh call.
+ */
+export function createApiClient(config: ApiClientConfig): AxiosInstance {
+  const api = axios.create();
+
+  // ── Request: attach bearer token ────────────────────────
+  api.interceptors.request.use((req) => {
+    const token = config.getToken();
+    if (token) {
+      req.headers.Authorization = `Bearer ${token}`;
+    }
+    return req;
+  });
+
+  // ── Response: handle 401 → refresh → retry ─────────────
+  let refreshPromise: Promise<void> | null = null;
+
+  api.interceptors.response.use(
+    (res) => res,
+    async (error) => {
+      const original = error.config as InternalAxiosRequestConfig & {
+        _retry?: boolean;
+      };
+
+      if (error.response?.status !== 401 || original._retry) {
+        return Promise.reject(error);
+      }
+
+      original._retry = true;
+
+      // Deduplicate concurrent refresh calls
+      if (!refreshPromise) {
+        refreshPromise = config
+          .refreshAuth()
+          .finally(() => {
+            refreshPromise = null;
+          });
+      }
+
+      try {
+        await refreshPromise;
+      } catch {
+        config.onAuthFailure();
+        return Promise.reject(error);
+      }
+
+      // Retry with the new token
+      const newToken = config.getToken();
+      if (!newToken) {
+        config.onAuthFailure();
+        return Promise.reject(error);
+      }
+
+      original.headers.Authorization = `Bearer ${newToken}`;
+      return api(original);
+    },
+  );
+
+  return api;
+}
+"#;
+
+pub const FRONTEND_SRC_SHARED_CREATE_AUTH_STORE_TS: &str = r#"import { create } from "zustand";
+import { persist } from "zustand/middleware";
+
+export interface Account {
+  id: number;
+  name: string;
+  email: string;
+}
+
+export interface AuthState<A extends Account = Account> {
+  account: A | null;
+  token: string | null;
+  isLoading: boolean;
+  isInitialized: boolean;
+  error: string | null;
+  login: (credentials: Record<string, unknown>) => Promise<void>;
+  logout: () => void;
+  fetchAccount: () => Promise<void>;
+  refreshToken: () => Promise<void>;
+  initSession: () => Promise<void>;
+}
+
+export interface AuthConfig {
+  loginEndpoint: string;    // "/api/v1/admin/auth/login"
+  meEndpoint: string;       // "/api/v1/admin/auth/me"
+  refreshEndpoint: string;  // "/api/v1/admin/auth/refresh"
+  storageKey: string;       // "admin-auth"
+}
+
+/**
+ * Factory that creates a typed auth store for any portal.
+ *
+ * The store uses `client_type: "web"` so the Rust backend stores the
+ * refresh token in an HttpOnly cookie. The frontend only manages the
+ * access token — the browser sends the cookie automatically on refresh.
+ *
+ * Usage:
+ * ```ts
+ * export const useAuthStore = createAuthStore({
+ *   loginEndpoint:   "/api/v1/admin/auth/login",
+ *   meEndpoint:      "/api/v1/admin/auth/me",
+ *   refreshEndpoint: "/api/v1/admin/auth/refresh",
+ *   storageKey:      "admin-auth",
+ * });
+ * ```
+ *
+ * For portals with extra account fields, pass a generic:
+ * ```ts
+ * interface MerchantAccount extends Account { companyId: number }
+ * export const useAuthStore = createAuthStore<MerchantAccount>({ ... });
+ * ```
+ */
+export function createAuthStore<A extends Account = Account>(
+  config: AuthConfig,
+) {
+  return create<AuthState<A>>()(
+    persist(
+      (set, get) => ({
+        account: null,
+        token: null,
+        isLoading: false,
+        isInitialized: false,
+        error: null,
+
+        login: async (credentials: Record<string, unknown>) => {
+          set({ isLoading: true, error: null } as Partial<AuthState<A>>);
+          try {
+            const res = await fetch(config.loginEndpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ ...credentials, client_type: "web" }),
+            });
+            if (!res.ok) {
+              const body = await res.json().catch(() => null);
+              throw new Error(body?.message ?? "Login failed");
+            }
+            const { data } = await res.json();
+            set({
+              token: data.access_token,
+              isLoading: false,
+            } as Partial<AuthState<A>>);
+          } catch (err) {
+            set({
+              error: (err as Error).message,
+              isLoading: false,
+            } as Partial<AuthState<A>>);
+            throw err;
+          }
+        },
+
+        logout: () =>
+          set({ account: null, token: null } as Partial<AuthState<A>>),
+
+        fetchAccount: async () => {
+          const { token } = get();
+          if (!token) return;
+          set({ isLoading: true } as Partial<AuthState<A>>);
+          try {
+            const res = await fetch(config.meEndpoint, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error("Failed to fetch account");
+            const { data } = await res.json();
+            set({ account: data, isLoading: false } as Partial<AuthState<A>>);
+          } catch {
+            set({
+              account: null,
+              token: null,
+              isLoading: false,
+            } as Partial<AuthState<A>>);
+          }
+        },
+
+        refreshToken: async () => {
+          const res = await fetch(config.refreshEndpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ client_type: "web" }),
+          });
+          if (!res.ok) {
+            set({ account: null, token: null } as Partial<AuthState<A>>);
+            throw new Error("Session expired");
+          }
+          const { data } = await res.json();
+          set({ token: data.access_token } as Partial<AuthState<A>>);
+        },
+
+        initSession: async () => {
+          const { token, isInitialized } = get();
+          if (isInitialized) return;
+          if (!token) {
+            set({ isInitialized: true } as Partial<AuthState<A>>);
+            return;
+          }
+          try {
+            await get().fetchAccount();
+          } catch {
+            // Access token expired — try refresh
+            try {
+              await get().refreshToken();
+              await get().fetchAccount();
+            } catch {
+              // Refresh also failed — session is gone
+              set({ account: null, token: null } as Partial<AuthState<A>>);
+            }
+          }
+          set({ isInitialized: true } as Partial<AuthState<A>>);
+        },
+      }),
+      { name: config.storageKey },
+    ),
+  );
+}
+"#;
+
+pub const FRONTEND_SRC_SHARED_PROTECTED_ROUTE_TSX: &str = r#"import { useEffect } from "react";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
+import type { AuthState, Account } from "./createAuthStore";
+import type { StoreApi, UseBoundStore } from "zustand";
+
+interface Props {
+  useAuthStore: UseBoundStore<StoreApi<AuthState<Account>>>;
+  loginPath?: string;
+}
+
+/**
+ * Route guard that protects child routes behind authentication.
+ *
+ * On first render it calls `initSession()` which:
+ * 1. If a persisted token exists → validates it via `fetchAccount()`
+ * 2. If access token expired → attempts `refreshToken()` then retries
+ * 3. If everything fails → clears auth state
+ *
+ * While initializing, a loading indicator is shown.
+ * Once initialized, unauthenticated users are redirected to `loginPath`.
+ *
+ * Usage in App.tsx:
+ * ```tsx
+ * <Route element={<ProtectedRoute useAuthStore={useAuthStore} />}>
+ *   <Route path="/*" element={<DashboardPage />} />
+ * </Route>
+ * ```
+ */
+export function ProtectedRoute({ useAuthStore, loginPath = "/login" }: Props) {
+  const token = useAuthStore((s) => s.token);
+  const isInitialized = useAuthStore((s) => s.isInitialized);
+  const initSession = useAuthStore((s) => s.initSession);
+  const location = useLocation();
+
+  useEffect(() => {
+    initSession();
+  }, [initSession]);
+
+  if (!isInitialized) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
+        <div className="text-muted">Loading…</div>
+      </div>
+    );
+  }
+
+  if (!token) {
+    return <Navigate to={loginPath} state={{ from: location }} replace />;
+  }
+
+  return <Outlet />;
+}
+"#;
+
+pub const FRONTEND_SRC_SHARED_COMPONENTS_INDEX_TS: &str = r#"export { TextInput } from "./TextInput";
+export type { TextInputProps } from "./TextInput";
+
+export { TextArea } from "./TextArea";
+export type { TextAreaProps } from "./TextArea";
+
+export { Select } from "./Select";
+export type { SelectProps, SelectOption } from "./Select";
+
+export { Checkbox } from "./Checkbox";
+export type { CheckboxProps } from "./Checkbox";
+
+export { Radio } from "./Radio";
+export type { RadioProps, RadioOption } from "./Radio";
+"#;
+
+pub const FRONTEND_SRC_SHARED_COMPONENTS_TEXT_INPUT_TSX: &str = r##"import { forwardRef, useId, useState, type InputHTMLAttributes } from "react";
+
+type InputType = "text" | "email" | "password" | "search" | "url" | "tel" | "number" | "money" | "pin";
+
+export interface TextInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
+  type?: InputType;
+  label?: string;
+  error?: string;
+  notes?: string;
+}
+
+function formatMoney(value: string): string {
+  const num = value.replace(/[^0-9.]/g, "");
+  const parts = num.split(".");
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  if (parts.length > 2) parts.length = 2;
+  if (parts[1] !== undefined) parts[1] = parts[1].slice(0, 2);
+  return parts.join(".");
+}
+
+function rawMoney(display: string): string {
+  return display.replace(/,/g, "");
+}
+
+export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
+  ({ type = "text", label, error, notes, required, className, onChange, value, defaultValue, id: externalId, ...rest }, ref) => {
+    const autoId = useId();
+    const id = externalId ?? autoId;
+    const isMoney = type === "money";
+    const isPin = type === "pin";
+
+    const [moneyDisplay, setMoneyDisplay] = useState(() => {
+      const init = (value ?? defaultValue ?? "") as string;
+      return isMoney ? formatMoney(init) : "";
+    });
+
+    const resolvedType = isMoney ? "text" : isPin ? "password" : type;
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (isMoney) {
+        const formatted = formatMoney(e.target.value);
+        setMoneyDisplay(formatted);
+        const synth = { ...e, target: { ...e.target, value: rawMoney(formatted) } } as React.ChangeEvent<HTMLInputElement>;
+        onChange?.(synth);
+      } else if (isPin) {
+        e.target.value = e.target.value.replace(/\D/g, "");
+        onChange?.(e);
+      } else {
+        onChange?.(e);
+      }
+    };
+
+    const inputMode = isMoney ? "decimal" as const : isPin ? "numeric" as const : undefined;
+
+    return (
+      <div className="rf-field">
+        {label && (
+          <label htmlFor={id} className={`rf-label ${required ? "rf-label-required" : ""}`}>
+            {label}
+          </label>
+        )}
+        <input
+          ref={ref}
+          id={id}
+          type={resolvedType}
+          inputMode={inputMode}
+          required={required}
+          className={`rf-input ${error ? "rf-input-error" : ""} ${className ?? ""}`}
+          onChange={handleChange}
+          value={isMoney ? moneyDisplay : value}
+          defaultValue={isMoney ? undefined : defaultValue}
+          {...rest}
+        />
+        {error && <p className="rf-error-message">{error}</p>}
+        {notes && !error && <p className="rf-note">{notes}</p>}
+      </div>
+    );
+  },
+);
+
+TextInput.displayName = "TextInput";
+"##;
+
+pub const FRONTEND_SRC_SHARED_COMPONENTS_TEXT_AREA_TSX: &str = r##"import { forwardRef, useId, type TextareaHTMLAttributes } from "react";
+
+export interface TextAreaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+  label?: string;
+  error?: string;
+  notes?: string;
+}
+
+export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(
+  ({ label, error, notes, required, className, id: externalId, ...rest }, ref) => {
+    const autoId = useId();
+    const id = externalId ?? autoId;
+
+    return (
+      <div className="rf-field">
+        {label && (
+          <label htmlFor={id} className={`rf-label ${required ? "rf-label-required" : ""}`}>
+            {label}
+          </label>
+        )}
+        <textarea
+          ref={ref}
+          id={id}
+          required={required}
+          className={`rf-textarea ${error ? "rf-textarea-error" : ""} ${className ?? ""}`}
+          {...rest}
+        />
+        {error && <p className="rf-error-message">{error}</p>}
+        {notes && !error && <p className="rf-note">{notes}</p>}
+      </div>
+    );
+  },
+);
+
+TextArea.displayName = "TextArea";
+"##;
+
+pub const FRONTEND_SRC_SHARED_COMPONENTS_SELECT_TSX: &str = r##"import { forwardRef, useId, type SelectHTMLAttributes } from "react";
+
+export interface SelectOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "children"> {
+  options: SelectOption[];
+  label?: string;
+  error?: string;
+  notes?: string;
+  placeholder?: string;
+}
+
+export const Select = forwardRef<HTMLSelectElement, SelectProps>(
+  ({ options, label, error, notes, required, placeholder, className, value, defaultValue, id: externalId, ...rest }, ref) => {
+    const autoId = useId();
+    const id = externalId ?? autoId;
+    const isPlaceholder = value === "" || (value === undefined && defaultValue === undefined);
+
+    return (
+      <div className="rf-field">
+        {label && (
+          <label htmlFor={id} className={`rf-label ${required ? "rf-label-required" : ""}`}>
+            {label}
+          </label>
+        )}
+        <select
+          ref={ref}
+          id={id}
+          required={required}
+          value={value}
+          defaultValue={defaultValue}
+          className={`rf-select ${error ? "rf-select-error" : ""} ${isPlaceholder ? "rf-select-placeholder" : ""} ${className ?? ""}`}
+          {...rest}
+        >
+          {placeholder && (
+            <option value="" disabled>
+              {placeholder}
+            </option>
+          )}
+          {options.map((opt) => (
+            <option key={opt.value} value={opt.value} disabled={opt.disabled}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        {error && <p className="rf-error-message">{error}</p>}
+        {notes && !error && <p className="rf-note">{notes}</p>}
+      </div>
+    );
+  },
+);
+
+Select.displayName = "Select";
+"##;
+
+pub const FRONTEND_SRC_SHARED_COMPONENTS_CHECKBOX_TSX: &str = r##"import { forwardRef, useId, type InputHTMLAttributes } from "react";
+
+export interface CheckboxProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
+  label?: string;
+  error?: string;
+  notes?: string;
+}
+
+export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
+  ({ label, error, notes, className, id: externalId, ...rest }, ref) => {
+    const autoId = useId();
+    const id = externalId ?? autoId;
+
+    return (
+      <div className="rf-field">
+        <div className="rf-checkbox-wrapper">
+          <input
+            ref={ref}
+            id={id}
+            type="checkbox"
+            className={`rf-checkbox ${error ? "rf-checkbox-error" : ""} ${className ?? ""}`}
+            {...rest}
+          />
+          {label && (
+            <label htmlFor={id} className="rf-checkbox-label">
+              {label}
+            </label>
+          )}
+        </div>
+        {error && <p className="rf-error-message">{error}</p>}
+        {notes && !error && <p className="rf-note">{notes}</p>}
+      </div>
+    );
+  },
+);
+
+Checkbox.displayName = "Checkbox";
+"##;
+
+pub const FRONTEND_SRC_SHARED_COMPONENTS_RADIO_TSX: &str = r##"import { useId } from "react";
+
+export interface RadioOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+export interface RadioProps {
+  name: string;
+  options: RadioOption[];
+  value?: string;
+  onChange?: (value: string) => void;
+  label?: string;
+  error?: string;
+  notes?: string;
+  required?: boolean;
+  disabled?: boolean;
+  className?: string;
+}
+
+export function Radio({ name, options, value, onChange, label, error, notes, required, disabled, className }: RadioProps) {
+  const groupId = useId();
+
+  return (
+    <div className="rf-field">
+      {label && (
+        <span className={`rf-label ${required ? "rf-label-required" : ""}`}>
+          {label}
+        </span>
+      )}
+      <div role="radiogroup" aria-labelledby={label ? `${groupId}-label` : undefined} className={`rf-radio-group ${className ?? ""}`}>
+        {options.map((opt) => {
+          const optId = `${groupId}-${opt.value}`;
+          return (
+            <div key={opt.value} className="rf-radio-wrapper">
+              <input
+                id={optId}
+                type="radio"
+                name={name}
+                value={opt.value}
+                checked={value === opt.value}
+                onChange={() => onChange?.(opt.value)}
+                disabled={disabled || opt.disabled}
+                className={`rf-radio ${error ? "rf-radio-error" : ""}`}
+              />
+              <label htmlFor={optId} className="rf-radio-label">
+                {opt.label}
+              </label>
+            </div>
+          );
+        })}
+      </div>
+      {error && <p className="rf-error-message">{error}</p>}
+      {notes && !error && <p className="rf-note">{notes}</p>}
+    </div>
+  );
+}
+"##;
+
+pub const FRONTEND_SRC_USER_STORES_AUTH_TS: &str = r#"import { createAuthStore } from "../../shared/createAuthStore";
+
+export const useAuthStore = createAuthStore({
+  loginEndpoint: "/api/v1/auth/login",
+  meEndpoint: "/api/v1/auth/me",
+  refreshEndpoint: "/api/v1/auth/refresh",
+  storageKey: "user-auth",
+});
+"#;
+
+pub const FRONTEND_SRC_ADMIN_STORES_AUTH_TS: &str = r#"import { createAuthStore } from "../../shared/createAuthStore";
+
+export const useAuthStore = createAuthStore({
+  loginEndpoint: "/api/v1/admin/auth/login",
+  meEndpoint: "/api/v1/admin/auth/me",
+  refreshEndpoint: "/api/v1/admin/auth/refresh",
+  storageKey: "admin-auth",
+});
+"#;
+
+pub const FRONTEND_SRC_USER_API_TS: &str = r#"import { createApiClient } from "../../shared/createApiClient";
+import { useAuthStore } from "./stores/auth";
+
+export const api = createApiClient({
+  getToken: () => useAuthStore.getState().token,
+  refreshAuth: () => useAuthStore.getState().refreshToken(),
+  onAuthFailure: () => {
+    useAuthStore.getState().logout();
+    window.location.href = "/login";
+  },
+});
+"#;
+
+pub const FRONTEND_SRC_ADMIN_API_TS: &str = r#"import { createApiClient } from "../../shared/createApiClient";
+import { useAuthStore } from "./stores/auth";
+
+export const api = createApiClient({
+  getToken: () => useAuthStore.getState().token,
+  refreshAuth: () => useAuthStore.getState().refreshToken(),
+  onAuthFailure: () => {
+    useAuthStore.getState().logout();
+    window.location.href = "/admin/login";
+  },
+});
+"#;
 
 pub const FRONTEND_AGENTS_MD: &str = r#"# Frontend — Multi-Portal React + Vite + Tailwind 4
 
@@ -4440,15 +5340,30 @@ frontend/
 ├── user.html
 ├── admin.html
 └── src/
-    ├── shared/            # Cross-portal components, hooks, utilities
-    ├── user/              # User portal source
-    │   ├── main.tsx
-    │   ├── App.tsx
-    │   └── app.css        # Tailwind 4 theme (@theme block)
-    └── admin/             # Admin portal source
-        ├── main.tsx
-        ├── App.tsx
-        └── app.css        # Tailwind 4 theme (@theme block)
+    ├── shared/                        # Cross-portal code
+    │   ├── i18n.ts                    # i18next init (shared JSON, :param transform)
+    │   ├── createAuthStore.ts         # Zustand auth store factory
+    │   ├── createApiClient.ts         # Axios factory with interceptors
+    │   ├── ProtectedRoute.tsx         # Auth guard (route protection + session restore)
+    │   └── components/                # Shared form components (styled via rf-* classes)
+    │       ├── index.ts               # Barrel export
+    │       ├── TextInput.tsx           # text, email, password, search, url, tel, number, money, pin
+    │       ├── TextArea.tsx            # Multi-line text
+    │       ├── Select.tsx              # Dropdown with typed options
+    │       ├── Checkbox.tsx            # Single checkbox
+    │       └── Radio.tsx               # Radio group with typed options
+    ├── user/
+    │   ├── main.tsx                   # Entry (BrowserRouter)
+    │   ├── App.tsx                    # Routes
+    │   ├── app.css                    # Tailwind 4 theme
+    │   ├── api.ts                     # Axios instance for this portal
+    │   └── stores/auth.ts             # Auth store instance
+    └── admin/
+        ├── main.tsx                   # Entry (BrowserRouter basename="/admin")
+        ├── App.tsx                    # Routes
+        ├── app.css                    # Tailwind 4 theme
+        ├── api.ts                     # Axios instance for this portal
+        └── stores/auth.ts             # Auth store instance
 ```
 
 ## Commands
@@ -4460,6 +5375,155 @@ make dev-admin        # Vite admin portal only (port 5174)
 make dev-api          # Rust API only (cargo-watch, port 3000)
 make build-frontend   # Clean build all portals → public/
 ```
+
+## Routing (React Router)
+
+Each portal uses `BrowserRouter` from `react-router-dom`. The admin portal sets `basename="/admin"` so all routes are relative to `/admin/`.
+
+Use `<Link to="/login">` and `useNavigate()` — the basename is applied automatically.
+
+### Protected Routes (Auth Guard)
+
+`ProtectedRoute` in `shared/ProtectedRoute.tsx` is the auth middleware. Wrap any routes that require authentication:
+
+```tsx
+import { Routes, Route } from "react-router-dom";
+import { ProtectedRoute } from "../shared/ProtectedRoute";
+import { useAuthStore } from "./stores/auth";
+
+export default function App() {
+  return (
+    <Routes>
+      {/* Public routes */}
+      <Route path="/login" element={<LoginPage />} />
+
+      {/* Protected routes — redirect to /login if unauthenticated */}
+      <Route element={<ProtectedRoute useAuthStore={useAuthStore} />}>
+        <Route path="/*" element={<DashboardPage />} />
+      </Route>
+    </Routes>
+  );
+}
+```
+
+What `ProtectedRoute` does on mount:
+1. Calls `initSession()` — checks if a persisted token exists
+2. If token exists → calls `fetchAccount()` to validate it
+3. If access token expired → calls `refreshToken()` (browser sends HttpOnly cookie) → retries `fetchAccount()`
+4. If refresh also fails → clears auth state
+5. Shows a loading screen while initializing
+6. Once initialized, redirects to `/login` if no valid token, otherwise renders child routes via `<Outlet />`
+
+The `from` location is passed in the redirect state, so after login you can navigate back:
+
+```tsx
+const location = useLocation();
+const from = location.state?.from?.pathname || "/";
+// After successful login:
+navigate(from, { replace: true });
+```
+
+### Custom login path
+
+Pass `loginPath` prop if the portal uses a different login route:
+
+```tsx
+<Route element={<ProtectedRoute useAuthStore={useAuthStore} loginPath="/auth/signin" />}>
+```
+
+## API Client (Axios)
+
+Each portal has its own `api.ts` that exports a configured Axios instance. The shared factory (`createApiClient`) provides:
+
+- **Request interceptor**: attaches `Authorization: Bearer <token>` from the auth store
+- **Response interceptor**: on 401, attempts token refresh (one concurrent refresh), retries the request, or redirects to login on failure
+
+```tsx
+// Import the portal's api instance for all API calls
+import { api } from "./api";
+
+const res = await api.get("/api/v1/articles");
+const data = res.data;
+```
+
+The refresh uses `client_type: "web"` — the Rust backend stores the refresh token in an HttpOnly cookie. The frontend only manages the access token; the browser sends the cookie automatically.
+
+### Auth Flow
+
+1. **Login**: `useAuthStore.login({ username, password })` → POST with `client_type: "web"` → stores `access_token`, refresh token set as HttpOnly cookie by server
+2. **Page refresh**: `ProtectedRoute` calls `initSession()` → validates persisted token → refreshes if expired → loads account data
+3. **API calls**: Axios attaches bearer token automatically
+4. **401 response**: interceptor calls `refreshToken()` → POST to refresh endpoint (cookie sent automatically) → new `access_token` → retry original request
+5. **Refresh failure**: clears auth state, redirects to `/login`
+
+## i18n (Shared with Rust)
+
+Frontend and Rust share the same `i18n/*.json` files. The Rust backend uses `:param` syntax; `src/shared/i18n.ts` transforms `:param` → `{{param}}` at init time so i18next can interpolate.
+
+```tsx
+import { useTranslation } from "react-i18next";
+
+function Greeting({ name }: { name: string }) {
+  const { t } = useTranslation();
+  return <p>{t("Welcome :name", { name })}</p>;
+}
+```
+
+The key is the English text itself — if no translation is found, the key is the fallback.
+
+## State Management (Zustand)
+
+Use Zustand for state. Define stores in `src/{portal}/stores/`.
+
+### Auth Store Factory
+
+`src/shared/createAuthStore.ts` is a factory that creates a typed auth store for any portal. Each portal provides its own endpoints:
+
+```typescript
+// src/{portal}/stores/auth.ts
+import { createAuthStore } from "../../shared/createAuthStore";
+
+export const useAuthStore = createAuthStore({
+  loginEndpoint:   "/api/v1/{portal}/auth/login",
+  meEndpoint:      "/api/v1/{portal}/auth/me",
+  refreshEndpoint: "/api/v1/{portal}/auth/refresh",
+  storageKey:      "{portal}-auth",
+});
+```
+
+The `login` action accepts a generic credentials object — each portal passes whatever fields its API expects:
+
+```tsx
+// Admin login (uses username)
+await login({ username, password });
+
+// User login (might use email)
+await login({ email, password });
+```
+
+`client_type: "web"` is appended automatically.
+
+For portals with extra account fields, pass a generic:
+
+```typescript
+import { createAuthStore, type Account } from "../../shared/createAuthStore";
+
+interface MerchantAccount extends Account {
+  companyId: number;
+  companyName: string;
+}
+
+export const useAuthStore = createAuthStore<MerchantAccount>({
+  loginEndpoint:   "/api/v1/merchant/auth/login",
+  meEndpoint:      "/api/v1/merchant/auth/me",
+  refreshEndpoint: "/api/v1/merchant/auth/refresh",
+  storageKey:      "merchant-auth",
+});
+```
+
+### Creating Other Shared Store Factories
+
+Follow the same factory pattern as `createAuthStore` for any cross-portal store. Define the factory in `shared/`, instantiate with portal-specific config in `src/{portal}/stores/`.
 
 ## Tailwind CSS 4
 
@@ -4473,14 +5537,126 @@ Each portal customises its design tokens in its own `app.css` via `@theme { }`. 
 }
 ```
 
+### Theme Tokens
+
+Each portal defines a comprehensive set of semantic color tokens in `@theme`. The admin portal uses a dark scheme and the user portal uses a light scheme. Key token groups:
+
+| Group | Tokens | Purpose |
+|-------|--------|---------|
+| **Base** | `background`, `foreground`, `muted`, `muted-foreground` | Page background, text, subtle text |
+| **Surface** | `surface`, `surface-hover`, `surface-active` | Cards, panels, interactive elements |
+| **Primary** | `primary`, `primary-hover`, `primary-foreground` | Brand color, buttons, links |
+| **Border** | `border`, `border-hover` | General dividers, card borders |
+| **Input** | `input`, `input-border`, `input-border-hover`, `input-focus`, `input-placeholder`, `input-disabled` | Form control styling |
+| **Ring** | `ring` | Focus ring color |
+| **Status** | `error`/`error-muted`, `warning`/`warning-muted`, `success`/`success-muted`, `info`/`info-muted` | Validation, alerts, badges |
+
+## Shared Form Components
+
+Reusable form components live in `src/shared/components/`. They contain **zero hardcoded Tailwind utilities** — all visual styling is applied through `rf-*` CSS classes defined in each portal's `app.css` using `@layer components` + `@apply`.
+
+This means portals can have completely different visual styles while sharing identical React logic.
+
+### Available Components
+
+| Component | Import | Description |
+|-----------|--------|-------------|
+| `TextInput` | `TextInputProps` | Text, email, password, search, url, tel, number + special `money` and `pin` types |
+| `TextArea` | `TextAreaProps` | Multi-line text input |
+| `Select` | `SelectProps`, `SelectOption` | Dropdown with typed options |
+| `Checkbox` | `CheckboxProps` | Single checkbox with label |
+| `Radio` | `RadioProps`, `RadioOption` | Radio group with typed options |
+
+### Usage
+
+```tsx
+import { TextInput, TextArea, Select, Checkbox, Radio } from "../shared/components";
+
+// Basic text input with error
+<TextInput label="Email" type="email" required error={errors.email} />
+
+// Money input — displays formatted (1,234.56), onChange emits raw numeric string
+<TextInput label="Amount" type="money" onChange={(e) => setAmount(e.target.value)} />
+
+// PIN input — renders as password field, strips non-digits, numeric keyboard
+<TextInput label="PIN" type="pin" maxLength={6} />
+
+// Text area with helper notes
+<TextArea label="Bio" notes="Maximum 500 characters" rows={4} />
+
+// Select with placeholder
+<Select
+  label="Country"
+  placeholder="Choose a country..."
+  options={[
+    { value: "us", label: "United States" },
+    { value: "uk", label: "United Kingdom" },
+  ]}
+  required
+/>
+
+// Checkbox
+<Checkbox label="I agree to the terms" error={errors.terms} />
+
+// Radio group
+<Radio
+  name="role"
+  label="Role"
+  value={role}
+  onChange={setRole}
+  options={[
+    { value: "admin", label: "Administrator" },
+    { value: "editor", label: "Editor" },
+    { value: "viewer", label: "Viewer" },
+  ]}
+/>
+```
+
+### Error and Notes Pattern
+
+All components follow the same pattern:
+- `error` prop: shows a red error message below the input and applies error styling
+- `notes` prop: shows a grey helper note below the input (hidden when `error` is present)
+- `required` prop: adds a red asterisk after the label
+
+### Special TextInput Types
+
+- **`money`**: Formats display value with commas (`1,234.56`), emits raw numeric string via `onChange`, uses `inputMode="decimal"` for mobile numeric keyboard
+- **`pin`**: Renders as `type="password"`, strips non-digit characters, uses `inputMode="numeric"` for mobile numeric keyboard
+
+### CSS Class Reference
+
+Each portal's `app.css` defines these `rf-*` classes using `@apply` with theme tokens:
+
+| Class | Used by | Purpose |
+|-------|---------|---------|
+| `rf-field` | All | Wrapper div with bottom margin |
+| `rf-label` | All | Label styling |
+| `rf-label-required` | All | Adds red asterisk via `::after` |
+| `rf-input` / `rf-input-error` | TextInput | Text input styling |
+| `rf-textarea` / `rf-textarea-error` | TextArea | Textarea styling |
+| `rf-select` / `rf-select-error` / `rf-select-placeholder` | Select | Select dropdown styling |
+| `rf-checkbox-wrapper` / `rf-checkbox` / `rf-checkbox-error` / `rf-checkbox-label` | Checkbox | Checkbox layout and styling |
+| `rf-radio-group` / `rf-radio-wrapper` / `rf-radio` / `rf-radio-error` / `rf-radio-label` | Radio | Radio group layout and styling |
+| `rf-error-message` | All | Error text below input |
+| `rf-note` | All | Helper text below input |
+
+### Theming for New Portals
+
+When adding a new portal, copy the `@layer components` block from an existing portal's `app.css`. The visual appearance is controlled entirely by the `@theme` tokens — the same `rf-*` class definitions produce different results based on each portal's token values.
+
 ## Adding a New Portal
 
 1. Create `vite.config.{name}.ts` — set `base`, `server.port`, `build.outDir`.
 2. Create `{name}.html` entry point.
-3. Create `src/{name}/` with `main.tsx`, `App.tsx`, `app.css`.
-4. Add `dev:{name}` and `build:{name}` scripts to `package.json`.
-5. Update the `build` script ordering (build nested portals first).
-6. In Rust, add `nest_service("/{name}", ...)` in `build_router` (see `app/src/internal/api/mod.rs`).
+3. Create `src/{name}/main.tsx` — `BrowserRouter` with `basename="/{name}"`.
+4. Create `src/{name}/App.tsx` — routes with `<ProtectedRoute>` wrapping protected routes.
+5. Create `src/{name}/app.css` — Tailwind theme.
+6. Create `src/{name}/stores/auth.ts` — call `createAuthStore` with portal config.
+7. Create `src/{name}/api.ts` — call `createApiClient` wired to auth store.
+8. Add `dev:{name}` and `build:{name}` scripts to `package.json`.
+9. Update the `build` script ordering (build nested portals first).
+10. In Rust, add `nest_service("/{name}", ...)` in `build_router` (see `app/src/internal/api/mod.rs`).
 
 ## Production
 
