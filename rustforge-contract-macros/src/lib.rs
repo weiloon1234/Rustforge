@@ -73,6 +73,10 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
             container_attrs_for_shadow.push(attr.clone());
             continue;
         }
+        if attr.path().is_ident("ts") {
+            original_container_attrs.push(attr.clone());
+            continue;
+        }
         original_container_attrs.push(attr.clone());
         container_attrs_for_shadow.push(attr.clone());
     }
@@ -105,6 +109,8 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
         for attr in non_rf_attrs {
             if attr.path().is_ident("schemars") {
                 shadow_field_attrs.push(attr);
+            } else if attr.path().is_ident("ts") {
+                original_field_attrs.push(attr);
             } else {
                 original_field_attrs.push(attr.clone());
                 shadow_field_attrs.push(attr);

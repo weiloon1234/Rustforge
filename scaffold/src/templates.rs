@@ -20,6 +20,7 @@ toml = "0.9"
 uuid = { version = "1", features = ["serde", "v4"] }
 time = { version = "0.3", features = ["serde"] }
 tower-cookies = "0.11"
+tower-http = { version = "0.6", features = ["fs"] }
 ts-rs = { version = "10", features = ["serde-compat"] }
 
 bootstrap = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
@@ -1401,6 +1402,7 @@ clap = { workspace = true }
 uuid = { workspace = true }
 time = { workspace = true }
 tower-cookies = { workspace = true }
+tower-http = { workspace = true, features = ["fs"] }
 ts-rs = { workspace = true }
 "#;
 
@@ -1453,7 +1455,6 @@ use core_web::datatable::{
 };
 use core_web::contracts::rustforge_contract;
 use generated::models::{AdminType, AdminView};
-use schemars::JsonSchema;
 use ts_rs::TS;
 use validator::Validate;
 
@@ -2119,6 +2120,12 @@ impl AppApiState {
 
 impl core_web::auth::AuthState for AppApiState {
     fn auth_db(&self) -> &sqlx::PgPool {
+        &self.db
+    }
+}
+
+impl core_web::extract::GetDb for AppApiState {
+    fn db(&self) -> &sqlx::PgPool {
         &self.db
     }
 }
