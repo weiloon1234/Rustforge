@@ -611,6 +611,11 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: "frontend/src/shared/useAutoForm.tsx",
+            content: templates::FRONTEND_SRC_SHARED_USE_AUTO_FORM_TSX,
+            executable: false,
+        },
+        FileTemplate {
             path: "frontend/src/shared/components/index.ts",
             content: templates::FRONTEND_SRC_SHARED_COMPONENTS_INDEX_TS,
             executable: false,
