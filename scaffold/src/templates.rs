@@ -3419,6 +3419,75 @@ ApiResponse::success(data, &t("OK"))       // 200
 ApiResponse::created(data, &t("Created"))  // 201
 ```
 
+## Console CLI (`./console`)
+
+### Built-in Commands
+
+| Command | Description |
+|---------|-------------|
+| `./console migrate run` | Apply pending SQL migrations |
+| `./console migrate revert` | Revert last migration |
+| `./console migrate info` | List migration status |
+| `./console migrate add {name}` | Create new migration file |
+| `./console migrate pump` | Generate framework internal migrations |
+| `./console db seed` | Run all default seeders |
+| `./console db seed --name UserSeeder` | Run a specific seeder by name |
+| `./console make seeder {name}` | Generate a new seeder file |
+| `./console assets publish --from dist` | Copy static assets to `PUBLIC_PATH` |
+| `./console assets publish --from dist --clean` | Same, but wipe destination first |
+
+### Custom Project Commands
+
+Define in `app/src/bin/console.rs`. Uses Clap derive + the `ProjectCommand` trait.
+
+```rust
+use bootstrap::boot::BootContext;
+use clap::Subcommand;
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ProjectCommands {
+    /// Simple command with no args
+    Ping,
+
+    /// Command with args
+    Demo {
+        #[arg(long)]
+        name: String,
+    },
+
+    /// Nested subcommand group
+    #[command(subcommand)]
+    Cache(CacheCommands),
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum CacheCommands {
+    /// Flush application cache
+    Flush,
+}
+
+#[async_trait::async_trait]
+impl bootstrap::console::ProjectCommand for ProjectCommands {
+    async fn handle(self, ctx: &BootContext) -> anyhow::Result<()> {
+        match self {
+            Self::Ping => println!("pong"),
+            Self::Demo { name } => {
+                println!("Hello {name} from {}", ctx.settings.app.name);
+            }
+            Self::Cache(CacheCommands::Flush) => {
+                ctx.redis.flush().await?;
+                println!("Cache flushed");
+            }
+        }
+        Ok(())
+    }
+}
+```
+
+Custom commands receive `BootContext` with full access to `db`, `redis`, `storage`, `queue`, `mailer`, `settings`.
+
+Usage: `./console ping`, `./console demo --name test`, `./console cache flush`.
+
 ## Migrations
 
 SQL files in `migrations/` with numeric prefix. After adding a schema, write the matching migration.
@@ -3427,8 +3496,6 @@ SQL files in `migrations/` with numeric prefix. After adding a schema, write the
 migrations/0000000001000_admin_auth.sql
 migrations/0000000002000_articles.sql
 ```
-
-Run: `./console migrate run`
 
 ## New Feature Checklist
 
