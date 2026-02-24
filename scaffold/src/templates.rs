@@ -1410,7 +1410,9 @@ tower-http = { workspace = true, features = ["fs"] }
 ts-rs = { workspace = true }
 "#;
 
-pub const APP_LIB_RS: &str = r#"pub mod contracts;
+pub const APP_LIB_RS: &str = r#"#![allow(dead_code)]
+
+pub mod contracts;
 pub mod internal;
 pub mod seeds;
 pub mod validation;
@@ -6174,7 +6176,6 @@ pub const APP_BIN_EXPORT_TYPES_RS: &str = r##"//! Exports Rust contract types to
 //! Run: `cargo run -p app --bin export-types`
 //! Or:  `make gen-types`
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use ts_rs::TS;
