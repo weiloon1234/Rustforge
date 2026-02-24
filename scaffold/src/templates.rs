@@ -3278,6 +3278,19 @@ pub const ROOT_AGENTS_MD: &str = r#"# Rustforge Project
 
 Rust backend built on **Rustforge** (Axum + SQLx + Redis + S3). Each subfolder has its own `AGENTS.md` with domain-specific rules — read those when working in that folder.
 
+## Tooling
+
+**Use `rust-analyzer`** for type exploration, auto-completion, and go-to-definition. Do not guess types, fields, or method signatures — let the LSP resolve them. When unsure what fields or methods are available on a struct (e.g. `AppApiState`, `BootContext`, generated models), use go-to-definition or hover rather than assuming.
+
+## App State
+
+Two main context types are passed throughout the app:
+
+- **`BootContext`** (from `bootstrap::boot`) — framework-level context available in console commands, jobs, and server startup. Key fields: `db` (PgPool), `redis` (Cache), `storage` (Arc\<dyn Storage\>), `queue` (RedisQueue), `mailer` (Arc\<Mailer\>), `settings` (Arc\<Settings\>).
+- **`AppApiState`** (defined in `app/src/internal/api/state.rs`) — app-level state passed to HTTP handlers. Wraps `BootContext` fields plus app-specific resources (datatable registry, export managers, etc.). Extend this struct when adding new shared resources.
+
+Use rust-analyzer to explore their full fields and methods — they evolve as the app grows.
+
 ## Folder Structure
 
 ```
