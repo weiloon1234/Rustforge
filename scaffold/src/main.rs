@@ -59,6 +59,34 @@ async fn main() -> anyhow::Result<()> {
         println!("{} {}", "Created".green(), path.display());
     }
 
+    // Create CLAUDE.md and GEMINI.md as symlinks to AGENTS.md in every
+    // directory that has an AGENTS.md file.
+    let agent_dirs: &[&str] = &[
+        "",
+        "app/src/contracts",
+        "app/src/internal/api",
+        "app/src/internal/workflows",
+        "app/src/internal/jobs",
+        "app/src/internal/middleware",
+        "app/src/internal/datatables",
+        "app/src/internal/realtime",
+        "app/src/validation",
+        "app/src/seeds",
+    ];
+    for dir in agent_dirs {
+        let base = if dir.is_empty() {
+            output.clone()
+        } else {
+            output.join(dir)
+        };
+        for link_name in &["CLAUDE.md", "GEMINI.md"] {
+            let link_path = base.join(link_name);
+            create_symlink(Path::new("AGENTS.md"), &link_path)
+                .with_context(|| format!("failed to create symlink {}", link_path.display()))?;
+            println!("{} {} -> AGENTS.md", "Linked".green(), link_path.display());
+        }
+    }
+
     println!("\n{}", "Starter scaffold generated.".bold().green());
     println!("{}", "Next: cd <output> && cargo check".cyan());
 
@@ -434,6 +462,57 @@ fn file_templates() -> Vec<FileTemplate> {
             content: templates::GENERATED_EXTENSIONS_RS,
             executable: false,
         },
+        // ── Agent guideline files ──────────────────────────────
+        FileTemplate {
+            path: "AGENTS.md",
+            content: templates::ROOT_AGENTS_MD,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/contracts/AGENTS.md",
+            content: templates::CONTRACTS_AGENTS_MD,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/internal/api/AGENTS.md",
+            content: templates::API_AGENTS_MD,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/internal/workflows/AGENTS.md",
+            content: templates::WORKFLOWS_AGENTS_MD,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/internal/jobs/AGENTS.md",
+            content: templates::JOBS_AGENTS_MD,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/internal/middleware/AGENTS.md",
+            content: templates::MIDDLEWARE_AGENTS_MD,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/internal/datatables/AGENTS.md",
+            content: templates::DATATABLES_AGENTS_MD,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/internal/realtime/AGENTS.md",
+            content: templates::REALTIME_AGENTS_MD,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/validation/AGENTS.md",
+            content: templates::VALIDATION_AGENTS_MD,
+            executable: false,
+        },
+        FileTemplate {
+            path: "app/src/seeds/AGENTS.md",
+            content: templates::SEEDS_AGENTS_MD,
+            executable: false,
+        },
     ]
 }
 
@@ -453,5 +532,27 @@ fn make_executable(path: &Path) -> anyhow::Result<()> {
 #[cfg(not(unix))]
 fn make_executable(path: &Path) -> anyhow::Result<()> {
     let _ = path;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn create_symlink(target: &Path, link: &Path) -> anyhow::Result<()> {
+    // Remove existing file/symlink at link path to allow --force re-runs
+    if link.exists() || link.symlink_metadata().is_ok() {
+        fs::remove_file(link)
+            .with_context(|| format!("failed to remove existing {}", link.display()))?;
+    }
+    std::os::unix::fs::symlink(target, link)
+        .with_context(|| format!("failed to symlink {} -> {}", link.display(), target.display()))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn create_symlink(target: &Path, link: &Path) -> anyhow::Result<()> {
+    // On non-Unix, fall back to copying the file
+    let content = fs::read_to_string(link.parent().unwrap().join(target))
+        .with_context(|| format!("failed to read {}", target.display()))?;
+    fs::write(link, content)
+        .with_context(|| format!("failed to write {}", link.display()))?;
     Ok(())
 }

@@ -3271,3 +3271,677 @@ pub mod admin {
     pub mod types {}
 }
 "#;
+
+// ── Agent guideline files (split per folder) ────────────────────────
+
+pub const ROOT_AGENTS_MD: &str = r#"# Rustforge Project
+
+Rust backend built on **Rustforge** (Axum + SQLx + Redis + S3). Each subfolder has its own `AGENTS.md` with domain-specific rules — read those when working in that folder.
+
+## Folder Structure
+
+```
+app/
+├── configs.toml              # Languages, auth guards, realtime, CORS config
+├── permissions.toml          # Permission catalog
+├── schemas/*.toml            # Model + enum definitions (code generation source)
+└── src/
+    ├── contracts/            # Request/response DTOs  ← has AGENTS.md
+    ├── internal/
+    │   ├── api/              # Route handlers + state ← has AGENTS.md
+    │   ├── workflows/        # Business logic         ← has AGENTS.md
+    │   ├── jobs/             # Background jobs        ← has AGENTS.md
+    │   ├── middleware/        # Custom middleware      ← has AGENTS.md
+    │   ├── datatables/       # Datatable executors    ← has AGENTS.md
+    │   └── realtime/         # WebSocket policies     ← has AGENTS.md
+    ├── validation/           # Validation rules       ← has AGENTS.md
+    └── seeds/                # Database seeders       ← has AGENTS.md
+generated/                    # Auto-generated — NEVER edit generated.rs
+migrations/                   # SQL migration files (ordered numeric prefix)
+i18n/                         # Translation JSON files
+```
+
+## Single Source of Truth (SSOT)
+
+These files are the canonical definitions. Code is generated from them at compile time.
+
+| File | Defines | Generated output |
+|------|---------|------------------|
+| `app/schemas/*.toml` | Models, enums, fields, relations | `generated/src/generated.rs` — model structs, enums, repos, query builders |
+| `app/permissions.toml` | Permission keys + guards | `Permission` enum with `as_str()`, `from_str()` |
+| `app/configs.toml` | Auth guards, languages, realtime channels, CORS | Typed `Settings` loaded at boot |
+
+**Never edit `generated/src/generated.rs`** — it is overwritten every build. Put custom extensions in `generated/src/extensions.rs`.
+
+### Schema format (`app/schemas/*.toml`)
+
+```toml
+[StatusEnum]
+type = "enum"
+storage = "string"
+variants = ["Draft", "Published", "Archived"]
+
+[model.article]
+table = "article"
+pk = "id"
+pk_type = "i64"
+id_strategy = "snowflake"
+soft_delete = true
+fields = [
+  "id:i64", "title:string", "slug:string",
+  "status:StatusEnum", "author_id:i64",
+  "created_at:datetime", "updated_at:datetime"
+]
+```
+
+Field types: `string`, `i16`, `i32`, `i64`, `f64`, `bool`, `datetime`, `hashed`, `Option<String>`, `serde_json::Value`, enum names.
+
+### Permission format (`app/permissions.toml`)
+
+```toml
+[[permissions]]
+key = "article.read"
+guard = "admin"
+label = "Read Articles"
+group = "article"
+description = "View article records."
+```
+
+Use in code: `Permission::ArticleRead.as_str()`, `Permission::from_str("article.read")`.
+
+## Translations (i18n)
+
+All user-facing strings **must** go through `core_i18n::t()`.
+
+```rust
+use core_i18n::t;
+
+// Simple
+t("Admin created")
+
+// With parameters — replaces :param placeholders
+use core_i18n::t_args;
+t_args("Welcome :name", &[("name", &user.name)])
+```
+
+### Rules
+
+1. **Use English text as key.** It doubles as the fallback when translation is missing.
+2. **Every `t()` key must appear in all `i18n/*.json` files.**
+3. **Flat key-value JSON** — no nesting.
+4. **One file per locale**: `i18n/en.json`, `i18n/zh.json`, etc.
+5. Parameters use `:paramName` syntax in both key and translations.
+
+```json
+// i18n/en.json
+{ "Article created": "Article created", "Welcome :name": "Welcome :name" }
+
+// i18n/zh.json
+{ "Article created": "文章创建成功", "Welcome :name": "欢迎 :name" }
+```
+
+### Where translations are used
+
+- `ApiResponse::success(data, &t("message"))` — response messages
+- `AppError::NotFound(t("Article not found"))` — error messages
+- `AppError::Forbidden(t("Not allowed"))` — auth errors
+- `AppError::Validation { message: t("Validation failed"), errors }` — validation wrappers
+
+Locale is resolved per-request: `X-Locale` header > `Accept-Language` header > default locale.
+
+## Error Handling
+
+```rust
+use core_web::error::AppError;
+use core_i18n::t;
+
+AppError::NotFound(t("Not found"))           // 404
+AppError::BadRequest(t("Invalid input"))     // 400
+AppError::Unauthorized(t("Bad credentials")) // 401
+AppError::Forbidden(t("Not allowed"))        // 403
+AppError::Validation { message: t("Validation failed"), errors }  // 422
+AppError::from(anyhow_error)                 // 500
+```
+
+## Response Envelope
+
+```rust
+use core_web::response::ApiResponse;
+
+ApiResponse::success(data, &t("OK"))       // 200
+ApiResponse::created(data, &t("Created"))  // 201
+```
+
+## Migrations
+
+SQL files in `migrations/` with numeric prefix. After adding a schema, write the matching migration.
+
+```
+migrations/0000000001000_admin_auth.sql
+migrations/0000000002000_articles.sql
+```
+
+Run: `./console migrate run`
+
+## New Feature Checklist
+
+1. Schema → `app/schemas/{domain}.toml`
+2. Migration → `migrations/{number}_{name}.sql`
+3. Permissions → `app/permissions.toml`
+4. Contracts → `app/src/contracts/api/v1/{domain}.rs`
+5. Workflow → `app/src/internal/workflows/{domain}.rs`
+6. Handler → `app/src/internal/api/v1/{domain}.rs`
+7. Wire routes → `app/src/internal/api/v1/mod.rs`
+8. Module declarations → add `mod`/`pub mod` in relevant `mod.rs`
+9. Translations → add keys to all `i18n/*.json` files
+10. `cargo check` to trigger code generation
+"#;
+
+pub const CONTRACTS_AGENTS_MD: &str = r#"# Contracts
+
+Request/response DTOs that define the API surface. Lives in `contracts/api/v1/` (versioned), `contracts/datatable/`, and `contracts/types/`.
+
+## Input Structs — `#[rustforge_contract]`
+
+Auto-injects `Debug, Clone, Deserialize, Validate, JsonSchema`. Use `#[rf(...)]` for validation rules.
+
+```rust
+use core_web::contracts::rustforge_contract;
+
+#[rustforge_contract]
+pub struct CreateArticleInput {
+    #[rf(length(min = 3, max = 255))]
+    #[rf(alpha_dash)]
+    pub slug: String,
+
+    #[rf(length(min = 1, max = 1000))]
+    pub title: String,
+
+    #[serde(default)]
+    #[rf(email)]
+    pub email: Option<String>,
+
+    #[rf(nested)]
+    pub metadata: MetadataInput,
+}
+```
+
+## `#[rf(...)]` Rules
+
+| Rule | Usage |
+|------|-------|
+| `length(min, max)` | `#[rf(length(min = 3, max = 64))]` |
+| `range(min, max)` | `#[rf(range(min = 1, max = 100))]` |
+| `email` | `#[rf(email)]` |
+| `url` | `#[rf(url)]` |
+| `alpha_dash` | letters, digits, `_`, `-` |
+| `one_of(...)` | `#[rf(one_of("a", "b", "c"))]` |
+| `none_of(...)` | `#[rf(none_of("x", "y"))]` |
+| `regex(pattern)` | `#[rf(regex(pattern = r"^\d{4}$"))]` |
+| `contains(pattern)` | `#[rf(contains(pattern = "@"))]` |
+| `does_not_contain(pattern)` | `#[rf(does_not_contain(pattern = "banned"))]` |
+| `must_match(other)` | `#[rf(must_match(other = "password_confirmation"))]` |
+| `nested` | validate nested struct recursively |
+| `date(format)` | `#[rf(date(format = "%Y-%m-%d"))]` |
+| `phonenumber(field)` | `#[rf(phonenumber(field = "country_iso2"))]` |
+| `async_unique(...)` | `#[rf(async_unique(table = "user", column = "email"))]` |
+| `async_exists(...)` | `#[rf(async_exists(table = "role", column = "id"))]` |
+| `async_not_exists(...)` | `#[rf(async_not_exists(table = "banned", column = "email"))]` |
+| `openapi(...)` | `#[rf(openapi(description = "...", example = "..."))]` |
+
+### Async unique with modifiers
+
+```rust
+#[rf(async_unique(
+    table = "admin", column = "username",
+    ignore(column = "id", field = "__target_id"),
+    where_null(column = "deleted_at")
+))]
+```
+
+### Update contracts with target ID for ignore
+
+```rust
+#[rustforge_contract]
+pub struct UpdateArticleInput {
+    #[serde(skip, default)]
+    __target_id: i64,
+
+    #[serde(default)]
+    #[rf(length(min = 3, max = 255))]
+    #[rf(async_unique(table = "article", column = "slug", ignore(column = "id", field = "__target_id")))]
+    pub slug: Option<String>,
+}
+
+impl UpdateArticleInput {
+    pub fn with_target_id(mut self, id: i64) -> Self {
+        self.__target_id = id;
+        self
+    }
+}
+```
+
+## Output Structs — manual derives (no macro)
+
+```rust
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ArticleOutput {
+    pub id: i64,
+    pub title: String,
+    #[schemars(with = "String")]
+    pub created_at: time::OffsetDateTime,
+}
+
+impl From<generated::models::ArticleView> for ArticleOutput {
+    fn from(v: generated::models::ArticleView) -> Self {
+        Self { id: v.id, title: v.title, created_at: v.created_at }
+    }
+}
+```
+
+Use `#[schemars(with = "String")]` for types that don't implement `JsonSchema` (e.g. `time::OffsetDateTime`).
+
+## Reusable String-Wrapper Types
+
+For validation rules shared across contracts, define in `contracts/types/`:
+
+```rust
+use core_web::contracts::rustforge_string_rule_type;
+
+rustforge_string_rule_type! {
+    pub struct EmailAddress {
+        #[rf(email)]
+        #[rf(openapi(description = "Valid email", example = "user@example.com"))]
+    }
+}
+```
+
+Use as field type with `#[rf(nested)]`:
+```rust
+#[rf(nested)]
+pub email: EmailAddress,
+```
+"#;
+
+pub const API_AGENTS_MD: &str = r#"# API Handlers
+
+Route handlers in `api/v1/`. Handlers are **thin** — parse input, call workflow, wrap in response.
+
+## Handler Pattern
+
+```rust
+use axum::extract::{Path, State};
+use core_i18n::t;
+use core_web::{
+    auth::AuthUser,
+    authz::PermissionMode,
+    contracts::{AsyncContractJson, ContractJson},
+    error::AppError,
+    openapi::{
+        with_permission_check_get_with, with_permission_check_post_with,
+        with_permission_check_patch_with, with_permission_check_delete_with,
+        ApiRouter,
+    },
+    response::ApiResponse,
+};
+use generated::{guards::AdminGuard, permissions::Permission};
+use crate::internal::api::state::AppApiState;
+
+pub fn router(state: AppApiState) -> ApiRouter {
+    ApiRouter::new()
+        .api_route(
+            "/",
+            with_permission_check_post_with(
+                create, AdminGuard, PermissionMode::Any,
+                [Permission::ArticleManage.as_str()],
+                |op| op.summary("Create article").tag("Articles"),
+            ),
+        )
+        .api_route(
+            "/{id}",
+            with_permission_check_get_with(
+                detail, AdminGuard, PermissionMode::Any,
+                [Permission::ArticleRead.as_str()],
+                |op| op.summary("Get article").tag("Articles"),
+            ),
+        )
+        .with_state(state)
+}
+
+async fn create(
+    State(state): State<AppApiState>,
+    auth: AuthUser<AdminGuard>,
+    req: AsyncContractJson<CreateArticleInput>,
+) -> Result<ApiResponse<ArticleOutput>, AppError> {
+    let article = workflow::create(&state, &auth, req.0).await?;
+    Ok(ApiResponse::success(ArticleOutput::from(article), &t("Article created")))
+}
+
+async fn detail(
+    State(state): State<AppApiState>,
+    _auth: AuthUser<AdminGuard>,
+    Path(id): Path<i64>,
+) -> Result<ApiResponse<ArticleOutput>, AppError> {
+    let article = workflow::detail(&state, id).await?;
+    Ok(ApiResponse::success(ArticleOutput::from(article), &t("Article loaded")))
+}
+```
+
+## Extractors
+
+| Extractor | When to use |
+|-----------|-------------|
+| `ContractJson<T>` | Sync validation only |
+| `AsyncContractJson<T>` | Has `async_unique`/`async_exists` rules |
+
+For update with async validation, validate manually:
+```rust
+async fn update(
+    State(state): State<AppApiState>,
+    Path(id): Path<i64>,
+    req: ContractJson<UpdateInput>,
+) -> Result<ApiResponse<Output>, AppError> {
+    let req = req.0.with_target_id(id);
+    if let Err(e) = req.validate_async(&state.db).await {
+        return Err(AppError::Validation {
+            message: t("Validation failed"),
+            errors: transform_validation_errors(e),
+        });
+    }
+    // ...
+}
+```
+
+## Router Wiring
+
+Register new domain routers in `api/v1/mod.rs`:
+```rust
+mod article;
+
+pub fn router(state: AppApiState) -> ApiRouter {
+    ApiRouter::new()
+        .nest("/articles", article::router(state.clone()))
+        // ...
+}
+```
+
+Guarded routes use middleware layer:
+```rust
+.layer(from_fn_with_state(state, crate::internal::middleware::auth::require_admin))
+```
+
+## Auth in Handlers
+
+```rust
+// Extract user
+auth: AuthUser<AdminGuard>
+
+// Permission check
+use core_web::authz::{PermissionMode, ensure_permissions};
+ensure_permissions(&auth, PermissionMode::Any, &["article.read"])?;
+
+// Direct check
+auth.has_permission("article.manage")
+```
+
+## State
+
+`AppApiState` in `state.rs` holds `db`, `auth`, `storage`, `mailer`, registries. Extend it when adding new shared resources.
+"#;
+
+pub const WORKFLOWS_AGENTS_MD: &str = r#"# Workflows
+
+Business logic functions. One file per domain. Handlers call these — keep DB queries, permission checks, and orchestration here.
+
+## Pattern
+
+```rust
+use core_db::common::sql::{DbConn, Op, generate_snowflake_i64};
+use core_i18n::t;
+use core_web::{auth::AuthUser, error::AppError};
+use generated::{guards::AdminGuard, models::{Article, ArticleView, ArticleQuery}};
+use crate::internal::api::state::AppApiState;
+
+pub async fn detail(state: &AppApiState, id: i64) -> Result<ArticleView, AppError> {
+    Article::new(DbConn::pool(&state.db), None)
+        .find(id)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::NotFound(t("Article not found")))
+}
+
+pub async fn create(
+    state: &AppApiState,
+    auth: &AuthUser<AdminGuard>,
+    req: CreateArticleInput,
+) -> Result<ArticleView, AppError> {
+    Article::new(DbConn::pool(&state.db), None)
+        .insert()
+        .set_id(generate_snowflake_i64())
+        .set_title(req.title.trim().to_string())
+        .set_slug(req.slug.trim().to_ascii_lowercase())
+        .save()
+        .await
+        .map_err(AppError::from)
+}
+
+pub async fn update(state: &AppApiState, id: i64, req: UpdateArticleInput) -> Result<ArticleView, AppError> {
+    let mut update = Article::new(DbConn::pool(&state.db), None)
+        .update()
+        .where_id(Op::Eq, id);
+
+    if let Some(title) = req.title {
+        update = update.set_title(title.trim().to_string());
+    }
+
+    let affected = update.save().await.map_err(AppError::from)?;
+    if affected == 0 {
+        return Err(AppError::NotFound(t("Article not found")));
+    }
+
+    detail(state, id).await
+}
+
+pub async fn remove(state: &AppApiState, id: i64) -> Result<(), AppError> {
+    let affected = Article::new(DbConn::pool(&state.db), None)
+        .delete(id)
+        .await
+        .map_err(AppError::from)?;
+    if affected == 0 {
+        return Err(AppError::NotFound(t("Article not found")));
+    }
+    Ok(())
+}
+```
+
+## Generated Model API
+
+| Operation | Code |
+|-----------|------|
+| Create handle | `Model::new(DbConn::pool(&db), None)` |
+| Insert | `.insert().set_field(val).save()` → `ModelView` |
+| Update | `.update().where_id(Op::Eq, id).set_field(val).save()` → affected rows |
+| Delete | `.delete(id)` → affected rows (soft-delete if enabled) |
+| Find by PK | `.find(id)` → `Option<ModelView>` |
+| Query | `ModelQuery::new(...).where_field(Op::Eq, val).first()` → `Option<ModelView>` |
+| Hashed field | `.set_password(&plain_text).map_err(AppError::from)?` (returns Result) |
+
+IDs use snowflake: `generate_snowflake_i64()`.
+"#;
+
+pub const JOBS_AGENTS_MD: &str = r#"# Background Jobs
+
+Define job structs, register them in this module, and dispatch from workflows.
+
+## Define a Job
+
+```rust
+use async_trait::async_trait;
+use core_jobs::{Job, JobContext};
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SendWelcomeEmailJob {
+    pub user_id: i64,
+    pub email: String,
+}
+
+#[async_trait]
+impl Job for SendWelcomeEmailJob {
+    const NAME: &'static str = "SendWelcomeEmail";
+    const QUEUE: &'static str = "emails";
+
+    async fn handle(&self, ctx: &JobContext) -> anyhow::Result<()> {
+        // ctx.db, ctx.redis, ctx.settings available
+        Ok(())
+    }
+
+    fn max_retries(&self) -> u32 { 3 }
+}
+```
+
+## Register
+
+In `jobs/mod.rs`:
+```rust
+pub fn register_jobs(worker: &mut Worker) {
+    worker.register::<SendWelcomeEmailJob>();
+}
+
+pub fn register_schedules(scheduler: &mut Scheduler) {
+    scheduler.cron::<DailyCleanupJob>("0 2 * * *");
+}
+```
+
+## Dispatch
+
+```rust
+let job = SendWelcomeEmailJob { user_id: 1, email: "a@b.com".into() };
+job.dispatch(&state.queue).await?;
+```
+"#;
+
+pub const MIDDLEWARE_AGENTS_MD: &str = r#"# Middleware
+
+Custom middleware functions. Framework applies standard stack (CORS, rate limit, timeout, compression, auth headers) automatically.
+
+## Auth Middleware Pattern
+
+```rust
+use axum::{extract::State, http::Request, middleware::Next, response::Response};
+use core_web::{auth, error::AppError};
+use generated::guards::AdminGuard;
+
+pub async fn require_admin<B>(
+    State(state): State<AppApiState>,
+    mut req: Request<B>,
+    next: Next<B>,
+) -> Result<Response, AppError> {
+    let token = auth::extract_bearer_token(req.headers())
+        .ok_or_else(|| AppError::Unauthorized(t("Missing token")))?;
+    let auth_user = auth::authenticate_token::<AdminGuard>(&state.db, &token).await?;
+    req.extensions_mut().insert(auth_user);
+    Ok(next.run(req).await)
+}
+```
+
+Apply to routes via `from_fn_with_state(state, require_admin)`.
+"#;
+
+pub const DATATABLES_AGENTS_MD: &str = r#"# Datatables
+
+Server-side datatable executors. Generated stubs come from `db-gen`; custom datatables are registered manually in `state.rs`.
+
+## Custom Datatable
+
+Override or extend generated datatables here. Registration happens in `AppApiState::new()`:
+
+```rust
+datatable_registry.register_as("article.list", custom_article_datatable(ctx.db.clone()));
+```
+
+## Datatable Contract
+
+Define query/export contracts in `contracts/datatable/{domain}/`. They specify filters, columns, and export formats available to the datatable.
+"#;
+
+pub const REALTIME_AGENTS_MD: &str = r#"# Realtime
+
+WebSocket channel policies and authorizers. Channels are configured in `app/configs.toml`:
+
+```toml
+[realtime.channels.notifications]
+enabled = true
+guard = "admin"
+presence_enabled = true
+```
+
+## Channel Policy
+
+Implement subscribe/publish authorization logic here for channels that need custom access control.
+"#;
+
+pub const VALIDATION_AGENTS_MD: &str = r#"# Validation
+
+Custom validation rules — both sync and async (DB).
+
+## Sync Validators
+
+Return `Result<(), ValidationError>`. Use in contracts with `#[validate(custom(function = "path"))]`.
+
+```rust
+use std::borrow::Cow;
+use validator::ValidationError;
+
+pub fn validate_slug(value: &str) -> Result<(), ValidationError> {
+    if value.contains("--") {
+        let mut err = ValidationError::new("slug");
+        err.message = Some(Cow::from("Slug cannot contain consecutive hyphens"));
+        return Err(err);
+    }
+    Ok(())
+}
+```
+
+## Async Validators (DB)
+
+For `async_unique` / `async_exists` rules, the `#[rf(...)]` macro generates async validation automatically. For custom async checks, implement `AsyncValidate`:
+
+```rust
+use core_web::extract::AsyncValidate;
+
+#[async_trait]
+impl AsyncValidate for MyInput {
+    async fn validate_async(&self, db: &sqlx::PgPool) -> Result<(), validator::ValidationErrors> {
+        // Custom DB checks
+        Ok(())
+    }
+}
+```
+"#;
+
+pub const SEEDS_AGENTS_MD: &str = r#"# Seeds
+
+Database seeders for initial/test data. Implement the `Seeder` trait.
+
+```rust
+use async_trait::async_trait;
+use core_db::seeder::Seeder;
+
+pub struct ArticleSeeder;
+
+#[async_trait]
+impl Seeder for ArticleSeeder {
+    fn name(&self) -> &str { "ArticleSeeder" }
+
+    async fn run(&self, db: &sqlx::PgPool) -> anyhow::Result<()> {
+        // Insert seed data
+        Ok(())
+    }
+}
+```
+
+Register in `seeds/mod.rs` and pass to `bootstrap::console::start_console`.
+
+Run: `./console db seed`
+"#;
