@@ -72,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
         "app/src/internal/realtime",
         "app/src/validation",
         "app/src/seeds",
+        "frontend",
     ];
     for dir in agent_dirs {
         let base = if dir.is_empty() {
@@ -462,7 +463,88 @@ fn file_templates() -> Vec<FileTemplate> {
             content: templates::GENERATED_EXTENSIONS_RS,
             executable: false,
         },
+        // ── Frontend files ────────────────────────────────────
+        FileTemplate {
+            path: "frontend/package.json",
+            content: templates::FRONTEND_PACKAGE_JSON,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/vite.config.user.ts",
+            content: templates::FRONTEND_VITE_CONFIG_USER_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/vite.config.admin.ts",
+            content: templates::FRONTEND_VITE_CONFIG_ADMIN_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/tsconfig.json",
+            content: templates::FRONTEND_TSCONFIG_JSON,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/tsconfig.node.json",
+            content: templates::FRONTEND_TSCONFIG_NODE_JSON,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/postcss.config.js",
+            content: templates::FRONTEND_POSTCSS_CONFIG_JS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/user.html",
+            content: templates::FRONTEND_USER_HTML,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/admin.html",
+            content: templates::FRONTEND_ADMIN_HTML,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/user/main.tsx",
+            content: templates::FRONTEND_SRC_USER_MAIN_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/user/App.tsx",
+            content: templates::FRONTEND_SRC_USER_APP_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/user/app.css",
+            content: templates::FRONTEND_SRC_USER_APP_CSS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/main.tsx",
+            content: templates::FRONTEND_SRC_ADMIN_MAIN_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/App.tsx",
+            content: templates::FRONTEND_SRC_ADMIN_APP_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/app.css",
+            content: templates::FRONTEND_SRC_ADMIN_APP_CSS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/.gitkeep",
+            content: templates::FRONTEND_SRC_SHARED_GITKEEP,
+            executable: false,
+        },
         // ── Agent guideline files ──────────────────────────────
+        FileTemplate {
+            path: "frontend/AGENTS.md",
+            content: templates::FRONTEND_AGENTS_MD,
+            executable: false,
+        },
         FileTemplate {
             path: "AGENTS.md",
             content: templates::ROOT_AGENTS_MD,

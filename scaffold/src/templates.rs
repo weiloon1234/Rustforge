@@ -204,6 +204,7 @@ logs/
 .vscode/
 node_modules/
 **/node_modules/
+frontend/dist/
 
 # Keep the directory, ignore generated static files by default.
 public/*
@@ -255,7 +256,13 @@ FRAMEWORK_DOCS_DIR := $(PUBLIC_PATH)/$(FRAMEWORK_DOCS_ROUTE)
 help:
 	@echo "Starter Makefile"
 	@echo "--------------"
-	@echo "  make dev"
+	@echo "  make dev                 # Rust API + all Vite portals"
+	@echo "  make dev-api             # Rust API only (cargo-watch)"
+	@echo "  make dev-frontend        # All Vite portals"
+	@echo "  make dev-user            # Vite user portal only"
+	@echo "  make dev-admin           # Vite admin portal only"
+	@echo "  make install-frontend    # npm install for frontend"
+	@echo "  make build-frontend      # Production build all portals"
 	@echo "  make run-api"
 	@echo "  make run-ws"
 	@echo "  make run-worker"
@@ -274,10 +281,42 @@ help:
 install-tools:
 	@command -v cargo-watch >/dev/null 2>&1 || cargo install cargo-watch
 
+.PHONY: install-frontend
+install-frontend:
+	npm --prefix frontend install
+
+.PHONY: dev-api
+dev-api:
+	@command -v cargo-watch >/dev/null 2>&1 || (echo "cargo-watch not found. Run: make install-tools" && exit 1)
+	RUN_WORKER=true cargo watch -x "run -p app --bin api-server"
+
+.PHONY: dev-user
+dev-user:
+	npm --prefix frontend run dev:user
+
+.PHONY: dev-admin
+dev-admin:
+	npm --prefix frontend run dev:admin
+
+.PHONY: dev-frontend
+dev-frontend:
+	@trap 'kill 0' EXIT; \
+	npm --prefix frontend run dev:user & \
+	npm --prefix frontend run dev:admin & \
+	wait
+
 .PHONY: dev
 dev:
 	@command -v cargo-watch >/dev/null 2>&1 || (echo "cargo-watch not found. Run: make install-tools" && exit 1)
-	RUN_WORKER=true cargo watch -x "run -p app --bin api-server"
+	@trap 'kill 0' EXIT; \
+	RUN_WORKER=true cargo watch -x "run -p app --bin api-server" & \
+	npm --prefix frontend run dev:user & \
+	npm --prefix frontend run dev:admin & \
+	wait
+
+.PHONY: build-frontend
+build-frontend:
+	npm --prefix frontend run build
 
 .PHONY: run-api
 run-api:
@@ -349,7 +388,8 @@ Use this repository to build real products. Keep framework changes in Rustforge,
 | `generated/` | Generated crate from `db-gen` using `app/schemas`, `app/permissions.toml`, `app/configs.toml`. |
 | `migrations/` | Application SQL migrations. |
 | `i18n/` | Project-owned translation catalogs (`en.json`, `zh.json`, ...). |
-| `public/` | Optional static output directory for built frontend assets (`PUBLIC_PATH`). |
+| `frontend/` | Multi-portal React + Vite + Tailwind 4 frontend (user & admin portals). |
+| `public/` | Built frontend output and static assets (`PUBLIC_PATH`). |
 | `bin/` | Short wrappers to run API/websocket/worker/console with expected env defaults. |
 | `.env.example` | Runtime environment template. |
 | `Cargo.toml` | Workspace root and Rustforge dependency wiring. |
@@ -376,7 +416,13 @@ cargo build -p generated
 ./console migrate run
 ```
 
-5. Start services:
+5. Install frontend dependencies:
+
+```bash
+make install-frontend
+```
+
+6. Start services:
 
 ```bash
 ./bin/api-server
@@ -384,10 +430,21 @@ cargo build -p generated
 ./bin/worker
 ```
 
-## Daily Commands
+Or start everything at once (API + frontend dev servers):
 
 ```bash
 make dev
+```
+
+## Daily Commands
+
+```bash
+make dev               # Rust API + Vite user (:5173) + Vite admin (:5174)
+make dev-api           # Rust API only (cargo-watch)
+make dev-frontend      # All Vite portals
+make dev-user          # Vite user portal only
+make dev-admin         # Vite admin portal only
+make build-frontend    # Production build → public/
 make check
 make run-api
 make run-ws
@@ -1127,6 +1184,10 @@ fi
 
 run_as_project_user "source \"\$HOME/.cargo/env\" >/dev/null 2>&1 || true; cd \"${PROJECT_DIR}\" && cargo build --release --workspace"
 
+if [[ -f "${PROJECT_DIR}/frontend/package.json" ]]; then
+    run_as_project_user "cd \"${PROJECT_DIR}\" && npm --prefix frontend install && npm --prefix frontend run build"
+fi
+
 if [[ "${RUN_MIGRATIONS}" == "true" ]]; then
     run_as_project_user "cd \"${PROJECT_DIR}\" && ./console migrate run"
 fi
@@ -1864,6 +1925,7 @@ use core_web::openapi::{
     },
     ApiRouter,
 };
+use tower_http::services::{ServeDir, ServeFile};
 
 use state::AppApiState;
 
@@ -1899,6 +1961,18 @@ pub async fn build_router(ctx: BootContext) -> anyhow::Result<Router> {
     }
 
     let public_path = core_web::static_assets::public_path_from_env();
+
+    // Admin SPA: /admin/* → public/admin/index.html
+    let admin_public = public_path.join("admin");
+    let admin_index = admin_public.join("index.html");
+    if admin_public.is_dir() && admin_index.is_file() {
+        router = router.nest_service(
+            "/admin",
+            ServeDir::new(&admin_public).fallback(ServeFile::new(&admin_index)),
+        );
+    }
+
+    // User SPA: everything else → public/index.html (existing logic)
     if let Some(static_router) = core_web::static_assets::static_assets_router(&public_path) {
         router = router.merge(static_router);
     } else {
@@ -3309,6 +3383,7 @@ app/
     │   └── realtime/         # WebSocket policies     ← has AGENTS.md
     ├── validation/           # Validation rules       ← has AGENTS.md
     └── seeds/                # Database seeders       ← has AGENTS.md
+frontend/                     # Multi-portal React + Vite + Tailwind 4 ← has AGENTS.md
 generated/                    # Auto-generated — NEVER edit generated.rs
 migrations/                   # SQL migration files (ordered numeric prefix)
 i18n/                         # Translation JSON files
@@ -4031,4 +4106,322 @@ impl Seeder for ArticleSeeder {
 Register in `seeds/mod.rs` and pass to `bootstrap::console::start_console`.
 
 Run: `./console db seed`
+"#;
+
+// ── Frontend template files ──────────────────────────────
+
+pub const FRONTEND_PACKAGE_JSON: &str = r#"{
+  "name": "frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:user": "vite --config vite.config.user.ts",
+    "dev:admin": "vite --config vite.config.admin.ts",
+    "build:user": "vite build --config vite.config.user.ts",
+    "build:admin": "vite build --config vite.config.admin.ts",
+    "build": "rm -rf ../public && npm run build:admin && npm run build:user",
+    "preview:user": "vite preview --config vite.config.user.ts",
+    "preview:admin": "vite preview --config vite.config.admin.ts"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.4.0",
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "~5.7.0",
+    "vite": "^6.0.0"
+  }
+}
+"#;
+
+pub const FRONTEND_VITE_CONFIG_USER_TS: &str = r#"import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  root: ".",
+  base: "/",
+  build: {
+    outDir: "../public",
+    emptyOutDir: false,
+    rollupOptions: {
+      input: "user.html",
+    },
+  },
+  // Rename user.html → index.html in the output so the Rust SPA
+  // fallback (which looks for public/index.html) works unchanged.
+  experimental: {
+    renderBuiltUrl(filename, { hostType }) {
+      if (hostType === "html") return filename;
+      return "/" + filename;
+    },
+  },
+  server: {
+    port: 5173,
+    proxy: {
+      "/api": "http://localhost:3000",
+    },
+  },
+});
+"#;
+
+pub const FRONTEND_VITE_CONFIG_ADMIN_TS: &str = r#"import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  root: ".",
+  base: "/admin/",
+  build: {
+    outDir: "../public/admin",
+    emptyOutDir: true,
+    rollupOptions: {
+      input: "admin.html",
+    },
+  },
+  experimental: {
+    renderBuiltUrl(filename, { hostType }) {
+      if (hostType === "html") return filename;
+      return "/admin/" + filename;
+    },
+  },
+  server: {
+    port: 5174,
+    proxy: {
+      "/api": "http://localhost:3000",
+    },
+  },
+});
+"#;
+
+pub const FRONTEND_TSCONFIG_JSON: &str = r#"{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["src"]
+}
+"#;
+
+pub const FRONTEND_TSCONFIG_NODE_JSON: &str = r#"{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["vite.config.*.ts"]
+}
+"#;
+
+pub const FRONTEND_POSTCSS_CONFIG_JS: &str = r#"export default {
+  plugins: {
+    "@tailwindcss/postcss": {},
+    autoprefixer: {},
+  },
+};
+"#;
+
+pub const FRONTEND_USER_HTML: &str = r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Starter</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/user/main.tsx"></script>
+  </body>
+</html>
+"#;
+
+pub const FRONTEND_ADMIN_HTML: &str = r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/admin/main.tsx"></script>
+  </body>
+</html>
+"#;
+
+pub const FRONTEND_SRC_USER_MAIN_TSX: &str = r#"import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+import "./app.css";
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+"#;
+
+pub const FRONTEND_SRC_USER_APP_TSX: &str = r#"export default function App() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold tracking-tight">Rustforge Starter</h1>
+        <p className="mt-2 text-lg text-muted">User Portal</p>
+      </div>
+    </div>
+  );
+}
+"#;
+
+pub const FRONTEND_SRC_USER_APP_CSS: &str = r#"@import "tailwindcss";
+
+@theme {
+  --color-background: #f8fafc;
+  --color-foreground: #0f172a;
+  --color-muted: #64748b;
+  --color-primary: #2563eb;
+  --color-primary-foreground: #ffffff;
+}
+"#;
+
+pub const FRONTEND_SRC_ADMIN_MAIN_TSX: &str = r#"import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+import "./app.css";
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+"#;
+
+pub const FRONTEND_SRC_ADMIN_APP_TSX: &str = r#"export default function App() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold tracking-tight">Rustforge Starter</h1>
+        <p className="mt-2 text-lg text-muted">Admin Portal</p>
+      </div>
+    </div>
+  );
+}
+"#;
+
+pub const FRONTEND_SRC_ADMIN_APP_CSS: &str = r#"@import "tailwindcss";
+
+@theme {
+  --color-background: #0f172a;
+  --color-foreground: #f8fafc;
+  --color-muted: #94a3b8;
+  --color-primary: #8b5cf6;
+  --color-primary-foreground: #ffffff;
+}
+"#;
+
+pub const FRONTEND_SRC_SHARED_GITKEEP: &str = "";
+
+pub const FRONTEND_AGENTS_MD: &str = r#"# Frontend — Multi-Portal React + Vite + Tailwind 4
+
+This directory contains the frontend source for the Rustforge starter. It ships two independent SPA portals:
+
+| Portal | Base | Dev port | Build output |
+|--------|------|----------|--------------|
+| **user** | `/` | 5173 | `../public/` (root) |
+| **admin** | `/admin/` | 5174 | `../public/admin/` |
+
+Each portal has its own Vite config, HTML entry, CSS theme, and source tree.
+
+## Directory Structure
+
+```
+frontend/
+├── package.json
+├── postcss.config.js
+├── tsconfig.json
+├── tsconfig.node.json
+├── vite.config.user.ts
+├── vite.config.admin.ts
+├── user.html
+├── admin.html
+└── src/
+    ├── shared/            # Cross-portal components, hooks, utilities
+    ├── user/              # User portal source
+    │   ├── main.tsx
+    │   ├── App.tsx
+    │   └── app.css        # Tailwind 4 theme (@theme block)
+    └── admin/             # Admin portal source
+        ├── main.tsx
+        ├── App.tsx
+        └── app.css        # Tailwind 4 theme (@theme block)
+```
+
+## Commands
+
+```bash
+make dev              # All: Vite user + Vite admin + Rust API
+make dev-user         # Vite user portal only (port 5173)
+make dev-admin        # Vite admin portal only (port 5174)
+make dev-api          # Rust API only (cargo-watch, port 3000)
+make build-frontend   # Clean build all portals → public/
+```
+
+## Tailwind CSS 4
+
+Each portal customises its design tokens in its own `app.css` via `@theme { }`. No `tailwind.config.js` is used — Tailwind 4 reads theme configuration from CSS.
+
+```css
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #2563eb;
+}
+```
+
+## Adding a New Portal
+
+1. Create `vite.config.{name}.ts` — set `base`, `server.port`, `build.outDir`.
+2. Create `{name}.html` entry point.
+3. Create `src/{name}/` with `main.tsx`, `App.tsx`, `app.css`.
+4. Add `dev:{name}` and `build:{name}` scripts to `package.json`.
+5. Update the `build` script ordering (build nested portals first).
+6. In Rust, add `nest_service("/{name}", ...)` in `build_router` (see `app/src/internal/api/mod.rs`).
+
+## Production
+
+`make build-frontend` writes optimised assets into `public/`. The Rust API serves them:
+- `/admin/*` → `public/admin/index.html` (admin SPA fallback)
+- `/*` → `public/index.html` (user SPA fallback)
 "#;
