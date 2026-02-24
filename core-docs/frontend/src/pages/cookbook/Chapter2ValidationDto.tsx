@@ -111,9 +111,12 @@ use core_web::contracts::rustforge_contract;
 use generated::models::AdminType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use validator::Validate;
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminLoginInput {
     #[rf(nested)]
     pub username: UsernameString,
@@ -124,7 +127,8 @@ pub struct AdminLoginInput {
     pub client_type: AuthClientType,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminMeOutput {
     pub id: i64,
     pub username: String,
@@ -136,12 +140,21 @@ pub struct AdminMeOutput {
 }`}</code>
                 </pre>
 
+                <p className="text-sm text-gray-600">
+                    Adding <code>#[derive(TS)]</code> with{' '}
+                    <code>#[ts(export, export_to = "portal/types/")]</code> enables automatic
+                    TypeScript type generation. Run <code>make gen-types</code> after adding or
+                    changing contract structs to regenerate frontend type files.
+                </p>
+
                 <h2>Step 4: Async DB Validation in DTOs (Create)</h2>
                 <h3>
                     File: <code>app/src/contracts/api/v1/admin.rs</code> (create excerpt)
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`#[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct CreateAdminInput {
     #[rf(nested)]
     #[rf(async_unique(table = "admin", column = "username"))]
@@ -166,6 +179,8 @@ pub struct CreateAdminInput {
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`#[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct UpdateAdminInput {
     #[serde(skip, default)]
     __target_id: i64,
@@ -244,7 +259,10 @@ async fn update(
                         options.
                     </li>
                     <li>
-                        TypeScript generation remains OpenAPI-first from <code>/openapi.json</code>.
+                        TypeScript generation uses <code>#[derive(TS)]</code> +{' '}
+                        <code>make gen-types</code> to produce per-portal type files directly
+                        from Rust structs. OpenAPI <code>/openapi.json</code> remains available
+                        as an alternative source.
                     </li>
                 </ul>
                 <p>

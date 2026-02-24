@@ -44,6 +44,12 @@ export function CookbookOverview() {
                         <code>#[schemars(...)]</code> is the escape hatch).
                     </li>
                     <li>
+                        Contract structs (inputs + outputs) derive{' '}
+                        <code>#[derive(TS)]</code> with{' '}
+                        <code>#[ts(export, export_to = "portal/types/")]</code> for
+                        automatic TypeScript generation via <code>make gen-types</code>.
+                    </li>
+                    <li>
                         Prefer <code>core_web::contracts::ContractJson&lt;T&gt;</code> on handlers
                         and keep <code>T</code> under the <code>RequestContract</code> standard.
                     </li>
@@ -126,8 +132,11 @@ with_permission_check_post(
 9) verify with ./console route list and curl`}</code>
                 </pre>
                 <p>
-                    TypeScript generation standard is OpenAPI-first from{' '}
-                    <code>/openapi.json</code>.
+                    TypeScript generation standard is <code>ts-rs</code> derive-based:{' '}
+                    add <code>#[derive(TS)]</code> to contract structs then run{' '}
+                    <code>make gen-types</code> to regenerate per-portal TypeScript files.
+                    OpenAPI <code>/openapi.json</code> remains available as an additional
+                    source for tooling and documentation.
                 </p>
 
                 <h2>Recommended Reading Order (No Renumber Needed)</h2>

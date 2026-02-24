@@ -444,6 +444,11 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: "app/src/bin/export-types.rs",
+            content: templates::APP_BIN_EXPORT_TYPES_RS,
+            executable: false,
+        },
+        FileTemplate {
             path: "generated/Cargo.toml",
             content: templates::GENERATED_CARGO_TOML,
             executable: false,
@@ -537,6 +542,52 @@ fn file_templates() -> Vec<FileTemplate> {
         FileTemplate {
             path: "frontend/src/shared/.gitkeep",
             content: templates::FRONTEND_SRC_SHARED_GITKEEP,
+            executable: false,
+        },
+        // ── Frontend TypeScript type files ───────────────────
+        FileTemplate {
+            path: "frontend/src/shared/types/api.ts",
+            content: templates::FRONTEND_SRC_SHARED_TYPES_API_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/types/datatable.ts",
+            content: templates::FRONTEND_SRC_SHARED_TYPES_DATATABLE_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/types/index.ts",
+            content: templates::FRONTEND_SRC_SHARED_TYPES_INDEX_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/types/enums.ts",
+            content: templates::FRONTEND_SRC_ADMIN_TYPES_ENUMS_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/types/admin.ts",
+            content: templates::FRONTEND_SRC_ADMIN_TYPES_ADMIN_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/types/admin-auth.ts",
+            content: templates::FRONTEND_SRC_ADMIN_TYPES_ADMIN_AUTH_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/types/datatable-admin.ts",
+            content: templates::FRONTEND_SRC_ADMIN_TYPES_DATATABLE_ADMIN_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/types/index.ts",
+            content: templates::FRONTEND_SRC_ADMIN_TYPES_INDEX_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/user/types/index.ts",
+            content: templates::FRONTEND_SRC_USER_TYPES_INDEX_TS,
             executable: false,
         },
         FileTemplate {

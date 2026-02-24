@@ -310,8 +310,11 @@ with_permission_check_get(
                         </h3>
                         <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                             <code className="language-rust">{`use core_web::contracts::rustforge_contract;
+use ts_rs::TS;
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct ArticleMetaInput {
     #[rf(length(min = 1, max = 120))]
     #[rf(required_trimmed)]
@@ -322,6 +325,8 @@ pub struct ArticleMetaInput {
 }
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct ArticleCreateInput {
     pub category_id: i64,
     pub status: generated::models::ArticleStatus,

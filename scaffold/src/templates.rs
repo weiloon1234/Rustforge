@@ -20,6 +20,7 @@ toml = "0.9"
 uuid = { version = "1", features = ["serde", "v4"] }
 time = { version = "0.3", features = ["serde"] }
 tower-cookies = "0.11"
+ts-rs = { version = "10", features = ["serde-compat"] }
 
 bootstrap = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 core-config = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
@@ -276,6 +277,7 @@ help:
 	@echo "  make framework-docs-build"
 	@echo "  make check"
 	@echo "  make gen"
+	@echo "  make gen-types            # Regenerate frontend TS types from Rust contracts"
 
 .PHONY: install-tools
 install-tools:
@@ -370,9 +372,15 @@ framework-docs-build:
 check:
 	cargo check --workspace
 
+.PHONY: gen-types
+gen-types:
+	cargo run -p app --bin export-types
+	@echo "TypeScript types regenerated in frontend/src/"
+
 .PHONY: gen
 gen:
 	cargo build -p generated
+	$(MAKE) gen-types
 "#;
 
 pub const ROOT_README_MD: &str = r#"# Rustforge Starter
@@ -1362,6 +1370,10 @@ name = "app"
 version = "0.1.0"
 edition.workspace = true
 
+[[bin]]
+name = "export-types"
+path = "src/bin/export-types.rs"
+
 [dependencies]
 bootstrap = { workspace = true }
 core-config = { workspace = true }
@@ -1389,6 +1401,7 @@ clap = { workspace = true }
 uuid = { workspace = true }
 time = { workspace = true }
 tower-cookies = { workspace = true }
+ts-rs = { workspace = true }
 "#;
 
 pub const APP_LIB_RS: &str = r#"pub mod contracts;
@@ -1441,12 +1454,16 @@ use core_web::datatable::{
 use core_web::contracts::rustforge_contract;
 use generated::models::{AdminType, AdminView};
 use schemars::JsonSchema;
+use ts_rs::TS;
 use validator::Validate;
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminDatatableQueryInput {
     #[serde(default)]
     #[rf(nested)]
+    #[ts(type = "DataTableQueryRequestBase")]
     pub base: DataTableQueryRequestBase,
     #[serde(default)]
     #[rf(length(min = 1, max = 120))]
@@ -1459,6 +1476,7 @@ pub struct AdminDatatableQueryInput {
     #[rf(length(min = 1, max = 120))]
     pub email: Option<String>,
     #[serde(default)]
+    #[ts(type = "AdminType | null")]
     pub admin_type: Option<AdminType>,
 }
 
@@ -1509,8 +1527,11 @@ impl DataTableQueryRequestContract for AdminDatatableQueryInput {
 }
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminDatatableEmailExportInput {
     #[rf(nested)]
+    #[ts(type = "DataTableEmailExportRequestBase")]
     pub base: DataTableEmailExportRequestBase,
     #[serde(default)]
     #[rf(length(min = 1, max = 120))]
@@ -1523,6 +1544,7 @@ pub struct AdminDatatableEmailExportInput {
     #[rf(length(min = 1, max = 120))]
     pub email: Option<String>,
     #[serde(default)]
+    #[ts(type = "AdminType | null")]
     pub admin_type: Option<AdminType>,
 }
 
@@ -1645,26 +1667,34 @@ use core_web::contracts::rustforge_contract;
 use generated::{models::AdminType, permissions::Permission};
 use schemars::JsonSchema;
 use serde::Serialize;
+use ts_rs::TS;
 use validator::Validate;
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct CreateAdminInput {
     #[rf(nested)]
     #[rf(async_unique(table = "admin", column = "username"))]
+    #[ts(type = "string")]
     pub username: UsernameString,
     #[serde(default)]
     #[rf(email)]
     pub email: Option<String>,
     #[rf(length(min = 1, max = 120))]
     pub name: String,
+    #[ts(type = "AdminType")]
     pub admin_type: AdminType,
     #[rf(length(min = 8, max = 128))]
     pub password: String,
     #[serde(default)]
+    #[ts(type = "Permission[]")]
     pub abilities: Vec<Permission>,
 }
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct UpdateAdminInput {
     #[serde(skip, default)]
     __target_id: i64,
@@ -1675,6 +1705,7 @@ pub struct UpdateAdminInput {
         column = "username",
         ignore(column = "id", field = "__target_id")
     ))]
+    #[ts(type = "string | null")]
     pub username: Option<UsernameString>,
     #[serde(default)]
     #[rf(email)]
@@ -1683,8 +1714,10 @@ pub struct UpdateAdminInput {
     #[rf(length(min = 1, max = 120))]
     pub name: Option<String>,
     #[serde(default)]
+    #[ts(type = "AdminType | null")]
     pub admin_type: Option<AdminType>,
     #[serde(default)]
+    #[ts(type = "Permission[] | null")]
     pub abilities: Option<Vec<Permission>>,
 }
 
@@ -1695,18 +1728,22 @@ impl UpdateAdminInput {
     }
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminOutput {
     pub id: i64,
     pub username: String,
     pub email: Option<String>,
     pub name: String,
+    #[ts(type = "AdminType")]
     pub admin_type: AdminType,
     #[serde(default)]
     pub abilities: Vec<String>,
     #[schemars(with = "String")]
+    #[ts(type = "string")]
     pub created_at: time::OffsetDateTime,
     #[schemars(with = "String")]
+    #[ts(type = "string")]
     pub updated_at: time::OffsetDateTime,
 }
 
@@ -1736,7 +1773,8 @@ impl From<generated::models::AdminView> for AdminOutput {
     }
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminDeleteOutput {
     pub deleted: bool,
 }
@@ -1746,23 +1784,31 @@ pub const APP_CONTRACTS_API_V1_ADMIN_AUTH_RS: &str = r#"use crate::contracts::ty
 use core_web::contracts::rustforge_contract;
 use schemars::JsonSchema;
 use serde::Serialize;
+use ts_rs::TS;
 use validator::Validate;
 use core_web::auth::AuthClientType;
 use generated::models::AdminType;
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminLoginInput {
     #[rf(nested)]
+    #[ts(type = "string")]
     pub username: UsernameString,
 
     #[rf(length(min = 8, max = 128))]
     pub password: String,
 
+    #[ts(type = "AuthClientType")]
     pub client_type: AuthClientType,
 }
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminRefreshInput {
+    #[ts(type = "AuthClientType")]
     pub client_type: AuthClientType,
     #[serde(default)]
     #[rf(length(min = 1, max = 256))]
@@ -1770,7 +1816,10 @@ pub struct AdminRefreshInput {
 }
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminLogoutInput {
+    #[ts(type = "AuthClientType")]
     pub client_type: AuthClientType,
     #[serde(default)]
     #[rf(length(min = 1, max = 256))]
@@ -1778,6 +1827,8 @@ pub struct AdminLogoutInput {
 }
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminProfileUpdateInput {
     #[rf(length(min = 1, max = 120))]
     pub name: String,
@@ -1787,6 +1838,8 @@ pub struct AdminProfileUpdateInput {
 }
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminPasswordUpdateInput {
     #[rf(length(min = 8, max = 128))]
     pub current_password: String,
@@ -1797,11 +1850,13 @@ pub struct AdminPasswordUpdateInput {
     pub password_confirmation: String,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminAuthOutput {
     pub token_type: String,
     pub access_token: String,
     #[schemars(with = "Option<String>")]
+    #[ts(type = "string | null")]
     pub access_expires_at: Option<time::OffsetDateTime>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
@@ -1809,32 +1864,38 @@ pub struct AdminAuthOutput {
     pub scopes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminMeOutput {
     pub id: i64,
     pub username: String,
     pub email: Option<String>,
     pub name: String,
+    #[ts(type = "AdminType")]
     pub admin_type: AdminType,
     #[serde(default)]
     pub scopes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminProfileUpdateOutput {
     pub id: i64,
     pub username: String,
     pub email: Option<String>,
     pub name: String,
+    #[ts(type = "AdminType")]
     pub admin_type: AdminType,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminPasswordUpdateOutput {
     pub updated: bool,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminLogoutOutput {
     pub revoked: bool,
 }
@@ -3653,13 +3714,14 @@ Admin is mounted first so `/admin/*` is matched before the catch-all user SPA.
 1. Schema → `app/schemas/{domain}.toml`
 2. Migration → `migrations/{number}_{name}.sql`
 3. Permissions → `app/permissions.toml`
-4. Contracts → `app/src/contracts/api/v1/{domain}.rs`
+4. Contracts → `app/src/contracts/api/v1/{domain}.rs` (add `#[derive(TS)]` for frontend types)
 5. Workflow → `app/src/internal/workflows/{domain}.rs`
 6. Handler → `app/src/internal/api/v1/{domain}.rs`
 7. Wire routes → `app/src/internal/api/v1/mod.rs`
 8. Module declarations → add `mod`/`pub mod` in relevant `mod.rs`
 9. Translations → add keys to all `i18n/*.json` files
 10. `cargo check` to trigger code generation
+11. Run `make gen-types` to regenerate frontend TypeScript types from contracts
 "#;
 
 pub const CONTRACTS_AGENTS_MD: &str = r#"# Contracts
@@ -3786,6 +3848,78 @@ Use as field type with `#[rf(nested)]`:
 #[rf(nested)]
 pub email: EmailAddress,
 ```
+
+## TypeScript Type Generation
+
+Contract structs are auto-exported to TypeScript via `ts-rs`. Add `#[derive(TS)]` alongside existing derives.
+
+### Input structs (with `#[rustforge_contract]`)
+
+```rust
+use ts_rs::TS;
+
+#[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
+pub struct CreateArticleInput {
+    #[rf(length(min = 1, max = 255))]
+    pub title: String,
+
+    #[ts(type = "ArticleStatus")]           // generated enum — override type
+    pub status: ArticleStatus,
+
+    #[ts(type = "string")]                  // newtype wrapper — flatten to string
+    #[rf(nested)]
+    pub slug: SlugString,
+
+    #[serde(default)]
+    pub tags: Vec<String>,                  // ts-rs handles Vec<String> natively
+}
+```
+
+### Output structs
+
+```rust
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
+pub struct ArticleOutput {
+    pub id: i64,
+    pub title: String,
+    #[ts(type = "string")]                  // OffsetDateTime → string
+    #[schemars(with = "String")]
+    pub created_at: time::OffsetDateTime,
+}
+```
+
+### Registering in `export-types.rs`
+
+After adding `#[derive(TS)]` to your structs, register them in `app/src/bin/export-types.rs`:
+
+```rust
+// Add a new TsFile block:
+{
+    use app::contracts::api::v1::article::*;
+    files.push(TsFile {
+        rel_path: "admin/types/article.ts",
+        imports: &["import type { ArticleStatus } from \"./enums\";"],
+        definitions: vec![
+            CreateArticleInput::export_to_string().expect("CreateArticleInput"),
+            ArticleOutput::export_to_string().expect("ArticleOutput"),
+        ],
+    });
+}
+```
+
+Then update the barrel `frontend/src/admin/types/index.ts` to re-export and run `make gen-types`.
+
+### Conventions
+
+- Only **serde-visible** fields are exported (fields with `#[serde(skip)]` are excluded)
+- Use `#[ts(type = "TypeName")]` for types that don't derive `TS` (generated enums, framework types, newtypes)
+- Use `#[ts(type = "string")]` for `time::OffsetDateTime` and string newtypes
+- `Option<T>` becomes `T | null` automatically
+- `Vec<T>` becomes `T[]` automatically
+- `#[serde(default)]` fields become optional in TypeScript (with `serde-compat` feature)
 "#;
 
 pub const API_AGENTS_MD: &str = r#"# API Handlers
@@ -4771,7 +4905,7 @@ import { persist } from "zustand/middleware";
 export interface Account {
   id: number;
   name: string;
-  email: string;
+  email: string | null;
 }
 
 export interface AuthState<A extends Account = Account> {
@@ -5281,8 +5415,9 @@ export const useAuthStore = createAuthStore({
 "#;
 
 pub const FRONTEND_SRC_ADMIN_STORES_AUTH_TS: &str = r#"import { createAuthStore } from "../../shared/createAuthStore";
+import type { AdminMeOutput } from "../types/admin-auth";
 
-export const useAuthStore = createAuthStore({
+export const useAuthStore = createAuthStore<AdminMeOutput>({
   loginEndpoint: "/api/v1/admin/auth/login",
   meEndpoint: "/api/v1/admin/auth/me",
   refreshEndpoint: "/api/v1/admin/auth/refresh",
@@ -5341,6 +5476,10 @@ frontend/
 ├── admin.html
 └── src/
     ├── shared/                        # Cross-portal code
+    │   ├── types/                     # Generated shared TS types (make gen-types)
+    │   │   ├── api.ts                 # ApiResponse<T>, ApiErrorResponse
+    │   │   ├── datatable.ts           # DataTable request/response generics
+    │   │   └── index.ts               # Barrel export
     │   ├── i18n.ts                    # i18next init (shared JSON, :param transform)
     │   ├── createAuthStore.ts         # Zustand auth store factory
     │   ├── createApiClient.ts         # Axios factory with interceptors
@@ -5357,13 +5496,21 @@ frontend/
     │   ├── App.tsx                    # Routes
     │   ├── app.css                    # Tailwind 4 theme
     │   ├── api.ts                     # Axios instance for this portal
-    │   └── stores/auth.ts             # Auth store instance
+    │   ├── stores/auth.ts             # Auth store instance
+    │   └── types/                     # Generated user TS types (make gen-types)
+    │       └── index.ts               # Barrel export (expand as user contracts are added)
     └── admin/
         ├── main.tsx                   # Entry (BrowserRouter basename="/admin")
         ├── App.tsx                    # Routes
         ├── app.css                    # Tailwind 4 theme
         ├── api.ts                     # Axios instance for this portal
-        └── stores/auth.ts             # Auth store instance
+        ├── stores/auth.ts             # Auth store instance
+        └── types/                     # Generated admin TS types (make gen-types)
+            ├── enums.ts               # AdminType, Permission, AuthClientType
+            ├── admin.ts               # CRUD: CreateAdminInput, AdminOutput, etc.
+            ├── admin-auth.ts          # Auth: AdminLoginInput, AdminMeOutput, etc.
+            ├── datatable-admin.ts     # AdminDatatableQueryInput, etc.
+            └── index.ts               # Barrel export
 ```
 
 ## Commands
@@ -5470,6 +5617,57 @@ function Greeting({ name }: { name: string }) {
 ```
 
 The key is the English text itself — if no translation is found, the key is the fallback.
+
+## TypeScript Types (Generated)
+
+Type definitions in `*/types/` directories are **auto-generated** from Rust contract structs using `ts-rs`. Do not edit them manually — run `make gen-types` to regenerate after changing Rust contracts.
+
+### Usage
+
+```typescript
+import type { ApiResponse } from "../../shared/types";
+import type { AdminOutput, CreateAdminInput } from "../types";
+
+// Typed API calls
+const res = await api.post<ApiResponse<AdminOutput>>("/api/v1/admin", input);
+const admin: AdminOutput = res.data.data;
+```
+
+### Regeneration
+
+```bash
+make gen-types    # Regenerate frontend TS types from Rust contracts
+make gen          # Code generation + type generation
+```
+
+### How it works
+
+1. Rust contract structs derive `ts_rs::TS` with `#[ts(export, export_to = "admin/types/")]`
+2. `app/src/bin/export-types.rs` calls `T::export_to_string()` for each contract type
+3. The binary assembles complete `.ts` files with proper imports and writes to `frontend/src/`
+4. Framework types (ApiResponse, DataTable*) and enum types are emitted as static strings
+
+### Adding types for a new domain
+
+1. In your Rust contract, add `#[derive(TS)]` and `#[ts(export, export_to = "{portal}/types/")]`
+2. For fields using external types (generated enums, framework types), add `#[ts(type = "TypeName")]`
+3. Register the types in `app/src/bin/export-types.rs` (add a new `TsFile` block)
+4. Update the barrel `index.ts` to re-export the new module
+5. Run `make gen-types`
+
+### Type mapping conventions
+
+| Rust | TypeScript | Notes |
+|------|-----------|-------|
+| `String` | `string` | |
+| `i64`, `f64` | `number` | |
+| `bool` | `boolean` | |
+| `Option<T>` | `T \| null` | |
+| `Vec<T>` | `T[]` | |
+| `time::OffsetDateTime` | `string` | Use `#[ts(type = "string")]` |
+| `UsernameString` (newtype) | `string` | Use `#[ts(type = "string")]` |
+| `AdminType` (generated enum) | `AdminType` | Use `#[ts(type = "AdminType")]` |
+| `#[serde(skip)]` field | omitted | ts-rs respects serde attrs |
 
 ## State Management (Zustand)
 
@@ -5664,3 +5862,613 @@ When adding a new portal, copy the `@layer components` block from an existing po
 - `/admin/*` → `public/admin/index.html` (admin SPA fallback)
 - `/*` → `public/index.html` (user SPA fallback)
 "#;
+
+// ── TypeScript type files ───────────────────────────────────────
+
+pub const FRONTEND_SRC_SHARED_TYPES_API_TS: &str = r#"export interface ApiResponse<T> {
+  data: T;
+  message?: string;
+}
+
+export interface ApiErrorResponse {
+  message: string;
+  errors?: Record<string, string[]>;
+}
+"#;
+
+pub const FRONTEND_SRC_SHARED_TYPES_DATATABLE_TS: &str = r#"export type DataTablePaginationMode = "offset" | "cursor";
+
+export type DataTableSortDirection = "asc" | "desc";
+
+export interface DataTableQueryRequestBase {
+  include_meta?: boolean;
+  page?: number | null;
+  per_page?: number | null;
+  cursor?: string | null;
+  pagination_mode?: DataTablePaginationMode | null;
+  sorting_column?: string | null;
+  sorting?: DataTableSortDirection | null;
+  timezone?: string | null;
+  created_at_from?: string | null;
+  created_at_to?: string | null;
+}
+
+export interface DataTableEmailExportRequestBase {
+  query: DataTableQueryRequestBase;
+  recipients: string[];
+  subject?: string | null;
+  export_file_name?: string | null;
+}
+
+export type DataTableFilterFieldType =
+  | "text"
+  | "select"
+  | "number"
+  | "date"
+  | "datetime"
+  | "boolean";
+
+export interface DataTableFilterOptionDto {
+  label: string;
+  value: string;
+}
+
+export interface DataTableFilterFieldDto {
+  field: string;
+  filter_key: string;
+  type: DataTableFilterFieldType;
+  label: string;
+  placeholder?: string;
+  description?: string;
+  options?: DataTableFilterOptionDto[];
+}
+
+export interface DataTableColumnMetaDto {
+  name: string;
+  data_type: string;
+  sortable: boolean;
+  localized: boolean;
+  filter_ops: string[];
+}
+
+export interface DataTableRelationColumnMetaDto {
+  relation: string;
+  column: string;
+  data_type: string;
+  filter_ops: string[];
+}
+
+export interface DataTableDefaultsDto {
+  sorting_column: string;
+  sorted: string;
+  per_page: number;
+  export_ignore_columns: string[];
+  timestamp_columns: string[];
+  unsortable: string[];
+}
+
+export interface DataTableDiagnosticsDto {
+  duration_ms: number;
+  auto_filters_applied: number;
+  unknown_filters: string[];
+  unknown_filter_mode: string;
+}
+
+export interface DataTableMetaDto {
+  model_key: string;
+  defaults: DataTableDefaultsDto;
+  columns: DataTableColumnMetaDto[];
+  relation_columns: DataTableRelationColumnMetaDto[];
+  filter_rows: DataTableFilterFieldDto[][];
+}
+
+export interface DataTableQueryResponse<T> {
+  records: T[];
+  per_page: number;
+  total_records: number;
+  total_pages: number;
+  page: number;
+  pagination_mode: string;
+  has_more?: boolean;
+  next_cursor?: string;
+  diagnostics: DataTableDiagnosticsDto;
+  meta?: DataTableMetaDto;
+}
+
+export type DataTableEmailExportState =
+  | "waiting_csv"
+  | "uploading"
+  | "sending"
+  | "completed"
+  | "failed";
+
+export interface DataTableEmailExportStatusDto {
+  state: DataTableEmailExportState;
+  recipients: string[];
+  subject?: string;
+  link_url?: string;
+  error?: string;
+  updated_at_unix: number;
+  sent_at_unix?: number;
+}
+
+export interface DataTableEmailExportQueuedDto {
+  job_id: string;
+  csv_state: string;
+  email_state: DataTableEmailExportState;
+}
+
+export interface DataTableExportStatusResponseDto {
+  job_id: string;
+  model_key: string;
+  csv_state: string;
+  csv_error?: string;
+  csv_file_name?: string;
+  csv_content_type?: string;
+  csv_total_records?: number;
+  email?: DataTableEmailExportStatusDto;
+}
+"#;
+
+pub const FRONTEND_SRC_SHARED_TYPES_INDEX_TS: &str = r#"export * from "./api";
+export * from "./datatable";
+"#;
+
+pub const FRONTEND_SRC_ADMIN_TYPES_ENUMS_TS: &str = r#"export type AdminType = "Developer" | "SuperAdmin" | "Admin";
+
+export type Permission = "admin.read" | "admin.manage";
+
+export type AuthClientType = "web" | "mobile";
+"#;
+
+pub const FRONTEND_SRC_ADMIN_TYPES_ADMIN_TS: &str = r#"import type { AdminType, Permission } from "./enums";
+
+export interface CreateAdminInput {
+  username: string;
+  email?: string | null;
+  name: string;
+  admin_type: AdminType;
+  password: string;
+  abilities?: Permission[];
+}
+
+export interface UpdateAdminInput {
+  username?: string | null;
+  email?: string | null;
+  name?: string | null;
+  admin_type?: AdminType | null;
+  abilities?: Permission[] | null;
+}
+
+export interface AdminOutput {
+  id: number;
+  username: string;
+  email: string | null;
+  name: string;
+  admin_type: AdminType;
+  abilities: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminDeleteOutput {
+  deleted: boolean;
+}
+"#;
+
+pub const FRONTEND_SRC_ADMIN_TYPES_ADMIN_AUTH_TS: &str = r#"import type { AdminType, AuthClientType } from "./enums";
+
+export interface AdminLoginInput {
+  username: string;
+  password: string;
+  client_type: AuthClientType;
+}
+
+export interface AdminRefreshInput {
+  client_type: AuthClientType;
+  refresh_token?: string | null;
+}
+
+export interface AdminLogoutInput {
+  client_type: AuthClientType;
+  refresh_token?: string | null;
+}
+
+export interface AdminProfileUpdateInput {
+  name: string;
+  email?: string | null;
+}
+
+export interface AdminPasswordUpdateInput {
+  current_password: string;
+  password: string;
+  password_confirmation: string;
+}
+
+export interface AdminAuthOutput {
+  token_type: string;
+  access_token: string;
+  access_expires_at?: string | null;
+  refresh_token?: string;
+  scopes: string[];
+}
+
+export interface AdminMeOutput {
+  id: number;
+  username: string;
+  email: string | null;
+  name: string;
+  admin_type: AdminType;
+  scopes: string[];
+}
+
+export interface AdminProfileUpdateOutput {
+  id: number;
+  username: string;
+  email: string | null;
+  name: string;
+  admin_type: AdminType;
+}
+
+export interface AdminPasswordUpdateOutput {
+  updated: boolean;
+}
+
+export interface AdminLogoutOutput {
+  revoked: boolean;
+}
+"#;
+
+pub const FRONTEND_SRC_ADMIN_TYPES_DATATABLE_ADMIN_TS: &str = r#"import type { AdminType } from "./enums";
+import type {
+  DataTableQueryRequestBase,
+  DataTableEmailExportRequestBase,
+} from "../../shared/types/datatable";
+
+export interface AdminDatatableQueryInput {
+  base?: DataTableQueryRequestBase;
+  q?: string | null;
+  username?: string | null;
+  email?: string | null;
+  admin_type?: AdminType | null;
+}
+
+export interface AdminDatatableEmailExportInput {
+  base: DataTableEmailExportRequestBase;
+  q?: string | null;
+  username?: string | null;
+  email?: string | null;
+  admin_type?: AdminType | null;
+}
+"#;
+
+pub const FRONTEND_SRC_ADMIN_TYPES_INDEX_TS: &str = r#"export * from "./enums";
+export * from "./admin";
+export * from "./admin-auth";
+export * from "./datatable-admin";
+"#;
+
+pub const FRONTEND_SRC_USER_TYPES_INDEX_TS: &str = r#"// Add user-specific types here as user contracts are created.
+// Example:
+//   export * from "./user";
+//   export * from "./user-auth";
+"#;
+
+pub const APP_BIN_EXPORT_TYPES_RS: &str = r##"//! Exports Rust contract types to TypeScript.
+//!
+//! Uses `ts-rs` to convert Rust types with `#[derive(TS)]` into TypeScript
+//! definitions, then writes them to `frontend/src/` alongside static framework
+//! types (ApiResponse, DataTable*, enums).
+//!
+//! Run: `cargo run -p app --bin export-types`
+//! Or:  `make gen-types`
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+use ts_rs::TS;
+
+// ── Generated types (ts-rs) ──────────────────────────────────
+
+/// A generated TypeScript file: imports + ts-rs type definitions.
+struct TsFile {
+    /// Relative path from `frontend/src/`, e.g. `admin/types/admin.ts`
+    rel_path: &'static str,
+    /// Import lines prepended to the file.
+    imports: &'static [&'static str],
+    /// TypeScript definitions produced by ts-rs (collected at runtime).
+    definitions: Vec<String>,
+}
+
+fn main() {
+    let base = Path::new("frontend/src");
+
+    // ── 1. Contract types via ts-rs ─────────────────────────
+    let mut files: Vec<TsFile> = Vec::new();
+
+    // admin/types/admin.ts
+    {
+        use app::contracts::api::v1::admin::*;
+        files.push(TsFile {
+            rel_path: "admin/types/admin.ts",
+            imports: &[r#"import type { AdminType, Permission } from "./enums";"#],
+            definitions: vec![
+                CreateAdminInput::export_to_string().expect("CreateAdminInput"),
+                UpdateAdminInput::export_to_string().expect("UpdateAdminInput"),
+                AdminOutput::export_to_string().expect("AdminOutput"),
+                AdminDeleteOutput::export_to_string().expect("AdminDeleteOutput"),
+            ],
+        });
+    }
+
+    // admin/types/admin-auth.ts
+    {
+        use app::contracts::api::v1::admin_auth::*;
+        files.push(TsFile {
+            rel_path: "admin/types/admin-auth.ts",
+            imports: &[r#"import type { AdminType, AuthClientType } from "./enums";"#],
+            definitions: vec![
+                AdminLoginInput::export_to_string().expect("AdminLoginInput"),
+                AdminRefreshInput::export_to_string().expect("AdminRefreshInput"),
+                AdminLogoutInput::export_to_string().expect("AdminLogoutInput"),
+                AdminProfileUpdateInput::export_to_string().expect("AdminProfileUpdateInput"),
+                AdminPasswordUpdateInput::export_to_string().expect("AdminPasswordUpdateInput"),
+                AdminAuthOutput::export_to_string().expect("AdminAuthOutput"),
+                AdminMeOutput::export_to_string().expect("AdminMeOutput"),
+                AdminProfileUpdateOutput::export_to_string().expect("AdminProfileUpdateOutput"),
+                AdminPasswordUpdateOutput::export_to_string().expect("AdminPasswordUpdateOutput"),
+                AdminLogoutOutput::export_to_string().expect("AdminLogoutOutput"),
+            ],
+        });
+    }
+
+    // admin/types/datatable-admin.ts
+    {
+        use app::contracts::datatable::admin::admin::*;
+        files.push(TsFile {
+            rel_path: "admin/types/datatable-admin.ts",
+            imports: &[
+                r#"import type { AdminType } from "./enums";"#,
+                r#"import type { DataTableQueryRequestBase, DataTableEmailExportRequestBase } from "../../shared/types/datatable";"#,
+            ],
+            definitions: vec![
+                AdminDatatableQueryInput::export_to_string().expect("AdminDatatableQueryInput"),
+                AdminDatatableEmailExportInput::export_to_string().expect("AdminDatatableEmailExportInput"),
+            ],
+        });
+    }
+
+    // Write ts-rs generated files
+    for ts_file in &files {
+        let path = base.join(ts_file.rel_path);
+        write_file(&path, &assemble(ts_file));
+    }
+
+    // ── 2. Static framework types (not derived from Rust structs) ──
+    //
+    // These mirror core-web types that don't live in the app crate.
+    // The scaffold also writes identical initial copies; this binary
+    // overwrites them to keep everything in sync after contract changes.
+    let statics: &[(&str, &str)] = &[
+        ("shared/types/api.ts", SHARED_API_TS),
+        ("shared/types/datatable.ts", SHARED_DATATABLE_TS),
+        ("shared/types/index.ts", SHARED_INDEX_TS),
+        ("admin/types/enums.ts", ADMIN_ENUMS_TS),
+        ("admin/types/index.ts", ADMIN_INDEX_TS),
+        ("user/types/index.ts", USER_INDEX_TS),
+    ];
+    for (rel, content) in statics {
+        write_file(&base.join(rel), content);
+    }
+
+    println!("\nTypeScript types regenerated in frontend/src/");
+}
+
+// ── Helpers ──────────────────────────────────────────────────
+
+fn assemble(f: &TsFile) -> String {
+    let header = "// Auto-generated by `cargo run -p app --bin export-types`.\n\
+                  // Do not edit manually — run `make gen-types` to regenerate.\n";
+    let mut out = String::from(header);
+    for imp in f.imports {
+        out.push_str(imp);
+        out.push('\n');
+    }
+    out.push('\n');
+    for (i, def) in f.definitions.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(def);
+        out.push('\n');
+    }
+    out
+}
+
+fn write_file(path: &Path, content: &str) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("failed to create directory");
+    }
+    fs::write(path, content).unwrap_or_else(|e| {
+        panic!("failed to write {}: {e}", path.display());
+    });
+    println!("  wrote {}", path.display());
+}
+
+// ── Static TypeScript content ────────────────────────────────
+// Framework types from core-web that can't derive TS directly.
+
+const SHARED_API_TS: &str = "\
+export interface ApiResponse<T> {
+  data: T;
+  message?: string;
+}
+
+export interface ApiErrorResponse {
+  message: string;
+  errors?: Record<string, string[]>;
+}
+";
+
+const SHARED_DATATABLE_TS: &str = "\
+export type DataTablePaginationMode = \"offset\" | \"cursor\";
+
+export type DataTableSortDirection = \"asc\" | \"desc\";
+
+export interface DataTableQueryRequestBase {
+  include_meta?: boolean;
+  page?: number | null;
+  per_page?: number | null;
+  cursor?: string | null;
+  pagination_mode?: DataTablePaginationMode | null;
+  sorting_column?: string | null;
+  sorting?: DataTableSortDirection | null;
+  timezone?: string | null;
+  created_at_from?: string | null;
+  created_at_to?: string | null;
+}
+
+export interface DataTableEmailExportRequestBase {
+  query: DataTableQueryRequestBase;
+  recipients: string[];
+  subject?: string | null;
+  export_file_name?: string | null;
+}
+
+export type DataTableFilterFieldType =
+  | \"text\"
+  | \"select\"
+  | \"number\"
+  | \"date\"
+  | \"datetime\"
+  | \"boolean\";
+
+export interface DataTableFilterOptionDto {
+  label: string;
+  value: string;
+}
+
+export interface DataTableFilterFieldDto {
+  field: string;
+  filter_key: string;
+  type: DataTableFilterFieldType;
+  label: string;
+  placeholder?: string;
+  description?: string;
+  options?: DataTableFilterOptionDto[];
+}
+
+export interface DataTableColumnMetaDto {
+  name: string;
+  data_type: string;
+  sortable: boolean;
+  localized: boolean;
+  filter_ops: string[];
+}
+
+export interface DataTableRelationColumnMetaDto {
+  relation: string;
+  column: string;
+  data_type: string;
+  filter_ops: string[];
+}
+
+export interface DataTableDefaultsDto {
+  sorting_column: string;
+  sorted: string;
+  per_page: number;
+  export_ignore_columns: string[];
+  timestamp_columns: string[];
+  unsortable: string[];
+}
+
+export interface DataTableDiagnosticsDto {
+  duration_ms: number;
+  auto_filters_applied: number;
+  unknown_filters: string[];
+  unknown_filter_mode: string;
+}
+
+export interface DataTableMetaDto {
+  model_key: string;
+  defaults: DataTableDefaultsDto;
+  columns: DataTableColumnMetaDto[];
+  relation_columns: DataTableRelationColumnMetaDto[];
+  filter_rows: DataTableFilterFieldDto[][];
+}
+
+export interface DataTableQueryResponse<T> {
+  records: T[];
+  per_page: number;
+  total_records: number;
+  total_pages: number;
+  page: number;
+  pagination_mode: string;
+  has_more?: boolean;
+  next_cursor?: string;
+  diagnostics: DataTableDiagnosticsDto;
+  meta?: DataTableMetaDto;
+}
+
+export type DataTableEmailExportState =
+  | \"waiting_csv\"
+  | \"uploading\"
+  | \"sending\"
+  | \"completed\"
+  | \"failed\";
+
+export interface DataTableEmailExportStatusDto {
+  state: DataTableEmailExportState;
+  recipients: string[];
+  subject?: string;
+  link_url?: string;
+  error?: string;
+  updated_at_unix: number;
+  sent_at_unix?: number;
+}
+
+export interface DataTableEmailExportQueuedDto {
+  job_id: string;
+  csv_state: string;
+  email_state: DataTableEmailExportState;
+}
+
+export interface DataTableExportStatusResponseDto {
+  job_id: string;
+  model_key: string;
+  csv_state: string;
+  csv_error?: string;
+  csv_file_name?: string;
+  csv_content_type?: string;
+  csv_total_records?: number;
+  email?: DataTableEmailExportStatusDto;
+}
+";
+
+const SHARED_INDEX_TS: &str = "\
+export * from \"./api\";
+export * from \"./datatable\";
+";
+
+const ADMIN_ENUMS_TS: &str = "\
+export type AdminType = \"Developer\" | \"SuperAdmin\" | \"Admin\";
+
+export type Permission = \"admin.read\" | \"admin.manage\";
+
+export type AuthClientType = \"web\" | \"mobile\";
+";
+
+const ADMIN_INDEX_TS: &str = "\
+export * from \"./enums\";
+export * from \"./admin\";
+export * from \"./admin-auth\";
+export * from \"./datatable-admin\";
+";
+
+const USER_INDEX_TS: &str = "\
+// Add user-specific types here as user contracts are created.
+// Example:
+//   export * from \"./user\";
+//   export * from \"./user-auth\";
+";
+"##;

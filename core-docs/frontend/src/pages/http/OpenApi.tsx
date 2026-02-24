@@ -123,15 +123,47 @@ pub struct ArticleCreateInput {
                     parsed from OpenAPI extensions.
                 </p>
 
-                <h2>TypeScript Generation (OpenAPI-first)</h2>
+                <h2>TypeScript Generation</h2>
+                <h3>Primary: ts-rs (derive-based)</h3>
                 <p>
-                    Generate TypeScript client/types from <code>/openapi.json</code> as the single
-                    source for API contracts:
+                    Add <code>#[derive(TS)]</code> with{' '}
+                    <code>#[ts(export, export_to = "portal/types/")]</code> to contract
+                    structs. Then run <code>make gen-types</code> to regenerate per-portal
+                    TypeScript files directly from Rust struct definitions.
+                </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`use ts_rs::TS;
+
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
+pub struct AdminMeOutput {
+    pub id: i64,
+    pub username: String,
+    pub name: String,
+}`}</code>
+                </pre>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
+                    <code className="language-bash">{`make gen-types`}</code>
+                </pre>
+                <p>
+                    This generates per-portal type files (e.g.{' '}
+                    <code>frontend/admin/types/AdminMeOutput.ts</code>) that stay in sync
+                    with Rust struct changes.
+                </p>
+
+                <h3>Alternative: OpenAPI</h3>
+                <p>
+                    Generate a single monolithic types file from the OpenAPI spec:
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-bash">{`curl -sS http://127.0.0.1:3000/openapi.json > openapi.json
 npx openapi-typescript openapi.json -o src/types/openapi.d.ts`}</code>
                 </pre>
+                <p>
+                    Use this approach when you need types that match the full OpenAPI schema
+                    (including generated path/query parameter types) or for integration with
+                    OpenAPI-based client generators.
+                </p>
             </div>
         </div>
     )

@@ -51,9 +51,12 @@ use core_web::contracts::rustforge_contract;
 use generated::models::AdminType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use validator::Validate;
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminLoginInput {
     #[rf(length(min = 3, max = 64))]
     #[rf(alpha_dash)]
@@ -67,6 +70,8 @@ pub struct AdminLoginInput {
 }
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminRefreshInput {
     pub client_type: AuthClientType,
     #[serde(default)]
@@ -75,6 +80,8 @@ pub struct AdminRefreshInput {
 }
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminProfileUpdateInput {
     #[rf(length(min = 1, max = 120))]
     #[rf(required_trimmed)]
@@ -85,6 +92,8 @@ pub struct AdminProfileUpdateInput {
 }
 
 #[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminPasswordUpdateInput {
     #[rf(length(min = 8, max = 128))]
     pub current_password: String,
@@ -95,7 +104,8 @@ pub struct AdminPasswordUpdateInput {
     pub password_confirmation: String,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminAuthOutput {
     pub token_type: String,
     pub access_token: String,
@@ -107,7 +117,8 @@ pub struct AdminAuthOutput {
     pub scopes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminMeOutput {
     pub id: i64,
     pub username: String,
