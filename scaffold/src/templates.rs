@@ -6484,30 +6484,69 @@ export default function Header({
 }
 "#;
 
-pub const FRONTEND_SRC_ADMIN_LAYOUTS_ADMIN_LAYOUT_TSX: &str = r#"import { useState, useEffect } from "react";
+pub const FRONTEND_SRC_ADMIN_LAYOUTS_ADMIN_LAYOUT_TSX: &str = r#"import { useState, useEffect, useCallback } from "react";
 import { Outlet } from "react-router-dom";
 import Sidebar from "@admin/components/Sidebar";
 import Header from "@admin/components/Header";
 import { ModalOutlet } from "@shared/components";
 
 const STORAGE_KEY = "admin-sidebar-collapsed";
+const MOBILE_BREAKPOINT = 768;
+
+function useIsMobile() {
+  const [mobile, setMobile] = useState(() => window.innerWidth < MOBILE_BREAKPOINT);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
+    const handler = (e: MediaQueryListEvent) => setMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return mobile;
+}
 
 export default function AdminLayout() {
+  const isMobile = useIsMobile();
   const [collapsed, setCollapsed] = useState(() => {
     return localStorage.getItem(STORAGE_KEY) === "true";
   });
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, String(collapsed));
-  }, [collapsed]);
+    if (!isMobile) localStorage.setItem(STORAGE_KEY, String(collapsed));
+  }, [collapsed, isMobile]);
+
+  // Close mobile sidebar on route change
+  useEffect(() => {
+    if (isMobile) setMobileOpen(false);
+  }, [isMobile]);
+
+  const toggleSidebar = useCallback(() => {
+    if (isMobile) {
+      setMobileOpen((o) => !o);
+    } else {
+      setCollapsed((c) => !c);
+    }
+  }, [isMobile]);
+
+  const sidebarVisible = isMobile ? mobileOpen : true;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <Header collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
-      <Sidebar collapsed={collapsed} />
+      <Header collapsed={isMobile ? true : collapsed} onToggle={toggleSidebar} />
+
+      {/* Mobile backdrop */}
+      {isMobile && mobileOpen && (
+        <div
+          className="fixed inset-0 z-20 bg-black/50"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      {sidebarVisible && <Sidebar collapsed={isMobile ? false : collapsed} />}
+
       <main
         className="pt-14 transition-all duration-200"
-        style={{ marginLeft: collapsed ? "4rem" : "16rem" }}
+        style={{ marginLeft: isMobile ? 0 : collapsed ? "4rem" : "16rem" }}
       >
         <div className="p-6">
           <Outlet />
@@ -6623,15 +6662,7 @@ export default function LoginPage() {
 }
 "#;
 
-pub const FRONTEND_SRC_ADMIN_PAGES_DASHBOARD_PAGE_TSX: &str = r#"import { Users, Activity, UserPlus, ShieldCheck } from "lucide-react";
-import { useAuthStore } from "@admin/stores/auth";
-
-const stats = [
-  { label: "Total Admins", value: "—", icon: Users },
-  { label: "Active Today", value: "—", icon: Activity },
-  { label: "New This Week", value: "—", icon: UserPlus },
-  { label: "System Health", value: "OK", icon: ShieldCheck },
-];
+pub const FRONTEND_SRC_ADMIN_PAGES_DASHBOARD_PAGE_TSX: &str = r#"import { useAuthStore } from "@admin/stores/auth";
 
 export default function DashboardPage() {
   const account = useAuthStore((s) => s.account);
@@ -6645,27 +6676,6 @@ export default function DashboardPage() {
         <p className="mt-1 text-sm text-muted">
           Here's an overview of your system.
         </p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <div key={stat.label} className="rf-stat-card">
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-primary/10 p-2">
-                  <Icon size={20} className="text-primary" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted">{stat.label}</p>
-                  <p className="text-lg font-semibold text-foreground">
-                    {stat.value}
-                  </p>
-                </div>
-              </div>
-            </div>
-          );
-        })}
       </div>
     </div>
   );
