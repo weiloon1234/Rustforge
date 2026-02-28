@@ -2099,9 +2099,9 @@ async fn admin_dev() -> Html<&'static str> {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Admin</title>
-    <script type="module" src="http://localhost:5174/@vite/client"></script>
+    <script type="module" src="http://localhost:5174/admin/@vite/client"></script>
     <script type="module">
-      import RefreshRuntime from "http://localhost:5174/@react-refresh"
+      import RefreshRuntime from "http://localhost:5174/admin/@react-refresh"
       RefreshRuntime.injectIntoGlobalHook(window)
       window.$RefreshReg$ = () => {}
       window.$RefreshSig$ = () => (type) => type
@@ -2110,7 +2110,7 @@ async fn admin_dev() -> Html<&'static str> {
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="http://localhost:5174/src/admin/main.tsx"></script>
+    <script type="module" src="http://localhost:5174/admin/src/admin/main.tsx"></script>
   </body>
 </html>"#)
 }
