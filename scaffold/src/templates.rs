@@ -4648,7 +4648,7 @@ pub const FRONTEND_SRC_USER_MAIN_TSX: &str = r#"import { StrictMode } from "reac
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import "@shared/i18n";
-import App from "./App";
+import App from "@user/App";
 import "./app.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -4857,7 +4857,7 @@ pub const FRONTEND_SRC_ADMIN_MAIN_TSX: &str = r#"import { StrictMode } from "rea
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import "@shared/i18n";
-import App from "./App";
+import App from "@admin/App";
 import "./app.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -5128,12 +5128,13 @@ export interface ApiClientConfig {
 export function createApiClient(config: ApiClientConfig): AxiosInstance {
   const api = axios.create({ withCredentials: true });
 
-  // ── Request: attach bearer token ────────────────────────
+  // ── Request: attach bearer token + timezone ─────────────
   api.interceptors.request.use((req) => {
     const token = config.getToken();
     if (token) {
       req.headers.Authorization = `Bearer ${token}`;
     }
+    req.headers["X-Timezone"] = Intl.DateTimeFormat().resolvedOptions().timeZone;
     return req;
   });
 
@@ -5354,7 +5355,7 @@ export function createAuthStore<A extends Account = Account>(
 
 pub const FRONTEND_SRC_SHARED_PROTECTED_ROUTE_TSX: &str = r#"import { useEffect } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import type { AuthState, Account } from "./createAuthStore";
+import type { AuthState, Account } from "@shared/createAuthStore";
 import type { StoreApi, UseBoundStore } from "zustand";
 
 interface Props {
@@ -5408,11 +5409,11 @@ export function ProtectedRoute({ useAuthStore, loginPath = "/login" }: Props) {
 
 pub const FRONTEND_SRC_SHARED_USE_AUTO_FORM_TSX: &str = r##"import { useState, useMemo, useCallback, type ReactElement } from "react";
 import type { AxiosInstance, AxiosError } from "axios";
-import { TextInput } from "./components/TextInput";
-import { TextArea } from "./components/TextArea";
-import { Select, type SelectOption } from "./components/Select";
-import { Checkbox } from "./components/Checkbox";
-import { Radio, type RadioOption } from "./components/Radio";
+import { TextInput } from "@shared/components/TextInput";
+import { TextArea } from "@shared/components/TextArea";
+import { Select, type SelectOption } from "@shared/components/Select";
+import { Checkbox } from "@shared/components/Checkbox";
+import { Radio, type RadioOption } from "@shared/components/Radio";
 
 type InputFieldType = "text" | "email" | "password" | "search" | "url" | "tel" | "number" | "money" | "pin";
 
@@ -5707,6 +5708,38 @@ export function moneyFormat(value: number, decimals: number = 2): string {
     maximumFractionDigits: decimals,
   });
 }
+
+/**
+ * Converts a UTC/server timestamp string to the browser's local timezone.
+ *
+ * @param value - ISO 8601 / RFC 3339 date string from the backend (e.g. "2025-03-01T12:00:00Z")
+ * @param format - Output format string. Tokens: Y (year), m (month 01), d (day 01),
+ *                 H (24h hour), h (12h hour), i (minute), s (second), A (AM/PM).
+ *                 Default: "Y-m-d h:i:s A"
+ * @returns Formatted local date string, or "—" if the value is empty/invalid.
+ */
+export function formatDateTime(value: string | null | undefined, format: string = "Y-m-d h:i:s A"): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (isNaN(date.getTime())) return "—";
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const hours24 = date.getHours();
+  const hours12 = hours24 % 12 || 12;
+
+  const tokens: Record<string, string> = {
+    Y: String(date.getFullYear()),
+    m: pad(date.getMonth() + 1),
+    d: pad(date.getDate()),
+    H: pad(hours24),
+    h: pad(hours12),
+    i: pad(date.getMinutes()),
+    s: pad(date.getSeconds()),
+    A: hours24 >= 12 ? "PM" : "AM",
+  };
+
+  return format.replace(/Y|m|d|H|h|i|s|A/g, (tok) => tokens[tok] ?? tok);
+}
 "#;
 
 pub const FRONTEND_SRC_SHARED_USE_MODAL_STORE_TS: &str = r#"import { create } from "zustand";
@@ -5783,7 +5816,7 @@ export const useModalStore = create<ModalState>()((set, get) => ({
 "#;
 
 pub const FRONTEND_SRC_SHARED_COMPONENTS_MODAL_TSX: &str = r#"import { useEffect, type ReactNode } from "react";
-import type { ModalEntry, ModalSize } from "../useModalStore";
+import type { ModalEntry, ModalSize } from "@shared/useModalStore";
 
 const sizeClasses: Record<ModalSize, string> = {
   sm: "max-w-sm",
@@ -5840,8 +5873,8 @@ export function Modal({ entry, index, onClose }: ModalProps) {
 "#;
 
 pub const FRONTEND_SRC_SHARED_COMPONENTS_MODAL_OUTLET_TSX: &str = r#"import { useCallback } from "react";
-import { useModalStore } from "../useModalStore";
-import { Modal } from "./Modal";
+import { useModalStore } from "@shared/useModalStore";
+import { Modal } from "@shared/components/Modal";
 
 export function ModalOutlet() {
   const stack = useModalStore((s) => s.stack);
@@ -5868,13 +5901,19 @@ import type { ApiResponse, DataTableQueryResponse, DataTableMetaDto, DataTableCo
 
 const PER_PAGE_OPTIONS = [30, 50, 100, 300, 1000, 3000];
 
+export interface DataTableSortState {
+  column: string;
+  direction: "asc" | "desc";
+  handleSort: (colName: string) => void;
+}
+
 export interface DataTableProps<T> {
   url: string;
   api: AxiosInstance;
   extraBody?: Record<string, unknown>;
   perPage?: number;
   hiddenColumns?: string[];
-  prependColumns?: ReactNode;
+  prependColumns?: ReactNode | ((sort: DataTableSortState) => ReactNode);
   appendColumns?: ReactNode;
   renderPrependCells?: (record: T, index: number, refresh: () => void) => ReactNode;
   renderAppendCells?: (record: T, index: number, refresh: () => void) => ReactNode;
@@ -6209,7 +6248,9 @@ export function DataTable<T>({
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-border bg-surface-hover/50">
-              {prependColumns}
+              {typeof prependColumns === "function"
+                ? prependColumns({ column: displaySortCol, direction: displaySortDir, handleSort })
+                : prependColumns}
               {visibleColumns.map((col) => (
                 <th
                   key={col.name}
@@ -6329,34 +6370,34 @@ export function DataTable<T>({
 }
 "#;
 
-pub const FRONTEND_SRC_SHARED_COMPONENTS_INDEX_TS: &str = r#"export { FieldErrors, hasFieldError } from "./FieldErrors";
-export type { FieldErrorsProps } from "./FieldErrors";
+pub const FRONTEND_SRC_SHARED_COMPONENTS_INDEX_TS: &str = r#"export { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
+export type { FieldErrorsProps } from "@shared/components/FieldErrors";
 
-export { TextInput } from "./TextInput";
-export type { TextInputProps } from "./TextInput";
+export { TextInput } from "@shared/components/TextInput";
+export type { TextInputProps } from "@shared/components/TextInput";
 
-export { TextArea } from "./TextArea";
-export type { TextAreaProps } from "./TextArea";
+export { TextArea } from "@shared/components/TextArea";
+export type { TextAreaProps } from "@shared/components/TextArea";
 
-export { Select } from "./Select";
-export type { SelectProps, SelectOption } from "./Select";
+export { Select } from "@shared/components/Select";
+export type { SelectProps, SelectOption } from "@shared/components/Select";
 
-export { Checkbox } from "./Checkbox";
-export type { CheckboxProps } from "./Checkbox";
+export { Checkbox } from "@shared/components/Checkbox";
+export type { CheckboxProps } from "@shared/components/Checkbox";
 
-export { Radio } from "./Radio";
-export type { RadioProps, RadioOption } from "./Radio";
+export { Radio } from "@shared/components/Radio";
+export type { RadioProps, RadioOption } from "@shared/components/Radio";
 
-export { DataTable } from "./DataTable";
-export type { DataTableProps } from "./DataTable";
+export { DataTable } from "@shared/components/DataTable";
+export type { DataTableProps, DataTableSortState } from "@shared/components/DataTable";
 
-export { useAutoForm } from "../useAutoForm";
-export type { FieldDef, AutoFormConfig, AutoFormErrors, AutoFormResult } from "../useAutoForm";
+export { useAutoForm } from "@shared/useAutoForm";
+export type { FieldDef, AutoFormConfig, AutoFormErrors, AutoFormResult } from "@shared/useAutoForm";
 
-export { Modal } from "./Modal";
-export { ModalOutlet } from "./ModalOutlet";
-export { useModalStore } from "../useModalStore";
-export type { ModalOptions, ModalSize, ModalEntry } from "../useModalStore";
+export { Modal } from "@shared/components/Modal";
+export { ModalOutlet } from "@shared/components/ModalOutlet";
+export { useModalStore } from "@shared/useModalStore";
+export type { ModalOptions, ModalSize, ModalEntry } from "@shared/useModalStore";
 
 export {
   alertConfirm,
@@ -6365,7 +6406,8 @@ export {
   alertWarning,
   alertInfo,
   moneyFormat,
-} from "../helpers";
+  formatDateTime,
+} from "@shared/helpers";
 "#;
 
 pub const FRONTEND_SRC_SHARED_COMPONENTS_FIELD_ERRORS_TSX: &str = r##"export interface FieldErrorsProps {
@@ -6394,7 +6436,7 @@ export function hasFieldError(error?: string, errors?: string[]): boolean {
 "##;
 
 pub const FRONTEND_SRC_SHARED_COMPONENTS_TEXT_INPUT_TSX: &str = r##"import { forwardRef, useId, useState, type InputHTMLAttributes } from "react";
-import { FieldErrors, hasFieldError } from "./FieldErrors";
+import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
 
 type InputType = "text" | "email" | "password" | "search" | "url" | "tel" | "number" | "money" | "pin";
 
@@ -6479,7 +6521,7 @@ TextInput.displayName = "TextInput";
 "##;
 
 pub const FRONTEND_SRC_SHARED_COMPONENTS_TEXT_AREA_TSX: &str = r##"import { forwardRef, useId, type TextareaHTMLAttributes } from "react";
-import { FieldErrors, hasFieldError } from "./FieldErrors";
+import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
 
 export interface TextAreaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   label?: string;
@@ -6518,7 +6560,7 @@ TextArea.displayName = "TextArea";
 "##;
 
 pub const FRONTEND_SRC_SHARED_COMPONENTS_SELECT_TSX: &str = r##"import { forwardRef, useId, type SelectHTMLAttributes } from "react";
-import { FieldErrors, hasFieldError } from "./FieldErrors";
+import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
 
 export interface SelectOption {
   value: string;
@@ -6579,7 +6621,7 @@ Select.displayName = "Select";
 "##;
 
 pub const FRONTEND_SRC_SHARED_COMPONENTS_CHECKBOX_TSX: &str = r##"import { forwardRef, useId, type InputHTMLAttributes } from "react";
-import { FieldErrors, hasFieldError } from "./FieldErrors";
+import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
 
 export interface CheckboxProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
   label?: string;
@@ -6622,7 +6664,7 @@ Checkbox.displayName = "Checkbox";
 "##;
 
 pub const FRONTEND_SRC_SHARED_COMPONENTS_RADIO_TSX: &str = r##"import { useId } from "react";
-import { FieldErrors, hasFieldError } from "./FieldErrors";
+import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
 
 export interface RadioOption {
   value: string;
@@ -7216,7 +7258,7 @@ export default function DashboardPage() {
 
 pub const FRONTEND_SRC_ADMIN_PAGES_ADMINS_PAGE_TSX: &str = r#"import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import type { AdminDeleteOutput, AdminDatatableRow, AdminType, Permission } from "@admin/types";
 import type { ApiResponse } from "@shared/types";
 import {
@@ -7227,7 +7269,9 @@ import {
   alertConfirm,
   alertSuccess,
   alertError,
+  formatDateTime,
 } from "@shared/components";
+import type { DataTableSortState } from "@shared/components";
 import { api } from "@admin/api";
 
 const TYPE_COLORS: Record<AdminType, string> = {
@@ -7453,13 +7497,23 @@ export default function AdminsPage() {
       url="/api/v1/admin/datatable/admin/query"
       api={api}
       perPage={30}
-      hiddenColumns={["id", "password", "created_at", "updated_at", "deleted_at"]}
-      prependColumns={
+      hiddenColumns={["id", "password", "updated_at", "deleted_at"]}
+      prependColumns={({ column, direction, handleSort }: DataTableSortState) => (
         <>
-          <th className="w-12 px-4 py-3 font-medium text-muted">#</th>
+          <th
+            className="w-12 px-4 py-3 font-medium text-muted cursor-pointer select-none"
+            onClick={() => handleSort("id")}
+          >
+            <span className="inline-flex items-center gap-1">
+              #
+              {column === "id" && direction === "asc" && <ArrowUp size={14} />}
+              {column === "id" && direction === "desc" && <ArrowDown size={14} />}
+              {column !== "id" && <ArrowUpDown size={14} className="opacity-30" />}
+            </span>
+          </th>
           <th className="px-4 py-3 font-medium text-muted">{t("Actions")}</th>
         </>
-      }
+      )}
       renderPrependCells={(admin, index, refresh) => (
         <>
           <td className="px-4 py-3 tabular-nums text-muted">{index + 1}</td>
@@ -7490,6 +7544,7 @@ export default function AdminsPage() {
         email: (v) => <td key="email" className="px-4 py-3 text-muted">{String(v ?? "—")}</td>,
         admin_type: (_, record) => <td key="admin_type" className="px-4 py-3"><TypeBadge type={record.admin_type} /></td>,
         abilities: (_, record) => <td key="abilities" className="px-4 py-3"><PermissionBadges abilities={record.abilities} /></td>,
+        created_at: (v) => <td key="created_at" className="px-4 py-3 tabular-nums text-muted">{formatDateTime(v as string)}</td>,
       }}
       rowKey={(admin) => String(admin.id)}
       header={(refresh) => (
@@ -8230,8 +8285,8 @@ export interface DataTableExportStatusResponseDto {
 }
 "#;
 
-pub const FRONTEND_SRC_SHARED_TYPES_INDEX_TS: &str = r#"export * from "./api";
-export * from "./datatable";
+pub const FRONTEND_SRC_SHARED_TYPES_INDEX_TS: &str = r#"export * from "@shared/types/api";
+export * from "@shared/types/datatable";
 "#;
 
 pub const FRONTEND_SRC_ADMIN_TYPES_ENUMS_TS: &str = r#"export type AdminType = "developer" | "superadmin" | "admin";
@@ -8241,7 +8296,7 @@ export type Permission = "admin.read" | "admin.manage";
 export type AuthClientType = "web" | "mobile";
 "#;
 
-pub const FRONTEND_SRC_ADMIN_TYPES_ADMIN_TS: &str = r#"import type { AdminType, Permission } from "./enums";
+pub const FRONTEND_SRC_ADMIN_TYPES_ADMIN_TS: &str = r#"import type { AdminType, Permission } from "@admin/types/enums";
 
 export interface CreateAdminInput {
   username: string;
@@ -8274,7 +8329,7 @@ export interface AdminDeleteOutput {
 }
 "#;
 
-pub const FRONTEND_SRC_ADMIN_TYPES_ADMIN_AUTH_TS: &str = r#"import type { AdminType, AuthClientType } from "./enums";
+pub const FRONTEND_SRC_ADMIN_TYPES_ADMIN_AUTH_TS: &str = r#"import type { AdminType, AuthClientType } from "@admin/types/enums";
 
 export interface AdminLoginInput {
   username: string;
@@ -8337,7 +8392,7 @@ export interface AdminLogoutOutput {
 }
 "#;
 
-pub const FRONTEND_SRC_ADMIN_TYPES_DATATABLE_ADMIN_TS: &str = r#"import type { AdminType } from "./enums";
+pub const FRONTEND_SRC_ADMIN_TYPES_DATATABLE_ADMIN_TS: &str = r#"import type { AdminType } from "@admin/types/enums";
 
 export interface AdminDatatableRow {
   id: number;
@@ -8351,16 +8406,16 @@ export interface AdminDatatableRow {
 }
 "#;
 
-pub const FRONTEND_SRC_ADMIN_TYPES_INDEX_TS: &str = r#"export * from "./enums";
-export * from "./admin";
-export * from "./admin-auth";
-export * from "./datatable-admin";
+pub const FRONTEND_SRC_ADMIN_TYPES_INDEX_TS: &str = r#"export * from "@admin/types/enums";
+export * from "@admin/types/admin";
+export * from "@admin/types/admin-auth";
+export * from "@admin/types/datatable-admin";
 "#;
 
 pub const FRONTEND_SRC_USER_TYPES_INDEX_TS: &str = r#"// Add user-specific types here as user contracts are created.
 // Example:
-//   export * from "./user";
-//   export * from "./user-auth";
+//   export * from "@user/types/user";
+//   export * from "@user/types/user-auth";
 "#;
 
 pub const APP_BIN_EXPORT_TYPES_RS: &str = r##"//! Exports Rust contract types to TypeScript.
@@ -8400,7 +8455,7 @@ fn main() {
         use app::contracts::api::v1::admin::*;
         files.push(TsFile {
             rel_path: "admin/types/admin.ts",
-            imports: &[r#"import type { AdminType, Permission } from "./enums";"#],
+            imports: &[r#"import type { AdminType, Permission } from "@admin/types/enums";"#],
             definitions: vec![
                 CreateAdminInput::export_to_string().expect("CreateAdminInput"),
                 UpdateAdminInput::export_to_string().expect("UpdateAdminInput"),
@@ -8415,7 +8470,7 @@ fn main() {
         use app::contracts::api::v1::admin_auth::*;
         files.push(TsFile {
             rel_path: "admin/types/admin-auth.ts",
-            imports: &[r#"import type { AdminType, AuthClientType } from "./enums";"#],
+            imports: &[r#"import type { AdminType, AuthClientType } from "@admin/types/enums";"#],
             definitions: vec![
                 AdminLoginInput::export_to_string().expect("AdminLoginInput"),
                 AdminRefreshInput::export_to_string().expect("AdminRefreshInput"),
@@ -8437,7 +8492,7 @@ fn main() {
         files.push(TsFile {
             rel_path: "admin/types/datatable-admin.ts",
             imports: &[
-                r#"import type { AdminType } from "./enums";"#,
+                r#"import type { AdminType } from "@admin/types/enums";"#,
             ],
             definitions: vec![
                 AdminDatatableRow::export_to_string().expect("AdminDatatableRow"),
@@ -8678,21 +8733,21 @@ export interface DataTableExportStatusResponseDto {
 ";
 
 const SHARED_INDEX_TS: &str = "\
-export * from \"./api\";
-export * from \"./datatable\";
+export * from \"@shared/types/api\";
+export * from \"@shared/types/datatable\";
 ";
 
 const ADMIN_INDEX_TS: &str = "\
-export * from \"./enums\";
-export * from \"./admin\";
-export * from \"./admin-auth\";
-export * from \"./datatable-admin\";
+export * from \"@admin/types/enums\";
+export * from \"@admin/types/admin\";
+export * from \"@admin/types/admin-auth\";
+export * from \"@admin/types/datatable-admin\";
 ";
 
 const USER_INDEX_TS: &str = "\
 // Add user-specific types here as user contracts are created.
 // Example:
-//   export * from \"./user\";
-//   export * from \"./user-auth\";
+//   export * from \"@user/types/user\";
+//   export * from \"@user/types/user-auth\";
 ";
 "##;
