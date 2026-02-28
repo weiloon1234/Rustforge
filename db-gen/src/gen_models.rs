@@ -5889,6 +5889,11 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     .unwrap();
     writeln!(
         out,
+        "    fn filter_query<'db>(&'db self, _query: {query_ident}<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<{query_ident}<'db>>> {{ Ok(None) }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
         "    fn filters<'db>(&'db self, query: {query_ident}<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<{query_ident}<'db>> {{ Ok(query) }}"
     )
     .unwrap();
@@ -5989,6 +5994,11 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     writeln!(
         out,
         "    fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {{ self.hooks.authorize(input, ctx) }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    fn filter_query<'db>(&'db self, query: {query_ident}<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<{query_ident}<'db>>> {{ self.hooks.filter_query(query, filter_key, value, input, ctx) }}"
     )
     .unwrap();
     writeln!(

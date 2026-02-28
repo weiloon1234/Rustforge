@@ -55,6 +55,14 @@ pub async fn execute_datatable<T: AutoDataTable>(
         }
     }
 
+    for (key, raw_value) in input.custom_filter_entries() {
+        if let Some(next) = table.filter_query(query.clone(), key, raw_value, input, ctx)? {
+            query = next;
+        } else {
+            unknown_filters.push(key.to_string());
+        }
+    }
+
     query = table.filters(query, input, ctx)?;
 
     let requested_col = input

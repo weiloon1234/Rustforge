@@ -3167,7 +3167,7 @@ pub const APP_INTERNAL_DATATABLES_ADMIN_RS: &str = r#"use core_datatable::{DataT
 use core_db::common::sql::Op;
 use core_web::authz::{has_required_permissions, PermissionMode};
 use generated::{
-    models::{AdminDataTable, AdminDataTableConfig, AdminDataTableHooks, AdminQuery, AdminType},
+    models::{AdminCol, AdminDataTable, AdminDataTableConfig, AdminDataTableHooks, AdminQuery, AdminType},
     permissions::Permission,
 };
 
@@ -3208,6 +3208,27 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
             &[Permission::AdminRead.as_str(), Permission::AdminManage.as_str()],
             PermissionMode::Any,
         ))
+    }
+
+    fn filter_query<'db>(
+        &'db self,
+        query: AdminQuery<'db>,
+        filter_key: &str,
+        value: &str,
+        _input: &DataTableInput,
+        _ctx: &DataTableContext,
+    ) -> anyhow::Result<Option<AdminQuery<'db>>> {
+        match filter_key {
+            "q" => {
+                let pattern = format!("%{value}%");
+                Ok(Some(query.where_group(|q| {
+                    q.where_col(AdminCol::Username, Op::Like, pattern.clone())
+                        .or_where_col(AdminCol::Name, Op::Like, pattern.clone())
+                        .or_where_col(AdminCol::Email, Op::Like, pattern)
+                })))
+            }
+            _ => Ok(None),
+        }
     }
 
     fn mappings(

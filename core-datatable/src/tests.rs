@@ -71,6 +71,7 @@ impl GeneratedTableAdapter for MockAdapter {
         &[
             DataTableColumnDescriptor {
                 name: "id",
+                label: "Id",
                 data_type: "i64",
                 sortable: true,
                 localized: false,
@@ -78,6 +79,7 @@ impl GeneratedTableAdapter for MockAdapter {
             },
             DataTableColumnDescriptor {
                 name: "name",
+                label: "Name",
                 data_type: "String",
                 sortable: true,
                 localized: false,

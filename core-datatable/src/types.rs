@@ -196,6 +196,39 @@ impl DataTableInput {
         })
     }
 
+    /// Non-`f-` filter params for custom `filter_query` hooks.
+    /// Excludes reserved/structural keys and empty values.
+    pub fn custom_filter_entries(&self) -> impl Iterator<Item = (&str, &str)> {
+        const RESERVED: &[&str] = &[
+            "model",
+            "p",
+            "page",
+            "ipp",
+            "per_page",
+            "cursor",
+            "pagination_mode",
+            "paginate_mode",
+            "sorting",
+            "sorting_column",
+            "export",
+            "export_file_name",
+            "timezone",
+            "TIMEZONE",
+            "X-Timezone",
+            "x-timezone",
+            "headers",
+            "unknown_filter_mode",
+            "filter_unknown_mode",
+            "strict_filters",
+        ];
+        self.params.iter().filter_map(|(k, v)| {
+            if k.starts_with("f-") || v.trim().is_empty() || RESERVED.contains(&k.as_str()) {
+                return None;
+            }
+            Some((k.as_str(), v.as_str()))
+        })
+    }
+
     pub fn unknown_filter_mode(&self) -> Option<DataTableUnknownFilterMode> {
         self.params
             .get("unknown_filter_mode")

@@ -139,6 +139,17 @@ pub trait AutoDataTable: Send + Sync + 'static {
         Ok(true)
     }
 
+    fn filter_query<'db>(
+        &'db self,
+        _query: <Self::Adapter as GeneratedTableAdapter>::Query<'db>,
+        _filter_key: &str,
+        _value: &str,
+        _input: &DataTableInput,
+        _ctx: &DataTableContext,
+    ) -> Result<Option<<Self::Adapter as GeneratedTableAdapter>::Query<'db>>> {
+        Ok(None)
+    }
+
     fn filters<'db>(
         &'db self,
         query: <Self::Adapter as GeneratedTableAdapter>::Query<'db>,
