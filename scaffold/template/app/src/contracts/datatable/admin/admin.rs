@@ -1,4 +1,3 @@
-use core_datatable::DataTableInput;
 use core_web::datatable::{
     DataTableFilterFieldDto, DataTableFilterFieldType,
     DataTableGenericEmailExportRequest, DataTableGenericQueryRequest,
@@ -43,22 +42,6 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
 
     fn openapi_tag(&self) -> &'static str {
         "Admin Account"
-    }
-
-    fn email_to_input(&self, req: &Self::EmailRequest) -> DataTableInput {
-        req.to_input()
-    }
-
-    fn email_recipients(&self, req: &Self::EmailRequest) -> Vec<String> {
-        req.base.recipients.clone()
-    }
-
-    fn email_subject(&self, req: &Self::EmailRequest) -> Option<String> {
-        req.base.subject.clone()
-    }
-
-    fn export_file_name(&self, req: &Self::EmailRequest) -> Option<String> {
-        req.base.export_file_name.clone()
     }
 
     fn filter_rows(&self) -> Vec<Vec<DataTableFilterFieldDto>> {

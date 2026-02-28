@@ -428,6 +428,26 @@ pub trait DataTableQueryRequestContract: RequestContract {
     }
 }
 
+/// Optional helper contract for email-export DTOs that embed
+/// `DataTableEmailExportRequestBase`.
+///
+/// Implement this on your email DTO once, then `DataTableScopedContract` can
+/// derive `email_to_input()`, `email_recipients()`, `email_subject()`, and
+/// `export_file_name()` defaults automatically.
+pub trait DataTableEmailRequestContract: RequestContract {
+    fn datatable_email_to_input(&self) -> DataTableInput;
+
+    fn datatable_email_recipients(&self) -> Vec<String>;
+
+    fn datatable_email_subject(&self) -> Option<String> {
+        None
+    }
+
+    fn datatable_export_file_name(&self) -> Option<String> {
+        None
+    }
+}
+
 // ── Generic request types ─────────────────────────────────────
 //
 // Drop-in replacements for per-datatable custom request structs.
@@ -498,9 +518,27 @@ impl DataTableGenericEmailExportRequest {
     }
 }
 
+impl DataTableEmailRequestContract for DataTableGenericEmailExportRequest {
+    fn datatable_email_to_input(&self) -> DataTableInput {
+        self.to_input()
+    }
+
+    fn datatable_email_recipients(&self) -> Vec<String> {
+        self.base.recipients.clone()
+    }
+
+    fn datatable_email_subject(&self) -> Option<String> {
+        self.base.subject.clone()
+    }
+
+    fn datatable_export_file_name(&self) -> Option<String> {
+        self.base.export_file_name.clone()
+    }
+}
+
 pub trait DataTableScopedContract: Clone + Send + Sync + 'static {
     type QueryRequest: DataTableQueryRequestContract;
-    type EmailRequest: RequestContract;
+    type EmailRequest: DataTableEmailRequestContract;
     type Row: ResponseContract + DeserializeOwned + Send + Sync + 'static;
 
     fn scoped_key(&self) -> &'static str;
@@ -509,16 +547,20 @@ pub trait DataTableScopedContract: Clone + Send + Sync + 'static {
         req.datatable_query_to_input()
     }
 
-    fn email_to_input(&self, req: &Self::EmailRequest) -> DataTableInput;
-
-    fn email_recipients(&self, req: &Self::EmailRequest) -> Vec<String>;
-
-    fn email_subject(&self, _req: &Self::EmailRequest) -> Option<String> {
-        None
+    fn email_to_input(&self, req: &Self::EmailRequest) -> DataTableInput {
+        req.datatable_email_to_input()
     }
 
-    fn export_file_name(&self, _req: &Self::EmailRequest) -> Option<String> {
-        None
+    fn email_recipients(&self, req: &Self::EmailRequest) -> Vec<String> {
+        req.datatable_email_recipients()
+    }
+
+    fn email_subject(&self, req: &Self::EmailRequest) -> Option<String> {
+        req.datatable_email_subject()
+    }
+
+    fn export_file_name(&self, req: &Self::EmailRequest) -> Option<String> {
+        req.datatable_export_file_name()
     }
 
     fn include_meta(&self, req: &Self::QueryRequest) -> bool {
