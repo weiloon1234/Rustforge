@@ -94,6 +94,21 @@ macro_rules! rustforge_string_rule_type {
                         value: self.0.clone(),
                     }
                     .validate()
+                    .map_err(|errors| {
+                        // The helper struct reports errors under a "value" key, which would
+                        // surface as "field.value" in API responses. Promote them to an
+                        // empty key so the flattener attaches them directly to the parent
+                        // field name (e.g. "username" instead of "username.value").
+                        let mut promoted = ::validator::ValidationErrors::new();
+                        for (_key, kind) in errors.into_errors() {
+                            if let ::validator::ValidationErrorsKind::Field(items) = kind {
+                                for item in items {
+                                    promoted.add("", item);
+                                }
+                            }
+                        }
+                        promoted
+                    })
                 }
             }
 

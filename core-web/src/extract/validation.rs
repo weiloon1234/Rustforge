@@ -23,8 +23,14 @@ fn flatten_validation_errors(
 ) {
     for (field, kind) in errors.errors() {
         let field = field.as_ref();
-        let path = match prefix {
-            Some(parent) if !parent.is_empty() => format!("{parent}.{field}"),
+        let path = match (prefix, field) {
+            // Nested field under a parent, e.g. "address" + "city" → "address.city"
+            (Some(parent), f) if !parent.is_empty() && !f.is_empty() => {
+                format!("{parent}.{f}")
+            }
+            // Empty field key (from rustforge_string_rule_type) — use parent as-is
+            (Some(parent), _) if !parent.is_empty() => parent.to_string(),
+            // Top-level field
             _ => field.to_string(),
         };
 
@@ -47,11 +53,54 @@ fn flatten_validation_errors(
 }
 
 fn validation_message(error: &ValidationError) -> String {
-    error
-        .message
-        .as_ref()
-        .map(ToString::to_string)
-        .unwrap_or_else(|| core_i18n::t("Invalid"))
+    // Prefer explicit message if set by the contract macro or custom validator.
+    if let Some(msg) = &error.message {
+        return msg.to_string();
+    }
+
+    // Auto-generate a human-readable message from the validator code and params.
+    let p = &error.params;
+    match error.code.as_ref() {
+        "length" => {
+            let min = p.get("min").and_then(|v| v.as_u64());
+            let max = p.get("max").and_then(|v| v.as_u64());
+            let equal = p.get("equal").and_then(|v| v.as_u64());
+            if let Some(eq) = equal {
+                return core_i18n::t(&format!("Must be exactly {eq} characters."));
+            }
+            match (min, max) {
+                (Some(lo), Some(hi)) => {
+                    core_i18n::t(&format!("Must be between {lo} and {hi} characters."))
+                }
+                (Some(lo), None) => {
+                    core_i18n::t(&format!("Must be at least {lo} characters."))
+                }
+                (None, Some(hi)) => {
+                    core_i18n::t(&format!("Must be at most {hi} characters."))
+                }
+                _ => core_i18n::t("Invalid length."),
+            }
+        }
+        "range" => {
+            let min = p.get("min").and_then(|v| v.as_f64());
+            let max = p.get("max").and_then(|v| v.as_f64());
+            match (min, max) {
+                (Some(lo), Some(hi)) => {
+                    core_i18n::t(&format!("Must be between {lo} and {hi}."))
+                }
+                (Some(lo), None) => core_i18n::t(&format!("Must be at least {lo}.")),
+                (None, Some(hi)) => core_i18n::t(&format!("Must be at most {hi}.")),
+                _ => core_i18n::t("Out of range."),
+            }
+        }
+        "email" => core_i18n::t("Must be a valid email address."),
+        "url" => core_i18n::t("Must be a valid URL."),
+        "required" => core_i18n::t("This field is required."),
+        "must_match" => core_i18n::t("Fields do not match."),
+        "contains" => core_i18n::t("Missing required content."),
+        "does_not_contain" => core_i18n::t("Contains disallowed content."),
+        _ => core_i18n::t("Invalid"),
+    }
 }
 
 pub fn apply_json_request_body_schema<T: schemars::JsonSchema>(

@@ -5105,7 +5105,7 @@ export interface ApiClientConfig {
  *   retries the original request. Concurrent 401s share one refresh call.
  */
 export function createApiClient(config: ApiClientConfig): AxiosInstance {
-  const api = axios.create();
+  const api = axios.create({ withCredentials: true });
 
   // ── Request: attach bearer token ────────────────────────
   api.interceptors.request.use((req) => {
@@ -5126,7 +5126,13 @@ export function createApiClient(config: ApiClientConfig): AxiosInstance {
         _retry?: boolean;
       };
 
-      if (error.response?.status !== 401 || original._retry) {
+      // Only attempt refresh if there is an active session (token exists).
+      // Unauthenticated requests (e.g. login) should not trigger a refresh.
+      if (
+        error.response?.status !== 401 ||
+        original._retry ||
+        !config.getToken()
+      ) {
         return Promise.reject(error);
       }
 
@@ -5409,7 +5415,7 @@ interface AutoFormConfig {
 
 interface AutoFormErrors {
   general: string | null;
-  fields: Record<string, string>;
+  fields: Record<string, string[]>;
 }
 
 interface AutoFormResult {
@@ -5435,7 +5441,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
   const { url, method = "post", fields, defaults, extraPayload, onSuccess, onError } = config;
 
   const [values, setValuesState] = useState<Record<string, string>>(() => buildDefaults(fields, defaults));
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -5480,9 +5486,13 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
       if (body) {
         setGeneralError(body.message ?? "Something went wrong");
         if (body.errors) {
-          const mapped: Record<string, string> = {};
+          const mapped: Record<string, string[]> = {};
           for (const [key, msgs] of Object.entries(body.errors)) {
-            if (msgs.length > 0) mapped[key] = msgs[0];
+            if (msgs.length > 0) {
+              // Use base field name (strip nested suffixes like ".value")
+              const fieldKey = key.split(".")[0];
+              mapped[fieldKey] = [...(mapped[fieldKey] ?? []), ...msgs];
+            }
           }
           setFieldErrors(mapped);
         }
@@ -5501,7 +5511,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
         {fields.map((field) => {
           const span = field.span ?? 2;
           const style = { gridColumn: `span ${span}` };
-          const error = fieldErrors[field.name];
+          const errors = fieldErrors[field.name];
 
           switch (field.type) {
             case "textarea":
@@ -5511,7 +5521,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
                     label={field.label}
                     value={values[field.name] ?? ""}
                     onChange={(e) => setValue(field.name, e.target.value)}
-                    error={error}
+                    errors={errors}
                     notes={field.notes}
                     placeholder={field.placeholder}
                     required={field.required}
@@ -5529,7 +5539,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
                     options={field.options}
                     value={values[field.name] ?? ""}
                     onChange={(e) => setValue(field.name, e.target.value)}
-                    error={error}
+                    errors={errors}
                     notes={field.notes}
                     placeholder={field.placeholder}
                     required={field.required}
@@ -5545,7 +5555,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
                     label={field.label}
                     checked={values[field.name] === "1"}
                     onChange={(e) => setValue(field.name, e.target.checked ? "1" : "")}
-                    error={error}
+                    errors={errors}
                     notes={field.notes}
                     required={field.required}
                     disabled={field.disabled}
@@ -5562,7 +5572,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
                     options={field.options}
                     value={values[field.name] ?? ""}
                     onChange={(v) => setValue(field.name, v)}
-                    error={error}
+                    errors={errors}
                     notes={field.notes}
                     required={field.required}
                     disabled={field.disabled}
@@ -5580,7 +5590,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
                     label={field.label}
                     value={values[field.name] ?? ""}
                     onChange={(e) => setValue(field.name, e.target.value)}
-                    error={error}
+                    errors={errors}
                     notes={field.notes}
                     placeholder={(field as { placeholder?: string }).placeholder}
                     required={field.required}
@@ -5828,7 +5838,10 @@ export function ModalOutlet() {
 }
 "#;
 
-pub const FRONTEND_SRC_SHARED_COMPONENTS_INDEX_TS: &str = r#"export { TextInput } from "./TextInput";
+pub const FRONTEND_SRC_SHARED_COMPONENTS_INDEX_TS: &str = r#"export { FieldErrors, hasFieldError } from "./FieldErrors";
+export type { FieldErrorsProps } from "./FieldErrors";
+
+export { TextInput } from "./TextInput";
 export type { TextInputProps } from "./TextInput";
 
 export { TextArea } from "./TextArea";
@@ -5861,7 +5874,33 @@ export {
 } from "../helpers";
 "#;
 
+pub const FRONTEND_SRC_SHARED_COMPONENTS_FIELD_ERRORS_TSX: &str = r##"export interface FieldErrorsProps {
+  error?: string;
+  errors?: string[];
+}
+
+export function FieldErrors({ error, errors }: FieldErrorsProps) {
+  const all = [
+    ...(errors ?? []),
+    ...(error && !(errors ?? []).includes(error) ? [error] : []),
+  ];
+  if (all.length === 0) return null;
+  return (
+    <>
+      {all.map((msg, i) => (
+        <p key={i} className="rf-error-message">{msg}</p>
+      ))}
+    </>
+  );
+}
+
+export function hasFieldError(error?: string, errors?: string[]): boolean {
+  return !!error || (errors != null && errors.length > 0);
+}
+"##;
+
 pub const FRONTEND_SRC_SHARED_COMPONENTS_TEXT_INPUT_TSX: &str = r##"import { forwardRef, useId, useState, type InputHTMLAttributes } from "react";
+import { FieldErrors, hasFieldError } from "./FieldErrors";
 
 type InputType = "text" | "email" | "password" | "search" | "url" | "tel" | "number" | "money" | "pin";
 
@@ -5869,6 +5908,7 @@ export interface TextInputProps extends Omit<InputHTMLAttributes<HTMLInputElemen
   type?: InputType;
   label?: string;
   error?: string;
+  errors?: string[];
   notes?: string;
 }
 
@@ -5886,7 +5926,7 @@ function rawMoney(display: string): string {
 }
 
 export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
-  ({ type = "text", label, error, notes, required, className, onChange, value, defaultValue, id: externalId, ...rest }, ref) => {
+  ({ type = "text", label, error, errors, notes, required, className, onChange, value, defaultValue, id: externalId, ...rest }, ref) => {
     const autoId = useId();
     const id = externalId ?? autoId;
     const isMoney = type === "money";
@@ -5928,14 +5968,14 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
           type={resolvedType}
           inputMode={inputMode}
           required={required}
-          className={`rf-input ${error ? "rf-input-error" : ""} ${className ?? ""}`}
+          className={`rf-input ${hasFieldError(error, errors) ? "rf-input-error" : ""} ${className ?? ""}`}
           onChange={handleChange}
           value={isMoney ? moneyDisplay : value}
           defaultValue={isMoney ? undefined : defaultValue}
           {...rest}
         />
-        {error && <p className="rf-error-message">{error}</p>}
-        {notes && !error && <p className="rf-note">{notes}</p>}
+        <FieldErrors error={error} errors={errors} />
+        {notes && !hasFieldError(error, errors) && <p className="rf-note">{notes}</p>}
       </div>
     );
   },
@@ -5945,15 +5985,17 @@ TextInput.displayName = "TextInput";
 "##;
 
 pub const FRONTEND_SRC_SHARED_COMPONENTS_TEXT_AREA_TSX: &str = r##"import { forwardRef, useId, type TextareaHTMLAttributes } from "react";
+import { FieldErrors, hasFieldError } from "./FieldErrors";
 
 export interface TextAreaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   label?: string;
   error?: string;
+  errors?: string[];
   notes?: string;
 }
 
 export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(
-  ({ label, error, notes, required, className, id: externalId, ...rest }, ref) => {
+  ({ label, error, errors, notes, required, className, id: externalId, ...rest }, ref) => {
     const autoId = useId();
     const id = externalId ?? autoId;
 
@@ -5968,11 +6010,11 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(
           ref={ref}
           id={id}
           required={required}
-          className={`rf-textarea ${error ? "rf-textarea-error" : ""} ${className ?? ""}`}
+          className={`rf-textarea ${hasFieldError(error, errors) ? "rf-textarea-error" : ""} ${className ?? ""}`}
           {...rest}
         />
-        {error && <p className="rf-error-message">{error}</p>}
-        {notes && !error && <p className="rf-note">{notes}</p>}
+        <FieldErrors error={error} errors={errors} />
+        {notes && !hasFieldError(error, errors) && <p className="rf-note">{notes}</p>}
       </div>
     );
   },
@@ -5982,6 +6024,7 @@ TextArea.displayName = "TextArea";
 "##;
 
 pub const FRONTEND_SRC_SHARED_COMPONENTS_SELECT_TSX: &str = r##"import { forwardRef, useId, type SelectHTMLAttributes } from "react";
+import { FieldErrors, hasFieldError } from "./FieldErrors";
 
 export interface SelectOption {
   value: string;
@@ -5993,12 +6036,13 @@ export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement
   options: SelectOption[];
   label?: string;
   error?: string;
+  errors?: string[];
   notes?: string;
   placeholder?: string;
 }
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ options, label, error, notes, required, placeholder, className, value, defaultValue, id: externalId, ...rest }, ref) => {
+  ({ options, label, error, errors, notes, required, placeholder, className, value, defaultValue, id: externalId, ...rest }, ref) => {
     const autoId = useId();
     const id = externalId ?? autoId;
     const isPlaceholder = value === "" || (value === undefined && defaultValue === undefined);
@@ -6016,7 +6060,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           required={required}
           value={value}
           defaultValue={defaultValue}
-          className={`rf-select ${error ? "rf-select-error" : ""} ${isPlaceholder ? "rf-select-placeholder" : ""} ${className ?? ""}`}
+          className={`rf-select ${hasFieldError(error, errors) ? "rf-select-error" : ""} ${isPlaceholder ? "rf-select-placeholder" : ""} ${className ?? ""}`}
           {...rest}
         >
           {placeholder && (
@@ -6030,8 +6074,8 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             </option>
           ))}
         </select>
-        {error && <p className="rf-error-message">{error}</p>}
-        {notes && !error && <p className="rf-note">{notes}</p>}
+        <FieldErrors error={error} errors={errors} />
+        {notes && !hasFieldError(error, errors) && <p className="rf-note">{notes}</p>}
       </div>
     );
   },
@@ -6041,15 +6085,17 @@ Select.displayName = "Select";
 "##;
 
 pub const FRONTEND_SRC_SHARED_COMPONENTS_CHECKBOX_TSX: &str = r##"import { forwardRef, useId, type InputHTMLAttributes } from "react";
+import { FieldErrors, hasFieldError } from "./FieldErrors";
 
 export interface CheckboxProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
   label?: string;
   error?: string;
+  errors?: string[];
   notes?: string;
 }
 
 export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
-  ({ label, error, notes, className, id: externalId, ...rest }, ref) => {
+  ({ label, error, errors, notes, className, id: externalId, ...rest }, ref) => {
     const autoId = useId();
     const id = externalId ?? autoId;
 
@@ -6060,7 +6106,7 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
             ref={ref}
             id={id}
             type="checkbox"
-            className={`rf-checkbox ${error ? "rf-checkbox-error" : ""} ${className ?? ""}`}
+            className={`rf-checkbox ${hasFieldError(error, errors) ? "rf-checkbox-error" : ""} ${className ?? ""}`}
             {...rest}
           />
           {label && (
@@ -6069,8 +6115,8 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
             </label>
           )}
         </div>
-        {error && <p className="rf-error-message">{error}</p>}
-        {notes && !error && <p className="rf-note">{notes}</p>}
+        <FieldErrors error={error} errors={errors} />
+        {notes && !hasFieldError(error, errors) && <p className="rf-note">{notes}</p>}
       </div>
     );
   },
@@ -6080,6 +6126,7 @@ Checkbox.displayName = "Checkbox";
 "##;
 
 pub const FRONTEND_SRC_SHARED_COMPONENTS_RADIO_TSX: &str = r##"import { useId } from "react";
+import { FieldErrors, hasFieldError } from "./FieldErrors";
 
 export interface RadioOption {
   value: string;
@@ -6094,13 +6141,14 @@ export interface RadioProps {
   onChange?: (value: string) => void;
   label?: string;
   error?: string;
+  errors?: string[];
   notes?: string;
   required?: boolean;
   disabled?: boolean;
   className?: string;
 }
 
-export function Radio({ name, options, value, onChange, label, error, notes, required, disabled, className }: RadioProps) {
+export function Radio({ name, options, value, onChange, label, error, errors, notes, required, disabled, className }: RadioProps) {
   const groupId = useId();
 
   return (
@@ -6123,7 +6171,7 @@ export function Radio({ name, options, value, onChange, label, error, notes, req
                 checked={value === opt.value}
                 onChange={() => onChange?.(opt.value)}
                 disabled={disabled || opt.disabled}
-                className={`rf-radio ${error ? "rf-radio-error" : ""}`}
+                className={`rf-radio ${hasFieldError(error, errors) ? "rf-radio-error" : ""}`}
               />
               <label htmlFor={optId} className="rf-radio-label">
                 {opt.label}
@@ -6132,8 +6180,8 @@ export function Radio({ name, options, value, onChange, label, error, notes, req
           );
         })}
       </div>
-      {error && <p className="rf-error-message">{error}</p>}
-      {notes && !error && <p className="rf-note">{notes}</p>}
+      <FieldErrors error={error} errors={errors} />
+      {notes && !hasFieldError(error, errors) && <p className="rf-note">{notes}</p>}
     </div>
   );
 }
@@ -6687,6 +6735,7 @@ frontend/
     │   ├── ProtectedRoute.tsx         # Auth guard (route protection + session restore)
     │   └── components/                # Shared form components (styled via rf-* classes)
     │       ├── index.ts               # Barrel export
+    │       ├── FieldErrors.tsx          # Shared error renderer (FieldErrors, hasFieldError)
     │       ├── TextInput.tsx           # text, email, password, search, url, tel, number, money, pin
     │       ├── TextArea.tsx            # Multi-line text
     │       ├── Select.tsx              # Dropdown with typed options
@@ -7014,9 +7063,13 @@ import { TextInput, TextArea, Select, Checkbox, Radio } from "@shared/components
 ### Error and Notes Pattern
 
 All components follow the same pattern:
-- `error` prop: shows a red error message below the input and applies error styling
-- `notes` prop: shows a grey helper note below the input (hidden when `error` is present)
+- `error?: string` prop: shows a single red error message below the input (for standalone usage)
+- `errors?: string[]` prop: shows multiple red error messages, one per line (for API validation errors)
+- Both can be provided simultaneously — duplicates are automatically deduplicated by `FieldErrors`
+- `notes` prop: shows a grey helper note below the input (hidden when any error is present)
 - `required` prop: adds a red asterisk after the label
+
+`useAutoForm` passes `errors` (array) from the API response directly to each component, preserving individual validation messages.
 
 ### Special TextInput Types
 
