@@ -1994,13 +1994,13 @@ pub mod realtime;
 pub mod workflows;
 "#;
 
-pub const APP_INTERNAL_API_MOD_RS: &str = r#"pub mod datatable;
+pub const APP_INTERNAL_API_MOD_RS: &str = r##"pub mod datatable;
 pub mod state;
 pub mod v1;
 
 use std::sync::Arc;
 
-use axum::{routing::get as axum_get, Json, Router};
+use axum::{routing::get as axum_get, Json, Router, response::Html};
 use bootstrap::boot::BootContext;
 use core_web::openapi::{
     aide::{
@@ -2053,22 +2053,68 @@ pub async fn build_router(ctx: BootContext) -> anyhow::Result<Router> {
             "/admin",
             ServeDir::new(&admin_public).fallback(ServeFile::new(&admin_index)),
         );
+    } else {
+        router = router
+            .route("/admin", axum_get(admin_dev))
+            .route("/admin/{*path}", axum_get(admin_dev));
     }
 
     // User SPA: everything else → public/index.html (existing logic)
     if let Some(static_router) = core_web::static_assets::static_assets_router(&public_path) {
         router = router.merge(static_router);
     } else {
-        router = router.route("/", axum_get(root));
+        router = router.fallback(axum_get(root));
     }
 
     Ok(router)
 }
 
-async fn root() -> &'static str {
-    "ok"
+async fn root() -> Html<&'static str> {
+    Html(r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>App</title>
+    <script type="module" src="http://localhost:5173/@vite/client"></script>
+    <script type="module">
+      import RefreshRuntime from "http://localhost:5173/@react-refresh"
+      RefreshRuntime.injectIntoGlobalHook(window)
+      window.$RefreshReg$ = () => {}
+      window.$RefreshSig$ = () => (type) => type
+      window.__vite_plugin_react_preamble_installed__ = true
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="http://localhost:5173/src/user/main.tsx"></script>
+  </body>
+</html>"#)
 }
-"#;
+
+async fn admin_dev() -> Html<&'static str> {
+    Html(r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin</title>
+    <script type="module" src="http://localhost:5174/@vite/client"></script>
+    <script type="module">
+      import RefreshRuntime from "http://localhost:5174/@react-refresh"
+      RefreshRuntime.injectIntoGlobalHook(window)
+      window.$RefreshReg$ = () => {}
+      window.$RefreshSig$ = () => (type) => type
+      window.__vite_plugin_react_preamble_installed__ = true
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="http://localhost:5174/src/admin/main.tsx"></script>
+  </body>
+</html>"#)
+}
+"##;
 
 pub const APP_INTERNAL_API_STATE_RS: &str = r#"use std::sync::Arc;
 
@@ -3437,7 +3483,7 @@ pub mod admin {
 
 // ── Agent guideline files (split per folder) ────────────────────────
 
-pub const ROOT_AGENTS_MD: &str = r#"# Rustforge Project
+pub const ROOT_AGENTS_MD: &str = r##"# Rustforge Project
 
 Rust backend built on **Rustforge** (Axum + SQLx + Redis + S3). Each subfolder has its own `AGENTS.md` with domain-specific rules — read those when working in that folder.
 
@@ -3716,11 +3762,100 @@ Admin is mounted first so `/admin/*` is matched before the catch-all user SPA.
 
 ### Adding a new portal
 
-1. `frontend/vite.config.{name}.ts` — set `base: "/{name}/"`, unique port, `outDir: "../public/{name}"`
-2. `frontend/{name}.html` + `frontend/src/{name}/{main.tsx, App.tsx, app.css}`
-3. Add `dev:{name}` and `build:{name}` to `package.json` scripts
-4. Update `build` script ordering (nested portals before root)
-5. Add `nest_service("/{name}", ...)` in `build_router` (before the user SPA catch-all)
+Adding a role portal (e.g. `merchant`) touches backend, frontend, and build config. Use the admin portal as the reference implementation.
+
+#### Backend (Rust)
+
+| # | File | What to do |
+|---|------|------------|
+| 1 | `app/configs.toml` | Add `[auth.guards.merchant]` with provider, TTL, refresh TTL |
+| 2 | `app/schemas/merchant.toml` | Define model + enum (`auth = true`, `auth_model = "merchant"`) |
+| 3 | `app/permissions.toml` | Add permission entries scoped to the new guard |
+| 4 | `migrations/{next}_merchant_auth.sql` | Create table + indexes |
+| 5 | `app/src/contracts/api/v1/merchant.rs` | CRUD DTOs (CreateInput, UpdateInput, Output) |
+| 6 | `app/src/contracts/api/v1/merchant_auth.rs` | Auth DTOs (LoginInput, RefreshInput, ProfileOutput) |
+| 7 | `app/src/contracts/datatable/merchant/` | Datatable query/export contracts |
+| 8 | `app/src/internal/workflows/merchant.rs` | CRUD business logic |
+| 9 | `app/src/internal/workflows/merchant_auth.rs` | Auth business logic (login, refresh, logout, profile) |
+| 10 | `app/src/internal/middleware/auth.rs` | Add `require_merchant` guard function |
+| 11 | `app/src/internal/api/v1/merchant.rs` | CRUD route handlers |
+| 12 | `app/src/internal/api/v1/merchant_auth.rs` | Auth route handlers |
+| 13 | `app/src/internal/api/v1/mod.rs` | Mount `/merchant` and `/merchant/auth` routes |
+| 14 | `app/src/internal/datatables/merchant.rs` | Datatable executor |
+| 15 | `app/src/internal/api/state.rs` | Register merchant datatable in `DataTableRegistry` |
+| 16 | `app/src/internal/api/mod.rs` | Add SPA serving — see below |
+| 17 | `app/src/seeds/merchant_bootstrap_seeder.rs` | Bootstrap seed data |
+| 18 | `i18n/*.json` | Add translation keys |
+| 19 | Wire `mod` declarations | Add `pub mod` / `mod` in every relevant `mod.rs` |
+
+**SPA serving in `build_router`** (`app/src/internal/api/mod.rs`) — add **before** the user SPA catch-all:
+
+```rust
+// Merchant SPA: /merchant/* → public/merchant/index.html
+let merchant_public = public_path.join("merchant");
+let merchant_index = merchant_public.join("index.html");
+if merchant_public.is_dir() && merchant_index.is_file() {
+    router = router.nest_service(
+        "/merchant",
+        ServeDir::new(&merchant_public).fallback(ServeFile::new(&merchant_index)),
+    );
+} else {
+    router = router
+        .route("/merchant", axum_get(merchant_dev))
+        .route("/merchant/{*path}", axum_get(merchant_dev));
+}
+```
+
+And a dev handler that serves HTML loading from the Vite dev server (copy `admin_dev`, change port and entry path):
+
+```rust
+async fn merchant_dev() -> Html<&'static str> {
+    Html(r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Merchant</title>
+    <script type="module" src="http://localhost:5175/@vite/client"></script>
+    <script type="module">
+      import RefreshRuntime from "http://localhost:5175/@react-refresh"
+      RefreshRuntime.injectIntoGlobalHook(window)
+      window.$RefreshReg$ = () => {}
+      window.$RefreshSig$ = () => (type) => type
+      window.__vite_plugin_react_preamble_installed__ = true
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="http://localhost:5175/src/merchant/main.tsx"></script>
+  </body>
+</html>"#)
+}
+```
+
+#### Frontend
+
+| # | File | What to do |
+|---|------|------------|
+| 1 | `frontend/vite.config.merchant.ts` | `base: "/merchant/"`, `server.port: 5175`, `outDir: "../public/merchant"` |
+| 2 | `frontend/merchant.html` | Entry HTML with `<script type="module" src="/src/merchant/main.tsx">` |
+| 3 | `frontend/src/merchant/main.tsx` | `<BrowserRouter basename="/merchant">` |
+| 4 | `frontend/src/merchant/App.tsx` | Routes with `<ProtectedRoute>` |
+| 5 | `frontend/src/merchant/app.css` | `@import "tailwindcss"` + `@theme {}` + `rf-*` component classes |
+| 6 | `frontend/src/merchant/api.ts` | `createApiClient` wired to auth store |
+| 7 | `frontend/src/merchant/stores/auth.ts` | `createAuthStore` with `/api/v1/merchant/auth/*` endpoints |
+| 8 | `frontend/src/merchant/types/` | Generated TS types (run `make gen-types`) |
+| 9 | `frontend/package.json` | Add `dev:merchant` and `build:merchant` scripts |
+| 10 | `frontend/package.json` `build` script | Add `npm run build:merchant` **before** `build:user` |
+
+#### Build & Dev
+
+| # | File | What to do |
+|---|------|------------|
+| 1 | `Makefile` | Add `dev-merchant` target; add `npm --prefix frontend run dev:merchant &` to `dev` target |
+| 2 | Port allocation | Pick an unused port (5175, 5176, ...) for the Vite dev server |
+
+Build order in `package.json` `build` script matters: nested portals (`merchant`, `admin`) must build before `user`, because the user build uses `emptyOutDir: false` while nested portals use `emptyOutDir: true` within their subdirectory.
 
 ## New Feature Checklist
 
@@ -3735,7 +3870,7 @@ Admin is mounted first so `/admin/*` is matched before the catch-all user SPA.
 9. Translations → add keys to all `i18n/*.json` files
 10. `cargo check` to trigger code generation
 11. Run `make gen-types` to regenerate frontend TypeScript types from contracts
-"#;
+"##;
 
 pub const CONTRACTS_AGENTS_MD: &str = r#"# Contracts
 
@@ -4336,10 +4471,12 @@ pub const FRONTEND_PACKAGE_JSON: &str = r#"{
   "dependencies": {
     "axios": "^1.7.0",
     "i18next": "^24.0.0",
+    "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-i18next": "^15.0.0",
     "react-router-dom": "^7.0.0",
+    "sweetalert2": "^11.0.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
@@ -4646,6 +4783,46 @@ pub const FRONTEND_SRC_USER_APP_CSS: &str = r#"@import "tailwindcss";
   .rf-error-message { @apply mt-1 text-xs text-error; }
   .rf-note { @apply mt-1 text-xs text-muted; }
   .rf-form-grid { @apply grid grid-cols-2 gap-x-4; }
+
+  /* ── Modal ──────────────────────────────────────── */
+  .rf-modal-backdrop {
+    @apply fixed inset-0 flex items-center justify-center bg-black/50;
+    animation: rf-fade-in 150ms ease-out;
+  }
+  .rf-modal-panel {
+    @apply w-full flex flex-col rounded-xl bg-surface shadow-xl;
+    max-height: calc(100vh - 2rem);
+    animation: rf-slide-up 150ms ease-out;
+  }
+  .rf-modal-header {
+    @apply flex items-center justify-between shrink-0 px-6 py-4 border-b border-border;
+  }
+  .rf-modal-title { @apply text-lg font-semibold text-foreground; }
+  .rf-modal-close {
+    @apply rounded-lg p-1.5 text-muted transition-colors duration-150
+      hover:bg-surface-hover hover:text-foreground;
+  }
+  .rf-modal-body { @apply flex-1 overflow-y-auto px-6 py-4; }
+  .rf-modal-footer {
+    @apply flex justify-end gap-3 shrink-0 px-6 py-4 border-t border-border;
+  }
+  .rf-modal-btn-primary {
+    @apply px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground
+      transition-colors duration-150 hover:bg-primary/90;
+  }
+  .rf-modal-btn-secondary {
+    @apply px-4 py-2 text-sm font-medium rounded-lg border border-border text-foreground
+      transition-colors duration-150 hover:bg-surface-hover;
+  }
+}
+
+@keyframes rf-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes rf-slide-up {
+  from { opacity: 0; transform: translateY(0.5rem); }
+  to { opacity: 1; transform: translateY(0); }
 }
 "#;
 
@@ -4668,35 +4845,20 @@ createRoot(document.getElementById("root")!).render(
 pub const FRONTEND_SRC_ADMIN_APP_TSX: &str = r#"import { Routes, Route } from "react-router-dom";
 import { ProtectedRoute } from "../shared/ProtectedRoute";
 import { useAuthStore } from "./stores/auth";
-
-function DashboardPage() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold tracking-tight">Rustforge Starter</h1>
-        <p className="mt-2 text-lg text-muted">Admin Portal</p>
-      </div>
-    </div>
-  );
-}
-
-function LoginPage() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold tracking-tight">Admin Login</h1>
-        <p className="mt-2 text-lg text-muted">Build your login form here.</p>
-      </div>
-    </div>
-  );
-}
+import AdminLayout from "./layouts/AdminLayout";
+import LoginPage from "./pages/LoginPage";
+import DashboardPage from "./pages/DashboardPage";
+import AdminsPage from "./pages/AdminsPage";
 
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute useAuthStore={useAuthStore} />}>
-        <Route path="/*" element={<DashboardPage />} />
+        <Route element={<AdminLayout />}>
+          <Route index element={<DashboardPage />} />
+          <Route path="/admins" element={<AdminsPage />} />
+        </Route>
       </Route>
     </Routes>
   );
@@ -4799,6 +4961,72 @@ pub const FRONTEND_SRC_ADMIN_APP_CSS: &str = r#"@import "tailwindcss";
   .rf-error-message { @apply mt-1 text-xs text-error; }
   .rf-note { @apply mt-1 text-xs text-muted; }
   .rf-form-grid { @apply grid grid-cols-2 gap-x-4; }
+
+  /* ── Layout ─────────────────────────────────────── */
+  .rf-sidebar {
+    @apply fixed left-0 top-14 bottom-0 bg-surface border-r border-border
+      transition-all duration-200 overflow-y-auto overflow-x-hidden z-20;
+  }
+  .rf-sidebar-expanded { @apply w-64; }
+  .rf-sidebar-collapsed { @apply w-16; }
+  .rf-sidebar-link {
+    @apply flex items-center gap-3 px-4 py-2.5 text-sm text-muted rounded-lg
+      transition-colors duration-150 hover:bg-surface-hover hover:text-foreground whitespace-nowrap;
+  }
+  .rf-sidebar-link-active {
+    @apply bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary;
+  }
+  .rf-header {
+    @apply fixed top-0 left-0 right-0 h-14 bg-surface border-b border-border
+      flex items-center px-4 z-30;
+  }
+  .rf-stat-card {
+    @apply rounded-xl bg-surface border border-border p-5;
+  }
+  .rf-badge {
+    @apply inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-xs
+      font-semibold rounded-full bg-primary text-primary-foreground;
+  }
+
+  /* ── Modal ──────────────────────────────────────── */
+  .rf-modal-backdrop {
+    @apply fixed inset-0 flex items-center justify-center bg-black/50;
+    animation: rf-fade-in 150ms ease-out;
+  }
+  .rf-modal-panel {
+    @apply w-full flex flex-col rounded-xl bg-surface shadow-xl;
+    max-height: calc(100vh - 2rem);
+    animation: rf-slide-up 150ms ease-out;
+  }
+  .rf-modal-header {
+    @apply flex items-center justify-between shrink-0 px-6 py-4 border-b border-border;
+  }
+  .rf-modal-title { @apply text-lg font-semibold text-foreground; }
+  .rf-modal-close {
+    @apply rounded-lg p-1.5 text-muted transition-colors duration-150
+      hover:bg-surface-hover hover:text-foreground;
+  }
+  .rf-modal-body { @apply flex-1 overflow-y-auto px-6 py-4; }
+  .rf-modal-footer {
+    @apply flex justify-end gap-3 shrink-0 px-6 py-4 border-t border-border;
+  }
+  .rf-modal-btn-primary {
+    @apply px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground
+      transition-colors duration-150 hover:bg-primary/90;
+  }
+  .rf-modal-btn-secondary {
+    @apply px-4 py-2 text-sm font-medium rounded-lg border border-border text-foreground
+      transition-colors duration-150 hover:bg-surface-hover;
+  }
+}
+
+@keyframes rf-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes rf-slide-up {
+  from { opacity: 0; transform: translateY(0.5rem); }
+  to { opacity: 1; transform: translateY(0); }
 }
 "#;
 
@@ -5343,6 +5571,235 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
 }
 "##;
 
+pub const FRONTEND_SRC_SHARED_HELPERS_TS: &str = r#"import Swal, { type SweetAlertResult } from "sweetalert2";
+
+// ── Alert types ──────────────────────────────────────
+
+interface AlertOptions {
+  title?: string;
+  message: string;
+  callback?: (result: SweetAlertResult) => void | Promise<void>;
+}
+
+interface AlertConfirmOptions extends AlertOptions {
+  confirmText?: string;
+  cancelText?: string;
+}
+
+// ── Alert wrappers ───────────────────────────────────
+// Wrapped so the underlying library can be swapped without
+// touching every call-site in the application.
+
+export async function alertConfirm(options: AlertConfirmOptions): Promise<void> {
+  const result = await Swal.fire({
+    title: options.title ?? "Are you sure?",
+    text: options.message,
+    icon: "question",
+    showCancelButton: true,
+    confirmButtonText: options.confirmText ?? "Confirm",
+    cancelButtonText: options.cancelText ?? "Cancel",
+    reverseButtons: true,
+  });
+  await options.callback?.(result);
+}
+
+export async function alertSuccess(options: AlertOptions): Promise<void> {
+  const result = await Swal.fire({
+    title: options.title ?? "Success",
+    text: options.message,
+    icon: "success",
+  });
+  await options.callback?.(result);
+}
+
+export async function alertError(options: AlertOptions): Promise<void> {
+  const result = await Swal.fire({
+    title: options.title ?? "Error",
+    text: options.message,
+    icon: "error",
+  });
+  await options.callback?.(result);
+}
+
+export async function alertWarning(options: AlertOptions): Promise<void> {
+  const result = await Swal.fire({
+    title: options.title ?? "Warning",
+    text: options.message,
+    icon: "warning",
+  });
+  await options.callback?.(result);
+}
+
+export async function alertInfo(options: AlertOptions): Promise<void> {
+  const result = await Swal.fire({
+    title: options.title ?? "Info",
+    text: options.message,
+    icon: "info",
+  });
+  await options.callback?.(result);
+}
+
+// ── Formatting helpers ───────────────────────────────
+
+export function moneyFormat(value: number, decimals: number = 2): string {
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+"#;
+
+pub const FRONTEND_SRC_SHARED_USE_MODAL_STORE_TS: &str = r#"import { create } from "zustand";
+import type { ReactNode } from "react";
+
+export type ModalSize = "sm" | "md" | "lg" | "xl" | "full";
+
+export interface ModalOptions {
+  id?: string;
+  title: string;
+  size?: ModalSize;
+  content: ReactNode;
+  footer?: ReactNode;
+  closeOnBackdrop?: boolean;
+  closeOnEsc?: boolean;
+  onClose?: () => void;
+}
+
+export interface ModalEntry extends Required<Pick<ModalOptions, "id" | "title" | "size" | "closeOnBackdrop" | "closeOnEsc">> {
+  content: ReactNode;
+  footer?: ReactNode;
+  onClose?: () => void;
+}
+
+interface ModalState {
+  stack: ModalEntry[];
+  open: (options: ModalOptions) => string;
+  close: (id?: string) => void;
+  closeAll: () => void;
+}
+
+let counter = 0;
+
+export const useModalStore = create<ModalState>()((set, get) => ({
+  stack: [],
+
+  open: (options) => {
+    const id = options.id ?? `modal-${++counter}`;
+    const entry: ModalEntry = {
+      id,
+      title: options.title,
+      size: options.size ?? "md",
+      content: options.content,
+      footer: options.footer,
+      closeOnBackdrop: options.closeOnBackdrop ?? true,
+      closeOnEsc: options.closeOnEsc ?? true,
+      onClose: options.onClose,
+    };
+    set((state) => ({ stack: [...state.stack, entry] }));
+    document.body.style.overflow = "hidden";
+    return id;
+  },
+
+  close: (id) => {
+    const { stack } = get();
+    if (stack.length === 0) return;
+    const targetId = id ?? stack[stack.length - 1].id;
+    const target = stack.find((m) => m.id === targetId);
+    const next = stack.filter((m) => m.id !== targetId);
+    set({ stack: next });
+    target?.onClose?.();
+    if (next.length === 0) {
+      document.body.style.overflow = "";
+    }
+  },
+
+  closeAll: () => {
+    const { stack } = get();
+    stack.forEach((m) => m.onClose?.());
+    set({ stack: [] });
+    document.body.style.overflow = "";
+  },
+}));
+"#;
+
+pub const FRONTEND_SRC_SHARED_COMPONENTS_MODAL_TSX: &str = r#"import { useEffect, type ReactNode } from "react";
+import type { ModalEntry, ModalSize } from "../useModalStore";
+
+const sizeClasses: Record<ModalSize, string> = {
+  sm: "max-w-sm",
+  md: "max-w-md",
+  lg: "max-w-lg",
+  xl: "max-w-xl",
+  full: "max-w-[calc(100vw-2rem)]",
+};
+
+interface ModalProps {
+  entry: ModalEntry;
+  index: number;
+  onClose: (id: string) => void;
+}
+
+export function Modal({ entry, index, onClose }: ModalProps) {
+  useEffect(() => {
+    if (!entry.closeOnEsc) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose(entry.id);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [entry.id, entry.closeOnEsc, onClose]);
+
+  return (
+    <div
+      className="rf-modal-backdrop"
+      style={{ zIndex: 40 + index * 10 }}
+      onClick={(e) => {
+        if (entry.closeOnBackdrop && e.target === e.currentTarget) {
+          onClose(entry.id);
+        }
+      }}
+    >
+      <div className={`rf-modal-panel ${sizeClasses[entry.size]}`} role="dialog" aria-modal="true">
+        <div className="rf-modal-header">
+          <h2 className="rf-modal-title">{entry.title}</h2>
+          <button className="rf-modal-close" onClick={() => onClose(entry.id)} aria-label="Close">
+            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+            </svg>
+          </button>
+        </div>
+        <div className="rf-modal-body">{entry.content}</div>
+        {entry.footer && <div className="rf-modal-footer">{entry.footer}</div>}
+      </div>
+    </div>
+  );
+}
+"#;
+
+pub const FRONTEND_SRC_SHARED_COMPONENTS_MODAL_OUTLET_TSX: &str = r#"import { useCallback } from "react";
+import { useModalStore } from "../useModalStore";
+import { Modal } from "./Modal";
+
+export function ModalOutlet() {
+  const stack = useModalStore((s) => s.stack);
+  const close = useModalStore((s) => s.close);
+  const handleClose = useCallback((id: string) => close(id), [close]);
+
+  if (stack.length === 0) return null;
+
+  return (
+    <>
+      {stack.map((entry, i) => (
+        <Modal key={entry.id} entry={entry} index={i} onClose={handleClose} />
+      ))}
+    </>
+  );
+}
+"#;
+
 pub const FRONTEND_SRC_SHARED_COMPONENTS_INDEX_TS: &str = r#"export { TextInput } from "./TextInput";
 export type { TextInputProps } from "./TextInput";
 
@@ -5360,6 +5817,20 @@ export type { RadioProps, RadioOption } from "./Radio";
 
 export { useAutoForm } from "../useAutoForm";
 export type { FieldDef, AutoFormConfig, AutoFormErrors, AutoFormResult } from "../useAutoForm";
+
+export { Modal } from "./Modal";
+export { ModalOutlet } from "./ModalOutlet";
+export { useModalStore } from "../useModalStore";
+export type { ModalOptions, ModalSize, ModalEntry } from "../useModalStore";
+
+export {
+  alertConfirm,
+  alertSuccess,
+  alertError,
+  alertWarning,
+  alertInfo,
+  moneyFormat,
+} from "../helpers";
 "#;
 
 pub const FRONTEND_SRC_SHARED_COMPONENTS_TEXT_INPUT_TSX: &str = r##"import { forwardRef, useId, useState, type InputHTMLAttributes } from "react";
@@ -5661,6 +6132,317 @@ export const useAuthStore = createAuthStore<AdminMeOutput>({
 });
 "#;
 
+pub const FRONTEND_SRC_ADMIN_STORES_NOTIFICATIONS_TS: &str = r#"import { create } from "zustand";
+
+interface NotificationState {
+  /** Map of notification keys to their pending counts. */
+  counts: Record<string, number>;
+  /** Get the count for a given key (returns 0 if not set). */
+  getCount: (key: string) => number;
+  /** Set count for a key. Call this from your polling/websocket handler. */
+  setCount: (key: string, count: number) => void;
+  /** Batch-set multiple counts at once. */
+  setCounts: (counts: Record<string, number>) => void;
+}
+
+export const useNotificationStore = create<NotificationState>()((set, get) => ({
+  counts: {},
+  getCount: (key) => get().counts[key] ?? 0,
+  setCount: (key, count) =>
+    set((state) => ({ counts: { ...state.counts, [key]: count } })),
+  setCounts: (counts) =>
+    set((state) => ({ counts: { ...state.counts, ...counts } })),
+}));
+"#;
+
+pub const FRONTEND_SRC_ADMIN_NAV_TS: &str = r#"import { LayoutDashboard, Users, type LucideIcon } from "lucide-react";
+
+export interface NavChild {
+  label: string;
+  path: string;
+  permissions?: string[];
+  notificationKey?: string;
+}
+
+export interface NavItem {
+  label: string;
+  icon: LucideIcon;
+  path?: string;
+  permissions?: string[];
+  notificationKey?: string;
+  children?: NavChild[];
+}
+
+/**
+ * Centralized navigation config for the admin sidebar.
+ *
+ * To add a new page:
+ *   1. Import the Lucide icon: `import { Settings } from "lucide-react";`
+ *   2. Add an entry to this array.
+ *   3. Create the page component in `pages/`.
+ *   4. Add a `<Route>` in `App.tsx`.
+ *
+ * Permission strings match `app/permissions.toml` keys (e.g. "admin.read").
+ * If `permissions` is omitted the item is visible to all authenticated admins.
+ *
+ * `notificationKey` connects to `useNotificationStore.counts` for badge display.
+ * Parent items with children auto-sum their visible children's counts.
+ */
+export const navigation: NavItem[] = [
+  {
+    label: "Dashboard",
+    icon: LayoutDashboard,
+    path: "/",
+  },
+  {
+    label: "Admins",
+    icon: Users,
+    path: "/admins",
+    permissions: ["admin.read", "admin.manage"],
+  },
+];
+"#;
+
+pub const FRONTEND_SRC_ADMIN_COMPONENTS_SIDEBAR_TSX: &str = r#"import { useLocation, Link } from "react-router-dom";
+import { ChevronDown } from "lucide-react";
+import { useState } from "react";
+import { navigation, type NavItem, type NavChild } from "../nav";
+import { useAuthStore } from "../stores/auth";
+import { useNotificationStore } from "../stores/notifications";
+
+function hasAccess(scopes: string[], required?: string[]): boolean {
+  if (!required || required.length === 0) return true;
+  return required.some((p) => scopes.includes(p));
+}
+
+function Badge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return <span className="rf-badge">{count > 99 ? "99+" : count}</span>;
+}
+
+function NavLink({
+  item,
+  active,
+  collapsed,
+}: {
+  item: { label: string; path: string; icon?: NavItem["icon"]; notificationKey?: string };
+  active: boolean;
+  collapsed: boolean;
+}) {
+  const count = useNotificationStore((s) => s.getCount(item.notificationKey ?? ""));
+  const Icon = item.icon;
+
+  return (
+    <Link
+      to={item.path}
+      className={`rf-sidebar-link ${active ? "rf-sidebar-link-active" : ""}`}
+      title={collapsed ? item.label : undefined}
+    >
+      {Icon && <Icon size={20} className="shrink-0" />}
+      {!collapsed && (
+        <>
+          <span className="flex-1 truncate">{item.label}</span>
+          <Badge count={count} />
+        </>
+      )}
+      {collapsed && count > 0 && (
+        <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />
+      )}
+    </Link>
+  );
+}
+
+function ParentNav({
+  item,
+  collapsed,
+  scopes,
+}: {
+  item: NavItem;
+  collapsed: boolean;
+  scopes: string[];
+}) {
+  const location = useLocation();
+  const [open, setOpen] = useState(false);
+  const getCount = useNotificationStore((s) => s.getCount);
+
+  const visibleChildren = (item.children ?? []).filter((c) =>
+    hasAccess(scopes, c.permissions),
+  );
+
+  const totalCount = visibleChildren.reduce(
+    (sum, c) => sum + getCount(c.notificationKey ?? ""),
+    0,
+  );
+
+  const isChildActive = visibleChildren.some(
+    (c) => location.pathname === c.path,
+  );
+
+  const Icon = item.icon;
+
+  if (collapsed) {
+    return (
+      <div className="relative" title={item.label}>
+        <button
+          className={`rf-sidebar-link w-full ${isChildActive ? "rf-sidebar-link-active" : ""}`}
+          onClick={() => setOpen(!open)}
+        >
+          <Icon size={20} className="shrink-0" />
+          {totalCount > 0 && (
+            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />
+          )}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <button
+        className={`rf-sidebar-link w-full ${isChildActive ? "rf-sidebar-link-active" : ""}`}
+        onClick={() => setOpen(!open)}
+      >
+        <Icon size={20} className="shrink-0" />
+        <span className="flex-1 truncate text-left">{item.label}</span>
+        <Badge count={totalCount} />
+        <ChevronDown
+          size={16}
+          className={`shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open && (
+        <div className="ml-7 mt-0.5 space-y-0.5">
+          {visibleChildren.map((child) => (
+            <NavLink
+              key={child.path}
+              item={child}
+              active={location.pathname === child.path}
+              collapsed={false}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Sidebar({ collapsed }: { collapsed: boolean }) {
+  const location = useLocation();
+  const scopes = useAuthStore((s) => s.account?.scopes ?? []);
+
+  const visibleItems = navigation.filter((item) => {
+    if (!hasAccess(scopes, item.permissions)) return false;
+    if (item.children) {
+      return item.children.some((c) => hasAccess(scopes, c.permissions));
+    }
+    return true;
+  });
+
+  return (
+    <aside className={`rf-sidebar ${collapsed ? "rf-sidebar-collapsed" : "rf-sidebar-expanded"}`}>
+      <nav className="flex flex-col gap-1 p-3">
+        {visibleItems.map((item) => {
+          if (item.children) {
+            return (
+              <ParentNav
+                key={item.label}
+                item={item}
+                collapsed={collapsed}
+                scopes={scopes}
+              />
+            );
+          }
+
+          return (
+            <NavLink
+              key={item.path!}
+              item={{ ...item, path: item.path!, icon: item.icon }}
+              active={location.pathname === item.path}
+              collapsed={collapsed}
+            />
+          );
+        })}
+      </nav>
+    </aside>
+  );
+}
+"#;
+
+pub const FRONTEND_SRC_ADMIN_COMPONENTS_HEADER_TSX: &str = r#"import { Menu, LogOut } from "lucide-react";
+import { useAuthStore } from "../stores/auth";
+
+export default function Header({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const account = useAuthStore((s) => s.account);
+  const logout = useAuthStore((s) => s.logout);
+
+  return (
+    <header className="rf-header">
+      <button
+        onClick={onToggle}
+        className="rounded-lg p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
+        <Menu size={20} />
+      </button>
+
+      <div className="flex-1" />
+
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-muted">{account?.name ?? "Admin"}</span>
+        <button
+          onClick={() => logout()}
+          className="rounded-lg p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+          aria-label="Logout"
+        >
+          <LogOut size={18} />
+        </button>
+      </div>
+    </header>
+  );
+}
+"#;
+
+pub const FRONTEND_SRC_ADMIN_LAYOUTS_ADMIN_LAYOUT_TSX: &str = r#"import { useState, useEffect } from "react";
+import { Outlet } from "react-router-dom";
+import Sidebar from "../components/Sidebar";
+import Header from "../components/Header";
+import { ModalOutlet } from "../../shared/components";
+
+const STORAGE_KEY = "admin-sidebar-collapsed";
+
+export default function AdminLayout() {
+  const [collapsed, setCollapsed] = useState(() => {
+    return localStorage.getItem(STORAGE_KEY) === "true";
+  });
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, String(collapsed));
+  }, [collapsed]);
+
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      <Header collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
+      <Sidebar collapsed={collapsed} />
+      <main
+        className="pt-14 transition-all duration-200"
+        style={{ marginLeft: collapsed ? "4rem" : "16rem" }}
+      >
+        <div className="p-6">
+          <Outlet />
+        </div>
+      </main>
+      <ModalOutlet />
+    </div>
+  );
+}
+"#;
+
 pub const FRONTEND_SRC_USER_API_TS: &str = r#"import { createApiClient } from "../../shared/createApiClient";
 import { useAuthStore } from "./stores/auth";
 
@@ -5687,7 +6469,160 @@ export const api = createApiClient({
 });
 "#;
 
-pub const FRONTEND_AGENTS_MD: &str = r#"# Frontend — Multi-Portal React + Vite + Tailwind 4
+pub const FRONTEND_SRC_ADMIN_PAGES_LOGIN_PAGE_TSX: &str = r#"import { useNavigate } from "react-router-dom";
+import { useAutoForm } from "../../shared/useAutoForm";
+import { useAuthStore } from "../stores/auth";
+import { api } from "../api";
+
+export default function LoginPage() {
+  const navigate = useNavigate();
+  const setToken = useAuthStore((s) => s.setToken);
+  const fetchAccount = useAuthStore((s) => s.fetchAccount);
+
+  const { submit, busy, form, errors } = useAutoForm(api, {
+    url: "/api/v1/admin/auth/login",
+    method: "post",
+    fields: [
+      {
+        name: "username",
+        type: "text",
+        label: "Username",
+        placeholder: "Enter your username",
+        required: true,
+        span: 2,
+      },
+      {
+        name: "password",
+        type: "password",
+        label: "Password",
+        placeholder: "Enter your password",
+        required: true,
+        span: 2,
+      },
+    ],
+    onSuccess: async (data: unknown) => {
+      const result = data as { access_token: string };
+      setToken(result.access_token);
+      await fetchAccount();
+      navigate("/");
+    },
+  });
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-8 text-center">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
+            Admin Portal
+          </h1>
+          <p className="mt-1 text-sm text-muted">
+            Sign in to your account
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-border bg-surface p-6">
+          {errors.general && (
+            <div className="mb-4 rounded-lg bg-error-muted px-3 py-2 text-sm text-error">
+              {errors.general}
+            </div>
+          )}
+
+          {form}
+
+          <button
+            onClick={submit}
+            disabled={busy}
+            className="mt-2 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium
+              text-primary-foreground transition-colors hover:bg-primary-hover
+              disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {busy ? "Signing in..." : "Sign in"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+"#;
+
+pub const FRONTEND_SRC_ADMIN_PAGES_DASHBOARD_PAGE_TSX: &str = r#"import { Users, Activity, UserPlus, ShieldCheck } from "lucide-react";
+import { useAuthStore } from "../stores/auth";
+
+const stats = [
+  { label: "Total Admins", value: "—", icon: Users },
+  { label: "Active Today", value: "—", icon: Activity },
+  { label: "New This Week", value: "—", icon: UserPlus },
+  { label: "System Health", value: "OK", icon: ShieldCheck },
+];
+
+export default function DashboardPage() {
+  const account = useAuthStore((s) => s.account);
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-foreground">
+          Welcome back, {account?.name ?? "Admin"}
+        </h1>
+        <p className="mt-1 text-sm text-muted">
+          Here's an overview of your system.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {stats.map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <div key={stat.label} className="rf-stat-card">
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-primary/10 p-2">
+                  <Icon size={20} className="text-primary" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted">{stat.label}</p>
+                  <p className="text-lg font-semibold text-foreground">
+                    {stat.value}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+"#;
+
+pub const FRONTEND_SRC_ADMIN_PAGES_ADMINS_PAGE_TSX: &str = r#"import { Users } from "lucide-react";
+
+export default function AdminsPage() {
+  return (
+    <div>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-foreground">Admins</h1>
+        <p className="mt-1 text-sm text-muted">
+          Manage administrator accounts
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-border bg-surface p-8 text-center">
+        <div className="mx-auto mb-3 w-fit rounded-lg bg-primary/10 p-3">
+          <Users size={24} className="text-primary" />
+        </div>
+        <p className="text-sm text-muted">
+          Connect to the admin datatable API to display data here.
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          See <code className="rounded bg-surface-hover px-1.5 py-0.5 text-foreground">types/datatable-admin.ts</code> for the query contract.
+        </p>
+      </div>
+    </div>
+  );
+}
+"#;
+
+pub const FRONTEND_AGENTS_MD: &str = r##"# Frontend — Multi-Portal React + Vite + Tailwind 4
 
 This directory contains the frontend source for the Rustforge starter. It ships two independent SPA portals:
 
@@ -6081,23 +7016,176 @@ When adding a new portal, copy the `@layer components` block from an existing po
 
 ## Adding a New Portal
 
-1. Create `vite.config.{name}.ts` — set `base`, `server.port`, `build.outDir`.
-2. Create `{name}.html` entry point.
-3. Create `src/{name}/main.tsx` — `BrowserRouter` with `basename="/{name}"`.
-4. Create `src/{name}/App.tsx` — routes with `<ProtectedRoute>` wrapping protected routes.
-5. Create `src/{name}/app.css` — Tailwind theme.
-6. Create `src/{name}/stores/auth.ts` — call `createAuthStore` with portal config.
-7. Create `src/{name}/api.ts` — call `createApiClient` wired to auth store.
-8. Add `dev:{name}` and `build:{name}` scripts to `package.json`.
-9. Update the `build` script ordering (build nested portals first).
-10. In Rust, add `nest_service("/{name}", ...)` in `build_router` (see `app/src/internal/api/mod.rs`).
+Use the admin portal as the reference. Example below uses `merchant` on port 5175.
 
-## Production
+### 1. Vite config — `frontend/vite.config.merchant.ts`
 
-`make build-frontend` writes optimised assets into `public/`. The Rust API serves them:
-- `/admin/*` → `public/admin/index.html` (admin SPA fallback)
-- `/*` → `public/index.html` (user SPA fallback)
-"#;
+```typescript
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  root: ".",
+  base: "/merchant/",
+  build: {
+    outDir: "../public/merchant",
+    emptyOutDir: true,
+    rollupOptions: { input: "merchant.html" },
+  },
+  experimental: {
+    renderBuiltUrl(filename, { hostType }) {
+      if (hostType === "html") return filename;
+      return "/merchant/" + filename;
+    },
+  },
+  server: {
+    port: 5175,
+    proxy: { "/api": "http://localhost:3000" },
+  },
+});
+```
+
+Key settings: `base: "/merchant/"` (trailing slash), `outDir: "../public/merchant"`, unique `port`.
+
+### 2. HTML entry — `frontend/merchant.html`
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Merchant</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/merchant/main.tsx"></script>
+  </body>
+</html>
+```
+
+### 3. Source directory — `frontend/src/merchant/`
+
+```
+src/merchant/
+├── main.tsx          # BrowserRouter with basename="/merchant"
+├── App.tsx           # Routes + ProtectedRoute
+├── app.css           # @import "tailwindcss" + @theme {} + rf-* classes
+├── api.ts            # createApiClient wired to auth store
+├── stores/
+│   └── auth.ts       # createAuthStore with /api/v1/merchant/auth/* endpoints
+└── types/            # Generated TS types (make gen-types)
+    └── index.ts
+```
+
+**`main.tsx`** — must set `basename`:
+
+```tsx
+import { BrowserRouter } from "react-router-dom";
+// ...
+<BrowserRouter basename="/merchant">
+  <App />
+</BrowserRouter>
+```
+
+**`app.css`** — copy the `@theme {}` block and `@layer components` block from an existing portal, then customise the colour tokens. The `rf-*` class definitions in `@layer components` should be identical — visual differences come from the theme tokens.
+
+### 4. npm scripts — `frontend/package.json`
+
+```json
+"dev:merchant": "vite --config vite.config.merchant.ts",
+"build:merchant": "vite build --config vite.config.merchant.ts",
+"build": "rm -rf ../public && npm run build:admin && npm run build:merchant && npm run build:user"
+```
+
+Build order: nested portals (`admin`, `merchant`) **before** `user`. The user build uses `emptyOutDir: false` so it preserves the nested portal outputs inside `public/`.
+
+### 5. Makefile
+
+Add a `dev-merchant` target and include the new process in `dev`:
+
+```makefile
+.PHONY: dev-merchant
+dev-merchant: ensure-frontend-deps
+	npm --prefix frontend run dev:merchant
+
+# In the `dev` target, add a line:
+npm --prefix frontend run dev:merchant &
+```
+
+### 6. Rust — SPA serving (`app/src/internal/api/mod.rs`)
+
+Add **before** the user SPA catch-all block. Two modes:
+
+**Production** (built frontend exists): serve static files with SPA fallback.
+**Dev** (no built frontend): serve HTML that loads from the Vite dev server with HMR.
+
+```rust
+// Merchant SPA: /merchant/* → public/merchant/index.html
+let merchant_public = public_path.join("merchant");
+let merchant_index = merchant_public.join("index.html");
+if merchant_public.is_dir() && merchant_index.is_file() {
+    router = router.nest_service(
+        "/merchant",
+        ServeDir::new(&merchant_public).fallback(ServeFile::new(&merchant_index)),
+    );
+} else {
+    router = router
+        .route("/merchant", axum_get(merchant_dev))
+        .route("/merchant/{*path}", axum_get(merchant_dev));
+}
+```
+
+Dev handler — serves HTML that loads scripts from the Vite dev server so HMR and React Fast Refresh work at `localhost:3000/merchant`:
+
+```rust
+async fn merchant_dev() -> Html<&'static str> {
+    Html(r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Merchant</title>
+    <script type="module" src="http://localhost:5175/@vite/client"></script>
+    <script type="module">
+      import RefreshRuntime from "http://localhost:5175/@react-refresh"
+      RefreshRuntime.injectIntoGlobalHook(window)
+      window.$RefreshReg$ = () => {}
+      window.$RefreshSig$ = () => (type) => type
+      window.__vite_plugin_react_preamble_installed__ = true
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="http://localhost:5175/src/merchant/main.tsx"></script>
+  </body>
+</html>"#)
+}
+```
+
+### Port allocation
+
+| Portal | Dev port | Base path |
+|--------|----------|-----------|
+| user | 5173 | `/` |
+| admin | 5174 | `/admin/` |
+| (next) | 5175 | `/{name}/` |
+
+## Dev vs Production Serving
+
+**Dev mode** (`make dev`, no built frontend in `public/`):
+
+The Rust API server at `:3000` serves HTML pages that load scripts directly from the Vite dev servers. The browser fetches modules from the Vite origin, so HMR, React Fast Refresh, and all asset resolution work as if you visited the Vite port directly. You can visit either `localhost:3000` or the Vite port — both work.
+
+**Production** (`make build-frontend`):
+
+`make build-frontend` compiles all portals into `public/`. The Rust API serves them as static files with SPA fallback routing:
+
+- `/admin/*` → `public/admin/index.html`
+- `/{portal}/*` → `public/{portal}/index.html`
+- `/*` → `public/index.html` (user portal catch-all, must be last)
+"##;
 
 // ── TypeScript type files ───────────────────────────────────────
 

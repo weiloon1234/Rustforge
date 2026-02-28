@@ -535,6 +535,11 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: "frontend/src/admin/nav.ts",
+            content: templates::FRONTEND_SRC_ADMIN_NAV_TS,
+            executable: false,
+        },
+        FileTemplate {
             path: "frontend/src/admin/app.css",
             content: templates::FRONTEND_SRC_ADMIN_APP_CSS,
             executable: false,
@@ -616,6 +621,11 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: "frontend/src/shared/helpers.ts",
+            content: templates::FRONTEND_SRC_SHARED_HELPERS_TS,
+            executable: false,
+        },
+        FileTemplate {
             path: "frontend/src/shared/components/index.ts",
             content: templates::FRONTEND_SRC_SHARED_COMPONENTS_INDEX_TS,
             executable: false,
@@ -646,6 +656,21 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: "frontend/src/shared/useModalStore.ts",
+            content: templates::FRONTEND_SRC_SHARED_USE_MODAL_STORE_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/components/Modal.tsx",
+            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_MODAL_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/shared/components/ModalOutlet.tsx",
+            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_MODAL_OUTLET_TSX,
+            executable: false,
+        },
+        FileTemplate {
             path: "frontend/src/user/stores/auth.ts",
             content: templates::FRONTEND_SRC_USER_STORES_AUTH_TS,
             executable: false,
@@ -661,8 +686,43 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: "frontend/src/admin/stores/notifications.ts",
+            content: templates::FRONTEND_SRC_ADMIN_STORES_NOTIFICATIONS_TS,
+            executable: false,
+        },
+        FileTemplate {
             path: "frontend/src/admin/api.ts",
             content: templates::FRONTEND_SRC_ADMIN_API_TS,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/components/Sidebar.tsx",
+            content: templates::FRONTEND_SRC_ADMIN_COMPONENTS_SIDEBAR_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/components/Header.tsx",
+            content: templates::FRONTEND_SRC_ADMIN_COMPONENTS_HEADER_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/layouts/AdminLayout.tsx",
+            content: templates::FRONTEND_SRC_ADMIN_LAYOUTS_ADMIN_LAYOUT_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/pages/LoginPage.tsx",
+            content: templates::FRONTEND_SRC_ADMIN_PAGES_LOGIN_PAGE_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/pages/DashboardPage.tsx",
+            content: templates::FRONTEND_SRC_ADMIN_PAGES_DASHBOARD_PAGE_TSX,
+            executable: false,
+        },
+        FileTemplate {
+            path: "frontend/src/admin/pages/AdminsPage.tsx",
+            content: templates::FRONTEND_SRC_ADMIN_PAGES_ADMINS_PAGE_TSX,
             executable: false,
         },
         // ── Agent guideline files ──────────────────────────────
