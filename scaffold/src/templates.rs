@@ -635,7 +635,8 @@ pub const ROOT_I18N_ZH_JSON: &str = r#"{
   "No records found.": "未找到记录。",
   "Read Admins": "查看管理员",
   "Manage Admins": "管理管理员",
-  "Cannot delete developer or superadmin accounts": "不能删除开发者或超级管理员账号"
+  "Cannot delete developer or superadmin accounts": "不能删除开发者或超级管理员账号",
+  "Go to": "跳转"
 }
 "#;
 
@@ -5907,11 +5908,13 @@ export function ModalOutlet() {
 }
 "#;
 
-pub const FRONTEND_SRC_SHARED_COMPONENTS_DATA_TABLE_TSX: &str = r#"import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
+pub const FRONTEND_SRC_SHARED_COMPONENTS_DATA_TABLE_TSX: &str = r#"import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from "lucide-react";
 import type { AxiosInstance } from "axios";
 import type { ApiResponse, DataTableQueryResponse } from "@shared/types";
+
+const PER_PAGE_OPTIONS = [10, 15, 25, 50, 100];
 
 export interface DataTableProps<T> {
   url: string;
@@ -5924,11 +5927,23 @@ export interface DataTableProps<T> {
   footer?: ReactNode;
 }
 
+function buildPageNumbers(current: number, total: number): (number | "…")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages: (number | "…")[] = [1];
+  const left = Math.max(2, current - 1);
+  const right = Math.min(total - 1, current + 1);
+  if (left > 2) pages.push("…");
+  for (let i = left; i <= right; i++) pages.push(i);
+  if (right < total - 1) pages.push("…");
+  pages.push(total);
+  return pages;
+}
+
 export function DataTable<T>({
   url,
   api,
   extraBody,
-  perPage = 15,
+  perPage: defaultPerPage = 15,
   columns,
   renderBody,
   header,
@@ -5938,12 +5953,15 @@ export function DataTable<T>({
   const [data, setData] = useState<DataTableQueryResponse<T> | null>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(defaultPerPage);
+  const [jumpValue, setJumpValue] = useState("");
+
   const fetchData = useCallback(
-    async (p: number, signal?: AbortSignal) => {
+    async (p: number, pp: number, signal?: AbortSignal) => {
       setLoading(true);
       try {
         const res = await api.post<ApiResponse<DataTableQueryResponse<T>>>(url, {
-          base: { page: p, per_page: perPage },
+          base: { page: p, per_page: pp },
           ...extraBody,
         }, { signal });
         setData(res.data.data);
@@ -5954,17 +5972,36 @@ export function DataTable<T>({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [api, url, perPage],
+    [api, url],
   );
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchData(page, controller.signal);
+    fetchData(page, perPage, controller.signal);
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+  }, [page, perPage]);
 
-  const refresh = () => fetchData(page);
+  const refresh = () => fetchData(page, perPage);
+
+  const totalPages = data?.total_pages ?? 1;
+  const goTo = (p: number) => setPage(Math.max(1, Math.min(totalPages, p)));
+
+  const handlePerPageChange = (newPerPage: number) => {
+    setPerPage(newPerPage);
+    setPage(1);
+  };
+
+  const handleJump = () => {
+    const n = parseInt(jumpValue, 10);
+    if (!isNaN(n) && n >= 1 && n <= totalPages) {
+      goTo(n);
+    }
+    setJumpValue("");
+  };
+
+  const pgBtn = "inline-flex items-center justify-center h-8 min-w-8 rounded-lg border border-border bg-surface text-sm font-medium text-foreground transition hover:bg-surface-hover disabled:opacity-40 disabled:pointer-events-none";
+  const pgBtnActive = "inline-flex items-center justify-center h-8 min-w-8 rounded-lg bg-primary text-sm font-medium text-primary-foreground";
 
   return (
     <div>
@@ -6022,31 +6059,63 @@ export function DataTable<T>({
         </table>
       </div>
 
-      {data && data.total_pages > 1 && (
-        <div className="mt-4 flex items-center justify-between">
-          <p className="text-sm text-muted">
-            {t("Page :page of :total_pages (:total_records total)", {
-              page: data.page,
-              total_pages: data.total_pages,
-              total_records: data.total_records,
-            })}
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1}
-              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-surface-hover disabled:opacity-50"
+      {data && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm text-muted">
+            <select
+              value={perPage}
+              onChange={(e) => handlePerPageChange(Number(e.target.value))}
+              className="rf-select !w-auto !py-1 !pr-8 !text-xs"
             >
-              {t("Previous")}
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(data.total_pages, p + 1))}
-              disabled={page >= data.total_pages}
-              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-surface-hover disabled:opacity-50"
-            >
-              {t("Next")}
-            </button>
+              {PER_PAGE_OPTIONS.map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+            <span>
+              {t("Page :page of :total_pages (:total_records total)", {
+                page: data.page,
+                total_pages: data.total_pages,
+                total_records: data.total_records,
+              })}
+            </span>
           </div>
+
+          {data.total_pages > 1 && (
+            <div className="flex items-center gap-1">
+              <button className={pgBtn} disabled={page <= 1} onClick={() => goTo(1)}>
+                <ChevronsLeft size={14} />
+              </button>
+              <button className={pgBtn} disabled={page <= 1} onClick={() => goTo(page - 1)}>
+                <ChevronLeft size={14} />
+              </button>
+              {buildPageNumbers(page, data.total_pages).map((p, i) =>
+                p === "…" ? (
+                  <span key={`e${i}`} className="px-1 text-sm text-muted select-none">…</span>
+                ) : (
+                  <button key={p} className={p === page ? pgBtnActive : pgBtn} onClick={() => goTo(p)}>
+                    {p}
+                  </button>
+                ),
+              )}
+              <button className={pgBtn} disabled={page >= data.total_pages} onClick={() => goTo(page + 1)}>
+                <ChevronRight size={14} />
+              </button>
+              <button className={pgBtn} disabled={page >= data.total_pages} onClick={() => goTo(data.total_pages)}>
+                <ChevronsRight size={14} />
+              </button>
+              <div className="ml-2 flex items-center gap-1">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={jumpValue}
+                  onChange={(e) => setJumpValue(e.target.value.replace(/\D/g, ""))}
+                  onKeyDown={(e) => e.key === "Enter" && handleJump()}
+                  placeholder={t("Go to")}
+                  className="rf-input !w-16 !py-1 !text-xs text-center"
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
