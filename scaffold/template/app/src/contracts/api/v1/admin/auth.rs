@@ -1,11 +1,11 @@
 use crate::contracts::types::username::UsernameString;
+use core_web::auth::AuthClientType;
 use core_web::contracts::rustforge_contract;
+use generated::models::AdminType;
 use schemars::JsonSchema;
 use serde::Serialize;
 use ts_rs::TS;
 use validator::Validate;
-use core_web::auth::AuthClientType;
-use generated::models::AdminType;
 
 #[rustforge_contract]
 #[derive(TS)]

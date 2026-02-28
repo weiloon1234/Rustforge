@@ -50,6 +50,10 @@ export function CookbookOverview() {
                         automatic TypeScript generation via <code>make gen-types</code>.
                     </li>
                     <li>
+                        Enum export policy: export only contract-facing enums referenced by DTO
+                        fields (API + datatable contracts), not every enum in the codebase.
+                    </li>
+                    <li>
                         Prefer <code>core_web::contracts::ContractJson&lt;T&gt;</code> on handlers
                         and keep <code>T</code> under the <code>RequestContract</code> standard.
                     </li>
@@ -135,6 +139,8 @@ with_permission_check_post(
                     TypeScript generation standard is <code>ts-rs</code> derive-based:{' '}
                     add <code>#[derive(TS)]</code> to contract structs then run{' '}
                     <code>make gen-types</code> to regenerate per-portal TypeScript files.
+                    Enum files are generated from actual DTO enum usage, and generation fails
+                    fast if a referenced external enum/type has no exporter mapping.
                     OpenAPI <code>/openapi.json</code> remains available as an additional
                     source for tooling and documentation.
                 </p>

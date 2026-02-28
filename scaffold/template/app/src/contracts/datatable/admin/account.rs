@@ -1,7 +1,6 @@
 use core_web::datatable::{
-    DataTableFilterFieldDto, DataTableFilterFieldType,
-    DataTableGenericEmailExportRequest, DataTableGenericQueryRequest,
-    DataTableScopedContract,
+    DataTableFilterFieldDto, DataTableFilterFieldType, DataTableGenericEmailExportRequest,
+    DataTableGenericQueryRequest, DataTableScopedContract,
 };
 use generated::models::AdminType;
 use schemars::JsonSchema;

@@ -1,6 +1,4 @@
-use core_db::common::sql::{
-    DbConn, Op, generate_snowflake_i64,
-};
+use core_db::common::sql::{generate_snowflake_i64, DbConn, Op};
 use core_i18n::t;
 use core_web::{auth::AuthUser, error::AppError};
 use generated::{
@@ -10,7 +8,7 @@ use generated::{
 };
 
 use crate::{
-    contracts::api::v1::admin::{CreateAdminInput, UpdateAdminInput},
+    contracts::api::v1::admin::account::{CreateAdminInput, UpdateAdminInput},
     internal::api::state::AppApiState,
 };
 
@@ -60,7 +58,9 @@ pub async fn update(
     }
 
     let existing = detail(state, id).await?;
-    let mut update = Admin::new(DbConn::pool(&state.db), None).update().where_id(Op::Eq, id);
+    let mut update = Admin::new(DbConn::pool(&state.db), None)
+        .update()
+        .where_id(Op::Eq, id);
     let mut touched = false;
 
     if let Some(username) = req.username {
@@ -111,7 +111,10 @@ pub async fn remove(
     }
 
     let target = detail(state, id).await?;
-    if matches!(target.admin_type, AdminType::Developer | AdminType::SuperAdmin) {
+    if matches!(
+        target.admin_type,
+        AdminType::Developer | AdminType::SuperAdmin
+    ) {
         return Err(AppError::Forbidden(t(
             "Cannot delete developer or superadmin accounts",
         )));
@@ -154,7 +157,10 @@ fn ensure_assignable_permissions(
         .map(|permission| permission.as_str().to_string())
         .collect::<Vec<_>>();
 
-    if matches!(auth.user.admin_type, AdminType::Developer | AdminType::SuperAdmin) {
+    if matches!(
+        auth.user.admin_type,
+        AdminType::Developer | AdminType::SuperAdmin
+    ) {
         return Ok(requested);
     }
 

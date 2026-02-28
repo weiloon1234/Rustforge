@@ -1,6 +1,6 @@
 # Contracts
 
-Request/response DTOs that define the API surface. Lives in `contracts/api/v1/` (versioned), `contracts/datatable/`, and `contracts/types/`.
+Request/response DTOs that define the API surface. Lives in `contracts/api/v1/{portal}/` (versioned), `contracts/datatable/{portal}/`, and `contracts/types/`.
 
 ## Input Structs — `#[rustforge_contract]`
 
@@ -172,14 +172,14 @@ After adding `#[derive(TS)]` to your structs, register them in `app/src/bin/expo
 ```rust
 // Add a new TsFile block:
 {
-    use app::contracts::api::v1::article::*;
+    use app::contracts::api::v1::admin::article::*;
     files.push(TsFile {
         rel_path: "admin/types/article.ts",
-        imports: &["import type { ArticleStatus } from \"./enums\";"],
         definitions: vec![
             CreateArticleInput::export_to_string().expect("CreateArticleInput"),
             ArticleOutput::export_to_string().expect("ArticleOutput"),
         ],
+        enums: BTreeSet::new(),
     });
 }
 ```

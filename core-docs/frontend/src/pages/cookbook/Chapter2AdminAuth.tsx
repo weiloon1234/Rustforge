@@ -43,7 +43,7 @@ export function Chapter2AdminAuth() {
 
                 <h2>Step 1: API DTOs</h2>
                 <h3>
-                    File: <code>app/src/contracts/api/v1/admin_auth.rs</code>
+                    File: <code>app/src/contracts/api/v1/admin/auth.rs</code>
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use core_web::auth::AuthClientType;
@@ -179,7 +179,7 @@ pub fn resolve_scope_grant(admin: &AdminView) -> TokenScopeGrant {
 
                 <h2>Step 3: Admin Auth Routes</h2>
                 <h3>
-                    File: <code>app/src/internal/api/v1/admin_auth.rs</code>
+                    File: <code>app/src/internal/api/v1/admin/auth.rs</code>
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`pub fn router(state: AppApiState) -> ApiRouter {

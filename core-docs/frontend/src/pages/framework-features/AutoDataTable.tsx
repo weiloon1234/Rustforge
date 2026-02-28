@@ -113,8 +113,14 @@ GET    /api/v1/admin/datatable/admin/export/status?job_id=...`}</code>
                     The contract file defines the Row DTO and filter UI. No custom request structs
                     needed &mdash; use the built-in generic types.
                 </p>
+                <p>
+                    Type generation note: datatable row DTOs participate in the same{' '}
+                    <code>make gen-types</code> scan as API DTOs. If a row field uses an enum via{' '}
+                    <code>#[ts(type = "EnumName")]</code>, that enum is auto-added to the generated{' '}
+                    <code>admin/types/enums.ts</code> only when referenced.
+                </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`// app/src/contracts/datatable/admin/admin.rs
+                    <code className="language-rust">{`// app/src/contracts/datatable/admin/account.rs
 use core_datatable::DataTableInput;
 use core_web::datatable::{
     DataTableFilterFieldDto, DataTableFilterFieldType,
@@ -207,12 +213,12 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
                 <h2>Step 2: Datatable Hooks (Scope, Filters, Mappings)</h2>
                 <p>
                     Hooks are defined per-model in{' '}
-                    <code>app/src/internal/datatables/admin.rs</code>. The generated hooks trait
+                    <code>app/src/internal/datatables/portal/admin/account.rs</code>. The generated hooks trait
                     provides <code>scope</code>, <code>authorize</code>,{' '}
                     <code>filter_query</code>, <code>filters</code>, and <code>mappings</code>.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`// app/src/internal/datatables/admin.rs
+                    <code className="language-rust">{`// app/src/internal/datatables/portal/admin/account.rs
 use core_datatable::{DataTableContext, DataTableInput};
 use core_db::common::sql::Op;
 use generated::models::{AdminCol, AdminDataTableHooks, AdminQuery, AdminType};

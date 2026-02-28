@@ -287,16 +287,16 @@ Adding a role portal (e.g. `merchant`) touches backend, frontend, and build conf
 | 2 | `app/schemas/merchant.toml` | Define model + enum (`auth = true`, `auth_model = "merchant"`) |
 | 3 | `app/permissions.toml` | Add permission entries scoped to the new guard |
 | 4 | `migrations/{next}_merchant_auth.sql` | Create table + indexes |
-| 5 | `app/src/contracts/api/v1/merchant.rs` | CRUD DTOs (CreateInput, UpdateInput, Output) |
-| 6 | `app/src/contracts/api/v1/merchant_auth.rs` | Auth DTOs (LoginInput, RefreshInput, ProfileOutput) |
+| 5 | `app/src/contracts/api/v1/merchant/account.rs` | CRUD DTOs (CreateInput, UpdateInput, Output) |
+| 6 | `app/src/contracts/api/v1/merchant/auth.rs` | Auth DTOs (LoginInput, RefreshInput, ProfileOutput) |
 | 7 | `app/src/contracts/datatable/merchant/` | Datatable query/export contracts |
 | 8 | `app/src/internal/workflows/merchant.rs` | CRUD business logic |
 | 9 | `app/src/internal/workflows/merchant_auth.rs` | Auth business logic (login, refresh, logout, profile) |
 | 10 | `app/src/internal/middleware/auth.rs` | Add `require_merchant` guard function |
-| 11 | `app/src/internal/api/v1/merchant.rs` | CRUD route handlers |
-| 12 | `app/src/internal/api/v1/merchant_auth.rs` | Auth route handlers |
+| 11 | `app/src/internal/api/v1/merchant/account.rs` | CRUD route handlers |
+| 12 | `app/src/internal/api/v1/merchant/auth.rs` | Auth route handlers |
 | 13 | `app/src/internal/api/v1/mod.rs` | Mount `/merchant` and `/merchant/auth` routes |
-| 14 | `app/src/internal/datatables/merchant.rs` | Datatable executor |
+| 14 | `app/src/internal/datatables/portal/merchant/account.rs` | Datatable executor |
 | 15 | `app/src/internal/api/state.rs` | Register merchant datatable in `DataTableRegistry` |
 | 16 | `app/src/internal/api/mod.rs` | Add SPA serving — see below |
 | 17 | `app/src/seeds/merchant_bootstrap_seeder.rs` | Bootstrap seed data |
@@ -377,9 +377,9 @@ Build order in `package.json` `build` script matters: nested portals (`merchant`
 1. Schema → `app/schemas/{domain}.toml`
 2. Migration → `migrations/{number}_{name}.sql`
 3. Permissions → `app/permissions.toml`
-4. Contracts → `app/src/contracts/api/v1/{domain}.rs` (add `#[derive(TS)]` for frontend types)
+4. Contracts → `app/src/contracts/api/v1/{portal}/{domain}.rs` (add `#[derive(TS)]` for frontend types)
 5. Workflow → `app/src/internal/workflows/{domain}.rs`
-6. Handler → `app/src/internal/api/v1/{domain}.rs`
+6. Handler → `app/src/internal/api/v1/{portal}/{domain}.rs`
 7. Wire routes → `app/src/internal/api/v1/mod.rs`
 8. Module declarations → add `mod`/`pub mod` in relevant `mod.rs`
 9. Translations → add keys to all `i18n/*.json` files

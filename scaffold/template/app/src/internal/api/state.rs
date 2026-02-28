@@ -24,10 +24,13 @@ pub struct AppApiState {
 impl AppApiState {
     pub fn new(ctx: &BootContext) -> anyhow::Result<Self> {
         let mut datatable_registry = DataTableRegistry::new();
-        crate::internal::datatables::register_all_generated_datatables(&mut datatable_registry, &ctx.db);
+        crate::internal::datatables::register_all_generated_datatables(
+            &mut datatable_registry,
+            &ctx.db,
+        );
         datatable_registry.register_as(
             "admin.account",
-            crate::internal::datatables::app_admin_datatable(ctx.db.clone()),
+            crate::internal::datatables::portal::admin::app_admin_datatable(ctx.db.clone()),
         );
 
         let datatable_registry = Arc::new(datatable_registry);

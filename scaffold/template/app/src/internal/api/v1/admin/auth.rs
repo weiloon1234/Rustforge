@@ -22,7 +22,7 @@ use time::Duration;
 use tower_cookies::Cookies;
 
 use crate::{
-    contracts::api::v1::admin_auth::{
+    contracts::api::v1::admin::auth::{
         AdminAuthOutput, AdminLoginInput, AdminLogoutInput, AdminLogoutOutput, AdminMeOutput,
         AdminPasswordUpdateInput, AdminPasswordUpdateOutput, AdminProfileUpdateInput,
         AdminProfileUpdateOutput, AdminRefreshInput,
@@ -68,13 +68,14 @@ pub fn router(state: AppApiState) -> ApiRouter {
         )
         .api_route(
             "/logout",
-            post_with(logout, |op| op.summary("Logout admin").tag("Admin Authentication")),
+            post_with(logout, |op| {
+                op.summary("Logout admin").tag("Admin Authentication")
+            }),
         )
         .api_route(
             "/profile_update",
             patch_with(profile_update, |op| {
-                op.summary("Update own profile")
-                    .tag("Admin Authentication")
+                op.summary("Update own profile").tag("Admin Authentication")
             }),
         )
         .api_route(
@@ -92,7 +93,9 @@ pub fn router(state: AppApiState) -> ApiRouter {
     ApiRouter::new()
         .api_route(
             "/login",
-            post_with(login, |op| op.summary("Login admin").tag("Admin Authentication")),
+            post_with(login, |op| {
+                op.summary("Login admin").tag("Admin Authentication")
+            }),
         )
         .api_route(
             "/refresh",

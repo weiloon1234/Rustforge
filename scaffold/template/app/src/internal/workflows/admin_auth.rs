@@ -13,7 +13,7 @@ use generated::{
     permissions::Permission,
 };
 
-use crate::contracts::api::v1::admin_auth::{AdminPasswordUpdateInput, AdminProfileUpdateInput};
+use crate::contracts::api::v1::admin::auth::{AdminPasswordUpdateInput, AdminProfileUpdateInput};
 use crate::internal::api::state::AppApiState;
 
 pub fn resolve_scope_grant(admin: &AdminView) -> TokenScopeGrant {
@@ -89,9 +89,17 @@ pub async fn login(
     Ok((admin, tokens))
 }
 
-pub async fn refresh(state: &AppApiState, refresh_token: &str) -> Result<IssuedTokenPair, AppError> {
-    auth::refresh_guard_session::<AdminGuard>(&state.db, &state.auth, refresh_token, "admin-session")
-        .await
+pub async fn refresh(
+    state: &AppApiState,
+    refresh_token: &str,
+) -> Result<IssuedTokenPair, AppError> {
+    auth::refresh_guard_session::<AdminGuard>(
+        &state.db,
+        &state.auth,
+        refresh_token,
+        "admin-session",
+    )
+    .await
 }
 
 pub async fn revoke_session(state: &AppApiState, refresh_token: &str) -> Result<(), AppError> {

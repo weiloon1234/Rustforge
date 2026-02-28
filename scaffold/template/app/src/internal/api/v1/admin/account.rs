@@ -15,7 +15,7 @@ use core_web::{
 use generated::{guards::AdminGuard, permissions::Permission};
 
 use crate::{
-    contracts::api::v1::admin::{
+    contracts::api::v1::admin::account::{
         AdminDeleteOutput, AdminOutput, CreateAdminInput, UpdateAdminInput,
     },
     internal::{api::state::AppApiState, workflows::admin as workflow},
@@ -39,7 +39,10 @@ pub fn router(state: AppApiState) -> ApiRouter {
                 detail,
                 AdminGuard,
                 PermissionMode::Any,
-                [Permission::AdminRead.as_str(), Permission::AdminManage.as_str()],
+                [
+                    Permission::AdminRead.as_str(),
+                    Permission::AdminManage.as_str(),
+                ],
                 |op| op.summary("Get admin detail").tag("Admin Account"),
             )
             .merge(with_permission_check_patch_with(
@@ -66,7 +69,10 @@ async fn detail(
     Path(id): Path<i64>,
 ) -> Result<ApiResponse<AdminOutput>, AppError> {
     let admin = workflow::detail(&state, id).await?;
-    Ok(ApiResponse::success(AdminOutput::from(admin), &t("Admin loaded")))
+    Ok(ApiResponse::success(
+        AdminOutput::from(admin),
+        &t("Admin loaded"),
+    ))
 }
 
 async fn create(
@@ -75,7 +81,10 @@ async fn create(
     req: AsyncContractJson<CreateAdminInput>,
 ) -> Result<ApiResponse<AdminOutput>, AppError> {
     let admin = workflow::create(&state, &auth, req.0).await?;
-    Ok(ApiResponse::success(AdminOutput::from(admin), &t("Admin created")))
+    Ok(ApiResponse::success(
+        AdminOutput::from(admin),
+        &t("Admin created"),
+    ))
 }
 
 async fn update(
@@ -86,7 +95,10 @@ async fn update(
 ) -> Result<ApiResponse<AdminOutput>, AppError> {
     let req = validate_update_input(&state, id, req.0).await?;
     let admin = workflow::update(&state, &auth, id, req).await?;
-    Ok(ApiResponse::success(AdminOutput::from(admin), &t("Admin updated")))
+    Ok(ApiResponse::success(
+        AdminOutput::from(admin),
+        &t("Admin updated"),
+    ))
 }
 
 async fn remove(

@@ -102,7 +102,7 @@ rustforge_string_rule_type! {
 
                 <h2>Step 3: Request + Response DTO Style</h2>
                 <h3>
-                    File: <code>app/src/contracts/api/v1/admin_auth.rs</code> (excerpt)
+                    File: <code>app/src/contracts/api/v1/admin/auth.rs</code> (excerpt)
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use crate::contracts::types::username::UsernameString;
@@ -149,7 +149,7 @@ pub struct AdminMeOutput {
 
                 <h2>Step 4: Async DB Validation in DTOs (Create)</h2>
                 <h3>
-                    File: <code>app/src/contracts/api/v1/admin.rs</code> (create excerpt)
+                    File: <code>app/src/contracts/api/v1/admin/account.rs</code> (create excerpt)
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`#[rustforge_contract]
@@ -175,7 +175,7 @@ pub struct CreateAdminInput {
 
                 <h2>Step 5: PATCH Async Unique Pattern (Path ID is SSOT)</h2>
                 <h3>
-                    File: <code>app/src/contracts/api/v1/admin.rs</code> (update excerpt)
+                    File: <code>app/src/contracts/api/v1/admin/account.rs</code> (update excerpt)
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`#[rustforge_contract]
@@ -203,7 +203,7 @@ impl UpdateAdminInput {
 }`}</code>
                 </pre>
                 <h3>
-                    File: <code>app/src/internal/api/v1/admin.rs</code> (handler excerpt)
+                    File: <code>app/src/internal/api/v1/admin/account.rs</code> (handler excerpt)
                 </h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use axum::extract::{Path, State};
@@ -264,6 +264,11 @@ async fn update(
                         from Rust structs. OpenAPI <code>/openapi.json</code> remains available
                         as an alternative source.
                     </li>
+                    <li>
+                        Contract-facing enum export is usage-driven: when DTO fields reference
+                        enums via <code>#[ts(type = "EnumName")]</code>, only those enums are
+                        emitted to TypeScript. Missing enum exporters fail generation early.
+                    </li>
                 </ul>
                 <p>
                     See <a href="#/requests">Requests</a> and{' '}
@@ -290,4 +295,3 @@ curl -sS http://127.0.0.1:3000/openapi.json | jq '.paths' > /tmp/openapi-paths.j
         </div>
     )
 }
-

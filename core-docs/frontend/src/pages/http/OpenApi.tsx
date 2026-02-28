@@ -131,6 +131,17 @@ pub struct ArticleCreateInput {
                     structs. Then run <code>make gen-types</code> to regenerate per-portal
                     TypeScript files directly from Rust struct definitions.
                 </p>
+                <p>
+                    Enum policy: only contract-facing enums are exported. The generator scans
+                    exported DTO TypeScript definitions (including datatable row DTOs), detects
+                    referenced enum types, and writes only those to{' '}
+                    <code>frontend/src/admin/types/enums.ts</code>.
+                </p>
+                <p>
+                    If a DTO references an external enum/type that is not registered in the enum
+                    exporter mapping, <code>make gen-types</code> fails fast so drift is caught in
+                    build time.
+                </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use ts_rs::TS;
 
@@ -140,14 +151,16 @@ pub struct AdminMeOutput {
     pub id: i64,
     pub username: String,
     pub name: String,
+    #[ts(type = "AdminType")]
+    pub admin_type: generated::models::AdminType,
 }`}</code>
                 </pre>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-bash">{`make gen-types`}</code>
                 </pre>
                 <p>
-                    This generates per-portal type files (e.g.{' '}
-                    <code>frontend/admin/types/AdminMeOutput.ts</code>) that stay in sync
+                    This generates per-portal type files under{' '}
+                    <code>frontend/src/admin/types/*.ts</code> that stay in sync
                     with Rust struct changes.
                 </p>
 

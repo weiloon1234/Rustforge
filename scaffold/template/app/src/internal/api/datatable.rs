@@ -2,18 +2,20 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::http::HeaderMap;
-use core_datatable::{DataTableActor, DataTableAsyncExportManager, DataTableContext, DataTableRegistry};
+use core_datatable::{
+    DataTableActor, DataTableAsyncExportManager, DataTableContext, DataTableRegistry,
+};
 use core_db::infra::storage::Storage;
+use core_web::auth::Guard;
 use core_web::datatable::{
     DataTableEmailExportManager, DataTableRouteOptions, DataTableRouteState,
 };
-use core_web::auth::Guard;
 use core_web::openapi::ApiRouter;
 use serde_json::Value;
 
 use generated::guards::AdminGuard;
 
-use crate::contracts::datatable::admin::admin::AdminAdminDataTableContract;
+use crate::contracts::datatable::admin::account::AdminAdminDataTableContract;
 use crate::internal::api::state::AppApiState;
 
 pub fn router(state: AppApiState) -> ApiRouter {
