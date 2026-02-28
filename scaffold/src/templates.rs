@@ -1507,19 +1507,16 @@ pub const APP_CONTRACTS_DATATABLE_MOD_RS: &str = r#"pub mod admin;
 pub const APP_CONTRACTS_DATATABLE_ADMIN_MOD_RS: &str = r#"pub mod admin;
 "#;
 
-pub const APP_CONTRACTS_DATATABLE_ADMIN_ADMIN_RS: &str = r#"use std::collections::BTreeMap;
-
-use core_datatable::DataTableInput;
+pub const APP_CONTRACTS_DATATABLE_ADMIN_ADMIN_RS: &str = r#"use core_datatable::DataTableInput;
 use core_web::datatable::{
-    DataTableEmailExportRequestBase, DataTableFilterFieldDto, DataTableFilterFieldType,
-    DataTableQueryRequestBase, DataTableQueryRequestContract, DataTableScopedContract,
+    DataTableFilterFieldDto, DataTableFilterFieldType,
+    DataTableGenericEmailExportRequest, DataTableGenericQueryRequest,
+    DataTableScopedContract,
 };
-use core_web::contracts::rustforge_contract;
 use generated::models::AdminType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use validator::Validate;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
@@ -1541,140 +1538,12 @@ pub struct AdminDatatableRow {
     pub updated_at: String,
 }
 
-#[rustforge_contract]
-#[derive(TS)]
-#[ts(export, export_to = "admin/types/")]
-pub struct AdminDatatableQueryInput {
-    #[serde(default)]
-    #[rf(nested)]
-    #[ts(type = "DataTableQueryRequestBase")]
-    pub base: DataTableQueryRequestBase,
-    #[serde(default)]
-    #[rf(length(min = 1, max = 120))]
-    pub q: Option<String>,
-    #[serde(default)]
-    #[rf(length(min = 3, max = 64))]
-    #[rf(alpha_dash)]
-    pub username: Option<String>,
-    #[serde(default)]
-    #[rf(length(min = 1, max = 120))]
-    pub email: Option<String>,
-    #[serde(default)]
-    #[ts(type = "AdminType | null")]
-    pub admin_type: Option<AdminType>,
-}
-
-impl AdminDatatableQueryInput {
-    pub fn to_input(&self) -> DataTableInput {
-        let mut input = self.base.to_input();
-        let mut params = BTreeMap::new();
-
-        if let Some(q) = self.q.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-            params.insert("q".to_string(), q.to_string());
-        }
-        if let Some(username) = self
-            .username
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
-            params.insert(
-                "f-like-username".to_string(),
-                username.to_ascii_lowercase(),
-            );
-        }
-        if let Some(email) = self
-            .email
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
-            params.insert("f-like-email".to_string(), email.to_string());
-        }
-        if let Some(admin_type) = self.admin_type {
-            params.insert("f-admin_type".to_string(), admin_type.as_str().to_string());
-        }
-
-        input.params.extend(params);
-        input
-    }
-}
-
-impl DataTableQueryRequestContract for AdminDatatableQueryInput {
-    fn query_base(&self) -> &DataTableQueryRequestBase {
-        &self.base
-    }
-
-    fn datatable_query_to_input(&self) -> DataTableInput {
-        self.to_input()
-    }
-}
-
-#[rustforge_contract]
-#[derive(TS)]
-#[ts(export, export_to = "admin/types/")]
-pub struct AdminDatatableEmailExportInput {
-    #[rf(nested)]
-    #[ts(type = "DataTableEmailExportRequestBase")]
-    pub base: DataTableEmailExportRequestBase,
-    #[serde(default)]
-    #[rf(length(min = 1, max = 120))]
-    pub q: Option<String>,
-    #[serde(default)]
-    #[rf(length(min = 3, max = 64))]
-    #[rf(alpha_dash)]
-    pub username: Option<String>,
-    #[serde(default)]
-    #[rf(length(min = 1, max = 120))]
-    pub email: Option<String>,
-    #[serde(default)]
-    #[ts(type = "AdminType | null")]
-    pub admin_type: Option<AdminType>,
-}
-
-impl AdminDatatableEmailExportInput {
-    pub fn to_input(&self) -> DataTableInput {
-        let mut input = self.base.query.to_input();
-        let mut params = BTreeMap::new();
-
-        if let Some(q) = self.q.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-            params.insert("q".to_string(), q.to_string());
-        }
-        if let Some(username) = self
-            .username
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
-            params.insert(
-                "f-like-username".to_string(),
-                username.to_ascii_lowercase(),
-            );
-        }
-        if let Some(email) = self
-            .email
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
-            params.insert("f-like-email".to_string(), email.to_string());
-        }
-        if let Some(admin_type) = self.admin_type {
-            params.insert("f-admin_type".to_string(), admin_type.as_str().to_string());
-        }
-
-        input.params.extend(params);
-        input.export_file_name = self.base.export_file_name.clone();
-        input
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct AdminAdminDataTableContract;
 
 impl DataTableScopedContract for AdminAdminDataTableContract {
-    type QueryRequest = AdminDatatableQueryInput;
-    type EmailRequest = AdminDatatableEmailExportInput;
+    type QueryRequest = DataTableGenericQueryRequest;
+    type EmailRequest = DataTableGenericEmailExportRequest;
     type Row = AdminDatatableRow;
 
     fn scoped_key(&self) -> &'static str {
@@ -8469,26 +8338,6 @@ export interface AdminLogoutOutput {
 "#;
 
 pub const FRONTEND_SRC_ADMIN_TYPES_DATATABLE_ADMIN_TS: &str = r#"import type { AdminType } from "./enums";
-import type {
-  DataTableQueryRequestBase,
-  DataTableEmailExportRequestBase,
-} from "@shared/types/datatable";
-
-export interface AdminDatatableQueryInput {
-  base?: DataTableQueryRequestBase;
-  q?: string | null;
-  username?: string | null;
-  email?: string | null;
-  admin_type?: AdminType | null;
-}
-
-export interface AdminDatatableEmailExportInput {
-  base: DataTableEmailExportRequestBase;
-  q?: string | null;
-  username?: string | null;
-  email?: string | null;
-  admin_type?: AdminType | null;
-}
 
 export interface AdminDatatableRow {
   id: number;
@@ -8589,11 +8438,8 @@ fn main() {
             rel_path: "admin/types/datatable-admin.ts",
             imports: &[
                 r#"import type { AdminType } from "./enums";"#,
-                r#"import type { DataTableQueryRequestBase, DataTableEmailExportRequestBase } from "@shared/types/datatable";"#,
             ],
             definitions: vec![
-                AdminDatatableQueryInput::export_to_string().expect("AdminDatatableQueryInput"),
-                AdminDatatableEmailExportInput::export_to_string().expect("AdminDatatableEmailExportInput"),
                 AdminDatatableRow::export_to_string().expect("AdminDatatableRow"),
             ],
         });

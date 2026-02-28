@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -425,6 +425,76 @@ pub trait DataTableQueryRequestContract: RequestContract {
     /// Override only when metadata behavior differs from `base.include_meta`.
     fn datatable_include_meta(&self) -> bool {
         self.query_base().include_meta
+    }
+}
+
+// ── Generic request types ─────────────────────────────────────
+//
+// Drop-in replacements for per-datatable custom request structs.
+// The frontend DataTable component sends filter values keyed by
+// `filter_key` from the meta response — these types capture them
+// automatically via `#[serde(flatten)]`.
+
+/// Generic datatable query request.
+///
+/// Collects filter params (both `f-` prefixed auto-filters and
+/// custom keys handled by `filter_query` hooks) from the JSON body.
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct DataTableGenericQueryRequest {
+    #[serde(default)]
+    #[validate(nested)]
+    pub base: DataTableQueryRequestBase,
+    #[serde(flatten)]
+    pub filters: BTreeMap<String, Value>,
+}
+
+impl DataTableQueryRequestContract for DataTableGenericQueryRequest {
+    fn query_base(&self) -> &DataTableQueryRequestBase {
+        &self.base
+    }
+
+    fn datatable_query_to_input(&self) -> DataTableInput {
+        let mut input = self.base.to_input();
+        for (key, value) in &self.filters {
+            let s = match value {
+                Value::String(s) => s.clone(),
+                Value::Null => continue,
+                other => other.to_string(),
+            };
+            if !s.trim().is_empty() {
+                input.params.insert(key.clone(), s);
+            }
+        }
+        input
+    }
+}
+
+/// Generic datatable email-export request.
+///
+/// Same flat-filter approach as [`DataTableGenericQueryRequest`].
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema)]
+pub struct DataTableGenericEmailExportRequest {
+    #[validate(nested)]
+    pub base: DataTableEmailExportRequestBase,
+    #[serde(flatten)]
+    pub filters: BTreeMap<String, Value>,
+}
+
+impl DataTableGenericEmailExportRequest {
+    pub fn to_input(&self) -> DataTableInput {
+        let mut input = self.base.query.to_input();
+        for (key, value) in &self.filters {
+            let s = match value {
+                Value::String(s) => s.clone(),
+                Value::Null => continue,
+                other => other.to_string(),
+            };
+            if !s.trim().is_empty() {
+                input.params.insert(key.clone(), s);
+            }
+        }
+        input.export_file_name = self.base.export_file_name.clone();
+        input
     }
 }
 
