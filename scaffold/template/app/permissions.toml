@@ -1,0 +1,14 @@
+# Permission catalog (single source of truth).
+[[permissions]]
+key = "admin.read"
+guard = "admin"
+label = "Read Admins"
+group = "admin"
+description = "View admin profile and datatable records."
+
+[[permissions]]
+key = "admin.manage"
+guard = "admin"
+label = "Manage Admins"
+group = "admin"
+description = "Create/update/delete admin records and perform management actions."

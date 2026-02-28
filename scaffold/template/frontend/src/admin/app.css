@@ -1,0 +1,179 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0f172a;
+  --color-foreground: #f1f5f9;
+  --color-muted: #94a3b8;
+  --color-muted-foreground: #64748b;
+  --color-surface: #1e293b;
+  --color-surface-hover: #334155;
+  --color-surface-active: #475569;
+  --color-primary: #8b5cf6;
+  --color-primary-hover: #7c3aed;
+  --color-primary-foreground: #ffffff;
+  --color-border: #334155;
+  --color-border-hover: #475569;
+  --color-input: #1e293b;
+  --color-input-border: #334155;
+  --color-input-border-hover: #475569;
+  --color-input-focus: #8b5cf6;
+  --color-input-placeholder: #64748b;
+  --color-input-disabled: #1a2332;
+  --color-ring: #8b5cf6;
+  --color-error: #ef4444;
+  --color-error-muted: #7f1d1d;
+  --color-warning: #f59e0b;
+  --color-warning-muted: #78350f;
+  --color-success: #22c55e;
+  --color-success-muted: #14532d;
+  --color-info: #3b82f6;
+  --color-info-muted: #1e3a5f;
+}
+
+@layer components {
+  .rf-field { @apply mb-4; }
+  .rf-label { @apply block mb-1.5 text-sm font-medium text-foreground; }
+  .rf-label-required::after { content: " *"; @apply text-error; }
+
+  .rf-input {
+    @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-foreground
+      placeholder:text-input-placeholder transition-colors duration-150
+      hover:border-input-border-hover focus:outline-none focus:ring-2 focus:ring-ring/40
+      focus:border-input-focus disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .rf-input-error {
+    @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
+  }
+
+  .rf-textarea {
+    @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-foreground
+      placeholder:text-input-placeholder transition-colors duration-150
+      hover:border-input-border-hover focus:outline-none focus:ring-2 focus:ring-ring/40
+      focus:border-input-focus disabled:opacity-50 disabled:cursor-not-allowed resize-y min-h-20;
+  }
+  .rf-textarea-error {
+    @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
+  }
+
+  .rf-select {
+    @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 pr-10 text-sm text-foreground
+      transition-colors duration-150 hover:border-input-border-hover focus:outline-none focus:ring-2
+      focus:ring-ring/40 focus:border-input-focus disabled:opacity-50 disabled:cursor-not-allowed
+      appearance-none bg-no-repeat;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-position: right 0.75rem center;
+    background-size: 1rem;
+  }
+  .rf-select-error {
+    @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
+  }
+  .rf-select-placeholder { @apply text-input-placeholder; }
+
+  .rf-checkbox-wrapper { @apply flex items-center gap-2.5 cursor-pointer; }
+  .rf-checkbox-hidden { @apply sr-only; }
+  .rf-checkbox-box {
+    @apply flex items-center justify-center h-[18px] w-[18px] shrink-0 rounded border-2 border-input-border bg-input
+      transition-all duration-150;
+  }
+  .rf-checkbox-icon { @apply h-3 w-3 text-primary-foreground opacity-0 transition-opacity duration-100; }
+  .rf-checkbox-hidden:checked + .rf-checkbox-box {
+    @apply border-primary bg-primary;
+  }
+  .rf-checkbox-hidden:checked + .rf-checkbox-box .rf-checkbox-icon { @apply opacity-100; }
+  .rf-checkbox-hidden:focus-visible + .rf-checkbox-box { @apply ring-2 ring-ring/40; }
+  .rf-checkbox-hidden:disabled + .rf-checkbox-box { @apply opacity-50 cursor-not-allowed; }
+  .rf-checkbox-wrapper:hover .rf-checkbox-box { @apply border-input-border-hover; }
+  .rf-checkbox-hidden:checked + .rf-checkbox-box:hover { @apply border-primary bg-primary; }
+  .rf-checkbox-error { @apply border-error; }
+  .rf-checkbox-label { @apply text-sm text-foreground select-none; }
+
+  .rf-radio-group { @apply flex flex-col gap-2; }
+  .rf-radio-wrapper { @apply flex items-center gap-2.5 cursor-pointer; }
+  .rf-radio-hidden { @apply sr-only; }
+  .rf-radio-circle {
+    @apply flex items-center justify-center h-[18px] w-[18px] shrink-0 rounded-full border-2 border-input-border bg-input
+      transition-all duration-150;
+  }
+  .rf-radio-dot {
+    @apply h-2 w-2 rounded-full bg-primary-foreground;
+  }
+  .rf-radio-hidden:checked + .rf-radio-circle {
+    @apply border-primary bg-primary;
+  }
+  .rf-radio-hidden:focus-visible + .rf-radio-circle { @apply ring-2 ring-ring/40; }
+  .rf-radio-hidden:disabled + .rf-radio-circle { @apply opacity-50 cursor-not-allowed; }
+  .rf-radio-wrapper:hover .rf-radio-circle { @apply border-input-border-hover; }
+  .rf-radio-hidden:checked + .rf-radio-circle:hover { @apply border-primary bg-primary; }
+  .rf-radio-error { @apply border-error; }
+  .rf-radio-label { @apply text-sm text-foreground select-none; }
+
+  .rf-error-message { @apply mt-1 text-xs text-error; }
+  .rf-note { @apply mt-1 text-xs text-muted; }
+  .rf-form-grid { @apply grid grid-cols-2 gap-x-4; }
+
+  /* ── Layout ─────────────────────────────────────── */
+  .rf-sidebar {
+    @apply fixed left-0 top-14 bottom-0 bg-surface border-r border-border
+      transition-all duration-200 overflow-y-auto overflow-x-hidden z-20;
+  }
+  .rf-sidebar-expanded { @apply w-64; }
+  .rf-sidebar-collapsed { @apply w-16; }
+  .rf-sidebar-link {
+    @apply flex items-center gap-3 px-4 py-2.5 text-sm text-muted rounded-lg
+      transition-colors duration-150 hover:bg-surface-hover hover:text-foreground whitespace-nowrap;
+  }
+  .rf-sidebar-link-active {
+    @apply bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary;
+  }
+  .rf-header {
+    @apply fixed top-0 left-0 right-0 h-14 bg-surface border-b border-border
+      flex items-center px-4 z-30;
+  }
+  .rf-stat-card {
+    @apply rounded-xl bg-surface border border-border p-5;
+  }
+  .rf-badge {
+    @apply inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-xs
+      font-semibold rounded-full bg-primary text-primary-foreground;
+  }
+
+  /* ── Modal ──────────────────────────────────────── */
+  .rf-modal-backdrop {
+    @apply fixed inset-0 flex items-center justify-center bg-black/50;
+    animation: rf-fade-in 150ms ease-out;
+  }
+  .rf-modal-panel {
+    @apply w-full flex flex-col rounded-xl bg-surface shadow-xl;
+    max-height: calc(100vh - 2rem);
+    animation: rf-slide-up 150ms ease-out;
+  }
+  .rf-modal-header {
+    @apply flex items-center justify-between shrink-0 px-6 py-4 border-b border-border;
+  }
+  .rf-modal-title { @apply text-lg font-semibold text-foreground; }
+  .rf-modal-close {
+    @apply rounded-lg p-1.5 text-muted transition-colors duration-150
+      hover:bg-surface-hover hover:text-foreground;
+  }
+  .rf-modal-body { @apply flex-1 overflow-y-auto px-6 py-4; }
+  .rf-modal-footer {
+    @apply flex justify-end gap-3 shrink-0 px-6 py-4 border-t border-border;
+  }
+  .rf-modal-btn-primary {
+    @apply px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground
+      transition-colors duration-150 hover:bg-primary/90;
+  }
+  .rf-modal-btn-secondary {
+    @apply px-4 py-2 text-sm font-medium rounded-lg border border-border text-foreground
+      transition-colors duration-150 hover:bg-surface-hover;
+  }
+}
+
+@keyframes rf-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes rf-slide-up {
+  from { opacity: 0; transform: translateY(0.5rem); }
+  to { opacity: 1; transform: translateY(0); }
+}

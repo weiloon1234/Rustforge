@@ -1,0 +1,38 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition.workspace = true
+
+[[bin]]
+name = "export-types"
+path = "src/bin/export-types.rs"
+
+[dependencies]
+bootstrap = { workspace = true }
+core-config = { workspace = true }
+core-db = { workspace = true }
+core-datatable = { workspace = true }
+core-mailer = { workspace = true }
+core-i18n = { workspace = true }
+core-jobs = { workspace = true }
+core-notify = { workspace = true }
+core-realtime = { workspace = true }
+core-web = { workspace = true }
+
+generated = { path = "../generated" }
+
+anyhow = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+validator = { workspace = true }
+schemars = { workspace = true }
+async-trait = { workspace = true }
+clap = { workspace = true }
+uuid = { workspace = true }
+time = { workspace = true }
+tower-cookies = { workspace = true }
+tower-http = { workspace = true, features = ["fs"] }
+ts-rs = { workspace = true }

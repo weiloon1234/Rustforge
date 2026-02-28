@@ -1,12 +1,14 @@
-mod templates;
-
 use anyhow::{bail, Context};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use clap::Parser;
 use colored::*;
+use include_dir::{include_dir, Dir, DirEntry, File};
 use rand::RngExt;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+static TEMPLATE_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/template");
 
 #[derive(Parser, Debug)]
 #[command(name = "scaffold")]
@@ -21,13 +23,6 @@ struct Cli {
     force: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct FileTemplate {
-    path: &'static str,
-    content: &'static str,
-    executable: bool,
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -39,47 +34,41 @@ async fn main() -> anyhow::Result<()> {
     ensure_output_ready(&output, cli.force)?;
 
     let app_key = generate_app_key();
-    let files = file_templates();
+    let replacements = [("APP_KEY", app_key.as_str())];
+
+    let files = template_files();
+    let agent_dirs = agent_link_dirs_from_paths(files.iter().map(|f| f.path()));
 
     for file in files {
-        let path = output.join(file.path);
+        let path = output.join(file.path());
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
 
-        let content = file.content.replace("{{APP_KEY}}", &app_key);
-        fs::write(&path, content)
-            .with_context(|| format!("failed to write {}", path.display()))?;
+        if let Some(content) = file.contents_utf8() {
+            let rendered = render_template(content, &replacements);
+            fs::write(&path, rendered.as_bytes())
+                .with_context(|| format!("failed to write {}", path.display()))?;
 
-        if file.executable {
-            make_executable(&path)?;
+            if is_shebang_script(rendered.as_bytes()) {
+                make_executable(&path)?;
+            }
+        } else {
+            fs::write(&path, file.contents())
+                .with_context(|| format!("failed to write {}", path.display()))?;
         }
 
         println!("{} {}", "Created".green(), path.display());
     }
 
-    // Create CLAUDE.md and GEMINI.md as symlinks to AGENTS.md in every
-    // directory that has an AGENTS.md file.
-    let agent_dirs: &[&str] = &[
-        "",
-        "app/src/contracts",
-        "app/src/internal/api",
-        "app/src/internal/workflows",
-        "app/src/internal/jobs",
-        "app/src/internal/middleware",
-        "app/src/internal/datatables",
-        "app/src/internal/realtime",
-        "app/src/validation",
-        "app/src/seeds",
-        "frontend",
-    ];
     for dir in agent_dirs {
-        let base = if dir.is_empty() {
+        let base = if dir.as_os_str().is_empty() {
             output.clone()
         } else {
             output.join(dir)
         };
+
         for link_name in &["CLAUDE.md", "GEMINI.md"] {
             let link_path = base.join(link_name);
             create_symlink(Path::new("AGENTS.md"), &link_path)
@@ -92,6 +81,62 @@ async fn main() -> anyhow::Result<()> {
     println!("{}", "Next: cd <output> && cargo check".cyan());
 
     Ok(())
+}
+
+fn template_files() -> Vec<&'static File<'static>> {
+    let mut files = Vec::new();
+    collect_template_files(&TEMPLATE_DIR, &mut files);
+    files.sort_by(|a, b| a.path().cmp(b.path()));
+    files
+}
+
+fn collect_template_files<'a>(dir: &'a Dir<'a>, out: &mut Vec<&'a File<'a>>) {
+    for entry in dir.entries() {
+        match entry {
+            DirEntry::Dir(child) => collect_template_files(child, out),
+            DirEntry::File(file) => out.push(file),
+        }
+    }
+}
+
+fn render_template(content: &str, replacements: &[(&str, &str)]) -> String {
+    let mut rendered = content.to_owned();
+
+    for (key, value) in replacements {
+        let token = format!("{{{{{key}}}}}");
+        rendered = rendered.replace(&token, value);
+    }
+
+    rendered
+}
+
+fn is_shebang_script(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"#!")
+}
+
+fn agent_link_dirs_from_paths<I, P>(paths: I) -> Vec<PathBuf>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<Path>,
+{
+    let mut dirs = BTreeSet::new();
+
+    for path in paths {
+        let path = path.as_ref();
+        if path.file_name().and_then(|name| name.to_str()) != Some("AGENTS.md") {
+            continue;
+        }
+
+        let dir = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+
+        dirs.insert(dir);
+    }
+
+    dirs.into_iter().collect()
 }
 
 fn generate_app_key() -> String {
@@ -141,659 +186,6 @@ fn ensure_output_ready(output: &Path, force: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn file_templates() -> Vec<FileTemplate> {
-    vec![
-        FileTemplate {
-            path: "Cargo.toml",
-            content: templates::ROOT_CARGO_TOML,
-            executable: false,
-        },
-        FileTemplate {
-            path: ".env.example",
-            content: templates::ROOT_ENV_EXAMPLE,
-            executable: false,
-        },
-        FileTemplate {
-            path: ".gitignore",
-            content: templates::ROOT_GITIGNORE,
-            executable: false,
-        },
-        FileTemplate {
-            path: ".gitattributes",
-            content: templates::ROOT_GITATTRIBUTES,
-            executable: false,
-        },
-        FileTemplate {
-            path: "Makefile",
-            content: templates::ROOT_MAKEFILE,
-            executable: false,
-        },
-        FileTemplate {
-            path: "README.md",
-            content: templates::ROOT_README_MD,
-            executable: false,
-        },
-        FileTemplate {
-            path: "i18n/en.json",
-            content: templates::ROOT_I18N_EN_JSON,
-            executable: false,
-        },
-        FileTemplate {
-            path: "i18n/zh.json",
-            content: templates::ROOT_I18N_ZH_JSON,
-            executable: false,
-        },
-        FileTemplate {
-            path: "console",
-            content: templates::ROOT_CONSOLE,
-            executable: true,
-        },
-        FileTemplate {
-            path: "bin/api-server",
-            content: templates::BIN_API_SERVER,
-            executable: true,
-        },
-        FileTemplate {
-            path: "bin/websocket-server",
-            content: templates::BIN_WEBSOCKET_SERVER,
-            executable: true,
-        },
-        FileTemplate {
-            path: "bin/worker",
-            content: templates::BIN_WORKER,
-            executable: true,
-        },
-        FileTemplate {
-            path: "bin/console",
-            content: templates::BIN_CONSOLE,
-            executable: true,
-        },
-        FileTemplate {
-            path: "scripts/install-ubuntu.sh",
-            content: templates::SCRIPT_INSTALL_UBUNTU_SH,
-            executable: true,
-        },
-        FileTemplate {
-            path: "scripts/update.sh",
-            content: templates::SCRIPT_UPDATE_SH,
-            executable: true,
-        },
-        FileTemplate {
-            path: "migrations/.gitkeep",
-            content: templates::MIGRATIONS_GITKEEP,
-            executable: false,
-        },
-        FileTemplate {
-            path: "public/.gitkeep",
-            content: templates::PUBLIC_GITKEEP,
-            executable: false,
-        },
-        FileTemplate {
-            path: "migrations/0000000001000_admin_auth.sql",
-            content: templates::MIGRATION_ADMIN_AUTH_SQL,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/Cargo.toml",
-            content: templates::APP_CARGO_TOML,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/configs.toml",
-            content: templates::APP_CONFIGS_TOML,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/permissions.toml",
-            content: templates::APP_PERMISSIONS_TOML,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/schemas/admin.toml",
-            content: templates::APP_SCHEMA_ADMIN_TOML,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/lib.rs",
-            content: templates::APP_LIB_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/contracts/mod.rs",
-            content: templates::APP_CONTRACTS_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/contracts/types/mod.rs",
-            content: templates::APP_CONTRACTS_TYPES_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/contracts/types/username.rs",
-            content: templates::APP_CONTRACTS_TYPES_USERNAME_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/contracts/datatable/mod.rs",
-            content: templates::APP_CONTRACTS_DATATABLE_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/contracts/datatable/admin/mod.rs",
-            content: templates::APP_CONTRACTS_DATATABLE_ADMIN_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/contracts/datatable/admin/admin.rs",
-            content: templates::APP_CONTRACTS_DATATABLE_ADMIN_ADMIN_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/contracts/api/mod.rs",
-            content: templates::APP_CONTRACTS_API_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/contracts/api/v1/mod.rs",
-            content: templates::APP_CONTRACTS_API_V1_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/contracts/api/v1/admin.rs",
-            content: templates::APP_CONTRACTS_API_V1_ADMIN_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/contracts/api/v1/admin_auth.rs",
-            content: templates::APP_CONTRACTS_API_V1_ADMIN_AUTH_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/validation/mod.rs",
-            content: templates::APP_VALIDATION_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/validation/sync.rs",
-            content: templates::APP_VALIDATION_SYNC_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/validation/username.rs",
-            content: templates::APP_VALIDATION_USERNAME_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/validation/db.rs",
-            content: templates::APP_VALIDATION_DB_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/mod.rs",
-            content: templates::APP_INTERNAL_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/api/mod.rs",
-            content: templates::APP_INTERNAL_API_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/api/state.rs",
-            content: templates::APP_INTERNAL_API_STATE_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/api/datatable.rs",
-            content: templates::APP_INTERNAL_API_DATATABLE_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/api/v1/mod.rs",
-            content: templates::APP_INTERNAL_API_V1_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/api/v1/admin.rs",
-            content: templates::APP_INTERNAL_API_V1_ADMIN_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/api/v1/admin_auth.rs",
-            content: templates::APP_INTERNAL_API_V1_ADMIN_AUTH_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/middleware/mod.rs",
-            content: templates::APP_INTERNAL_MIDDLEWARE_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/middleware/auth.rs",
-            content: templates::APP_INTERNAL_MIDDLEWARE_AUTH_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/workflows/mod.rs",
-            content: templates::APP_INTERNAL_WORKFLOWS_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/workflows/admin.rs",
-            content: templates::APP_INTERNAL_WORKFLOWS_ADMIN_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/workflows/admin_auth.rs",
-            content: templates::APP_INTERNAL_WORKFLOWS_ADMIN_AUTH_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/realtime/mod.rs",
-            content: templates::APP_INTERNAL_REALTIME_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/jobs/mod.rs",
-            content: templates::APP_INTERNAL_JOBS_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/datatables/mod.rs",
-            content: templates::APP_INTERNAL_DATATABLES_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/datatables/admin.rs",
-            content: templates::APP_INTERNAL_DATATABLES_ADMIN_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/seeds/mod.rs",
-            content: templates::APP_SEEDS_MOD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/seeds/countries_seeder.rs",
-            content: templates::APP_SEEDS_COUNTRIES_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/seeds/admin_bootstrap_seeder.rs",
-            content: templates::APP_SEEDS_ADMIN_BOOTSTRAP_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/bin/api-server.rs",
-            content: templates::APP_BIN_API_SERVER_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/bin/websocket-server.rs",
-            content: templates::APP_BIN_WEBSOCKET_SERVER_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/bin/worker.rs",
-            content: templates::APP_BIN_WORKER_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/bin/console.rs",
-            content: templates::APP_BIN_CONSOLE_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/bin/export-types.rs",
-            content: templates::APP_BIN_EXPORT_TYPES_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "generated/Cargo.toml",
-            content: templates::GENERATED_CARGO_TOML,
-            executable: false,
-        },
-        FileTemplate {
-            path: "generated/build.rs",
-            content: templates::GENERATED_BUILD_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "generated/src/lib.rs",
-            content: templates::GENERATED_LIB_RS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "generated/src/extensions.rs",
-            content: templates::GENERATED_EXTENSIONS_RS,
-            executable: false,
-        },
-        // ── Frontend files ────────────────────────────────────
-        FileTemplate {
-            path: "frontend/package.json",
-            content: templates::FRONTEND_PACKAGE_JSON,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/vite.config.user.ts",
-            content: templates::FRONTEND_VITE_CONFIG_USER_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/vite.config.admin.ts",
-            content: templates::FRONTEND_VITE_CONFIG_ADMIN_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/tsconfig.json",
-            content: templates::FRONTEND_TSCONFIG_JSON,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/tsconfig.node.json",
-            content: templates::FRONTEND_TSCONFIG_NODE_JSON,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/postcss.config.js",
-            content: templates::FRONTEND_POSTCSS_CONFIG_JS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/user.html",
-            content: templates::FRONTEND_USER_HTML,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/admin.html",
-            content: templates::FRONTEND_ADMIN_HTML,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/user/main.tsx",
-            content: templates::FRONTEND_SRC_USER_MAIN_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/user/App.tsx",
-            content: templates::FRONTEND_SRC_USER_APP_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/user/app.css",
-            content: templates::FRONTEND_SRC_USER_APP_CSS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/main.tsx",
-            content: templates::FRONTEND_SRC_ADMIN_MAIN_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/App.tsx",
-            content: templates::FRONTEND_SRC_ADMIN_APP_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/nav.ts",
-            content: templates::FRONTEND_SRC_ADMIN_NAV_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/app.css",
-            content: templates::FRONTEND_SRC_ADMIN_APP_CSS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/.gitkeep",
-            content: templates::FRONTEND_SRC_SHARED_GITKEEP,
-            executable: false,
-        },
-        // ── Frontend TypeScript type files ───────────────────
-        FileTemplate {
-            path: "frontend/src/shared/types/api.ts",
-            content: templates::FRONTEND_SRC_SHARED_TYPES_API_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/types/datatable.ts",
-            content: templates::FRONTEND_SRC_SHARED_TYPES_DATATABLE_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/types/index.ts",
-            content: templates::FRONTEND_SRC_SHARED_TYPES_INDEX_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/types/enums.ts",
-            content: templates::FRONTEND_SRC_ADMIN_TYPES_ENUMS_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/types/admin.ts",
-            content: templates::FRONTEND_SRC_ADMIN_TYPES_ADMIN_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/types/admin-auth.ts",
-            content: templates::FRONTEND_SRC_ADMIN_TYPES_ADMIN_AUTH_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/types/datatable-admin.ts",
-            content: templates::FRONTEND_SRC_ADMIN_TYPES_DATATABLE_ADMIN_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/types/index.ts",
-            content: templates::FRONTEND_SRC_ADMIN_TYPES_INDEX_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/user/types/index.ts",
-            content: templates::FRONTEND_SRC_USER_TYPES_INDEX_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/i18n.ts",
-            content: templates::FRONTEND_SRC_SHARED_I18N_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/createApiClient.ts",
-            content: templates::FRONTEND_SRC_SHARED_CREATE_API_CLIENT_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/createAuthStore.ts",
-            content: templates::FRONTEND_SRC_SHARED_CREATE_AUTH_STORE_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/ProtectedRoute.tsx",
-            content: templates::FRONTEND_SRC_SHARED_PROTECTED_ROUTE_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/useAutoForm.tsx",
-            content: templates::FRONTEND_SRC_SHARED_USE_AUTO_FORM_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/helpers.ts",
-            content: templates::FRONTEND_SRC_SHARED_HELPERS_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/components/index.ts",
-            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_INDEX_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/components/DataTable.tsx",
-            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_DATA_TABLE_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/components/FieldErrors.tsx",
-            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_FIELD_ERRORS_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/components/TextInput.tsx",
-            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_TEXT_INPUT_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/components/TextArea.tsx",
-            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_TEXT_AREA_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/components/Select.tsx",
-            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_SELECT_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/components/Checkbox.tsx",
-            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_CHECKBOX_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/components/Radio.tsx",
-            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_RADIO_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/useModalStore.ts",
-            content: templates::FRONTEND_SRC_SHARED_USE_MODAL_STORE_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/components/Modal.tsx",
-            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_MODAL_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/shared/components/ModalOutlet.tsx",
-            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_MODAL_OUTLET_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/user/stores/auth.ts",
-            content: templates::FRONTEND_SRC_USER_STORES_AUTH_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/user/api.ts",
-            content: templates::FRONTEND_SRC_USER_API_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/stores/auth.ts",
-            content: templates::FRONTEND_SRC_ADMIN_STORES_AUTH_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/stores/notifications.ts",
-            content: templates::FRONTEND_SRC_ADMIN_STORES_NOTIFICATIONS_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/api.ts",
-            content: templates::FRONTEND_SRC_ADMIN_API_TS,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/components/Sidebar.tsx",
-            content: templates::FRONTEND_SRC_ADMIN_COMPONENTS_SIDEBAR_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/components/Header.tsx",
-            content: templates::FRONTEND_SRC_ADMIN_COMPONENTS_HEADER_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/layouts/AdminLayout.tsx",
-            content: templates::FRONTEND_SRC_ADMIN_LAYOUTS_ADMIN_LAYOUT_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/pages/LoginPage.tsx",
-            content: templates::FRONTEND_SRC_ADMIN_PAGES_LOGIN_PAGE_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/pages/DashboardPage.tsx",
-            content: templates::FRONTEND_SRC_ADMIN_PAGES_DASHBOARD_PAGE_TSX,
-            executable: false,
-        },
-        FileTemplate {
-            path: "frontend/src/admin/pages/AdminsPage.tsx",
-            content: templates::FRONTEND_SRC_ADMIN_PAGES_ADMINS_PAGE_TSX,
-            executable: false,
-        },
-        // ── Agent guideline files ──────────────────────────────
-        FileTemplate {
-            path: "frontend/AGENTS.md",
-            content: templates::FRONTEND_AGENTS_MD,
-            executable: false,
-        },
-        FileTemplate {
-            path: "AGENTS.md",
-            content: templates::ROOT_AGENTS_MD,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/contracts/AGENTS.md",
-            content: templates::CONTRACTS_AGENTS_MD,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/api/AGENTS.md",
-            content: templates::API_AGENTS_MD,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/workflows/AGENTS.md",
-            content: templates::WORKFLOWS_AGENTS_MD,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/jobs/AGENTS.md",
-            content: templates::JOBS_AGENTS_MD,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/middleware/AGENTS.md",
-            content: templates::MIDDLEWARE_AGENTS_MD,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/datatables/AGENTS.md",
-            content: templates::DATATABLES_AGENTS_MD,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/internal/realtime/AGENTS.md",
-            content: templates::REALTIME_AGENTS_MD,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/validation/AGENTS.md",
-            content: templates::VALIDATION_AGENTS_MD,
-            executable: false,
-        },
-        FileTemplate {
-            path: "app/src/seeds/AGENTS.md",
-            content: templates::SEEDS_AGENTS_MD,
-            executable: false,
-        },
-    ]
-}
-
 #[cfg(unix)]
 fn make_executable(path: &Path) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -820,8 +212,13 @@ fn create_symlink(target: &Path, link: &Path) -> anyhow::Result<()> {
         fs::remove_file(link)
             .with_context(|| format!("failed to remove existing {}", link.display()))?;
     }
-    std::os::unix::fs::symlink(target, link)
-        .with_context(|| format!("failed to symlink {} -> {}", link.display(), target.display()))?;
+    std::os::unix::fs::symlink(target, link).with_context(|| {
+        format!(
+            "failed to symlink {} -> {}",
+            link.display(),
+            target.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -830,7 +227,46 @@ fn create_symlink(target: &Path, link: &Path) -> anyhow::Result<()> {
     // On non-Unix, fall back to copying the file
     let content = fs::read_to_string(link.parent().unwrap().join(target))
         .with_context(|| format!("failed to read {}", target.display()))?;
-    fs::write(link, content)
-        .with_context(|| format!("failed to write {}", link.display()))?;
+    fs::write(link, content).with_context(|| format!("failed to write {}", link.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_template_replaces_known_tokens_only() {
+        let rendered = render_template(
+            "APP_KEY={{APP_KEY}}\nMISSING={{MISSING}}\n",
+            &[("APP_KEY", "abc")],
+        );
+        assert_eq!(rendered, "APP_KEY=abc\nMISSING={{MISSING}}\n");
+    }
+
+    #[test]
+    fn agent_link_dirs_are_deduped_and_sorted() {
+        let dirs = agent_link_dirs_from_paths([
+            "AGENTS.md",
+            "frontend/AGENTS.md",
+            "app/src/contracts/AGENTS.md",
+            "frontend/AGENTS.md",
+            "README.md",
+        ]);
+
+        assert_eq!(
+            dirs,
+            vec![
+                PathBuf::new(),
+                PathBuf::from("app/src/contracts"),
+                PathBuf::from("frontend"),
+            ]
+        );
+    }
+
+    #[test]
+    fn shebang_detection_is_prefix_based() {
+        assert!(is_shebang_script(b"#!/usr/bin/env bash\necho hi\n"));
+        assert!(!is_shebang_script(b"echo hi\n"));
+    }
 }

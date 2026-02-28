@@ -1,0 +1,5 @@
+{
+  "Welcome back, :name": "Welcome back, :name",
+  "Page :page of :total_pages (:total_records total)": "Page :page of :total_pages (:total_records total)",
+  "Are you sure you want to delete \":username\"?": "Are you sure you want to delete \":username\"?"
+}

@@ -36,6 +36,8 @@ cargo install --git https://github.com/weiloon1234/Rustforge.git scaffold
 scaffold --output /path/to/Rustforge-Starter
 ```
 
+Scaffold source of truth lives in `scaffold/template/`. Edit files there when updating starter output.
+
 ### 2. Dependency mode
 
 Starter output uses git dependencies to Rustforge (`branch = "main"`).

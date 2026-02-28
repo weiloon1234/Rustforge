@@ -1,0 +1,25 @@
+[AdminType]
+type = "enum"
+storage = "string"
+variants = ["Developer", "SuperAdmin", "Admin"]
+
+auth = true
+auth_model = "admin"
+
+[model.admin]
+table = "admin"
+pk = "id"
+pk_type = "i64"
+id_strategy = "snowflake"
+soft_delete = true
+fields = [
+  "id:i64",
+  "username:string",
+  "email:Option<String>",
+  "password:hashed",
+  "name:string",
+  "admin_type:AdminType",
+  "abilities:serde_json::Value",
+  "created_at:datetime",
+  "updated_at:datetime"
+]

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export APP_CONFIGS_PATH="${APP_CONFIGS_PATH:-app/configs.toml}"
+export APP_SEEDERS_DIR="${APP_SEEDERS_DIR:-app/src/seeds}"
+export PUBLIC_PATH="${PUBLIC_PATH:-public}"
+cargo run -p app --bin worker
