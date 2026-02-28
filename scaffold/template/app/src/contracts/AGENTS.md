@@ -165,26 +165,16 @@ pub struct ArticleOutput {
 }
 ```
 
-### Registering in `export-types.rs`
+### Auto-discovery in `export-types.rs`
 
-After adding `#[derive(TS)]` to your structs, register them in `app/src/bin/export-types.rs`:
+No manual registration is needed. `app/build.rs` scans:
 
-```rust
-// Add a new TsFile block:
-{
-    use app::contracts::api::v1::admin::article::*;
-    files.push(TsFile {
-        rel_path: "admin/types/article.ts",
-        definitions: vec![
-            CreateArticleInput::export_to_string().expect("CreateArticleInput"),
-            ArticleOutput::export_to_string().expect("ArticleOutput"),
-        ],
-        enums: BTreeSet::new(),
-    });
-}
-```
+- `app/src/contracts/api/v1/**`
+- `app/src/contracts/datatable/**`
 
-Then update the barrel `frontend/src/admin/types/index.ts` to re-export and run `make gen-types`.
+for public types with both `#[derive(TS)]` and `#[ts(export, export_to = "...")]`, then auto-registers them for `make gen-types`.
+
+Per-portal `frontend/src/{portal}/types/index.ts` is generated automatically from discovered files.
 
 ### Conventions
 

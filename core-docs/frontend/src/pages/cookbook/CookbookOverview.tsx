@@ -50,6 +50,11 @@ export function CookbookOverview() {
                         automatic TypeScript generation via <code>make gen-types</code>.
                     </li>
                     <li>
+                        Shared framework TypeScript primitives are generated into{' '}
+                        <code>shared/types/platform.ts</code> (localized, attachments, meta, JSON
+                        shape generics) and exported via <code>@shared/types</code>.
+                    </li>
+                    <li>
                         Enum export policy: export only contract-facing enums referenced by DTO
                         fields (API + datatable contracts), not every enum in the codebase.
                     </li>

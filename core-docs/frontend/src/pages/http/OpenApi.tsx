@@ -138,6 +138,12 @@ pub struct ArticleCreateInput {
                     <code>frontend/src/admin/types/enums.ts</code>.
                 </p>
                 <p>
+                    Shared framework generics are also emitted by default to{' '}
+                    <code>frontend/src/shared/types/platform.ts</code> (localized, attachments,
+                    meta, JSON value types), then re-exported from{' '}
+                    <code>@shared/types</code>.
+                </p>
+                <p>
                     If a DTO references an external enum/type that is not registered in the enum
                     exporter mapping, <code>make gen-types</code> fails fast so drift is caught in
                     build time.

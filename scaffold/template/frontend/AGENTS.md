@@ -26,6 +26,7 @@ frontend/
     │   ├── types/                     # Generated shared TS types (make gen-types)
     │   │   ├── api.ts                 # ApiResponse<T>, ApiErrorResponse
     │   │   ├── datatable.ts           # DataTable request/response generics
+    │   │   ├── platform.ts            # Localized, attachments, meta, JSON generic shapes
     │   │   └── index.ts               # Barrel export
     │   ├── i18n.ts                    # i18next init (shared JSON, :param transform)
     │   ├── createAuthStore.ts         # Zustand auth store factory
@@ -190,18 +191,16 @@ make gen          # Code generation + type generation
 
 ### How it works
 
-1. Rust contract structs derive `ts_rs::TS` with `#[ts(export, export_to = "admin/types/")]`
-2. `app/src/bin/export-types.rs` calls `T::export_to_string()` for each contract type
-3. The binary assembles complete `.ts` files with proper imports and writes to `frontend/src/`
-4. Framework types (ApiResponse, DataTable*) and enum types are emitted as static strings
+1. Rust contract structs derive `ts_rs::TS` with `#[ts(export, export_to = "{portal}/types/")]`
+2. `app/build.rs` auto-discovers contract/datatable TS types from `app/src/contracts/api/v1/**` and `app/src/contracts/datatable/**`
+3. `app/src/bin/export-types.rs` exports discovered types, assembles `.ts` files with enum imports, and writes to `frontend/src/`
+4. Per-portal `types/index.ts`, shared framework types, and enum types are emitted automatically
 
 ### Adding types for a new domain
 
 1. In your Rust contract, add `#[derive(TS)]` and `#[ts(export, export_to = "{portal}/types/")]`
 2. For fields using external types (generated enums, framework types), add `#[ts(type = "TypeName")]`
-3. Register the types in `app/src/bin/export-types.rs` (add a new `TsFile` block)
-4. Update the barrel `index.ts` to re-export the new module
-5. Run `make gen-types`
+3. Run `make gen-types` (types and portal barrels are discovered/generated automatically)
 
 ### Type mapping conventions
 

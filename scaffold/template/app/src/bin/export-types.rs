@@ -1,8 +1,8 @@
 //! Exports Rust contract types to TypeScript.
 //!
 //! Uses `ts-rs` to convert Rust types with `#[derive(TS)]` into TypeScript
-//! definitions, then writes them to `frontend/src/` alongside static framework
-//! types (ApiResponse, DataTable*, enums).
+//! definitions, then writes them to `frontend/src/` alongside framework
+//! shared types (ApiResponse, DataTable*, platform primitives, enums).
 //!
 //! Run: `cargo run -p app --bin export-types`
 //! Or:  `make gen-types`
@@ -18,70 +18,33 @@ use ts_rs::TS;
 /// A generated TypeScript file: imports + ts-rs type definitions.
 struct TsFile {
     /// Relative path from `frontend/src/`, e.g. `admin/types/admin.ts`
-    rel_path: &'static str,
+    rel_path: String,
     /// TypeScript definitions produced by ts-rs (collected at runtime).
     definitions: Vec<String>,
     /// Contract-facing enums referenced by the definitions.
     enums: BTreeSet<String>,
 }
 
+#[derive(Clone, Copy)]
+struct AutoTsType {
+    rel_path: &'static str,
+    rust_path: &'static str,
+    export: fn() -> String,
+}
+
+include!(concat!(env!("OUT_DIR"), "/export_types_registry.rs"));
+
 fn main() {
     let base = Path::new("frontend/src");
 
     // ── 1. Contract types via ts-rs ─────────────────────────
-    let mut files: Vec<TsFile> = Vec::new();
-
-    // admin/types/admin.ts
-    {
-        use app::contracts::api::v1::admin::account::*;
-        files.push(TsFile {
-            rel_path: "admin/types/admin.ts",
-            definitions: vec![
-                CreateAdminInput::export_to_string().expect("CreateAdminInput"),
-                UpdateAdminInput::export_to_string().expect("UpdateAdminInput"),
-                AdminOutput::export_to_string().expect("AdminOutput"),
-                AdminDeleteOutput::export_to_string().expect("AdminDeleteOutput"),
-            ],
-            enums: BTreeSet::new(),
-        });
-    }
-
-    // admin/types/admin-auth.ts
-    {
-        use app::contracts::api::v1::admin::auth::*;
-        files.push(TsFile {
-            rel_path: "admin/types/admin-auth.ts",
-            definitions: vec![
-                AdminLoginInput::export_to_string().expect("AdminLoginInput"),
-                AdminRefreshInput::export_to_string().expect("AdminRefreshInput"),
-                AdminLogoutInput::export_to_string().expect("AdminLogoutInput"),
-                AdminProfileUpdateInput::export_to_string().expect("AdminProfileUpdateInput"),
-                AdminPasswordUpdateInput::export_to_string().expect("AdminPasswordUpdateInput"),
-                AdminAuthOutput::export_to_string().expect("AdminAuthOutput"),
-                AdminMeOutput::export_to_string().expect("AdminMeOutput"),
-                AdminProfileUpdateOutput::export_to_string().expect("AdminProfileUpdateOutput"),
-                AdminPasswordUpdateOutput::export_to_string().expect("AdminPasswordUpdateOutput"),
-                AdminLogoutOutput::export_to_string().expect("AdminLogoutOutput"),
-            ],
-            enums: BTreeSet::new(),
-        });
-    }
-
-    // admin/types/datatable-admin.ts
-    {
-        use app::contracts::datatable::admin::account::*;
-        files.push(TsFile {
-            rel_path: "admin/types/datatable-admin.ts",
-            definitions: vec![AdminDatatableRow::export_to_string().expect("AdminDatatableRow")],
-            enums: BTreeSet::new(),
-        });
-    }
+    let mut files = load_discovered_ts_files();
 
     // Determine which contract-facing enums are actually referenced by DTOs.
     let known_contract_types = collect_declared_contract_types(&files);
     for ts_file in &mut files {
         ts_file.enums = detect_enum_references(
-            ts_file.rel_path,
+            ts_file.rel_path.as_str(),
             &ts_file.definitions,
             &known_contract_types,
         );
@@ -89,14 +52,20 @@ fn main() {
 
     // Write ts-rs generated files
     for ts_file in &files {
-        let path = base.join(ts_file.rel_path);
+        let path = base.join(&ts_file.rel_path);
         write_file(&path, &assemble(ts_file));
     }
 
     // ── 2. Enum types (serde-derived) ────────────────────────
     let required_enums_by_portal = collect_required_enums_by_portal(&files);
-    for (portal, enums) in &required_enums_by_portal {
-        let enums_ts = assemble_enums_file(enums);
+
+    let all_portals = collect_all_portals(&files, &required_enums_by_portal);
+    for portal in &all_portals {
+        let enums = required_enums_by_portal
+            .get(portal.as_str())
+            .cloned()
+            .unwrap_or_default();
+        let enums_ts = assemble_enums_file(&enums);
         write_file(&base.join(format!("{portal}/types/enums.ts")), &enums_ts);
     }
 
@@ -105,21 +74,111 @@ fn main() {
     // These mirror core-web types that don't live in the app crate.
     // The scaffold also writes identical initial copies; this binary
     // overwrites them to keep everything in sync after contract changes.
-    let statics: &[(&str, &str)] = &[
-        ("shared/types/api.ts", SHARED_API_TS),
-        ("shared/types/datatable.ts", SHARED_DATATABLE_TS),
-        ("shared/types/index.ts", SHARED_INDEX_TS),
-        ("admin/types/index.ts", ADMIN_INDEX_TS),
-        ("user/types/index.ts", USER_INDEX_TS),
-    ];
-    for (rel, content) in statics {
-        write_file(&base.join(rel), content);
+    write_file(
+        &base.join("shared/types/platform.ts"),
+        &render_shared_platform_ts(),
+    );
+
+    for (portal, content) in assemble_portal_indexes(&all_portals, &files) {
+        write_file(&base.join(format!("{portal}/types/index.ts")), &content);
     }
+    write_file(&base.join("shared/types/api.ts"), SHARED_API_TS);
+    write_file(&base.join("shared/types/datatable.ts"), SHARED_DATATABLE_TS);
+    write_file(&base.join("shared/types/index.ts"), SHARED_INDEX_TS);
 
     println!("\nTypeScript types regenerated in frontend/src/");
 }
 
 // ── Helpers ──────────────────────────────────────────────────
+
+fn load_discovered_ts_files() -> Vec<TsFile> {
+    let mut grouped: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+
+    for discovered in discovered_ts_types() {
+        grouped
+            .entry(discovered.rel_path.to_string())
+            .or_default()
+            .push((discovered.rust_path.to_string(), (discovered.export)()));
+    }
+
+    let mut files = Vec::new();
+    for (rel_path, mut exports) in grouped {
+        exports.sort_by(|a, b| a.0.cmp(&b.0));
+        let definitions = exports.into_iter().map(|(_, def)| def).collect();
+        files.push(TsFile {
+            rel_path,
+            definitions,
+            enums: BTreeSet::new(),
+        });
+    }
+    files.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    files
+}
+
+fn collect_all_portals(
+    files: &[TsFile],
+    required_enums_by_portal: &BTreeMap<String, BTreeSet<String>>,
+) -> BTreeSet<String> {
+    let mut portals = BTreeSet::new();
+
+    for portal in discovered_portals() {
+        portals.insert((*portal).to_string());
+    }
+
+    for file in files {
+        if let Some(portal) = portal_from_rel_path(&file.rel_path) {
+            portals.insert(portal.to_string());
+        }
+    }
+
+    portals.extend(required_enums_by_portal.keys().cloned());
+    portals
+}
+
+fn assemble_portal_indexes(
+    portals: &BTreeSet<String>,
+    files: &[TsFile],
+) -> BTreeMap<String, String> {
+    let mut modules_by_portal: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for file in files {
+        let Some(portal) = portal_from_rel_path(&file.rel_path) else {
+            continue;
+        };
+
+        let Some(rel_from_types_dir) = file.rel_path.strip_prefix(&format!("{portal}/types/"))
+        else {
+            continue;
+        };
+        if rel_from_types_dir == "index.ts" || rel_from_types_dir == "enums.ts" {
+            continue;
+        }
+
+        let Some(module_name) = rel_from_types_dir.strip_suffix(".ts") else {
+            continue;
+        };
+        modules_by_portal
+            .entry(portal.to_string())
+            .or_default()
+            .insert(module_name.to_string());
+    }
+
+    let mut indexes = BTreeMap::new();
+    for portal in portals {
+        let mut out = String::new();
+        out.push_str(&format!("export * from \"@{portal}/types/enums\";\n"));
+
+        if let Some(modules) = modules_by_portal.get(portal) {
+            for module in modules {
+                out.push_str(&format!("export * from \"@{portal}/types/{module}\";\n"));
+            }
+        } else {
+            out.push_str("// Add portal-specific contract types here as contracts are created.\n");
+        }
+
+        indexes.insert(portal.to_string(), out);
+    }
+    indexes
+}
 
 fn enum_to_ts_type<T: Serialize>(name: &str, variants: &[T]) -> String {
     let parts: Vec<String> = variants
@@ -133,7 +192,7 @@ fn assemble(f: &TsFile) -> String {
     let header = "// Auto-generated by `cargo run -p app --bin export-types`.\n\
                   // Do not edit manually — run `make gen-types` to regenerate.\n";
     let mut out = String::from(header);
-    let portal = portal_from_rel_path(f.rel_path)
+    let portal = portal_from_rel_path(&f.rel_path)
         .unwrap_or_else(|| panic!("invalid TS export path (missing portal): {}", f.rel_path));
     if let Some(import) = enum_import_line(portal, &f.enums) {
         out.push_str(&import);
@@ -186,7 +245,7 @@ fn collect_required_enums_by_portal(files: &[TsFile]) -> BTreeMap<String, BTreeS
         if file.enums.is_empty() {
             continue;
         }
-        let portal = portal_from_rel_path(file.rel_path).unwrap_or_else(|| {
+        let portal = portal_from_rel_path(&file.rel_path).unwrap_or_else(|| {
             panic!("invalid TS export path (missing portal): {}", file.rel_path)
         });
         out.entry(portal.to_string())
@@ -242,6 +301,80 @@ fn detect_enum_references(
     }
 
     enums
+}
+
+fn render_shared_platform_ts() -> String {
+    use generated::{DEFAULT_LOCALE, SUPPORTED_LOCALES};
+
+    if !SUPPORTED_LOCALES.contains(&DEFAULT_LOCALE) {
+        panic!(
+            "DEFAULT_LOCALE `{}` is not included in SUPPORTED_LOCALES",
+            DEFAULT_LOCALE
+        );
+    }
+
+    let locale_union = SUPPORTED_LOCALES
+        .iter()
+        .map(|locale| format!("\"{locale}\""))
+        .collect::<Vec<_>>()
+        .join(" | ");
+
+    format!(
+        "\
+export type LocaleCode = {locale_union};
+export const DEFAULT_LOCALE: LocaleCode = \"{default_locale}\";
+
+// Localized text payload generated from app language settings.
+export type MultiLang<TLocale extends string = LocaleCode> = Record<TLocale, string>;
+
+// field -> owner_id -> locale -> value
+export type LocalizedMap<TLocale extends string = LocaleCode> = Record<
+  string,
+  Record<number, Record<TLocale, string>>
+>;
+
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
+export interface JsonObject {{
+  [key: string]: JsonValue;
+}}
+
+// Generic typed meta shape (compile-time typed keys/values).
+export type MetaRecord<
+  TShape extends Record<string, unknown> = Record<string, JsonValue>
+> = Partial<TShape>;
+
+// field -> owner_id -> value
+export type MetaMap = Record<string, Record<number, JsonValue>>;
+
+export interface AttachmentUploadDto {{
+  id?: string | null;
+  name?: string | null;
+  path: string;
+  content_type: string;
+  size: number;
+  width?: number | null;
+  height?: number | null;
+}}
+
+// Backward-compatible alias used by generated model APIs.
+export type AttachmentInput = AttachmentUploadDto;
+
+export interface Attachment {{
+  id: string;
+  path: string;
+  content_type: string;
+  size: number;
+  width: number | null;
+  height: number | null;
+  created_at: string;
+}}
+
+// field -> owner_id -> attachments
+export type AttachmentMap = Record<string, Record<number, Attachment[]>>;
+",
+        default_locale = DEFAULT_LOCALE
+    )
 }
 
 fn collect_used_type_identifiers(definition: &str, out: &mut BTreeSet<String>) {
@@ -566,18 +699,5 @@ export interface DataTableExportStatusResponseDto {
 const SHARED_INDEX_TS: &str = "\
 export * from \"@shared/types/api\";
 export * from \"@shared/types/datatable\";
-";
-
-const ADMIN_INDEX_TS: &str = "\
-export * from \"@admin/types/enums\";
-export * from \"@admin/types/admin\";
-export * from \"@admin/types/admin-auth\";
-export * from \"@admin/types/datatable-admin\";
-";
-
-const USER_INDEX_TS: &str = "\
-// Add user-specific types here as user contracts are created.
-// Example:
-//   export * from \"@user/types/user\";
-//   export * from \"@user/types/user-auth\";
+export * from \"@shared/types/platform\";
 ";

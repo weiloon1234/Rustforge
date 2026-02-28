@@ -1,4 +1,2 @@
-// Add user-specific types here as user contracts are created.
-// Example:
-//   export * from "@user/types/user";
-//   export * from "@user/types/user-auth";
+export * from "@user/types/enums";
+// Add portal-specific contract types here as contracts are created.
