@@ -634,7 +634,8 @@ pub const ROOT_I18N_ZH_JSON: &str = r#"{
   "Are you sure you want to delete \":username\"?": "确定要删除「:username」吗？",
   "No records found.": "未找到记录。",
   "Read Admins": "查看管理员",
-  "Manage Admins": "管理管理员"
+  "Manage Admins": "管理管理员",
+  "Cannot delete developer or superadmin accounts": "不能删除开发者或超级管理员账号"
 }
 "#;
 
@@ -2879,6 +2880,13 @@ pub async fn remove(
         )));
     }
 
+    let target = detail(state, id).await?;
+    if matches!(target.admin_type, AdminType::Developer | AdminType::SuperAdmin) {
+        return Err(AppError::Forbidden(t(
+            "Cannot delete developer or superadmin accounts",
+        )));
+    }
+
     let affected = Admin::new(DbConn::pool(&state.db), None)
         .delete(id)
         .await
@@ -4808,25 +4816,41 @@ pub const FRONTEND_SRC_USER_APP_CSS: &str = r#"@import "tailwindcss";
   }
   .rf-select-placeholder { @apply text-input-placeholder; }
 
-  .rf-checkbox-wrapper { @apply flex items-start gap-2; }
-  .rf-checkbox {
-    @apply mt-0.5 h-4 w-4 shrink-0 rounded border border-input-border bg-input
-      transition-colors duration-150 hover:border-input-border-hover focus:outline-none
-      focus:ring-2 focus:ring-ring/40 focus:ring-offset-0 disabled:opacity-50
-      disabled:cursor-not-allowed;
-    accent-color: var(--color-primary);
+  .rf-checkbox-wrapper { @apply flex items-center gap-2.5 cursor-pointer; }
+  .rf-checkbox-hidden { @apply sr-only; }
+  .rf-checkbox-box {
+    @apply flex items-center justify-center h-[18px] w-[18px] shrink-0 rounded border-2 border-input-border bg-input
+      transition-all duration-150;
   }
+  .rf-checkbox-icon { @apply h-3 w-3 text-primary-foreground opacity-0 transition-opacity duration-100; }
+  .rf-checkbox-hidden:checked + .rf-checkbox-box {
+    @apply border-primary bg-primary;
+  }
+  .rf-checkbox-hidden:checked + .rf-checkbox-box .rf-checkbox-icon { @apply opacity-100; }
+  .rf-checkbox-hidden:focus-visible + .rf-checkbox-box { @apply ring-2 ring-ring/40; }
+  .rf-checkbox-hidden:disabled + .rf-checkbox-box { @apply opacity-50 cursor-not-allowed; }
+  .rf-checkbox-wrapper:hover .rf-checkbox-box { @apply border-input-border-hover; }
+  .rf-checkbox-hidden:checked + .rf-checkbox-box:hover { @apply border-primary bg-primary; }
   .rf-checkbox-error { @apply border-error; }
   .rf-checkbox-label { @apply text-sm text-foreground select-none; }
 
   .rf-radio-group { @apply flex flex-col gap-2; }
-  .rf-radio-wrapper { @apply flex items-center gap-2; }
-  .rf-radio {
-    @apply h-4 w-4 shrink-0 border border-input-border bg-input transition-colors duration-150
-      hover:border-input-border-hover focus:outline-none focus:ring-2 focus:ring-ring/40
-      focus:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed;
-    accent-color: var(--color-primary);
+  .rf-radio-wrapper { @apply flex items-center gap-2.5 cursor-pointer; }
+  .rf-radio-hidden { @apply sr-only; }
+  .rf-radio-circle {
+    @apply flex items-center justify-center h-[18px] w-[18px] shrink-0 rounded-full border-2 border-input-border bg-input
+      transition-all duration-150;
   }
+  .rf-radio-dot {
+    @apply h-2 w-2 rounded-full bg-primary-foreground;
+  }
+  .rf-radio-hidden:checked + .rf-radio-circle {
+    @apply border-primary bg-primary;
+  }
+  .rf-radio-hidden:focus-visible + .rf-radio-circle { @apply ring-2 ring-ring/40; }
+  .rf-radio-hidden:disabled + .rf-radio-circle { @apply opacity-50 cursor-not-allowed; }
+  .rf-radio-wrapper:hover .rf-radio-circle { @apply border-input-border-hover; }
+  .rf-radio-hidden:checked + .rf-radio-circle:hover { @apply border-primary bg-primary; }
   .rf-radio-error { @apply border-error; }
   .rf-radio-label { @apply text-sm text-foreground select-none; }
 
@@ -4986,25 +5010,41 @@ pub const FRONTEND_SRC_ADMIN_APP_CSS: &str = r#"@import "tailwindcss";
   }
   .rf-select-placeholder { @apply text-input-placeholder; }
 
-  .rf-checkbox-wrapper { @apply flex items-start gap-2; }
-  .rf-checkbox {
-    @apply mt-0.5 h-4 w-4 shrink-0 rounded border border-input-border bg-input
-      transition-colors duration-150 hover:border-input-border-hover focus:outline-none
-      focus:ring-2 focus:ring-ring/40 focus:ring-offset-0 disabled:opacity-50
-      disabled:cursor-not-allowed;
-    accent-color: var(--color-primary);
+  .rf-checkbox-wrapper { @apply flex items-center gap-2.5 cursor-pointer; }
+  .rf-checkbox-hidden { @apply sr-only; }
+  .rf-checkbox-box {
+    @apply flex items-center justify-center h-[18px] w-[18px] shrink-0 rounded border-2 border-input-border bg-input
+      transition-all duration-150;
   }
+  .rf-checkbox-icon { @apply h-3 w-3 text-primary-foreground opacity-0 transition-opacity duration-100; }
+  .rf-checkbox-hidden:checked + .rf-checkbox-box {
+    @apply border-primary bg-primary;
+  }
+  .rf-checkbox-hidden:checked + .rf-checkbox-box .rf-checkbox-icon { @apply opacity-100; }
+  .rf-checkbox-hidden:focus-visible + .rf-checkbox-box { @apply ring-2 ring-ring/40; }
+  .rf-checkbox-hidden:disabled + .rf-checkbox-box { @apply opacity-50 cursor-not-allowed; }
+  .rf-checkbox-wrapper:hover .rf-checkbox-box { @apply border-input-border-hover; }
+  .rf-checkbox-hidden:checked + .rf-checkbox-box:hover { @apply border-primary bg-primary; }
   .rf-checkbox-error { @apply border-error; }
   .rf-checkbox-label { @apply text-sm text-foreground select-none; }
 
   .rf-radio-group { @apply flex flex-col gap-2; }
-  .rf-radio-wrapper { @apply flex items-center gap-2; }
-  .rf-radio {
-    @apply h-4 w-4 shrink-0 border border-input-border bg-input transition-colors duration-150
-      hover:border-input-border-hover focus:outline-none focus:ring-2 focus:ring-ring/40
-      focus:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed;
-    accent-color: var(--color-primary);
+  .rf-radio-wrapper { @apply flex items-center gap-2.5 cursor-pointer; }
+  .rf-radio-hidden { @apply sr-only; }
+  .rf-radio-circle {
+    @apply flex items-center justify-center h-[18px] w-[18px] shrink-0 rounded-full border-2 border-input-border bg-input
+      transition-all duration-150;
   }
+  .rf-radio-dot {
+    @apply h-2 w-2 rounded-full bg-primary-foreground;
+  }
+  .rf-radio-hidden:checked + .rf-radio-circle {
+    @apply border-primary bg-primary;
+  }
+  .rf-radio-hidden:focus-visible + .rf-radio-circle { @apply ring-2 ring-ring/40; }
+  .rf-radio-hidden:disabled + .rf-radio-circle { @apply opacity-50 cursor-not-allowed; }
+  .rf-radio-wrapper:hover .rf-radio-circle { @apply border-input-border-hover; }
+  .rf-radio-hidden:checked + .rf-radio-circle:hover { @apply border-primary bg-primary; }
   .rf-radio-error { @apply border-error; }
   .rf-radio-label { @apply text-sm text-foreground select-none; }
 
@@ -5867,7 +5907,7 @@ export function ModalOutlet() {
 }
 "#;
 
-pub const FRONTEND_SRC_SHARED_COMPONENTS_DATA_TABLE_TSX: &str = r#"import { useState, useEffect, useCallback, type ReactNode } from "react";
+pub const FRONTEND_SRC_SHARED_COMPONENTS_DATA_TABLE_TSX: &str = r#"import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { RefreshCw } from "lucide-react";
 import type { AxiosInstance } from "axios";
@@ -5898,18 +5938,17 @@ export function DataTable<T>({
   const [data, setData] = useState<DataTableQueryResponse<T> | null>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-
   const fetchData = useCallback(
-    async (p: number) => {
+    async (p: number, signal?: AbortSignal) => {
       setLoading(true);
       try {
         const res = await api.post<ApiResponse<DataTableQueryResponse<T>>>(url, {
           base: { page: p, per_page: perPage },
           ...extraBody,
-        });
+        }, { signal });
         setData(res.data.data);
-      } catch {
-        // let caller handle via renderBody or external error boundary
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
       } finally {
         setLoading(false);
       }
@@ -5919,8 +5958,11 @@ export function DataTable<T>({
   );
 
   useEffect(() => {
-    fetchData(page);
-  }, [page, fetchData]);
+    const controller = new AbortController();
+    fetchData(page, controller.signal);
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
   const refresh = () => fetchData(page);
 
@@ -6277,25 +6319,27 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
   ({ label, error, errors, notes, className, id: externalId, ...rest }, ref) => {
     const autoId = useId();
     const id = externalId ?? autoId;
+    const hasError = hasFieldError(error, errors);
 
     return (
       <div className="rf-field">
-        <div className="rf-checkbox-wrapper">
+        <label htmlFor={id} className="rf-checkbox-wrapper">
           <input
             ref={ref}
             id={id}
             type="checkbox"
-            className={`rf-checkbox ${hasFieldError(error, errors) ? "rf-checkbox-error" : ""} ${className ?? ""}`}
+            className={`rf-checkbox-hidden ${className ?? ""}`}
             {...rest}
           />
-          {label && (
-            <label htmlFor={id} className="rf-checkbox-label">
-              {label}
-            </label>
-          )}
-        </div>
+          <span className={`rf-checkbox-box ${hasError ? "rf-checkbox-error" : ""}`}>
+            <svg className="rf-checkbox-icon" viewBox="0 0 12 12" fill="none">
+              <path d="M2.5 6L5 8.5L9.5 3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+          {label && <span className="rf-checkbox-label">{label}</span>}
+        </label>
         <FieldErrors error={error} errors={errors} />
-        {notes && !hasFieldError(error, errors) && <p className="rf-note">{notes}</p>}
+        {notes && !hasError && <p className="rf-note">{notes}</p>}
       </div>
     );
   },
@@ -6329,6 +6373,7 @@ export interface RadioProps {
 
 export function Radio({ name, options, value, onChange, label, error, errors, notes, required, disabled, className }: RadioProps) {
   const groupId = useId();
+  const hasError = hasFieldError(error, errors);
 
   return (
     <div className="rf-field">
@@ -6340,27 +6385,29 @@ export function Radio({ name, options, value, onChange, label, error, errors, no
       <div role="radiogroup" aria-labelledby={label ? `${groupId}-label` : undefined} className={`rf-radio-group ${className ?? ""}`}>
         {options.map((opt) => {
           const optId = `${groupId}-${opt.value}`;
+          const isSelected = value === opt.value;
           return (
-            <div key={opt.value} className="rf-radio-wrapper">
+            <label key={opt.value} htmlFor={optId} className="rf-radio-wrapper">
               <input
                 id={optId}
                 type="radio"
                 name={name}
                 value={opt.value}
-                checked={value === opt.value}
+                checked={isSelected}
                 onChange={() => onChange?.(opt.value)}
                 disabled={disabled || opt.disabled}
-                className={`rf-radio ${hasFieldError(error, errors) ? "rf-radio-error" : ""}`}
+                className="rf-radio-hidden"
               />
-              <label htmlFor={optId} className="rf-radio-label">
-                {opt.label}
-              </label>
-            </div>
+              <span className={`rf-radio-circle ${hasError ? "rf-radio-error" : ""}`}>
+                {isSelected && <span className="rf-radio-dot" />}
+              </span>
+              <span className="rf-radio-label">{opt.label}</span>
+            </label>
           );
         })}
       </div>
       <FieldErrors error={error} errors={errors} />
-      {notes && !hasFieldError(error, errors) && <p className="rf-note">{notes}</p>}
+      {notes && !hasError && <p className="rf-note">{notes}</p>}
     </div>
   );
 }
@@ -6900,6 +6947,7 @@ import { Plus, Pencil, Trash2 } from "lucide-react";
 import type { AdminOutput, AdminDeleteOutput, AdminType, Permission } from "@admin/types";
 import type { ApiResponse } from "@shared/types";
 import {
+  Checkbox,
   DataTable,
   useAutoForm,
   useModalStore,
@@ -6916,6 +6964,11 @@ const TYPE_COLORS: Record<AdminType, string> = {
 };
 
 const ALL_PERMISSIONS: Permission[] = ["admin.read", "admin.manage"];
+
+const PERMISSION_LABELS: Record<Permission, string> = {
+  "admin.read": "Read Admins",
+  "admin.manage": "Manage Admins",
+};
 
 function TypeBadge({ type }: { type: AdminType }) {
   return (
@@ -6950,11 +7003,6 @@ function PermissionBadges({ abilities }: { abilities: string[] }) {
   );
 }
 
-const PERMISSION_LABELS: Record<Permission, string> = {
-  "admin.read": "Read Admins",
-  "admin.manage": "Manage Admins",
-};
-
 function PermissionCheckboxes({
   abilities,
   onChange,
@@ -6964,25 +7012,22 @@ function PermissionCheckboxes({
 }) {
   const { t } = useTranslation();
   return (
-    <fieldset className="col-span-2 space-y-2">
+    <fieldset className="space-y-2">
       <legend className="text-sm font-medium text-foreground">{t("Permissions")}</legend>
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-x-6 gap-y-1">
         {ALL_PERMISSIONS.map((perm) => (
-          <label key={perm} className="inline-flex items-center gap-2 text-sm text-foreground">
-            <input
-              type="checkbox"
-              checked={abilities.includes(perm)}
-              onChange={(e) => {
-                if (e.target.checked) {
-                  onChange([...abilities, perm]);
-                } else {
-                  onChange(abilities.filter((a) => a !== perm));
-                }
-              }}
-              className="rounded border-border"
-            />
-            {t(PERMISSION_LABELS[perm])}
-          </label>
+          <Checkbox
+            key={perm}
+            label={t(PERMISSION_LABELS[perm])}
+            checked={abilities.includes(perm)}
+            onChange={(e) => {
+              if (e.target.checked) {
+                onChange([...abilities, perm]);
+              } else {
+                onChange(abilities.filter((a) => a !== perm));
+              }
+            }}
+          />
         ))}
       </div>
     </fieldset>
@@ -7041,6 +7086,7 @@ function EditAdminForm({
 }) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
+  const isNormalAdmin = admin.admin_type === "admin";
   const [abilities, setAbilities] = useState<string[]>(
     admin.abilities.filter((a) => a !== "*"),
   );
@@ -7048,7 +7094,7 @@ function EditAdminForm({
   const { submit, busy, form, errors } = useAutoForm(api, {
     url: `/api/v1/admin/admins/${admin.id}`,
     method: "patch",
-    extraPayload: { abilities },
+    extraPayload: isNormalAdmin ? { abilities } : {},
     fields: [
       { name: "username", type: "text", label: t("Username"), placeholder: t("Enter username"), required: true },
       { name: "name", type: "text", label: t("Name"), placeholder: t("Enter full name"), required: true },
@@ -7074,7 +7120,9 @@ function EditAdminForm({
         </p>
       )}
       {form}
-      <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
+      {isNormalAdmin && (
+        <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
+      )}
       <div className="flex justify-end gap-2 pt-2">
         <button type="button" onClick={() => close()} className="rf-modal-btn-secondary">
           {t("Cancel")}
@@ -7149,29 +7197,20 @@ export default function AdminsPage() {
       )}
       columns={
         <>
-          <th className="px-4 py-3 font-medium text-muted">{t("ID")}</th>
+          <th className="w-12 px-4 py-3 font-medium text-muted">#</th>
+          <th className="px-4 py-3 font-medium text-muted">{t("Actions")}</th>
           <th className="px-4 py-3 font-medium text-muted">{t("Username")}</th>
           <th className="px-4 py-3 font-medium text-muted">{t("Name")}</th>
           <th className="px-4 py-3 font-medium text-muted">{t("Email")}</th>
           <th className="px-4 py-3 font-medium text-muted">{t("Type")}</th>
           <th className="px-4 py-3 font-medium text-muted">{t("Permissions")}</th>
-          <th className="px-4 py-3 font-medium text-muted">{t("Actions")}</th>
         </>
       }
       renderBody={(records, refresh) => (
         <>
-          {records.map((admin) => (
+          {records.map((admin, index) => (
             <tr key={admin.id} className="border-b border-border last:border-0 hover:bg-surface-hover/30">
-              <td className="px-4 py-3 tabular-nums text-muted">{admin.id}</td>
-              <td className="px-4 py-3 font-medium text-foreground">{admin.username}</td>
-              <td className="px-4 py-3 text-foreground">{admin.name}</td>
-              <td className="px-4 py-3 text-muted">{admin.email ?? "—"}</td>
-              <td className="px-4 py-3">
-                <TypeBadge type={admin.admin_type} />
-              </td>
-              <td className="px-4 py-3">
-                <PermissionBadges abilities={admin.abilities} />
-              </td>
+              <td className="px-4 py-3 tabular-nums text-muted">{index + 1}</td>
               <td className="px-4 py-3">
                 <div className="flex gap-1">
                   <button
@@ -7181,14 +7220,25 @@ export default function AdminsPage() {
                   >
                     <Pencil size={16} />
                   </button>
-                  <button
-                    onClick={() => handleDelete(admin, refresh)}
-                    className="rounded-lg p-1.5 text-muted transition hover:bg-red-50 hover:text-red-600"
-                    title={t("Delete")}
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  {admin.admin_type === "admin" && (
+                    <button
+                      onClick={() => handleDelete(admin, refresh)}
+                      className="rounded-lg p-1.5 text-muted transition hover:bg-red-50 hover:text-red-600"
+                      title={t("Delete")}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                 </div>
+              </td>
+              <td className="px-4 py-3 font-medium text-foreground">{admin.username}</td>
+              <td className="px-4 py-3 text-foreground">{admin.name}</td>
+              <td className="px-4 py-3 text-muted">{admin.email ?? "—"}</td>
+              <td className="px-4 py-3">
+                <TypeBadge type={admin.admin_type} />
+              </td>
+              <td className="px-4 py-3">
+                <PermissionBadges abilities={admin.abilities} />
               </td>
             </tr>
           ))}
