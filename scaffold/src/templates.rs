@@ -1515,9 +1515,31 @@ use core_web::datatable::{
     DataTableQueryRequestBase, DataTableQueryRequestContract, DataTableScopedContract,
 };
 use core_web::contracts::rustforge_contract;
-use generated::models::{AdminType, AdminView};
+use generated::models::AdminType;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use validator::Validate;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
+pub struct AdminDatatableRow {
+    pub id: i64,
+    pub username: String,
+    pub email: Option<String>,
+    pub name: String,
+    #[ts(type = "AdminType")]
+    pub admin_type: AdminType,
+    #[serde(default)]
+    #[ts(type = "string[]")]
+    pub abilities: Vec<String>,
+    #[schemars(with = "String")]
+    #[ts(type = "string")]
+    pub created_at: String,
+    #[schemars(with = "String")]
+    #[ts(type = "string")]
+    pub updated_at: String,
+}
 
 #[rustforge_contract]
 #[derive(TS)]
@@ -1653,7 +1675,7 @@ pub struct AdminAdminDataTableContract;
 impl DataTableScopedContract for AdminAdminDataTableContract {
     type QueryRequest = AdminDatatableQueryInput;
     type EmailRequest = AdminDatatableEmailExportInput;
-    type Row = AdminView;
+    type Row = AdminDatatableRow;
 
     fn scoped_key(&self) -> &'static str {
         "admin.account"
@@ -3186,6 +3208,31 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
             &[Permission::AdminRead.as_str(), Permission::AdminManage.as_str()],
             PermissionMode::Any,
         ))
+    }
+
+    fn mappings(
+        &self,
+        record: &mut serde_json::Map<String, serde_json::Value>,
+        _input: &DataTableInput,
+        _ctx: &DataTableContext,
+    ) -> anyhow::Result<()> {
+        record.remove("password");
+        record.remove("deleted_at");
+
+        if let Some(abilities_val) = record.get("abilities") {
+            let strings: Vec<String> = abilities_val
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(ToString::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            record.insert("abilities".to_string(), serde_json::to_value(strings)?);
+        }
+
+        Ok(())
     }
 }
 
@@ -7280,7 +7327,7 @@ export default function DashboardPage() {
 pub const FRONTEND_SRC_ADMIN_PAGES_ADMINS_PAGE_TSX: &str = r#"import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Pencil, Trash2 } from "lucide-react";
-import type { AdminOutput, AdminDeleteOutput, AdminType, Permission } from "@admin/types";
+import type { AdminDeleteOutput, AdminDatatableRow, AdminType, Permission } from "@admin/types";
 import type { ApiResponse } from "@shared/types";
 import {
   Checkbox,
@@ -7417,7 +7464,7 @@ function EditAdminForm({
   admin,
   onUpdated,
 }: {
-  admin: AdminOutput;
+  admin: AdminDatatableRow;
   onUpdated: () => void;
 }) {
   const { t } = useTranslation();
@@ -7482,7 +7529,7 @@ export default function AdminsPage() {
     });
   };
 
-  const handleEdit = (admin: AdminOutput, refresh: () => void) => {
+  const handleEdit = (admin: AdminDatatableRow, refresh: () => void) => {
     useModalStore.getState().open({
       title: t("Edit Admin"),
       size: "lg",
@@ -7490,7 +7537,7 @@ export default function AdminsPage() {
     });
   };
 
-  const handleDelete = async (admin: AdminOutput, refresh: () => void) => {
+  const handleDelete = async (admin: AdminDatatableRow, refresh: () => void) => {
     await alertConfirm({
       title: t("Delete Admin"),
       message: t('Are you sure you want to delete ":username"?', { username: admin.username }),
@@ -7512,7 +7559,7 @@ export default function AdminsPage() {
   };
 
   return (
-    <DataTable<AdminOutput>
+    <DataTable<AdminDatatableRow>
       url="/api/v1/admin/datatable/admin/query"
       api={api}
       perPage={30}
@@ -8421,6 +8468,17 @@ export interface AdminDatatableEmailExportInput {
   email?: string | null;
   admin_type?: AdminType | null;
 }
+
+export interface AdminDatatableRow {
+  id: number;
+  username: string;
+  email: string | null;
+  name: string;
+  admin_type: AdminType;
+  abilities: string[];
+  created_at: string;
+  updated_at: string;
+}
 "#;
 
 pub const FRONTEND_SRC_ADMIN_TYPES_INDEX_TS: &str = r#"export * from "./enums";
@@ -8515,6 +8573,7 @@ fn main() {
             definitions: vec![
                 AdminDatatableQueryInput::export_to_string().expect("AdminDatatableQueryInput"),
                 AdminDatatableEmailExportInput::export_to_string().expect("AdminDatatableEmailExportInput"),
+                AdminDatatableRow::export_to_string().expect("AdminDatatableRow"),
             ],
         });
     }
