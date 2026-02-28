@@ -631,7 +631,10 @@ pub const ROOT_I18N_ZH_JSON: &str = r#"{
   "Deleted": "已删除",
   "Failed to load admins.": "加载管理员列表失败。",
   "Failed to delete admin.": "删除管理员失败。",
-  "Are you sure you want to delete \":username\"?": "确定要删除「:username」吗？"
+  "Are you sure you want to delete \":username\"?": "确定要删除「:username」吗？",
+  "No records found.": "未找到记录。",
+  "Read Admins": "查看管理员",
+  "Manage Admins": "管理管理员"
 }
 "#;
 
@@ -5458,6 +5461,7 @@ interface AutoFormResult {
   busy: boolean;
   form: ReactElement;
   errors: AutoFormErrors;
+  values: Record<string, string>;
   reset: () => void;
   setValues: (values: Record<string, string>) => void;
 }
@@ -5640,7 +5644,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
     );
   }, [fields, values, fieldErrors, setValue]);
 
-  return { submit, busy, form, errors: { general: generalError, fields: fieldErrors }, reset, setValues };
+  return { submit, busy, form, errors: { general: generalError, fields: fieldErrors }, values, reset, setValues };
 }
 "##;
 
@@ -5873,6 +5877,153 @@ export function ModalOutlet() {
 }
 "#;
 
+pub const FRONTEND_SRC_SHARED_COMPONENTS_DATA_TABLE_TSX: &str = r#"import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { RefreshCw } from "lucide-react";
+import type { AxiosInstance } from "axios";
+import type { ApiResponse, DataTableQueryResponse } from "@shared/types";
+
+export interface DataTableProps<T> {
+  url: string;
+  api: AxiosInstance;
+  extraBody?: Record<string, unknown>;
+  perPage?: number;
+  columns: ReactNode;
+  renderBody: (records: T[], refresh: () => void) => ReactNode;
+  header?: ReactNode | ((refresh: () => void) => ReactNode);
+  footer?: ReactNode;
+}
+
+export function DataTable<T>({
+  url,
+  api,
+  extraBody,
+  perPage = 15,
+  columns,
+  renderBody,
+  header,
+  footer,
+}: DataTableProps<T>) {
+  const { t } = useTranslation();
+  const [data, setData] = useState<DataTableQueryResponse<T> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+
+  const fetchData = useCallback(
+    async (p: number) => {
+      setLoading(true);
+      try {
+        const res = await api.post<ApiResponse<DataTableQueryResponse<T>>>(url, {
+          base: { page: p, per_page: perPage },
+          ...extraBody,
+        });
+        setData(res.data.data);
+      } catch {
+        // let caller handle via renderBody or external error boundary
+      } finally {
+        setLoading(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [api, url, perPage],
+  );
+
+  useEffect(() => {
+    fetchData(page);
+  }, [page, fetchData]);
+
+  const refresh = () => fetchData(page);
+
+  return (
+    <div>
+      {header && (
+        <div className="mb-6 flex items-center justify-between">
+          <div className="flex-1">{typeof header === "function" ? header(refresh) : header}</div>
+          <button
+            onClick={refresh}
+            disabled={loading}
+            className="ml-3 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-surface-hover"
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            {t("Refresh")}
+          </button>
+        </div>
+      )}
+
+      {!header && (
+        <div className="mb-4 flex justify-end">
+          <button
+            onClick={refresh}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-surface-hover"
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            {t("Refresh")}
+          </button>
+        </div>
+      )}
+
+      <div className="overflow-hidden rounded-xl border border-border bg-surface">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-border bg-surface-hover/50">
+              {columns}
+            </tr>
+          </thead>
+          <tbody>
+            {loading && !data && (
+              <tr>
+                <td colSpan={99} className="px-4 py-8 text-center text-muted">
+                  {t("Loading…")}
+                </td>
+              </tr>
+            )}
+            {data && data.records.length === 0 && (
+              <tr>
+                <td colSpan={99} className="px-4 py-8 text-center text-muted">
+                  {t("No records found.")}
+                </td>
+              </tr>
+            )}
+            {data && data.records.length > 0 && renderBody(data.records, refresh)}
+          </tbody>
+        </table>
+      </div>
+
+      {data && data.total_pages > 1 && (
+        <div className="mt-4 flex items-center justify-between">
+          <p className="text-sm text-muted">
+            {t("Page :page of :total_pages (:total_records total)", {
+              page: data.page,
+              total_pages: data.total_pages,
+              total_records: data.total_records,
+            })}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-surface-hover disabled:opacity-50"
+            >
+              {t("Previous")}
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(data.total_pages, p + 1))}
+              disabled={page >= data.total_pages}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-surface-hover disabled:opacity-50"
+            >
+              {t("Next")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {footer}
+    </div>
+  );
+}
+"#;
+
 pub const FRONTEND_SRC_SHARED_COMPONENTS_INDEX_TS: &str = r#"export { FieldErrors, hasFieldError } from "./FieldErrors";
 export type { FieldErrorsProps } from "./FieldErrors";
 
@@ -5890,6 +6041,9 @@ export type { CheckboxProps } from "./Checkbox";
 
 export { Radio } from "./Radio";
 export type { RadioProps, RadioOption } from "./Radio";
+
+export { DataTable } from "./DataTable";
+export type { DataTableProps } from "./DataTable";
 
 export { useAutoForm } from "../useAutoForm";
 export type { FieldDef, AutoFormConfig, AutoFormErrors, AutoFormResult } from "../useAutoForm";
@@ -6750,12 +6904,13 @@ export default function DashboardPage() {
 }
 "#;
 
-pub const FRONTEND_SRC_ADMIN_PAGES_ADMINS_PAGE_TSX: &str = r#"import { useState, useEffect, useCallback } from "react";
+pub const FRONTEND_SRC_ADMIN_PAGES_ADMINS_PAGE_TSX: &str = r#"import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { RefreshCw, Plus, Pencil, Trash2 } from "lucide-react";
-import type { AdminOutput, AdminDeleteOutput, AdminType } from "@admin/types";
-import type { DataTableQueryResponse, ApiResponse } from "@shared/types";
+import { Plus, Pencil, Trash2 } from "lucide-react";
+import type { AdminOutput, AdminDeleteOutput, AdminType, Permission } from "@admin/types";
+import type { ApiResponse } from "@shared/types";
 import {
+  DataTable,
   useAutoForm,
   useModalStore,
   alertConfirm,
@@ -6769,6 +6924,8 @@ const TYPE_COLORS: Record<AdminType, string> = {
   superadmin: "bg-amber-100 text-amber-700",
   admin: "bg-blue-100 text-blue-700",
 };
+
+const ALL_PERMISSIONS: Permission[] = ["admin.read", "admin.manage"];
 
 function TypeBadge({ type }: { type: AdminType }) {
   return (
@@ -6803,9 +6960,49 @@ function PermissionBadges({ abilities }: { abilities: string[] }) {
   );
 }
 
+const PERMISSION_LABELS: Record<Permission, string> = {
+  "admin.read": "Read Admins",
+  "admin.manage": "Manage Admins",
+};
+
+function PermissionCheckboxes({
+  abilities,
+  onChange,
+}: {
+  abilities: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <fieldset className="col-span-2 space-y-2">
+      <legend className="text-sm font-medium text-foreground">{t("Permissions")}</legend>
+      <div className="flex flex-wrap gap-3">
+        {ALL_PERMISSIONS.map((perm) => (
+          <label key={perm} className="inline-flex items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={abilities.includes(perm)}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  onChange([...abilities, perm]);
+                } else {
+                  onChange(abilities.filter((a) => a !== perm));
+                }
+              }}
+              className="rounded border-border"
+            />
+            {t(PERMISSION_LABELS[perm])}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
+  const [abilities, setAbilities] = useState<string[]>([]);
 
   const typeOptions = [
     { label: t("Developer"), value: "developer" as AdminType },
@@ -6813,22 +7010,22 @@ function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
     { label: t("Admin"), value: "admin" as AdminType },
   ];
 
-  const { submit, busy, form, errors } = useAutoForm(api, {
+  const { submit, busy, form, errors, values } = useAutoForm(api, {
     url: "/api/v1/admin/admins",
     method: "post",
+    extraPayload: { abilities },
     fields: [
-      { name: "username", type: "text", label: t("Username"), placeholder: t("Enter username"), required: true, span: 1 },
-      { name: "name", type: "text", label: t("Name"), placeholder: t("Enter full name"), required: true, span: 1 },
-      { name: "email", type: "email", label: t("Email"), placeholder: t("Enter email"), required: false, span: 1 },
+      { name: "username", type: "text", label: t("Username"), placeholder: t("Enter username"), required: true },
+      { name: "name", type: "text", label: t("Name"), placeholder: t("Enter full name"), required: true },
+      { name: "email", type: "email", label: t("Email"), placeholder: t("Enter email"), required: false },
       {
         name: "admin_type",
         type: "select",
         label: t("Type"),
         required: true,
-        span: 1,
         options: typeOptions,
       },
-      { name: "password", type: "password", label: t("Password"), placeholder: t("Enter password"), required: true, span: 2 },
+      { name: "password", type: "password", label: t("Password"), placeholder: t("Enter password"), required: true },
     ],
     onSuccess: () => {
       close();
@@ -6844,7 +7041,12 @@ function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
           {errors.general}
         </p>
       )}
-      <div className="grid grid-cols-2 gap-4">{form}</div>
+      <div className="grid grid-cols-2 gap-4">
+        {form}
+        {values.admin_type === "admin" && (
+          <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
+        )}
+      </div>
       <div className="flex justify-end gap-2 pt-2">
         <button type="button" onClick={() => close()} className="rf-modal-btn-secondary">
           {t("Cancel")}
@@ -6866,6 +7068,9 @@ function EditAdminForm({
 }) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
+  const [abilities, setAbilities] = useState<string[]>(
+    admin.abilities.filter((a) => a !== "*"),
+  );
 
   const typeOptions = [
     { label: t("Developer"), value: "developer" as AdminType },
@@ -6873,19 +7078,19 @@ function EditAdminForm({
     { label: t("Admin"), value: "admin" as AdminType },
   ];
 
-  const { submit, busy, form, errors } = useAutoForm(api, {
+  const { submit, busy, form, errors, values } = useAutoForm(api, {
     url: `/api/v1/admin/admins/${admin.id}`,
     method: "patch",
+    extraPayload: { abilities },
     fields: [
-      { name: "username", type: "text", label: t("Username"), placeholder: t("Enter username"), required: true, span: 1 },
-      { name: "name", type: "text", label: t("Name"), placeholder: t("Enter full name"), required: true, span: 1 },
-      { name: "email", type: "email", label: t("Email"), placeholder: t("Enter email"), required: false, span: 1 },
+      { name: "username", type: "text", label: t("Username"), placeholder: t("Enter username"), required: true },
+      { name: "name", type: "text", label: t("Name"), placeholder: t("Enter full name"), required: true },
+      { name: "email", type: "email", label: t("Email"), placeholder: t("Enter email"), required: false },
       {
         name: "admin_type",
         type: "select",
         label: t("Type"),
         required: true,
-        span: 1,
         options: typeOptions,
       },
     ],
@@ -6909,7 +7114,12 @@ function EditAdminForm({
           {errors.general}
         </p>
       )}
-      <div className="grid grid-cols-2 gap-4">{form}</div>
+      <div className="grid grid-cols-2 gap-4">
+        {form}
+        {values.admin_type === "admin" && (
+          <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
+        )}
+      </div>
       <div className="flex justify-end gap-2 pt-2">
         <button type="button" onClick={() => close()} className="rf-modal-btn-secondary">
           {t("Cancel")}
@@ -6924,49 +7134,24 @@ function EditAdminForm({
 
 export default function AdminsPage() {
   const { t } = useTranslation();
-  const [data, setData] = useState<DataTableQueryResponse<AdminOutput> | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
 
-  const fetchAdmins = useCallback(async (p: number) => {
-    setLoading(true);
-    try {
-      const res = await api.post<ApiResponse<DataTableQueryResponse<AdminOutput>>>(
-        "/api/v1/admin/datatable/admin/query",
-        { base: { page: p, per_page: 15 } },
-      );
-      setData(res.data.data);
-    } catch {
-      alertError({ title: t("Error"), message: t("Failed to load admins.") });
-    } finally {
-      setLoading(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    fetchAdmins(page);
-  }, [page, fetchAdmins]);
-
-  const refresh = () => fetchAdmins(page);
-
-  const handleCreate = () => {
+  const handleCreate = (refresh: () => void) => {
     useModalStore.getState().open({
       title: t("Create Admin"),
-      size: "md",
+      size: "lg",
       content: <CreateAdminForm onCreated={refresh} />,
     });
   };
 
-  const handleEdit = (admin: AdminOutput) => {
+  const handleEdit = (admin: AdminOutput, refresh: () => void) => {
     useModalStore.getState().open({
       title: t("Edit Admin"),
-      size: "md",
+      size: "lg",
       content: <EditAdminForm admin={admin} onUpdated={refresh} />,
     });
   };
 
-  const handleDelete = async (admin: AdminOutput) => {
+  const handleDelete = async (admin: AdminOutput, refresh: () => void) => {
     await alertConfirm({
       title: t("Delete Admin"),
       message: t('Are you sure you want to delete ":username"?', { username: admin.username }),
@@ -6988,123 +7173,73 @@ export default function AdminsPage() {
   };
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">{t("Admins")}</h1>
-          <p className="mt-1 text-sm text-muted">{t("Manage administrator accounts")}</p>
-        </div>
-        <div className="flex gap-2">
+    <DataTable<AdminOutput>
+      url="/api/v1/admin/datatable/admin/query"
+      api={api}
+      perPage={15}
+      header={(refresh) => (
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">{t("Admins")}</h1>
+            <p className="mt-1 text-sm text-muted">{t("Manage administrator accounts")}</p>
+          </div>
           <button
-            onClick={refresh}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-surface-hover"
-          >
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-            {t("Refresh")}
-          </button>
-          <button
-            onClick={handleCreate}
+            onClick={() => handleCreate(refresh)}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary/90"
           >
             <Plus size={16} />
             {t("Create Admin")}
           </button>
         </div>
-      </div>
-
-      <div className="overflow-hidden rounded-xl border border-border bg-surface">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-border bg-surface-hover/50">
-              <th className="px-4 py-3 font-medium text-muted">{t("ID")}</th>
-              <th className="px-4 py-3 font-medium text-muted">{t("Username")}</th>
-              <th className="px-4 py-3 font-medium text-muted">{t("Name")}</th>
-              <th className="px-4 py-3 font-medium text-muted">{t("Email")}</th>
-              <th className="px-4 py-3 font-medium text-muted">{t("Type")}</th>
-              <th className="px-4 py-3 font-medium text-muted">{t("Permissions")}</th>
-              <th className="px-4 py-3 font-medium text-muted">{t("Actions")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && !data && (
-              <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-muted">
-                  {t("Loading…")}
-                </td>
-              </tr>
-            )}
-            {data && data.records.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-muted">
-                  {t("No admins found.")}
-                </td>
-              </tr>
-            )}
-            {data?.records.map((admin) => (
-              <tr key={admin.id} className="border-b border-border last:border-0 hover:bg-surface-hover/30">
-                <td className="px-4 py-3 tabular-nums text-muted">{admin.id}</td>
-                <td className="px-4 py-3 font-medium text-foreground">{admin.username}</td>
-                <td className="px-4 py-3 text-foreground">{admin.name}</td>
-                <td className="px-4 py-3 text-muted">{admin.email ?? "—"}</td>
-                <td className="px-4 py-3">
-                  <TypeBadge type={admin.admin_type} />
-                </td>
-                <td className="px-4 py-3">
-                  <PermissionBadges abilities={admin.abilities} />
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => handleEdit(admin)}
-                      className="rounded-lg p-1.5 text-muted transition hover:bg-surface-hover hover:text-foreground"
-                      title={t("Edit")}
-                    >
-                      <Pencil size={16} />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(admin)}
-                      className="rounded-lg p-1.5 text-muted transition hover:bg-red-50 hover:text-red-600"
-                      title={t("Delete")}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {data && data.total_pages > 1 && (
-        <div className="mt-4 flex items-center justify-between">
-          <p className="text-sm text-muted">
-            {t("Page :page of :total_pages (:total_records total)", {
-              page: data.page,
-              total_pages: data.total_pages,
-              total_records: data.total_records,
-            })}
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1}
-              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-surface-hover disabled:opacity-50"
-            >
-              {t("Previous")}
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(data.total_pages, p + 1))}
-              disabled={page >= data.total_pages}
-              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-surface-hover disabled:opacity-50"
-            >
-              {t("Next")}
-            </button>
-          </div>
-        </div>
       )}
-    </div>
+      columns={
+        <>
+          <th className="px-4 py-3 font-medium text-muted">{t("ID")}</th>
+          <th className="px-4 py-3 font-medium text-muted">{t("Username")}</th>
+          <th className="px-4 py-3 font-medium text-muted">{t("Name")}</th>
+          <th className="px-4 py-3 font-medium text-muted">{t("Email")}</th>
+          <th className="px-4 py-3 font-medium text-muted">{t("Type")}</th>
+          <th className="px-4 py-3 font-medium text-muted">{t("Permissions")}</th>
+          <th className="px-4 py-3 font-medium text-muted">{t("Actions")}</th>
+        </>
+      }
+      renderBody={(records, refresh) => (
+        <>
+          {records.map((admin) => (
+            <tr key={admin.id} className="border-b border-border last:border-0 hover:bg-surface-hover/30">
+              <td className="px-4 py-3 tabular-nums text-muted">{admin.id}</td>
+              <td className="px-4 py-3 font-medium text-foreground">{admin.username}</td>
+              <td className="px-4 py-3 text-foreground">{admin.name}</td>
+              <td className="px-4 py-3 text-muted">{admin.email ?? "—"}</td>
+              <td className="px-4 py-3">
+                <TypeBadge type={admin.admin_type} />
+              </td>
+              <td className="px-4 py-3">
+                <PermissionBadges abilities={admin.abilities} />
+              </td>
+              <td className="px-4 py-3">
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => handleEdit(admin, refresh)}
+                    className="rounded-lg p-1.5 text-muted transition hover:bg-surface-hover hover:text-foreground"
+                    title={t("Edit")}
+                  >
+                    <Pencil size={16} />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(admin, refresh)}
+                    className="rounded-lg p-1.5 text-muted transition hover:bg-red-50 hover:text-red-600"
+                    title={t("Delete")}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </>
+      )}
+    />
   );
 }
 "#;

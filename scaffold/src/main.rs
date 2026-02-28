@@ -631,6 +631,11 @@ fn file_templates() -> Vec<FileTemplate> {
             executable: false,
         },
         FileTemplate {
+            path: "frontend/src/shared/components/DataTable.tsx",
+            content: templates::FRONTEND_SRC_SHARED_COMPONENTS_DATA_TABLE_TSX,
+            executable: false,
+        },
+        FileTemplate {
             path: "frontend/src/shared/components/FieldErrors.tsx",
             content: templates::FRONTEND_SRC_SHARED_COMPONENTS_FIELD_ERRORS_TSX,
             executable: false,
