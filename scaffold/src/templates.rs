@@ -1728,8 +1728,6 @@ pub struct CreateAdminInput {
     pub email: Option<String>,
     #[rf(length(min = 1, max = 120))]
     pub name: String,
-    #[ts(type = "AdminType")]
-    pub admin_type: AdminType,
     #[rf(length(min = 8, max = 128))]
     pub password: String,
     #[serde(default)]
@@ -1758,9 +1756,6 @@ pub struct UpdateAdminInput {
     #[serde(default)]
     #[rf(length(min = 1, max = 120))]
     pub name: Option<String>,
-    #[serde(default)]
-    #[ts(type = "AdminType | null")]
-    pub admin_type: Option<AdminType>,
     #[serde(default)]
     #[ts(type = "Permission[] | null")]
     pub abilities: Option<Vec<Permission>>,
@@ -2810,7 +2805,7 @@ pub async fn create(
         .set_id(generate_snowflake_i64())
         .set_username(username)
         .set_name(req.name.trim().to_string())
-        .set_admin_type(req.admin_type)
+        .set_admin_type(AdminType::Admin)
         .set_abilities(permissions_to_json(&abilities));
 
     if let Some(email) = normalize_optional_email(req.email) {
@@ -2852,11 +2847,6 @@ pub async fn update(
 
     if let Some(email) = normalize_optional_email(req.email) {
         update = update.set_email(Some(email));
-        touched = true;
-    }
-
-    if let Some(admin_type) = req.admin_type {
-        update = update.set_admin_type(admin_type);
         touched = true;
     }
 
@@ -7004,13 +6994,7 @@ function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
   const close = useModalStore((s) => s.close);
   const [abilities, setAbilities] = useState<string[]>([]);
 
-  const typeOptions = [
-    { label: t("Developer"), value: "developer" as AdminType },
-    { label: t("Super Admin"), value: "superadmin" as AdminType },
-    { label: t("Admin"), value: "admin" as AdminType },
-  ];
-
-  const { submit, busy, form, errors, values } = useAutoForm(api, {
+  const { submit, busy, form, errors } = useAutoForm(api, {
     url: "/api/v1/admin/admins",
     method: "post",
     extraPayload: { abilities },
@@ -7018,13 +7002,6 @@ function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
       { name: "username", type: "text", label: t("Username"), placeholder: t("Enter username"), required: true },
       { name: "name", type: "text", label: t("Name"), placeholder: t("Enter full name"), required: true },
       { name: "email", type: "email", label: t("Email"), placeholder: t("Enter email"), required: false },
-      {
-        name: "admin_type",
-        type: "select",
-        label: t("Type"),
-        required: true,
-        options: typeOptions,
-      },
       { name: "password", type: "password", label: t("Password"), placeholder: t("Enter password"), required: true },
     ],
     onSuccess: () => {
@@ -7042,9 +7019,7 @@ function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
         </p>
       )}
       {form}
-      {values.admin_type === "admin" && (
-        <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
-      )}
+      <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
       <div className="flex justify-end gap-2 pt-2">
         <button type="button" onClick={() => close()} className="rf-modal-btn-secondary">
           {t("Cancel")}
@@ -7070,13 +7045,7 @@ function EditAdminForm({
     admin.abilities.filter((a) => a !== "*"),
   );
 
-  const typeOptions = [
-    { label: t("Developer"), value: "developer" as AdminType },
-    { label: t("Super Admin"), value: "superadmin" as AdminType },
-    { label: t("Admin"), value: "admin" as AdminType },
-  ];
-
-  const { submit, busy, form, errors, values } = useAutoForm(api, {
+  const { submit, busy, form, errors } = useAutoForm(api, {
     url: `/api/v1/admin/admins/${admin.id}`,
     method: "patch",
     extraPayload: { abilities },
@@ -7084,19 +7053,11 @@ function EditAdminForm({
       { name: "username", type: "text", label: t("Username"), placeholder: t("Enter username"), required: true },
       { name: "name", type: "text", label: t("Name"), placeholder: t("Enter full name"), required: true },
       { name: "email", type: "email", label: t("Email"), placeholder: t("Enter email"), required: false },
-      {
-        name: "admin_type",
-        type: "select",
-        label: t("Type"),
-        required: true,
-        options: typeOptions,
-      },
     ],
     defaults: {
       username: admin.username,
       name: admin.name,
       email: admin.email ?? "",
-      admin_type: admin.admin_type,
     },
     onSuccess: () => {
       close();
@@ -7113,9 +7074,7 @@ function EditAdminForm({
         </p>
       )}
       {form}
-      {values.admin_type === "admin" && (
-        <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
-      )}
+      <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
       <div className="flex justify-end gap-2 pt-2">
         <button type="button" onClick={() => close()} className="rf-modal-btn-secondary">
           {t("Cancel")}
@@ -7974,7 +7933,6 @@ export interface CreateAdminInput {
   username: string;
   email?: string | null;
   name: string;
-  admin_type: AdminType;
   password: string;
   abilities?: Permission[];
 }
@@ -7983,7 +7941,6 @@ export interface UpdateAdminInput {
   username?: string | null;
   email?: string | null;
   name?: string | null;
-  admin_type?: AdminType | null;
   abilities?: Permission[] | null;
 }
 
