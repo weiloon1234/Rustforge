@@ -5179,6 +5179,7 @@ export interface AuthState<A extends Account = Account> {
   isLoading: boolean;
   isInitialized: boolean;
   error: string | null;
+  setToken: (token: string) => void;
   login: (credentials: Record<string, unknown>) => Promise<void>;
   logout: () => void;
   fetchAccount: () => Promise<void>;
@@ -5227,6 +5228,9 @@ export function createAuthStore<A extends Account = Account>(
         isLoading: false,
         isInitialized: false,
         error: null,
+
+        setToken: (token: string) =>
+          set({ token } as Partial<AuthState<A>>),
 
         login: async (credentials: Record<string, unknown>) => {
           set({ isLoading: true, error: null } as Partial<AuthState<A>>);
@@ -5397,6 +5401,8 @@ interface AutoFormConfig {
   method?: "post" | "put" | "patch";
   fields: FieldDef[];
   defaults?: Record<string, string>;
+  /** Static key-value pairs merged into every submission (not rendered as form fields). */
+  extraPayload?: Record<string, unknown>;
   onSuccess?: (data: unknown) => void;
   onError?: (error: unknown) => void;
 }
@@ -5426,7 +5432,7 @@ function buildDefaults(fields: FieldDef[], defaults?: Record<string, string>): R
 }
 
 export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFormResult {
-  const { url, method = "post", fields, defaults, onSuccess, onError } = config;
+  const { url, method = "post", fields, defaults, extraPayload, onSuccess, onError } = config;
 
   const [values, setValuesState] = useState<Record<string, string>>(() => buildDefaults(fields, defaults));
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -5459,7 +5465,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
     setGeneralError(null);
 
     // Build payload — checkboxes send "1"/"0" instead of "on"/""
-    const payload: Record<string, string> = {};
+    const payload: Record<string, unknown> = { ...extraPayload };
     for (const field of fields) {
       const v = values[field.name] ?? "";
       payload[field.name] = field.type === "checkbox" ? (v ? "1" : "0") : v;
@@ -5487,7 +5493,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
     } finally {
       setBusy(false);
     }
-  }, [api, method, url, fields, values, onSuccess, onError]);
+  }, [api, method, url, fields, values, extraPayload, onSuccess, onError]);
 
   const form = useMemo((): ReactElement => {
     return (
@@ -6495,6 +6501,7 @@ pub const FRONTEND_SRC_ADMIN_PAGES_LOGIN_PAGE_TSX: &str = r#"import { useNavigat
 import { useAutoForm } from "@shared/useAutoForm";
 import { useAuthStore } from "@admin/stores/auth";
 import { api } from "@admin/api";
+import type { AdminAuthOutput } from "@admin/types";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -6504,6 +6511,7 @@ export default function LoginPage() {
   const { submit, busy, form, errors } = useAutoForm(api, {
     url: "/api/v1/admin/auth/login",
     method: "post",
+    extraPayload: { client_type: "web" },
     fields: [
       {
         name: "username",
@@ -6523,7 +6531,7 @@ export default function LoginPage() {
       },
     ],
     onSuccess: async (data: unknown) => {
-      const result = data as { access_token: string };
+      const result = data as AdminAuthOutput;
       setToken(result.access_token);
       await fetchAccount();
       navigate("/");
