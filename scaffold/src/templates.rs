@@ -7041,12 +7041,10 @@ function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
           {errors.general}
         </p>
       )}
-      <div className="grid grid-cols-2 gap-4">
-        {form}
-        {values.admin_type === "admin" && (
-          <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
-        )}
-      </div>
+      {form}
+      {values.admin_type === "admin" && (
+        <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
+      )}
       <div className="flex justify-end gap-2 pt-2">
         <button type="button" onClick={() => close()} className="rf-modal-btn-secondary">
           {t("Cancel")}
@@ -7114,12 +7112,10 @@ function EditAdminForm({
           {errors.general}
         </p>
       )}
-      <div className="grid grid-cols-2 gap-4">
-        {form}
-        {values.admin_type === "admin" && (
-          <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
-        )}
-      </div>
+      {form}
+      {values.admin_type === "admin" && (
+        <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
+      )}
       <div className="flex justify-end gap-2 pt-2">
         <button type="button" onClick={() => close()} className="rf-modal-btn-secondary">
           {t("Cancel")}
