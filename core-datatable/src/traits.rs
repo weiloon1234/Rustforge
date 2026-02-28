@@ -14,6 +14,7 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 #[derive(Debug, Clone, Copy)]
 pub struct DataTableColumnDescriptor {
     pub name: &'static str,
+    pub label: &'static str,
     pub data_type: &'static str,
     pub sortable: bool,
     pub localized: bool,
@@ -187,6 +188,7 @@ pub trait AutoDataTable: Send + Sync + 'static {
             .iter()
             .map(|c| DataTableColumnMeta {
                 name: c.name.to_string(),
+                label: c.label.to_string(),
                 data_type: c.data_type.to_string(),
                 sortable: c.sortable,
                 localized: c.localized,

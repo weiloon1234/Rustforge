@@ -199,6 +199,28 @@ pub fn to_title_case(s: &str) -> String {
     out
 }
 
+pub fn to_label(s: &str) -> String {
+    s.split('_')
+        .filter(|p| !p.is_empty())
+        .map(|w| {
+            if w.eq_ignore_ascii_case("id") {
+                "ID".to_string()
+            } else {
+                let mut c = w.chars();
+                match c.next() {
+                    None => String::new(),
+                    Some(f) => {
+                        let mut out = f.to_ascii_uppercase().to_string();
+                        out.push_str(c.as_str());
+                        out
+                    }
+                }
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub fn parse_fields(cfg: &ModelSpec, pk: &str) -> Vec<FieldSpec> {
     let mut out = Vec::new();
     if let Some(list) = &cfg.fields {

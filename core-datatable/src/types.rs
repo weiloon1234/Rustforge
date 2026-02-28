@@ -306,6 +306,7 @@ pub struct DataTableResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataTableColumnMeta {
     pub name: String,
+    pub label: String,
     pub data_type: String,
     pub sortable: bool,
     pub localized: bool,

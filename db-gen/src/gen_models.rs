@@ -4850,6 +4850,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     let table_adapter_ident = format!("{}TableAdapter", model_title);
     let sortable_cols_lit = db_fields
         .iter()
+        .filter(|f| !f.ty.contains("serde_json"))
         .map(|f| format!("\"{}\"", f.name))
         .collect::<Vec<_>>()
         .join(", ");
@@ -5153,18 +5154,21 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     writeln!(out, "        &[").unwrap();
     for f in &db_fields {
         let ops = column_filter_ops_lit(f);
+        let label = crate::schema::to_label(&f.name);
+        let sortable = !f.ty.contains("serde_json");
         writeln!(
             out,
-            "            DataTableColumnDescriptor {{ name: \"{name}\", data_type: \"{ty}\", sortable: true, localized: false, filter_ops: {ops} }},",
+            "            DataTableColumnDescriptor {{ name: \"{name}\", label: \"{label}\", data_type: \"{ty}\", sortable: {sortable}, localized: false, filter_ops: {ops} }},",
             name = f.name,
             ty = f.ty,
         )
         .unwrap();
     }
     for f in &multilang_fields {
+        let label = crate::schema::to_label(f);
         writeln!(
             out,
-            "            DataTableColumnDescriptor {{ name: \"{name}\", data_type: \"String\", sortable: false, localized: true, filter_ops: &[\"locale_eq\", \"locale_like\"] }},",
+            "            DataTableColumnDescriptor {{ name: \"{name}\", label: \"{label}\", data_type: \"String\", sortable: false, localized: true, filter_ops: &[\"locale_eq\", \"locale_like\"] }},",
             name = f,
         )
         .unwrap();
