@@ -4495,11 +4495,19 @@ pub const FRONTEND_PACKAGE_JSON: &str = r#"{
 
 pub const FRONTEND_VITE_CONFIG_USER_TS: &str = r#"import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import path from "path";
 
 export default defineConfig({
   plugins: [react()],
   root: ".",
   base: "/",
+  resolve: {
+    alias: {
+      "@shared": path.resolve(__dirname, "src/shared"),
+      "@admin": path.resolve(__dirname, "src/admin"),
+      "@user": path.resolve(__dirname, "src/user"),
+    },
+  },
   build: {
     outDir: "../public",
     emptyOutDir: false,
@@ -4526,11 +4534,19 @@ export default defineConfig({
 
 pub const FRONTEND_VITE_CONFIG_ADMIN_TS: &str = r#"import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import path from "path";
 
 export default defineConfig({
   plugins: [react()],
   root: ".",
   base: "/admin/",
+  resolve: {
+    alias: {
+      "@shared": path.resolve(__dirname, "src/shared"),
+      "@admin": path.resolve(__dirname, "src/admin"),
+      "@user": path.resolve(__dirname, "src/user"),
+    },
+  },
   build: {
     outDir: "../public/admin",
     emptyOutDir: true,
@@ -4570,7 +4586,13 @@ pub const FRONTEND_TSCONFIG_JSON: &str = r#"{
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["src/shared/*"],
+      "@admin/*": ["src/admin/*"],
+      "@user/*": ["src/user/*"]
+    }
   },
   "include": ["src"]
 }
@@ -4636,7 +4658,7 @@ pub const FRONTEND_ADMIN_HTML: &str = r#"<!doctype html>
 pub const FRONTEND_SRC_USER_MAIN_TSX: &str = r#"import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import "../shared/i18n";
+import "@shared/i18n";
 import App from "./App";
 import "./app.css";
 
@@ -4650,8 +4672,8 @@ createRoot(document.getElementById("root")!).render(
 "#;
 
 pub const FRONTEND_SRC_USER_APP_TSX: &str = r#"import { Routes, Route } from "react-router-dom";
-import { ProtectedRoute } from "../shared/ProtectedRoute";
-import { useAuthStore } from "./stores/auth";
+import { ProtectedRoute } from "@shared/ProtectedRoute";
+import { useAuthStore } from "@user/stores/auth";
 
 function DashboardPage() {
   return (
@@ -4829,7 +4851,7 @@ pub const FRONTEND_SRC_USER_APP_CSS: &str = r#"@import "tailwindcss";
 pub const FRONTEND_SRC_ADMIN_MAIN_TSX: &str = r#"import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import "../shared/i18n";
+import "@shared/i18n";
 import App from "./App";
 import "./app.css";
 
@@ -4843,12 +4865,12 @@ createRoot(document.getElementById("root")!).render(
 "#;
 
 pub const FRONTEND_SRC_ADMIN_APP_TSX: &str = r#"import { Routes, Route } from "react-router-dom";
-import { ProtectedRoute } from "../shared/ProtectedRoute";
-import { useAuthStore } from "./stores/auth";
-import AdminLayout from "./layouts/AdminLayout";
-import LoginPage from "./pages/LoginPage";
-import DashboardPage from "./pages/DashboardPage";
-import AdminsPage from "./pages/AdminsPage";
+import { ProtectedRoute } from "@shared/ProtectedRoute";
+import { useAuthStore } from "@admin/stores/auth";
+import AdminLayout from "@admin/layouts/AdminLayout";
+import LoginPage from "@admin/pages/LoginPage";
+import DashboardPage from "@admin/pages/DashboardPage";
+import AdminsPage from "@admin/pages/AdminsPage";
 
 export default function App() {
   return (
@@ -6111,7 +6133,7 @@ export function Radio({ name, options, value, onChange, label, error, notes, req
 }
 "##;
 
-pub const FRONTEND_SRC_USER_STORES_AUTH_TS: &str = r#"import { createAuthStore } from "../../shared/createAuthStore";
+pub const FRONTEND_SRC_USER_STORES_AUTH_TS: &str = r#"import { createAuthStore } from "@shared/createAuthStore";
 
 export const useAuthStore = createAuthStore({
   loginEndpoint: "/api/v1/auth/login",
@@ -6121,8 +6143,8 @@ export const useAuthStore = createAuthStore({
 });
 "#;
 
-pub const FRONTEND_SRC_ADMIN_STORES_AUTH_TS: &str = r#"import { createAuthStore } from "../../shared/createAuthStore";
-import type { AdminMeOutput } from "../types/admin-auth";
+pub const FRONTEND_SRC_ADMIN_STORES_AUTH_TS: &str = r#"import { createAuthStore } from "@shared/createAuthStore";
+import type { AdminMeOutput } from "@admin/types/admin-auth";
 
 export const useAuthStore = createAuthStore<AdminMeOutput>({
   loginEndpoint: "/api/v1/admin/auth/login",
@@ -6206,9 +6228,9 @@ export const navigation: NavItem[] = [
 pub const FRONTEND_SRC_ADMIN_COMPONENTS_SIDEBAR_TSX: &str = r#"import { useLocation, Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
-import { navigation, type NavItem, type NavChild } from "../nav";
-import { useAuthStore } from "../stores/auth";
-import { useNotificationStore } from "../stores/notifications";
+import { navigation, type NavItem, type NavChild } from "@admin/nav";
+import { useAuthStore } from "@admin/stores/auth";
+import { useNotificationStore } from "@admin/stores/notifications";
 
 function hasAccess(scopes: string[], required?: string[]): boolean {
   if (!required || required.length === 0) return true;
@@ -6369,7 +6391,7 @@ export default function Sidebar({ collapsed }: { collapsed: boolean }) {
 "#;
 
 pub const FRONTEND_SRC_ADMIN_COMPONENTS_HEADER_TSX: &str = r#"import { Menu, LogOut } from "lucide-react";
-import { useAuthStore } from "../stores/auth";
+import { useAuthStore } from "@admin/stores/auth";
 
 export default function Header({
   collapsed,
@@ -6410,9 +6432,9 @@ export default function Header({
 
 pub const FRONTEND_SRC_ADMIN_LAYOUTS_ADMIN_LAYOUT_TSX: &str = r#"import { useState, useEffect } from "react";
 import { Outlet } from "react-router-dom";
-import Sidebar from "../components/Sidebar";
-import Header from "../components/Header";
-import { ModalOutlet } from "../../shared/components";
+import Sidebar from "@admin/components/Sidebar";
+import Header from "@admin/components/Header";
+import { ModalOutlet } from "@shared/components";
 
 const STORAGE_KEY = "admin-sidebar-collapsed";
 
@@ -6443,8 +6465,8 @@ export default function AdminLayout() {
 }
 "#;
 
-pub const FRONTEND_SRC_USER_API_TS: &str = r#"import { createApiClient } from "../../shared/createApiClient";
-import { useAuthStore } from "./stores/auth";
+pub const FRONTEND_SRC_USER_API_TS: &str = r#"import { createApiClient } from "@shared/createApiClient";
+import { useAuthStore } from "@user/stores/auth";
 
 export const api = createApiClient({
   getToken: () => useAuthStore.getState().token,
@@ -6456,8 +6478,8 @@ export const api = createApiClient({
 });
 "#;
 
-pub const FRONTEND_SRC_ADMIN_API_TS: &str = r#"import { createApiClient } from "../../shared/createApiClient";
-import { useAuthStore } from "./stores/auth";
+pub const FRONTEND_SRC_ADMIN_API_TS: &str = r#"import { createApiClient } from "@shared/createApiClient";
+import { useAuthStore } from "@admin/stores/auth";
 
 export const api = createApiClient({
   getToken: () => useAuthStore.getState().token,
@@ -6470,9 +6492,9 @@ export const api = createApiClient({
 "#;
 
 pub const FRONTEND_SRC_ADMIN_PAGES_LOGIN_PAGE_TSX: &str = r#"import { useNavigate } from "react-router-dom";
-import { useAutoForm } from "../../shared/useAutoForm";
-import { useAuthStore } from "../stores/auth";
-import { api } from "../api";
+import { useAutoForm } from "@shared/useAutoForm";
+import { useAuthStore } from "@admin/stores/auth";
+import { api } from "@admin/api";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -6546,7 +6568,7 @@ export default function LoginPage() {
 "#;
 
 pub const FRONTEND_SRC_ADMIN_PAGES_DASHBOARD_PAGE_TSX: &str = r#"import { Users, Activity, UserPlus, ShieldCheck } from "lucide-react";
-import { useAuthStore } from "../stores/auth";
+import { useAuthStore } from "@admin/stores/auth";
 
 const stats = [
   { label: "Total Admins", value: "—", icon: Users },
@@ -6706,8 +6728,8 @@ Use `<Link to="/login">` and `useNavigate()` — the basename is applied automat
 
 ```tsx
 import { Routes, Route } from "react-router-dom";
-import { ProtectedRoute } from "../shared/ProtectedRoute";
-import { useAuthStore } from "./stores/auth";
+import { ProtectedRoute } from "@shared/ProtectedRoute";
+import { useAuthStore } from "@user/stores/auth";
 
 export default function App() {
   return (
@@ -6757,8 +6779,8 @@ Each portal has its own `api.ts` that exports a configured Axios instance. The s
 - **Response interceptor**: on 401, attempts token refresh (one concurrent refresh), retries the request, or redirects to login on failure
 
 ```tsx
-// Import the portal's api instance for all API calls
-import { api } from "./api";
+// Import the portal's api instance for all API calls (use @admin/ or @user/ alias)
+import { api } from "@admin/api";
 
 const res = await api.get("/api/v1/articles");
 const data = res.data;
@@ -6796,8 +6818,8 @@ Type definitions in `*/types/` directories are **auto-generated** from Rust cont
 ### Usage
 
 ```typescript
-import type { ApiResponse } from "../../shared/types";
-import type { AdminOutput, CreateAdminInput } from "../types";
+import type { ApiResponse } from "@shared/types";
+import type { AdminOutput, CreateAdminInput } from "@admin/types";
 
 // Typed API calls
 const res = await api.post<ApiResponse<AdminOutput>>("/api/v1/admin", input);
@@ -6850,7 +6872,7 @@ Use Zustand for state. Define stores in `src/{portal}/stores/`.
 
 ```typescript
 // src/{portal}/stores/auth.ts
-import { createAuthStore } from "../../shared/createAuthStore";
+import { createAuthStore } from "@shared/createAuthStore";
 
 export const useAuthStore = createAuthStore({
   loginEndpoint:   "/api/v1/{portal}/auth/login",
@@ -6875,7 +6897,7 @@ await login({ email, password });
 For portals with extra account fields, pass a generic:
 
 ```typescript
-import { createAuthStore, type Account } from "../../shared/createAuthStore";
+import { createAuthStore, type Account } from "@shared/createAuthStore";
 
 interface MerchantAccount extends Account {
   companyId: number;
@@ -6939,7 +6961,7 @@ This means portals can have completely different visual styles while sharing ide
 ### Usage
 
 ```tsx
-import { TextInput, TextArea, Select, Checkbox, Radio } from "../shared/components";
+import { TextInput, TextArea, Select, Checkbox, Radio } from "@shared/components";
 
 // Basic text input with error
 <TextInput label="Email" type="email" required error={errors.email} />
@@ -7447,7 +7469,7 @@ pub const FRONTEND_SRC_ADMIN_TYPES_DATATABLE_ADMIN_TS: &str = r#"import type { A
 import type {
   DataTableQueryRequestBase,
   DataTableEmailExportRequestBase,
-} from "../../shared/types/datatable";
+} from "@shared/types/datatable";
 
 export interface AdminDatatableQueryInput {
   base?: DataTableQueryRequestBase;
@@ -7553,7 +7575,7 @@ fn main() {
             rel_path: "admin/types/datatable-admin.ts",
             imports: &[
                 r#"import type { AdminType } from "./enums";"#,
-                r#"import type { DataTableQueryRequestBase, DataTableEmailExportRequestBase } from "../../shared/types/datatable";"#,
+                r#"import type { DataTableQueryRequestBase, DataTableEmailExportRequestBase } from "@shared/types/datatable";"#,
             ],
             definitions: vec![
                 AdminDatatableQueryInput::export_to_string().expect("AdminDatatableQueryInput"),
