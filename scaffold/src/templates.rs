@@ -551,27 +551,9 @@ Publishes framework docs to `public/framework-documentation/`.
 "#;
 
 pub const ROOT_I18N_EN_JSON: &str = r#"{
-  "Admin list loaded": "Admin list loaded",
-  "Admin loaded": "Admin loaded",
-  "Admin created": "Admin created",
-  "Admin updated": "Admin updated",
-  "Admin deleted": "Admin deleted",
-  "Username is already taken": "Username is already taken",
-  "Cannot assign permissions you do not have": "Cannot assign permissions you do not have",
-  "You cannot update your own admin account here": "You cannot update your own admin account here",
-  "You cannot delete your own admin account here": "You cannot delete your own admin account here",
-  "Normal admin cannot assign admin.read or admin.manage": "Normal admin cannot assign admin.read or admin.manage",
-  "Profile loaded": "Profile loaded",
-  "Login successful": "Login successful",
-  "Token refreshed": "Token refreshed",
-  "Logout successful": "Logout successful",
-  "Profile updated successfully": "Profile updated successfully",
-  "Password updated successfully": "Password updated successfully",
-  "Current password is incorrect": "Current password is incorrect",
-  "Admin not found": "Admin not found",
-  "Missing refresh token": "Missing refresh token",
-  "Invalid credentials": "Invalid credentials",
-  "Access denied": "Access denied"
+  "Welcome back, :name": "Welcome back, :name",
+  "Page :page of :total_pages (:total_records total)": "Page :page of :total_pages (:total_records total)",
+  "Are you sure you want to delete \":username\"?": "Are you sure you want to delete \":username\"?"
 }
 "#;
 
@@ -596,7 +578,60 @@ pub const ROOT_I18N_ZH_JSON: &str = r#"{
   "Admin not found": "找不到管理员",
   "Missing refresh token": "缺少刷新令牌",
   "Invalid credentials": "凭证无效",
-  "Access denied": "拒绝访问"
+  "Access denied": "拒绝访问",
+
+  "Admin Portal": "管理后台",
+  "Sign in to your account": "登录你的账号",
+  "Sign in": "登录",
+  "Signing in...": "登录中...",
+  "Welcome back, :name": "欢迎回来，:name",
+  "Here's an overview of your system.": "以下是系统概览。",
+  "Admin": "管理员",
+  "Expand sidebar": "展开侧栏",
+  "Collapse sidebar": "收起侧栏",
+  "Logout": "登出",
+
+  "Admins": "管理员",
+  "Manage administrator accounts": "管理管理员账号",
+  "Refresh": "刷新",
+  "Create Admin": "创建管理员",
+  "Edit Admin": "编辑管理员",
+  "Delete Admin": "删除管理员",
+  "ID": "ID",
+  "Username": "用户名",
+  "Name": "姓名",
+  "Email": "邮箱",
+  "Type": "类型",
+  "Password": "密码",
+  "Permissions": "权限",
+  "Actions": "操作",
+  "All permissions": "所有权限",
+  "Loading…": "加载中…",
+  "No admins found.": "未找到管理员。",
+  "Edit": "编辑",
+  "Delete": "删除",
+  "Previous": "上一页",
+  "Next": "下一页",
+  "Page :page of :total_pages (:total_records total)": "第 :page 页，共 :total_pages 页（:total_records 条记录）",
+  "Enter username": "输入用户名",
+  "Enter your username": "输入你的用户名",
+  "Enter full name": "输入全名",
+  "Enter email": "输入邮箱",
+  "Enter password": "输入密码",
+  "Enter your password": "输入你的密码",
+  "Developer": "开发者",
+  "Super Admin": "超级管理员",
+  "Cancel": "取消",
+  "Create": "创建",
+  "Creating…": "创建中…",
+  "Save": "保存",
+  "Saving…": "保存中…",
+  "Success": "成功",
+  "Error": "错误",
+  "Deleted": "已删除",
+  "Failed to load admins.": "加载管理员列表失败。",
+  "Failed to delete admin.": "删除管理员失败。",
+  "Are you sure you want to delete \":username\"?": "确定要删除「:username」吗？"
 }
 "#;
 
@@ -6286,9 +6321,36 @@ import { navigation, type NavItem, type NavChild } from "@admin/nav";
 import { useAuthStore } from "@admin/stores/auth";
 import { useNotificationStore } from "@admin/stores/notifications";
 
+function matchPattern(pattern: string, value: string): boolean {
+  if (!pattern.endsWith(".*")) return false;
+  const prefix = pattern.slice(0, -2);
+  if (!prefix) return false;
+  return value === prefix || value.startsWith(prefix + ".");
+}
+
+function manageImpliesRead(granted: string, required: string): boolean {
+  const gi = granted.lastIndexOf(".");
+  const ri = required.lastIndexOf(".");
+  if (gi === -1 || ri === -1) return false;
+  return (
+    granted.slice(0, gi) === required.slice(0, ri) &&
+    granted.slice(gi + 1) === "manage" &&
+    required.slice(ri + 1) === "read"
+  );
+}
+
+function permissionMatches(granted: string, required: string): boolean {
+  const g = granted.trim();
+  const r = required.trim();
+  if (!g || !r) return false;
+  if (g === "*" || r === "*" || g === r) return true;
+  if (manageImpliesRead(g, r)) return true;
+  return matchPattern(g, r) || matchPattern(r, g);
+}
+
 function hasAccess(scopes: string[], required?: string[]): boolean {
   if (!required || required.length === 0) return true;
-  return required.some((p) => scopes.includes(p));
+  return required.some((r) => scopes.some((g) => permissionMatches(g, r)));
 }
 
 function Badge({ count }: { count: number }) {
@@ -6445,6 +6507,7 @@ export default function Sidebar({ collapsed }: { collapsed: boolean }) {
 "#;
 
 pub const FRONTEND_SRC_ADMIN_COMPONENTS_HEADER_TSX: &str = r#"import { Menu, LogOut } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@admin/stores/auth";
 
 export default function Header({
@@ -6454,6 +6517,7 @@ export default function Header({
   collapsed: boolean;
   onToggle: () => void;
 }) {
+  const { t } = useTranslation();
   const account = useAuthStore((s) => s.account);
   const logout = useAuthStore((s) => s.logout);
 
@@ -6462,7 +6526,7 @@ export default function Header({
       <button
         onClick={onToggle}
         className="rounded-lg p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
-        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-label={collapsed ? t("Expand sidebar") : t("Collapse sidebar")}
       >
         <Menu size={20} />
       </button>
@@ -6470,11 +6534,11 @@ export default function Header({
       <div className="flex-1" />
 
       <div className="flex items-center gap-3">
-        <span className="text-sm text-muted">{account?.name ?? "Admin"}</span>
+        <span className="text-sm text-muted">{account?.name ?? t("Admin")}</span>
         <button
           onClick={() => logout()}
           className="rounded-lg p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
-          aria-label="Logout"
+          aria-label={t("Logout")}
         >
           <LogOut size={18} />
         </button>
@@ -6585,12 +6649,14 @@ export const api = createApiClient({
 "#;
 
 pub const FRONTEND_SRC_ADMIN_PAGES_LOGIN_PAGE_TSX: &str = r#"import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAutoForm } from "@shared/useAutoForm";
 import { useAuthStore } from "@admin/stores/auth";
 import { api } from "@admin/api";
 import type { AdminAuthOutput } from "@admin/types";
 
 export default function LoginPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const setToken = useAuthStore((s) => s.setToken);
   const fetchAccount = useAuthStore((s) => s.fetchAccount);
@@ -6603,16 +6669,16 @@ export default function LoginPage() {
       {
         name: "username",
         type: "text",
-        label: "Username",
-        placeholder: "Enter your username",
+        label: t("Username"),
+        placeholder: t("Enter your username"),
         required: true,
         span: 2,
       },
       {
         name: "password",
         type: "password",
-        label: "Password",
-        placeholder: "Enter your password",
+        label: t("Password"),
+        placeholder: t("Enter your password"),
         required: true,
         span: 2,
       },
@@ -6630,10 +6696,10 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            Admin Portal
+            {t("Admin Portal")}
           </h1>
           <p className="mt-1 text-sm text-muted">
-            Sign in to your account
+            {t("Sign in to your account")}
           </p>
         </div>
 
@@ -6653,7 +6719,7 @@ export default function LoginPage() {
               text-primary-foreground transition-colors hover:bg-primary-hover
               disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {busy ? "Signing in..." : "Sign in"}
+            {busy ? t("Signing in...") : t("Sign in")}
           </button>
         </div>
       </div>
@@ -6662,19 +6728,21 @@ export default function LoginPage() {
 }
 "#;
 
-pub const FRONTEND_SRC_ADMIN_PAGES_DASHBOARD_PAGE_TSX: &str = r#"import { useAuthStore } from "@admin/stores/auth";
+pub const FRONTEND_SRC_ADMIN_PAGES_DASHBOARD_PAGE_TSX: &str = r#"import { useTranslation } from "react-i18next";
+import { useAuthStore } from "@admin/stores/auth";
 
 export default function DashboardPage() {
+  const { t } = useTranslation();
   const account = useAuthStore((s) => s.account);
 
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground">
-          Welcome back, {account?.name ?? "Admin"}
+          {t("Welcome back, :name", { name: account?.name ?? t("Admin") })}
         </h1>
         <p className="mt-1 text-sm text-muted">
-          Here's an overview of your system.
+          {t("Here's an overview of your system.")}
         </p>
       </div>
     </div>
@@ -6682,29 +6750,359 @@ export default function DashboardPage() {
 }
 "#;
 
-pub const FRONTEND_SRC_ADMIN_PAGES_ADMINS_PAGE_TSX: &str = r#"import { Users } from "lucide-react";
+pub const FRONTEND_SRC_ADMIN_PAGES_ADMINS_PAGE_TSX: &str = r#"import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import { RefreshCw, Plus, Pencil, Trash2 } from "lucide-react";
+import type { AdminOutput, AdminDeleteOutput, AdminType } from "@admin/types";
+import type { DataTableQueryResponse, ApiResponse } from "@shared/types";
+import {
+  useAutoForm,
+  useModalStore,
+  alertConfirm,
+  alertSuccess,
+  alertError,
+} from "@shared/components";
+import { api } from "@admin/api";
+
+const TYPE_COLORS: Record<AdminType, string> = {
+  developer: "bg-purple-100 text-purple-700",
+  superadmin: "bg-amber-100 text-amber-700",
+  admin: "bg-blue-100 text-blue-700",
+};
+
+function TypeBadge({ type }: { type: AdminType }) {
+  return (
+    <span
+      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${TYPE_COLORS[type] ?? "bg-gray-100 text-gray-700"}`}
+    >
+      {type}
+    </span>
+  );
+}
+
+function PermissionBadges({ abilities }: { abilities: string[] }) {
+  const { t } = useTranslation();
+  if (abilities.includes("*")) {
+    return (
+      <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+        {t("All permissions")}
+      </span>
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {abilities.map((a) => (
+        <span
+          key={a}
+          className="inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+        >
+          {a}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
+  const { t } = useTranslation();
+  const close = useModalStore((s) => s.close);
+
+  const typeOptions = [
+    { label: t("Developer"), value: "developer" as AdminType },
+    { label: t("Super Admin"), value: "superadmin" as AdminType },
+    { label: t("Admin"), value: "admin" as AdminType },
+  ];
+
+  const { submit, busy, form, errors } = useAutoForm(api, {
+    url: "/api/v1/admin/admins",
+    method: "post",
+    fields: [
+      { name: "username", type: "text", label: t("Username"), placeholder: t("Enter username"), required: true, span: 1 },
+      { name: "name", type: "text", label: t("Name"), placeholder: t("Enter full name"), required: true, span: 1 },
+      { name: "email", type: "email", label: t("Email"), placeholder: t("Enter email"), required: false, span: 1 },
+      {
+        name: "admin_type",
+        type: "select",
+        label: t("Type"),
+        required: true,
+        span: 1,
+        options: typeOptions,
+      },
+      { name: "password", type: "password", label: t("Password"), placeholder: t("Enter password"), required: true, span: 2 },
+    ],
+    onSuccess: () => {
+      close();
+      alertSuccess({ title: t("Success"), message: t("Admin created") });
+      onCreated();
+    },
+  });
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      {errors.general && (
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+          {errors.general}
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-4">{form}</div>
+      <div className="flex justify-end gap-2 pt-2">
+        <button type="button" onClick={() => close()} className="rf-modal-btn-secondary">
+          {t("Cancel")}
+        </button>
+        <button type="submit" disabled={busy} className="rf-modal-btn-primary">
+          {busy ? t("Creating…") : t("Create")}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function EditAdminForm({
+  admin,
+  onUpdated,
+}: {
+  admin: AdminOutput;
+  onUpdated: () => void;
+}) {
+  const { t } = useTranslation();
+  const close = useModalStore((s) => s.close);
+
+  const typeOptions = [
+    { label: t("Developer"), value: "developer" as AdminType },
+    { label: t("Super Admin"), value: "superadmin" as AdminType },
+    { label: t("Admin"), value: "admin" as AdminType },
+  ];
+
+  const { submit, busy, form, errors } = useAutoForm(api, {
+    url: `/api/v1/admin/admins/${admin.id}`,
+    method: "patch",
+    fields: [
+      { name: "username", type: "text", label: t("Username"), placeholder: t("Enter username"), required: true, span: 1 },
+      { name: "name", type: "text", label: t("Name"), placeholder: t("Enter full name"), required: true, span: 1 },
+      { name: "email", type: "email", label: t("Email"), placeholder: t("Enter email"), required: false, span: 1 },
+      {
+        name: "admin_type",
+        type: "select",
+        label: t("Type"),
+        required: true,
+        span: 1,
+        options: typeOptions,
+      },
+    ],
+    defaults: {
+      username: admin.username,
+      name: admin.name,
+      email: admin.email ?? "",
+      admin_type: admin.admin_type,
+    },
+    onSuccess: () => {
+      close();
+      alertSuccess({ title: t("Success"), message: t("Admin updated") });
+      onUpdated();
+    },
+  });
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      {errors.general && (
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+          {errors.general}
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-4">{form}</div>
+      <div className="flex justify-end gap-2 pt-2">
+        <button type="button" onClick={() => close()} className="rf-modal-btn-secondary">
+          {t("Cancel")}
+        </button>
+        <button type="submit" disabled={busy} className="rf-modal-btn-primary">
+          {busy ? t("Saving…") : t("Save")}
+        </button>
+      </div>
+    </form>
+  );
+}
 
 export default function AdminsPage() {
+  const { t } = useTranslation();
+  const [data, setData] = useState<DataTableQueryResponse<AdminOutput> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+
+  const fetchAdmins = useCallback(async (p: number) => {
+    setLoading(true);
+    try {
+      const res = await api.post<ApiResponse<DataTableQueryResponse<AdminOutput>>>(
+        "/api/v1/admin/datatable/admin",
+        { base: { page: p, per_page: 15 } },
+      );
+      setData(res.data.data);
+    } catch {
+      alertError({ title: t("Error"), message: t("Failed to load admins.") });
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    fetchAdmins(page);
+  }, [page, fetchAdmins]);
+
+  const refresh = () => fetchAdmins(page);
+
+  const handleCreate = () => {
+    useModalStore.getState().open({
+      title: t("Create Admin"),
+      size: "md",
+      content: <CreateAdminForm onCreated={refresh} />,
+    });
+  };
+
+  const handleEdit = (admin: AdminOutput) => {
+    useModalStore.getState().open({
+      title: t("Edit Admin"),
+      size: "md",
+      content: <EditAdminForm admin={admin} onUpdated={refresh} />,
+    });
+  };
+
+  const handleDelete = async (admin: AdminOutput) => {
+    await alertConfirm({
+      title: t("Delete Admin"),
+      message: t('Are you sure you want to delete ":username"?', { username: admin.username }),
+      confirmText: t("Delete"),
+      callback: async (result) => {
+        if (result.isConfirmed) {
+          try {
+            await api.delete<ApiResponse<AdminDeleteOutput>>(
+              `/api/v1/admin/admins/${admin.id}`,
+            );
+            alertSuccess({ title: t("Deleted"), message: t("Admin deleted") });
+            refresh();
+          } catch {
+            alertError({ title: t("Error"), message: t("Failed to delete admin.") });
+          }
+        }
+      },
+    });
+  };
+
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Admins</h1>
-        <p className="mt-1 text-sm text-muted">
-          Manage administrator accounts
-        </p>
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">{t("Admins")}</h1>
+          <p className="mt-1 text-sm text-muted">{t("Manage administrator accounts")}</p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={refresh}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-surface-hover"
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            {t("Refresh")}
+          </button>
+          <button
+            onClick={handleCreate}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary/90"
+          >
+            <Plus size={16} />
+            {t("Create Admin")}
+          </button>
+        </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-surface p-8 text-center">
-        <div className="mx-auto mb-3 w-fit rounded-lg bg-primary/10 p-3">
-          <Users size={24} className="text-primary" />
-        </div>
-        <p className="text-sm text-muted">
-          Connect to the admin datatable API to display data here.
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          See <code className="rounded bg-surface-hover px-1.5 py-0.5 text-foreground">types/datatable-admin.ts</code> for the query contract.
-        </p>
+      <div className="overflow-hidden rounded-xl border border-border bg-surface">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-border bg-surface-hover/50">
+              <th className="px-4 py-3 font-medium text-muted">{t("ID")}</th>
+              <th className="px-4 py-3 font-medium text-muted">{t("Username")}</th>
+              <th className="px-4 py-3 font-medium text-muted">{t("Name")}</th>
+              <th className="px-4 py-3 font-medium text-muted">{t("Email")}</th>
+              <th className="px-4 py-3 font-medium text-muted">{t("Type")}</th>
+              <th className="px-4 py-3 font-medium text-muted">{t("Permissions")}</th>
+              <th className="px-4 py-3 font-medium text-muted">{t("Actions")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && !data && (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-muted">
+                  {t("Loading…")}
+                </td>
+              </tr>
+            )}
+            {data && data.records.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-muted">
+                  {t("No admins found.")}
+                </td>
+              </tr>
+            )}
+            {data?.records.map((admin) => (
+              <tr key={admin.id} className="border-b border-border last:border-0 hover:bg-surface-hover/30">
+                <td className="px-4 py-3 tabular-nums text-muted">{admin.id}</td>
+                <td className="px-4 py-3 font-medium text-foreground">{admin.username}</td>
+                <td className="px-4 py-3 text-foreground">{admin.name}</td>
+                <td className="px-4 py-3 text-muted">{admin.email ?? "—"}</td>
+                <td className="px-4 py-3">
+                  <TypeBadge type={admin.admin_type} />
+                </td>
+                <td className="px-4 py-3">
+                  <PermissionBadges abilities={admin.abilities} />
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => handleEdit(admin)}
+                      className="rounded-lg p-1.5 text-muted transition hover:bg-surface-hover hover:text-foreground"
+                      title={t("Edit")}
+                    >
+                      <Pencil size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(admin)}
+                      className="rounded-lg p-1.5 text-muted transition hover:bg-red-50 hover:text-red-600"
+                      title={t("Delete")}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
+
+      {data && data.total_pages > 1 && (
+        <div className="mt-4 flex items-center justify-between">
+          <p className="text-sm text-muted">
+            {t("Page :page of :total_pages (:total_records total)", {
+              page: data.page,
+              total_pages: data.total_pages,
+              total_records: data.total_records,
+            })}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-surface-hover disabled:opacity-50"
+            >
+              {t("Previous")}
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(data.total_pages, p + 1))}
+              disabled={page >= data.total_pages}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-surface-hover disabled:opacity-50"
+            >
+              {t("Next")}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
