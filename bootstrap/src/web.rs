@@ -68,10 +68,14 @@ where
     }
     .layer(from_fn(core_i18n::middleware::locale_middleware));
 
+    // 5. Apply Standard Middleware (CORS, cookies, compression, timeouts, etc.)
+    let app_router =
+        core_web::middleware::stack::apply_standard_middleware(app_router, &ctx.settings);
+
     let bind_addr = ctx.settings.server.bind_addr()?;
     info!("Starting server on {}", bind_addr);
 
-    // 5. Serve
+    // 6. Serve
     core_web::server::serve(app_router, bind_addr).await?;
 
     Ok(())
