@@ -6932,7 +6932,7 @@ export default function AdminsPage() {
     setLoading(true);
     try {
       const res = await api.post<ApiResponse<DataTableQueryResponse<AdminOutput>>>(
-        "/api/v1/admin/datatable/admin",
+        "/api/v1/admin/datatable/admin/query",
         { base: { page: p, per_page: 15 } },
       );
       setData(res.data.data);
@@ -6941,7 +6941,8 @@ export default function AdminsPage() {
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     fetchAdmins(page);
