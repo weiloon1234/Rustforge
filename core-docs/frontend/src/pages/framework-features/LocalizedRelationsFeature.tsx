@@ -18,6 +18,12 @@ export function LocalizedRelationsFeature() {
             </div>
 
             <div className="prose prose-orange max-w-none">
+                <h2>Scaffold Now (verified)</h2>
+                <p>
+                    Scaffold baseline does not include article module by default. The schema and
+                    relation examples here are <strong>Concept Extension (optional)</strong>.
+                </p>
+
                 <h2>Schema</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-toml">{`[model.article]
@@ -150,4 +156,3 @@ let comment_counts = counts.get("comments");`}</code>
         </div>
     )
 }
-

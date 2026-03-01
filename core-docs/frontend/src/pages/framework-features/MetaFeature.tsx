@@ -16,6 +16,13 @@ export function MetaFeature() {
             </div>
 
             <div className="prose prose-orange max-w-none">
+                <h2>Scaffold Now (verified)</h2>
+                <p>
+                    Scaffold default focuses on admin domain. The article model below is a
+                    <strong> Concept Extension (optional)</strong> to demonstrate typed JSONB meta
+                    patterns.
+                </p>
+
                 <p>
                     Meta is for model-specific dynamic fields that should not become top-level
                     columns immediately. It keeps runtime flexibility while preserving typed

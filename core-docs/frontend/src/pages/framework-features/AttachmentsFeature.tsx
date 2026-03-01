@@ -16,6 +16,12 @@ export function AttachmentsFeature() {
             </div>
 
             <div className="prose prose-orange max-w-none">
+                <h2>Scaffold Now (verified)</h2>
+                <p>
+                    Scaffold ships admin-domain baseline only. Attachment examples in this page
+                    use article-style modules as a <strong>Concept Extension (optional)</strong>.
+                </p>
+
                 <p>
                     Attachments are declared in schema and validated by type definitions in
                     <code>app/configs.toml</code>. The generated model handles read hydration and
@@ -199,4 +205,3 @@ async fn upload_article_cover(
         </div>
     )
 }
-

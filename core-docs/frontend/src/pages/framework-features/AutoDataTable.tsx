@@ -17,6 +17,13 @@ export function AutoDataTableFeature() {
             </div>
 
             <div className="prose prose-orange max-w-none">
+                <h2>Scaffold Now (verified)</h2>
+                <p>
+                    This feature is wired by default for admin account datatable in scaffold.
+                    Additional scopes (for example merchant/article) are
+                    <strong> Concept Extension (optional)</strong>.
+                </p>
+
                 <h2>Key Concepts</h2>
                 <ul>
                     <li>
@@ -169,10 +176,9 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
     fn scoped_key(&self) -> &'static str { "admin.account" }
     fn openapi_tag(&self) -> &'static str { "Admin Account" }
 
-    fn email_to_input(&self, req: &Self::EmailRequest) -> DataTableInput { req.to_input() }
-    fn email_recipients(&self, req: &Self::EmailRequest) -> Vec<String> { req.base.recipients.clone() }
-    fn email_subject(&self, req: &Self::EmailRequest) -> Option<String> { req.base.subject.clone() }
-    fn export_file_name(&self, req: &Self::EmailRequest) -> Option<String> { req.base.export_file_name.clone() }
+    // Optional overrides only. Default trait implementations already map:
+    // email_to_input / email_recipients / email_subject / export_file_name
+    // from DataTableGenericEmailExportRequest.
 
     fn filter_rows(&self) -> Vec<Vec<DataTableFilterFieldDto>> {
         vec![

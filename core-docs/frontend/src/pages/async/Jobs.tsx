@@ -4,98 +4,50 @@ export function Jobs() {
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">Job Queue</h1>
                 <p className="text-xl text-gray-500">
-                    Durable queue jobs plus lightweight goroutine-style tasks.
+                    Durable Redis-backed jobs plus lightweight in-process runtime tasks.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
-                <p>
-                    Use the framework in two async modes:
-                    <br />
-                    1) <strong>Durable Redis jobs</strong> for reliable background work.
-                    <br />
-                    2) <strong>In-process runtime tasks</strong> for goroutine-style fan-out and channels.
-                </p>
+                <h2>Scaffold Now (verified)</h2>
+                <ul>
+                    <li>
+                        App job registration entrypoint is <code>app/src/internal/jobs/mod.rs</code>
+                    </li>
+                    <li>
+                        Worker process entrypoint is <code>app/src/bin/worker.rs</code>
+                    </li>
+                    <li>
+                        API binary can run embedded worker depending on runtime config
+                    </li>
+                </ul>
 
-                <h3>1) Durable Jobs (Laravel-style queue)</h3>
-                <p>Implement `core_jobs::Job` and set `NAME` + `QUEUE`.</p>
+                <h3>Registry baseline</h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`use core_jobs::{Job, JobContext};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+                    <code className="language-rust">{`use core_jobs::worker::Worker;
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SendWelcomeEmail {
-    pub user_id: Uuid,
+pub fn register_jobs(worker: &mut Worker) {
+    // worker.register::<YourJob>();
 }
 
-#[async_trait::async_trait]
-impl Job for SendWelcomeEmail {
-    const NAME: &'static str = "SendWelcomeEmail";
-    const QUEUE: &'static str = "mail";
-
-    async fn handle(&self, ctx: &JobContext) -> anyhow::Result<()> {
-        // Worker logic (DB, mailer, external APIs...)
-        Ok(())
-    }
-}`}</code>
+#[allow(unused_variables)]
+pub fn register_schedules(scheduler: &mut core_jobs::cron::Scheduler) {}`}</code>
                 </pre>
 
-                <h3>Dispatching</h3>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`// In API/App layer
-SendWelcomeEmail { user_id }.dispatch(&ctx.queue).await?;`}</code>
-                </pre>
-
-                <h3>Transactional Dispatch (after-commit pattern)</h3>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`use core_jobs::buffer::JobBuffer;
-
-let mut tx = ctx.db.begin().await?;
-
-// 1) Domain writes
-// sqlx::query(...).execute(&mut *tx).await?;
-
-// 2) Queue writes in same transaction
-let mut buffer = JobBuffer::new(&mut tx);
-buffer.push(SendWelcomeEmail { user_id }).await?;
-
-// 3) Commit once
-tx.commit().await?;`}</code>
-                </pre>
-                <p>
-                    Jobs buffered into <code>outbox_jobs</code> are flushed by the worker sweeper
-                    (`WORKER_SWEEP_INTERVAL`). This gives an after-commit safety net even if the
-                    process crashes between commit and dispatch.
-                </p>
-
-                <h3>Registering Jobs in Worker</h3>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`// app/src/internal/jobs/lib.rs
-pub fn register_jobs(worker: &mut core_jobs::worker::Worker) {
-    worker.register::<SendWelcomeEmail>();
-}`}</code>
-                </pre>
-
-                <h3>2) Goroutine-style Local Tasks</h3>
-                <p>
-                    For in-process concurrency (no Redis durability), use runtime helpers from
-                    <code>core_jobs::runtime</code>.
-                </p>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`use core_jobs::runtime;
-
-let (tx, mut rx) = runtime::channel::<String>(32);
-
-runtime::go(async move {
-    let _ = tx.send("hello from task".to_string()).await;
-});
-
-while let Some(msg) = rx.recv().await {
-    tracing::info!("received: {}", msg);
-    break;
-}`}</code>
-                </pre>
+                <h2>Concept Extension (optional)</h2>
+                <ul>
+                    <li>
+                        Implement <code>core_jobs::Job</code> for domain jobs under{' '}
+                        <code>app/src/internal/jobs/</code>.
+                    </li>
+                    <li>
+                        Use <code>core_jobs::buffer::JobBuffer</code> for transactional enqueue with outbox safety.
+                    </li>
+                    <li>
+                        Use <code>core_jobs::runtime</code> helpers for in-process async fan-out that does not need
+                        Redis durability.
+                    </li>
+                </ul>
             </div>
         </div>
     )

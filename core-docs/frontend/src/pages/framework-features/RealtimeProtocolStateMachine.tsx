@@ -158,8 +158,8 @@ export function RealtimeProtocolStateMachineFeature() {
                         queue/rate settings.
                     </li>
                     <li>
-                        Use <code>cli realtime bench --json</code> in CI/perf jobs for regression
-                        detection.
+                        Use a custom websocket benchmark script in CI/perf jobs for regression detection.
+                        Scaffold does not include a default realtime bench command.
                     </li>
                 </ul>
 
