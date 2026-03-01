@@ -133,11 +133,11 @@ Pulls latest code, compiles release binaries, builds frontend, runs migrations, 
 
 | Source file | Generates |
 |-------------|-----------|
-| `app/schemas/*.toml` | Model structs, enums, repos, query builders |
+| `app/schemas/*.toml` | Model structs, enums, repos, query builders, datatable skeletons |
 | `app/permissions.toml` | `Permission` enum |
-| `app/configs.toml` | Typed `Settings` |
+| `app/configs.toml` | Typed `Settings`, auth guards, localization artifacts |
 
-Never edit `generated/src/generated.rs` — it's overwritten on every build. Put extensions in `generated/src/extensions.rs`.
+Never edit generated outputs directly (for example: `generated/src/lib.rs`, `generated/src/models/*`, `generated/src/guards/*`, `generated/src/permissions.rs`, `generated/src/localized.rs`) — they are overwritten by generation/build steps. Put custom code in `generated/src/extensions.rs`.
 
 ### i18n
 

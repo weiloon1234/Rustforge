@@ -28,13 +28,14 @@ app/
     │   ├── api/              # Route handlers + state ← has AGENTS.md
     │   ├── workflows/        # Business logic         ← has AGENTS.md
     │   ├── jobs/             # Background jobs        ← has AGENTS.md
-    │   ├── middleware/        # Custom middleware      ← has AGENTS.md
+    │   ├── middleware/       # Custom middleware      ← has AGENTS.md
     │   ├── datatables/       # Datatable executors    ← has AGENTS.md
     │   └── realtime/         # WebSocket policies     ← has AGENTS.md
     ├── validation/           # Validation rules       ← has AGENTS.md
     └── seeds/                # Database seeders       ← has AGENTS.md
 frontend/                     # Multi-portal React + Vite + Tailwind 4 ← has AGENTS.md
-generated/                    # Auto-generated — NEVER edit generated.rs
+generated/                    # Auto-generated crate (do not edit generated outputs directly)
+docs/                         # Focused guides (portal setup, custom commands, etc.)
 migrations/                   # SQL migration files (ordered numeric prefix)
 i18n/                         # Translation JSON files
 ```
@@ -45,11 +46,11 @@ These files are the canonical definitions. Code is generated from them at compil
 
 | File | Defines | Generated output |
 |------|---------|------------------|
-| `app/schemas/*.toml` | Models, enums, fields, relations | `generated/src/generated.rs` — model structs, enums, repos, query builders |
+| `app/schemas/*.toml` | Models, enums, fields, relations | `generated/src/models/*`, auth guards, and datatable skeletons |
 | `app/permissions.toml` | Permission keys + guards | `Permission` enum with `as_str()`, `from_str()` |
-| `app/configs.toml` | Auth guards, languages, realtime channels, CORS | Typed `Settings` loaded at boot |
+| `app/configs.toml` | Auth guards, languages, realtime channels, CORS | Typed `Settings` + generated auth/localization artifacts |
 
-**Never edit `generated/src/generated.rs`** — it is overwritten every build. Put custom extensions in `generated/src/extensions.rs`.
+**Never edit generated outputs directly** (for example: `generated/src/lib.rs`, `generated/src/models/*`, `generated/src/guards/*`, `generated/src/permissions.rs`, `generated/src/localized.rs`) — they are overwritten by generation/build steps. Put custom extensions in `generated/src/extensions.rs`.
 
 ### Schema format (`app/schemas/*.toml`)
 
