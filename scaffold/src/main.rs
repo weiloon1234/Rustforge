@@ -32,6 +32,9 @@ async fn main() -> anyhow::Result<()> {
     println!("{} {}", "Output:".bold(), output.display());
 
     ensure_output_ready(&output, cli.force)?;
+    if cli.force {
+        cleanup_legacy_module_conflicts(&output)?;
+    }
 
     let app_key = generate_app_key();
     let replacements = [("APP_KEY", app_key.as_str())];
@@ -79,6 +82,29 @@ async fn main() -> anyhow::Result<()> {
 
     println!("\n{}", "Starter scaffold generated.".bold().green());
     println!("{}", "Next: cd <output> && cargo check".cyan());
+
+    Ok(())
+}
+
+fn cleanup_legacy_module_conflicts(output: &Path) -> anyhow::Result<()> {
+    // Legacy flat modules that now conflict with directory modules:
+    // app/src/**/api/v1/admin.rs + app/src/**/api/v1/admin/mod.rs
+    // app/src/**/api/v1/user.rs  + app/src/**/api/v1/user/mod.rs
+    let legacy_conflicts = [
+        "app/src/contracts/api/v1/admin.rs",
+        "app/src/contracts/api/v1/user.rs",
+        "app/src/internal/api/v1/admin.rs",
+        "app/src/internal/api/v1/user.rs",
+    ];
+
+    for rel in legacy_conflicts {
+        let path = output.join(rel);
+        if path.is_file() {
+            fs::remove_file(&path)
+                .with_context(|| format!("failed to remove legacy module {}", path.display()))?;
+            println!("{} {}", "Removed legacy".yellow(), path.display());
+        }
+    }
 
     Ok(())
 }
