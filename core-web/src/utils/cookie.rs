@@ -1,6 +1,27 @@
 use time::Duration;
 use tower_cookies::{cookie::SameSite, Cookie, Cookies};
 
+fn bool_from_env(key: &str) -> Option<bool> {
+    let raw = std::env::var(key).ok()?;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn should_use_secure_cookie() -> bool {
+    if let Some(v) = bool_from_env("COOKIE_SECURE") {
+        return v;
+    }
+
+    let env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
+    !matches!(
+        env.trim().to_ascii_lowercase().as_str(),
+        "local" | "development" | "dev" | "test" | "testing"
+    )
+}
+
 fn sanitize_guard_for_cookie(guard: &str) -> String {
     let value = guard
         .trim()
@@ -26,7 +47,7 @@ pub fn guard_refresh_cookie_name(guard: &str) -> String {
 pub fn set_auth(cookies: &Cookies, token: &str, ttl: Duration) {
     let mut c = Cookie::new("access_token", token.to_string());
     c.set_http_only(true);
-    c.set_secure(true);
+    c.set_secure(should_use_secure_cookie());
     c.set_same_site(SameSite::Lax);
     c.set_path("/");
 
@@ -42,7 +63,7 @@ pub fn set_auth(cookies: &Cookies, token: &str, ttl: Duration) {
 pub fn set_standard(cookies: &Cookies, name: &str, val: &str, ttl: Duration) {
     let mut c = Cookie::new(name.to_string(), val.to_string());
     c.set_http_only(true);
-    c.set_secure(true);
+    c.set_secure(should_use_secure_cookie());
     c.set_same_site(SameSite::Lax);
     c.set_path("/");
 
@@ -57,7 +78,7 @@ pub fn set_standard(cookies: &Cookies, name: &str, val: &str, ttl: Duration) {
 pub fn set_public(cookies: &Cookies, name: &str, val: &str, ttl: Duration) {
     let mut c = Cookie::new(name.to_string(), val.to_string());
     c.set_http_only(false); // <--- JS accessible
-    c.set_secure(true);
+    c.set_secure(should_use_secure_cookie());
     c.set_same_site(SameSite::Lax);
     c.set_path("/");
 
@@ -83,7 +104,7 @@ pub fn set_guard_refresh(
 ) {
     let mut cookie = Cookie::new(guard_refresh_cookie_name(guard), refresh_token.to_string());
     cookie.set_http_only(true);
-    cookie.set_secure(true);
+    cookie.set_secure(should_use_secure_cookie());
     cookie.set_same_site(SameSite::Lax);
     cookie.set_path(path.to_string());
     cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(

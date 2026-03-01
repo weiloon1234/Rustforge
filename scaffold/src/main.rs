@@ -37,6 +37,9 @@ async fn main() -> anyhow::Result<()> {
     let replacements = [("APP_KEY", app_key.as_str())];
 
     let files = template_files();
+    if cli.force {
+        cleanup_module_path_conflicts(&output, files.iter().map(|file| file.path()))?;
+    }
     let agent_dirs = agent_link_dirs_from_paths(files.iter().map(|f| f.path()));
 
     for file in files {
@@ -172,34 +175,55 @@ fn ensure_output_ready(output: &Path, force: bool) -> anyhow::Result<()> {
             fs::read_dir(output).with_context(|| format!("failed to read {}", output.display()))?;
         let non_empty = entries.next().transpose()?.is_some();
 
-        if non_empty {
-            if !force {
-                bail!(
-                    "Refusing to scaffold into non-empty directory: {}\nUse --force to overwrite.",
-                    output.display()
-                );
-            }
-
-            for entry in fs::read_dir(output)
-                .with_context(|| format!("failed to read {}", output.display()))?
-            {
-                let entry = entry.with_context(|| {
-                    format!("failed to read entry in output {}", output.display())
-                })?;
-                let path = entry.path();
-                if path.is_dir() {
-                    fs::remove_dir_all(&path).with_context(|| {
-                        format!("failed to remove directory {}", path.display())
-                    })?;
-                } else {
-                    fs::remove_file(&path)
-                        .with_context(|| format!("failed to remove file {}", path.display()))?;
-                }
-            }
+        if non_empty && !force {
+            bail!(
+                "Refusing to scaffold into non-empty directory: {}\nUse --force to overwrite.",
+                output.display()
+            );
         }
     } else {
         fs::create_dir_all(output)
             .with_context(|| format!("failed to create {}", output.display()))?;
+    }
+
+    Ok(())
+}
+
+fn cleanup_module_path_conflicts<'a, I>(output: &Path, template_paths: I) -> anyhow::Result<()>
+where
+    I: IntoIterator<Item = &'a Path>,
+{
+    // Generic Rust module conflict cleanup:
+    // if template contains `.../<module>/mod.rs`, remove stale `.../<module>.rs`
+    // in output to avoid E0761 ambiguity.
+    let mut removed = BTreeSet::new();
+
+    for rel in template_paths {
+        if rel.file_name().and_then(|name| name.to_str()) != Some("mod.rs") {
+            continue;
+        }
+
+        let Some(module_dir) = rel.parent() else {
+            continue;
+        };
+        let Some(module_name) = module_dir.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Some(parent_dir) = module_dir.parent() else {
+            continue;
+        };
+
+        let flat_rel = parent_dir.join(format!("{module_name}.rs"));
+        if !removed.insert(flat_rel.clone()) {
+            continue;
+        }
+
+        let flat_abs = output.join(&flat_rel);
+        if flat_abs.is_file() {
+            fs::remove_file(&flat_abs)
+                .with_context(|| format!("failed to remove conflicting module {}", flat_abs.display()))?;
+            println!("{} {}", "Removed conflict".yellow(), flat_abs.display());
+        }
     }
 
     Ok(())

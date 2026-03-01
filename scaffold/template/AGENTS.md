@@ -176,55 +176,9 @@ ApiResponse::created(data, &t("Created"))  // 201
 
 ### Custom Project Commands
 
-Define in `app/src/bin/console.rs`. Uses Clap derive + the `ProjectCommand` trait.
+Keep root guidance small. For full custom command patterns (Clap enums, nested subcommands, `ProjectCommand` trait, and examples), open:
 
-```rust
-use bootstrap::boot::BootContext;
-use clap::Subcommand;
-
-#[derive(Subcommand, Debug, Clone)]
-pub enum ProjectCommands {
-    /// Simple command with no args
-    Ping,
-
-    /// Command with args
-    Demo {
-        #[arg(long)]
-        name: String,
-    },
-
-    /// Nested subcommand group
-    #[command(subcommand)]
-    Cache(CacheCommands),
-}
-
-#[derive(Subcommand, Debug, Clone)]
-pub enum CacheCommands {
-    /// Flush application cache
-    Flush,
-}
-
-#[async_trait::async_trait]
-impl bootstrap::console::ProjectCommand for ProjectCommands {
-    async fn handle(self, ctx: &BootContext) -> anyhow::Result<()> {
-        match self {
-            Self::Ping => println!("pong"),
-            Self::Demo { name } => {
-                println!("Hello {name} from {}", ctx.settings.app.name);
-            }
-            Self::Cache(CacheCommands::Flush) => {
-                ctx.redis.flush().await?;
-                println!("Cache flushed");
-            }
-        }
-        Ok(())
-    }
-}
-```
-
-Custom commands receive `BootContext` with full access to `db`, `redis`, `storage`, `queue`, `mailer`, `settings`.
-
-Usage: `./console ping`, `./console demo --name test`, `./console cache flush`.
+- `docs/custom-project-commands.md`
 
 ## Migrations
 
@@ -277,100 +231,10 @@ Admin is mounted first so `/admin/*` is matched before the catch-all user SPA.
 
 ### Adding a new portal
 
-Adding a role portal (e.g. `merchant`) touches backend, frontend, and build config. Use the admin portal as the reference implementation.
+Keep this file lean. For the full backend + frontend + build playbook, open:
 
-#### Backend (Rust)
-
-| # | File | What to do |
-|---|------|------------|
-| 1 | `app/configs.toml` | Add `[auth.guards.merchant]` with provider, TTL, refresh TTL |
-| 2 | `app/schemas/merchant.toml` | Define model + enum (`auth = true`, `auth_model = "merchant"`) |
-| 3 | `app/permissions.toml` | Add permission entries scoped to the new guard |
-| 4 | `migrations/{next}_merchant_auth.sql` | Create table + indexes |
-| 5 | `app/src/contracts/api/v1/merchant/account.rs` | CRUD DTOs (CreateInput, UpdateInput, Output) |
-| 6 | `app/src/contracts/api/v1/merchant/auth.rs` | Auth DTOs (LoginInput, RefreshInput, ProfileOutput) |
-| 7 | `app/src/contracts/datatable/merchant/` | Datatable query/export contracts |
-| 8 | `app/src/internal/workflows/merchant.rs` | CRUD business logic |
-| 9 | `app/src/internal/workflows/merchant_auth.rs` | Auth business logic (login, refresh, logout, profile) |
-| 10 | `app/src/internal/middleware/auth.rs` | Add `require_merchant` guard function |
-| 11 | `app/src/internal/api/v1/merchant/account.rs` | CRUD route handlers |
-| 12 | `app/src/internal/api/v1/merchant/auth.rs` | Auth route handlers |
-| 13 | `app/src/internal/api/v1/mod.rs` | Mount `/merchant` and `/merchant/auth` routes |
-| 14 | `app/src/internal/datatables/portal/merchant/account.rs` | Datatable executor |
-| 15 | `app/src/internal/api/state.rs` | Register merchant datatable in `DataTableRegistry` |
-| 16 | `app/src/internal/api/mod.rs` | Add SPA serving — see below |
-| 17 | `app/src/seeds/merchant_bootstrap_seeder.rs` | Bootstrap seed data |
-| 18 | `i18n/*.json` | Add translation keys |
-| 19 | Wire `mod` declarations | Add `pub mod` / `mod` in every relevant `mod.rs` |
-
-**SPA serving in `build_router`** (`app/src/internal/api/mod.rs`) — add **before** the user SPA catch-all:
-
-```rust
-// Merchant SPA: /merchant/* → public/merchant/index.html
-let merchant_public = public_path.join("merchant");
-let merchant_index = merchant_public.join("index.html");
-if merchant_public.is_dir() && merchant_index.is_file() {
-    router = router.nest_service(
-        "/merchant",
-        ServeDir::new(&merchant_public).fallback(ServeFile::new(&merchant_index)),
-    );
-} else {
-    router = router
-        .route("/merchant", axum_get(merchant_dev))
-        .route("/merchant/{*path}", axum_get(merchant_dev));
-}
-```
-
-And a dev handler that serves HTML loading from the Vite dev server (copy `admin_dev`, change port and entry path):
-
-```rust
-async fn merchant_dev() -> Html<&'static str> {
-    Html(r#"<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Merchant</title>
-    <script type="module" src="http://localhost:5175/@vite/client"></script>
-    <script type="module">
-      import RefreshRuntime from "http://localhost:5175/@react-refresh"
-      RefreshRuntime.injectIntoGlobalHook(window)
-      window.$RefreshReg$ = () => {}
-      window.$RefreshSig$ = () => (type) => type
-      window.__vite_plugin_react_preamble_installed__ = true
-    </script>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="http://localhost:5175/src/merchant/main.tsx"></script>
-  </body>
-</html>"#)
-}
-```
-
-#### Frontend
-
-| # | File | What to do |
-|---|------|------------|
-| 1 | `frontend/vite.config.merchant.ts` | `base: "/merchant/"`, `server.port: 5175`, `outDir: "../public/merchant"` |
-| 2 | `frontend/merchant.html` | Entry HTML with `<script type="module" src="/src/merchant/main.tsx">` |
-| 3 | `frontend/src/merchant/main.tsx` | `<BrowserRouter basename="/merchant">` |
-| 4 | `frontend/src/merchant/App.tsx` | Routes with `<ProtectedRoute>` |
-| 5 | `frontend/src/merchant/app.css` | `@import "tailwindcss"` + `@theme {}` + `rf-*` component classes |
-| 6 | `frontend/src/merchant/api.ts` | `createApiClient` wired to auth store |
-| 7 | `frontend/src/merchant/stores/auth.ts` | `createAuthStore` with `/api/v1/merchant/auth/*` endpoints |
-| 8 | `frontend/src/merchant/types/` | Generated TS types (run `make gen-types`) |
-| 9 | `frontend/package.json` | Add `dev:merchant` and `build:merchant` scripts |
-| 10 | `frontend/package.json` `build` script | Add `npm run build:merchant` **before** `build:user` |
-
-#### Build & Dev
-
-| # | File | What to do |
-|---|------|------------|
-| 1 | `Makefile` | Add `dev-merchant` target; add `npm --prefix frontend run dev:merchant &` to `dev` target |
-| 2 | Port allocation | Pick an unused port (5175, 5176, ...) for the Vite dev server |
-
-Build order in `package.json` `build` script matters: nested portals (`merchant`, `admin`) must build before `user`, because the user build uses `emptyOutDir: false` while nested portals use `emptyOutDir: true` within their subdirectory.
+- `docs/add-new-portal.md` (primary guide)
+- `frontend/AGENTS.md` (frontend-only implementation details)
 
 ## New Feature Checklist
 

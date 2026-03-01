@@ -103,16 +103,15 @@ export function createAuthStore<A extends Account = Account>(
           try {
             const res = await fetch(config.meEndpoint, {
               headers: { Authorization: `Bearer ${token}` },
+              credentials: "include",
             });
             if (!res.ok) throw new Error("Failed to fetch account");
             const { data } = await res.json();
             set({ account: data, isLoading: false } as Partial<AuthState<A>>);
-          } catch {
-            set({
-              account: null,
-              token: null,
-              isLoading: false,
-            } as Partial<AuthState<A>>);
+          } catch (error) {
+            // Let caller decide whether to refresh, clear session, or retry.
+            set({ account: null, isLoading: false } as Partial<AuthState<A>>);
+            throw error;
           }
         },
 
@@ -153,7 +152,15 @@ export function createAuthStore<A extends Account = Account>(
           set({ isInitialized: true } as Partial<AuthState<A>>);
         },
       }),
-      { name: config.storageKey },
+      {
+        name: config.storageKey,
+        // Persist durable session data only.
+        // Runtime flags are recomputed on each app boot.
+        partialize: (state) => ({
+          account: state.account,
+          token: state.token,
+        }),
+      },
     ),
   );
 }
