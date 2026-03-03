@@ -244,7 +244,7 @@ export default function Header({
                   onClick={() => void handleLocaleChange(code)}
                   className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm text-foreground transition-colors hover:bg-surface-hover"
                 >
-                  <span>{code.toUpperCase()}</span>
+                  <span>{t(`Locale ${code.toUpperCase()}`}</span>
                   {locale === code && <Check size={16} className="text-primary" />}
                 </button>
               ))}
