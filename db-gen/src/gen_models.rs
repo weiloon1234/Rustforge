@@ -4572,9 +4572,24 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     .unwrap();
     writeln!(
         out,
-        "        let (cols, set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();"
+        "        let (mut cols, mut set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();"
     )
     .unwrap();
+    if has_updated_at {
+        writeln!(out, "        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, {col_ident}::UpdatedAt)) {{").unwrap();
+        writeln!(
+            out,
+            "            let now = time::OffsetDateTime::now_utc();"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            cols.push({col_ident}::UpdatedAt);"
+        )
+        .unwrap();
+        writeln!(out, "            set_binds.push(now.into());").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
     writeln!(out, "        // find target ids for localized updates").unwrap();
     writeln!(out, "        let select_sql = format!(\"SELECT {pk} FROM {table} WHERE {{}}\", self.where_sql.join(\" AND \"));").unwrap();
     writeln!(
@@ -4682,57 +4697,6 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     )
     .unwrap();
     writeln!(out, "        let res = db.execute(q).await?;").unwrap();
-    if has_updated_at {
-        writeln!(out, "        let mut target_ids = target_ids;").unwrap();
-        writeln!(out, "        if HAS_UPDATED_AT {{").unwrap();
-        writeln!(
-            out,
-            "            let now = time::OffsetDateTime::now_utc();"
-        )
-        .unwrap();
-        writeln!(out, "            let idx = 1;").unwrap();
-        writeln!(out, "            let mut sql = format!(\"UPDATE {table} SET {{}} = ${{}}\", {col_ident}::UpdatedAt.as_sql(), idx);").unwrap();
-        writeln!(out, "            if !where_sql.is_empty() {{").unwrap();
-        writeln!(out, "                sql.push_str(\" WHERE \");").unwrap();
-        writeln!(
-            out,
-            "                sql.push_str(&where_sql.join(\" AND \"));"
-        )
-        .unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "            let mut q = sqlx::query(&sql);").unwrap();
-        writeln!(
-            out,
-            "            for b in &set_binds {{ q = bind_query(q, b.clone()); }}"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "            for b in &binds {{ q = bind_query(q, b.clone()); }}"
-        )
-        .unwrap();
-        writeln!(out, "            q = bind_query(q, now.into());").unwrap();
-        writeln!(out, "            db.execute(q).await?;").unwrap();
-        writeln!(out, "            if target_ids.is_empty() {{").unwrap();
-        writeln!(out, "                let select_sql = format!(\"SELECT {pk} FROM {table} WHERE {{}}\", where_sql.join(\" AND \"));").unwrap();
-        writeln!(
-            out,
-            "                let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                for b in &binds {{ select_q = bind_scalar(select_q, b.clone()); }}"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                target_ids = db.fetch_all_scalar(select_q).await?;"
-        )
-        .unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
     if !multilang_fields.is_empty() {
         writeln!(out, "        if res.rows_affected() > 0 && !self.translations.is_empty() && !target_ids.is_empty() {{").unwrap();
         writeln!(out, "            let repo = LocalizedRepo::new(db);").unwrap();

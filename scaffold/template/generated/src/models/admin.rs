@@ -1532,7 +1532,12 @@ impl<'db> AdminUpdate<'db> {
     }
 
     async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<u64> {
-        let (cols, set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();
+        let (mut cols, mut set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::UpdatedAt)) {
+            let now = time::OffsetDateTime::now_utc();
+            cols.push(AdminCol::UpdatedAt);
+            set_binds.push(now.into());
+        }
         // find target ids for localized updates
         let select_sql = format!("SELECT id FROM admin WHERE {}", self.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
@@ -1560,27 +1565,6 @@ impl<'db> AdminUpdate<'db> {
         for b in &set_binds { q = bind_query(q, b.clone()); }
         for b in &binds { q = bind_query(q, b.clone()); }
         let res = db.execute(q).await?;
-        let mut target_ids = target_ids;
-        if HAS_UPDATED_AT {
-            let now = time::OffsetDateTime::now_utc();
-            let idx = 1;
-            let mut sql = format!("UPDATE admin SET {} = ${}", AdminCol::UpdatedAt.as_sql(), idx);
-            if !where_sql.is_empty() {
-                sql.push_str(" WHERE ");
-                sql.push_str(&where_sql.join(" AND "));
-            }
-            let mut q = sqlx::query(&sql);
-            for b in &set_binds { q = bind_query(q, b.clone()); }
-            for b in &binds { q = bind_query(q, b.clone()); }
-            q = bind_query(q, now.into());
-            db.execute(q).await?;
-            if target_ids.is_empty() {
-                let select_sql = format!("SELECT id FROM admin WHERE {}", where_sql.join(" AND "));
-                let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
-                for b in &binds { select_q = bind_scalar(select_q, b.clone()); }
-                target_ids = db.fetch_all_scalar(select_q).await?;
-            }
-        }
         Ok(res.rows_affected())
     }
 }
