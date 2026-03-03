@@ -1,6 +1,7 @@
 import { useLocation, Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { navigation, type NavItem, type NavChild } from "@admin/nav";
 import { useAuthStore } from "@admin/stores/auth";
 import { useNotificationStore } from "@admin/stores/notifications";
@@ -60,6 +61,7 @@ function NavLink({
   active: boolean;
   collapsed: boolean;
 }) {
+  const { t } = useTranslation();
   const count = useNotificationStore((s) => s.getCount(item.notificationKey ?? ""));
   const Icon = item.icon;
 
@@ -67,12 +69,12 @@ function NavLink({
     <Link
       to={item.path}
       className={`rf-sidebar-link ${active ? "rf-sidebar-link-active" : ""}`}
-      title={collapsed ? item.label : undefined}
+      title={collapsed ? t(item.label) : undefined}
     >
       {Icon && <Icon size={20} className="shrink-0" />}
       {!collapsed && (
         <>
-          <span className="flex-1 truncate">{item.label}</span>
+          <span className="flex-1 truncate">{t(item.label)}</span>
           <Badge count={count} />
         </>
       )}
@@ -94,6 +96,7 @@ function ParentNav({
   scopes: string[];
   adminType: string | null;
 }) {
+  const { t } = useTranslation();
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const getCount = useNotificationStore((s) => s.getCount);
@@ -116,7 +119,7 @@ function ParentNav({
 
   if (collapsed) {
     return (
-      <div className="relative" title={item.label}>
+      <div className="relative" title={t(item.label)}>
         <button
           className={`rf-sidebar-link w-full ${isChildActive ? "rf-sidebar-link-active" : ""}`}
           onClick={() => setOpen(!open)}
@@ -137,7 +140,7 @@ function ParentNav({
         onClick={() => setOpen(!open)}
       >
         <Icon size={20} className="shrink-0" />
-        <span className="flex-1 truncate text-left">{item.label}</span>
+        <span className="flex-1 truncate text-left">{t(item.label)}</span>
         <Badge count={totalCount} />
         <ChevronDown
           size={16}

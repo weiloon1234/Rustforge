@@ -16,7 +16,7 @@ export default function DashboardPage() {
           {t("Here's an overview of your system.")}
         </p>
         <p className="mt-2 text-sm text-muted">
-          {`Hello, Welcome to ${appName}`}
+          {t("Hello, Welcome to :app_name", { app_name: appName })}
         </p>
       </div>
     </div>
