@@ -35,36 +35,6 @@ const ADMIN_PERMISSION_META = PERMISSION_META.filter(
 
 const ENABLE_SUMMARY_CARDS = true;
 
-interface AdminDatatableSummary {
-  total_admin_counts: number;
-  developer_count: number;
-  superadmin_count: number;
-  admin_count: number;
-}
-
-function parseAdminDatatableSummary(
-  raw: AdminDatatableSummaryOutput | null | undefined,
-): AdminDatatableSummary | null {
-  if (!raw) return null;
-  const totalAdminCounts = Number(raw.total_admin_counts ?? raw.total_filtered);
-  const developerCount = Number(raw.developer_count);
-  const superadminCount = Number(raw.superadmin_count);
-  const adminCount = Number(raw.admin_count);
-  if (
-    ![totalAdminCounts, developerCount, superadminCount, adminCount].every(
-      Number.isFinite,
-    )
-  ) {
-    return null;
-  }
-  return {
-    total_admin_counts: totalAdminCounts,
-    developer_count: developerCount,
-    superadmin_count: superadminCount,
-    admin_count: adminCount,
-  };
-}
-
 function TypeBadge({ type }: { type: AdminType }) {
   return (
     <span
@@ -136,12 +106,18 @@ function PermissionCheckboxes({
   );
 }
 
-function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
+function CreateAdminForm({
+  onCreated,
+  formId,
+}: {
+  onCreated: () => void;
+  formId: string;
+}) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
   const [abilities, setAbilities] = useState<Permission[]>([]);
 
-  const { submit, busy, form, errors } = useAutoForm(api, {
+  const { submit, form, errors } = useAutoForm(api, {
     url: "admins",
     method: "post",
     extraPayload: { abilities },
@@ -183,7 +159,7 @@ function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
   });
 
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <form id={formId} onSubmit={submit} className="space-y-4">
       {errors.general && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
           {errors.general}
@@ -191,18 +167,6 @@ function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
       )}
       {form}
       <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
-      <div className="flex justify-end gap-2 pt-2">
-        <button
-          type="button"
-          onClick={() => close()}
-          className="rf-modal-btn-secondary"
-        >
-          {t("Cancel")}
-        </button>
-        <button type="submit" disabled={busy} className="rf-modal-btn-primary">
-          {busy ? t("Creating…") : t("Create")}
-        </button>
-      </div>
     </form>
   );
 }
@@ -210,9 +174,11 @@ function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
 function EditAdminForm({
   admin,
   onUpdated,
+  formId,
 }: {
   admin: AdminDatatableRow;
   onUpdated: () => void;
+  formId: string;
 }) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
@@ -224,7 +190,7 @@ function EditAdminForm({
     ),
   );
 
-  const { submit, busy, form, errors } = useAutoForm(api, {
+  const { submit, form, errors } = useAutoForm(api, {
     url: `admins/${admin.id}`,
     method: "patch",
     extraPayload: isNormalAdmin ? { abilities } : {},
@@ -264,7 +230,7 @@ function EditAdminForm({
   });
 
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <form id={formId} onSubmit={submit} className="space-y-4">
       {errors.general && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
           {errors.general}
@@ -274,25 +240,15 @@ function EditAdminForm({
       {isNormalAdmin && (
         <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
       )}
-      <div className="flex justify-end gap-2 pt-2">
-        <button
-          type="button"
-          onClick={() => close()}
-          className="rf-modal-btn-secondary"
-        >
-          {t("Cancel")}
-        </button>
-        <button type="submit" disabled={busy} className="rf-modal-btn-primary">
-          {busy ? t("Saving…") : t("Save")}
-        </button>
-      </div>
     </form>
   );
 }
 
 export default function AdminsPage() {
   const { t } = useTranslation();
-  const [summary, setSummary] = useState<AdminDatatableSummary | null>(null);
+  const [summary, setSummary] = useState<AdminDatatableSummaryOutput | null>(
+    null,
+  );
   const summaryRequestId = useRef(0);
 
   const handleDatatablePostCall = (
@@ -319,7 +275,7 @@ export default function AdminsPage() {
       )
       .then((res) => {
         if (summaryRequestId.current !== requestId) return;
-        setSummary(parseAdminDatatableSummary(res.data?.data));
+        setSummary(res.data?.data ?? null);
       })
       .catch(() => {
         if (summaryRequestId.current !== requestId) return;
@@ -328,18 +284,50 @@ export default function AdminsPage() {
   };
 
   const handleCreate = (refresh: () => void) => {
+    const formId = `admin-create-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     useModalStore.getState().open({
       title: t("Create Admin"),
       size: "lg",
-      content: <CreateAdminForm onCreated={refresh} />,
+      content: <CreateAdminForm onCreated={refresh} formId={formId} />,
+      footer: (
+        <>
+          <button
+            type="button"
+            onClick={() => useModalStore.getState().close()}
+            className="rf-modal-btn-secondary"
+          >
+            {t("Cancel")}
+          </button>
+          <button type="submit" form={formId} className="rf-modal-btn-primary">
+            {t("Create")}
+          </button>
+        </>
+      ),
     });
   };
 
   const handleEdit = (admin: AdminDatatableRow, refresh: () => void) => {
+    const formId = `admin-edit-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     useModalStore.getState().open({
       title: t("Edit Admin"),
       size: "lg",
-      content: <EditAdminForm admin={admin} onUpdated={refresh} />,
+      content: (
+        <EditAdminForm admin={admin} onUpdated={refresh} formId={formId} />
+      ),
+      footer: (
+        <>
+          <button
+            type="button"
+            onClick={() => useModalStore.getState().close()}
+            className="rf-modal-btn-secondary"
+          >
+            {t("Cancel")}
+          </button>
+          <button type="submit" form={formId} className="rf-modal-btn-primary">
+            {t("Save")}
+          </button>
+        </>
+      ),
     });
   };
 
@@ -389,24 +377,26 @@ export default function AdminsPage() {
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Filtered Total")}</p>
               <p className="font-semibold text-foreground">
-                {summary.total_admin_counts}
+                {Number(summary.total_admin_counts ?? summary.total_filtered)}
               </p>
             </div>
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Developers")}</p>
               <p className="font-semibold text-foreground">
-                {summary.developer_count}
+                {Number(summary.developer_count)}
               </p>
             </div>
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Super Admins")}</p>
               <p className="font-semibold text-foreground">
-                {summary.superadmin_count}
+                {Number(summary.superadmin_count)}
               </p>
             </div>
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Admins")}</p>
-              <p className="font-semibold text-foreground">{summary.admin_count}</p>
+              <p className="font-semibold text-foreground">
+                {Number(summary.admin_count)}
+              </p>
             </div>
           </div>
         ) : undefined

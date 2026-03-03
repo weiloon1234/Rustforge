@@ -26,6 +26,7 @@ frontend/
     │   ├── types/                     # Generated shared TS types (make gen-types)
     │   │   ├── api.ts                 # ApiResponse<T>, ApiErrorResponse
     │   │   ├── datatable.ts           # DataTable request/response generics
+    │   │   ├── enums.ts               # Contract-facing enums shared across portals
     │   │   ├── platform.ts            # Localized, attachments, meta, JSON generic shapes
     │   │   └── index.ts               # Barrel export
     │   ├── i18n.ts                    # i18next init (shared JSON, :param transform)
@@ -35,7 +36,7 @@ frontend/
     │   └── components/                # Shared form components (styled via rf-* classes)
     │       ├── index.ts               # Barrel export
     │       ├── FieldErrors.tsx          # Shared error renderer (FieldErrors, hasFieldError)
-    │       ├── TextInput.tsx           # text, email, password, search, url, tel, number, money, pin
+    │       ├── TextInput.tsx           # text, email, password, search, url, tel, number, money, atm, pin
     │       ├── TextArea.tsx            # Multi-line text
     │       ├── Select.tsx              # Dropdown with typed options
     │       ├── Checkbox.tsx            # Single checkbox
@@ -246,7 +247,8 @@ make gen          # Code generation + type generation
 | Rust | TypeScript | Notes |
 |------|-----------|-------|
 | `String` | `string` | |
-| `i64`, `f64` | `number` | |
+| `i64`, `u64`, `i128`, `u128` | `bigint` | Default ts-rs mapping (precision-safe for IDs) |
+| `f32`, `f64`, `i32`, `u32` | `number` | |
 | `bool` | `boolean` | |
 | `Option<T>` | `T \| null` | |
 | `Vec<T>` | `T[]` | |
@@ -345,7 +347,7 @@ This means portals can have completely different visual styles while sharing ide
 
 | Component | Import | Description |
 |-----------|--------|-------------|
-| `TextInput` | `TextInputProps` | Text, email, password, search, url, tel, number + special `money` and `pin` types |
+| `TextInput` | `TextInputProps` | Text, email, password, search, url, tel, number + special `money`, `atm`, and `pin` types |
 | `TextArea` | `TextAreaProps` | Multi-line text input |
 | `Select` | `SelectProps`, `SelectOption` | Dropdown with typed options |
 | `Checkbox` | `CheckboxProps` | Single checkbox with label |
@@ -361,6 +363,9 @@ import { TextInput, TextArea, Select, Checkbox, Radio } from "@shared/components
 
 // Money input — displays formatted (1,234.56), onChange emits raw numeric string
 <TextInput label="Amount" type="money" onChange={(e) => setAmount(e.target.value)} />
+
+// ATM input — digit keypad style (1 -> 0.01, 12 -> 0.12, 123 -> 1.23)
+<TextInput label="Amount" type="atm" onChange={(e) => setAmount(e.target.value)} />
 
 // PIN input — renders as password field, strips non-digits, numeric keyboard
 <TextInput label="PIN" type="pin" maxLength={6} />
@@ -410,7 +415,91 @@ All components follow the same pattern:
 ### Special TextInput Types
 
 - **`money`**: Formats display value with commas (`1,234.56`), emits raw numeric string via `onChange`, uses `inputMode="decimal"` for mobile numeric keyboard
+- **`atm`**: ATM keypad style input (`1 -> 0.01`, `12 -> 0.12`, `123 -> 1.23`), emits normalized decimal string via `onChange`, uses `inputMode="numeric"`
 - **`pin`**: Renders as `type="password"`, strips non-digit characters, uses `inputMode="numeric"` for mobile numeric keyboard
+
+## DataTable Usage (Shared Component)
+
+Use `DataTable` from `src/shared/components/DataTable.tsx` as the single table primitive in portal pages.
+
+Do:
+- Wrap each portal app once with `DataTableApiProvider` in `{portal}/main.tsx`.
+- Pass only relative datatable paths from portal API root, e.g. `url="datatable/admin/query"`.
+- Define `columns` and return only cell content from `render` (`string` or JSX/ReactNode).
+- Keep summary/extra calls in `onPostCall` with request dedupe guard when needed.
+
+Don't:
+- Do not pass raw Axios clients into each table instance.
+- Do not return `<td>` from `render` (DataTable wraps cells internally).
+- Do not issue uncontrolled duplicate `onPostCall` side requests.
+
+Good:
+```tsx
+<DataTable<AdminDatatableRow>
+  url="datatable/admin/query"
+  columns={[
+    { key: "username", label: t("Username"), render: (row) => row.username },
+    { key: "created_at", label: t("Created At"), render: (row) => formatDateTime(row.created_at) },
+  ]}
+/>
+```
+
+Bad:
+```tsx
+<DataTable
+  url="/api/v1/admin/datatable/admin/query"
+  columns={[{
+    key: "username",
+    label: "Username",
+    render: (row) => <td>{row.username}</td>, // wrong: DataTable already renders <td>
+  }]}
+/>
+```
+
+## Modal Store Pattern (Sticky Footer)
+
+`useModalStore` already supports header/body/footer shell:
+- Header: title + close button
+- Body: scrollable content area
+- Footer: sticky action bar
+
+Rule:
+- Put only form/detail content inside `content`.
+- Put action buttons (`Cancel`, `Save`, `Close`) in modal `footer`.
+- For form submission, set a stable form `id` in content and trigger submit from footer button via `form="<id>"`.
+
+Good:
+```tsx
+const formId = `profile-form-${Date.now()}`;
+useModalStore.getState().open({
+  title: t("Edit Profile"),
+  size: "lg",
+  content: <ProfileModal formId={formId} account={account} onUpdated={setAccount} />,
+  footer: (
+    <>
+      <button type="button" onClick={() => useModalStore.getState().close()} className="rf-modal-btn-secondary">
+        {t("Cancel")}
+      </button>
+      <button type="submit" form={formId} className="rf-modal-btn-primary">
+        {t("Save")}
+      </button>
+    </>
+  ),
+});
+```
+
+Bad:
+```tsx
+useModalStore.getState().open({
+  title: t("Edit Profile"),
+  content: (
+    <form>
+      {form}
+      <div className="flex justify-end gap-2">{/* inline actions in body */}</div>
+    </form>
+  ),
+});
+```
 
 ### CSS Class Reference
 

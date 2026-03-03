@@ -205,7 +205,7 @@
         @apply hover:bg-surface-hover/30;
     }
     .rf-dt-td {
-        @apply whitespace-nowrap border-b border-border px-4 py-3 align-top text-foreground;
+        @apply whitespace-nowrap border-b border-border px-4 py-3 align-middle text-foreground;
     }
     .rf-dt-td-index {
         @apply tabular-nums text-muted;

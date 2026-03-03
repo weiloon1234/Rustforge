@@ -11,13 +11,15 @@ import { adminLocalePersistence } from "@admin/locale";
 function ProfileModal({
   account,
   onUpdated,
+  formId,
 }: {
   account: AdminMeOutput;
   onUpdated: (next: AdminProfileUpdateOutput) => void;
+  formId: string;
 }) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
-  const { submit, busy, form, errors } = useAutoForm(api, {
+  const { submit, form, errors } = useAutoForm(api, {
     url: "auth/profile_update",
     method: "patch",
     fields: [
@@ -36,29 +38,21 @@ function ProfileModal({
   });
 
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <form id={formId} onSubmit={submit} className="space-y-4">
       {errors.general && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
           {errors.general}
         </p>
       )}
       {form}
-      <div className="flex justify-end gap-2 pt-2">
-        <button type="button" onClick={() => close()} className="rf-modal-btn-secondary">
-          {t("Cancel")}
-        </button>
-        <button type="submit" disabled={busy} className="rf-modal-btn-primary">
-          {busy ? t("Saving…") : t("Save")}
-        </button>
-      </div>
     </form>
   );
 }
 
-function SecurityModal() {
+function SecurityModal({ formId }: { formId: string }) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
-  const { submit, busy, form, errors } = useAutoForm(api, {
+  const { submit, form, errors } = useAutoForm(api, {
     url: "auth/password_update",
     method: "patch",
     fields: [
@@ -73,21 +67,13 @@ function SecurityModal() {
   });
 
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <form id={formId} onSubmit={submit} className="space-y-4">
       {errors.general && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
           {errors.general}
         </p>
       )}
       {form}
-      <div className="flex justify-end gap-2 pt-2">
-        <button type="button" onClick={() => close()} className="rf-modal-btn-secondary">
-          {t("Cancel")}
-        </button>
-        <button type="submit" disabled={busy} className="rf-modal-btn-primary">
-          {busy ? t("Saving…") : t("Save")}
-        </button>
-      </div>
     </form>
   );
 }
@@ -141,11 +127,13 @@ export default function Header({
   const openProfileModal = () => {
     if (!account) return;
     setMenuOpen(false);
+    const formId = `admin-profile-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     useModalStore.getState().open({
       title: t("Edit Profile"),
       size: "lg",
       content: (
         <ProfileModal
+          formId={formId}
           account={account}
           onUpdated={(next) =>
             setAccount({
@@ -156,15 +144,44 @@ export default function Header({
           }
         />
       ),
+      footer: (
+        <>
+          <button
+            type="button"
+            onClick={() => useModalStore.getState().close()}
+            className="rf-modal-btn-secondary"
+          >
+            {t("Cancel")}
+          </button>
+          <button type="submit" form={formId} className="rf-modal-btn-primary">
+            {t("Save")}
+          </button>
+        </>
+      ),
     });
   };
 
   const openSecurityModal = () => {
     setMenuOpen(false);
+    const formId = `admin-security-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     useModalStore.getState().open({
       title: t("Account Security"),
       size: "lg",
-      content: <SecurityModal />,
+      content: <SecurityModal formId={formId} />,
+      footer: (
+        <>
+          <button
+            type="button"
+            onClick={() => useModalStore.getState().close()}
+            className="rf-modal-btn-secondary"
+          >
+            {t("Cancel")}
+          </button>
+          <button type="submit" form={formId} className="rf-modal-btn-primary">
+            {t("Save")}
+          </button>
+        </>
+      ),
     });
   };
 

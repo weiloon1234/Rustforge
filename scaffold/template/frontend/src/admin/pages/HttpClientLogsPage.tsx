@@ -109,6 +109,15 @@ export default function HttpClientLogsPage() {
           <JsonPanel title={t("Response Body")} value={log.response_body} />
         </div>
       ),
+      footer: (
+        <button
+          type="button"
+          onClick={() => useModalStore.getState().close()}
+          className="rf-modal-btn-secondary"
+        >
+          {t("Close")}
+        </button>
+      ),
     });
   };
 
