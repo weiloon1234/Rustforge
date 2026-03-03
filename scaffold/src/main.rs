@@ -81,7 +81,11 @@ async fn main() -> anyhow::Result<()> {
     }
 
     println!("\n{}", "Starter scaffold generated.".bold().green());
-    println!("{}", "Next: cd <output> && cargo check".cyan());
+    println!("{}", "Next:".cyan());
+    println!("{}", "  cd <output>".cyan());
+    println!("{}", "  ./console migrate pump".cyan());
+    println!("{}", "  ./console migrate run".cyan());
+    println!("{}", "  cargo check -p app".cyan());
 
     Ok(())
 }
