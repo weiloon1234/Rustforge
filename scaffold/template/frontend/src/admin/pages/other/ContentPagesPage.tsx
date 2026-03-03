@@ -76,7 +76,7 @@ export default function ContentPagesPage() {
             <div className="flex gap-1">
               <button
                 type="button"
-                onClick={() => navigate(`/content-pages/${row.id}/edit`)}
+                onClick={() => navigate(`/other/content-pages/${row.id}/edit`)}
                 className="rounded-lg p-1.5 text-muted transition hover:bg-surface-hover hover:text-foreground"
                 title={t("Edit")}
               >

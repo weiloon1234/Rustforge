@@ -43,13 +43,13 @@ export const navigation: NavItem[] = [
   {
     label: "Admins",
     icon: Users,
-    path: "/admins",
+    path: "/other/admins",
     permissions: [PERMISSION.ADMIN_READ, PERMISSION.ADMIN_MANAGE],
   },
   {
     label: "Pages",
     icon: FileText,
-    path: "/content-pages",
+    path: "/other/content-pages",
     permissions: [PERMISSION.PAGE_READ, PERMISSION.PAGE_MANAGE],
   },
   {
@@ -59,13 +59,13 @@ export const navigation: NavItem[] = [
     children: [
       {
         label: "HTTP Client Logs",
-        path: "/http-client-logs",
+        path: "/developer/http-client-logs",
         permissions: [PERMISSION.ADMIN_READ, PERMISSION.ADMIN_MANAGE],
         admin_types: [ADMIN_TYPE.DEVELOPER],
       },
       {
         label: "Webhook Logs",
-        path: "/webhook-logs",
+        path: "/developer/webhook-logs",
         permissions: [PERMISSION.ADMIN_READ, PERMISSION.ADMIN_MANAGE],
         admin_types: [ADMIN_TYPE.DEVELOPER],
       },

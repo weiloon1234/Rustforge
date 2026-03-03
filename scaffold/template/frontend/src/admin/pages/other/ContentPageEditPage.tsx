@@ -120,7 +120,7 @@ export default function ContentPageEditPage() {
         formData,
       );
       alertSuccess({ title: t("Success"), message: t("Page updated") });
-      navigate("/content-pages");
+      navigate("/other/content-pages");
     } catch (err) {
       setError(normalizeErrorMessage(err, t("Failed to update page.")));
     } finally {
@@ -136,7 +136,7 @@ export default function ContentPageEditPage() {
           <p className="text-sm text-muted">{t("Update localized content and cover")}</p>
         </div>
         <Link
-          to="/content-pages"
+          to="/other/content-pages"
           className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-surface-hover"
         >
           <ArrowLeft size={16} />
