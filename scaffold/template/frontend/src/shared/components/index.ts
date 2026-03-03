@@ -23,6 +23,9 @@ export {
 } from "@shared/components/TemporalInput";
 export type { TemporalInputProps, TemporalInputType } from "@shared/components/TemporalInput";
 
+export { TiptapInput, TapbitInput } from "@shared/components/TiptapInput";
+export type { TiptapInputProps } from "@shared/components/TiptapInput";
+
 export { FileInput } from "@shared/components/FileInput";
 export type { FileInputProps, FilePreviewItem } from "@shared/components/FileInput";
 

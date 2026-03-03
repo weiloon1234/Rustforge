@@ -59,25 +59,26 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
     const isMoney = type === "money";
     const isAtm = type === "atm";
     const isPin = type === "pin";
+    const isFormattedInput = isMoney || isAtm;
 
-    const [moneyDisplay, setMoneyDisplay] = useState(() => {
+    const [displayValue, setDisplayValue] = useState(() => {
       const init = (value ?? defaultValue ?? "") as string;
       if (isMoney) return formatMoney(init);
       if (isAtm) return formatAtm(init);
       return "";
     });
 
-    const resolvedType = isMoney || isAtm ? "text" : isPin ? "password" : type;
+    const resolvedType = isFormattedInput ? "text" : isPin ? "password" : type;
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       if (isMoney) {
         const formatted = formatMoney(e.target.value);
-        setMoneyDisplay(formatted);
+        setDisplayValue(formatted);
         const synth = { ...e, target: { ...e.target, value: rawMoney(formatted) } } as React.ChangeEvent<HTMLInputElement>;
         onChange?.(synth);
       } else if (isAtm) {
         const formatted = formatAtm(e.target.value);
-        setMoneyDisplay(formatted);
+        setDisplayValue(formatted);
         const synth = { ...e, target: { ...e.target, value: rawAtm(formatted) } } as React.ChangeEvent<HTMLInputElement>;
         onChange?.(synth);
       } else if (isPin) {
@@ -109,8 +110,8 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
           required={required}
           className={`rf-input ${hasFieldError(error, errors) ? "rf-input-error" : ""} ${className ?? ""}`}
           onChange={handleChange}
-          value={isMoney || isAtm ? moneyDisplay : value}
-          defaultValue={isMoney || isAtm ? undefined : defaultValue}
+          value={isFormattedInput ? displayValue : value}
+          defaultValue={isFormattedInput ? undefined : defaultValue}
           {...rest}
         />
         <FieldErrors error={error} errors={errors} />

@@ -1,0 +1,98 @@
+use async_trait::async_trait;
+use core_db::{
+    common::sql::{generate_snowflake_i64, DbConn, Op},
+    seeder::Seeder,
+};
+use generated::models::{Page, PageSystemFlag};
+
+#[derive(Debug, Default)]
+pub struct PageBootstrapSeeder;
+
+#[async_trait]
+impl Seeder for PageBootstrapSeeder {
+    async fn run(&self, db: &sqlx::PgPool) -> anyhow::Result<()> {
+        ensure_page(
+            db,
+            "terms_and_conditions",
+            "Terms and Conditions",
+            "条款与条件",
+            "<p>Please provide your terms and conditions content here.</p>",
+            "<p>请在此填写条款与条件内容。</p>",
+        )
+        .await?;
+
+        ensure_page(
+            db,
+            "privacy_policy",
+            "Privacy Policy",
+            "隐私政策",
+            "<p>Please provide your privacy policy content here.</p>",
+            "<p>请在此填写隐私政策内容。</p>",
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "PageBootstrapSeeder"
+    }
+}
+
+async fn ensure_page(
+    db: &sqlx::PgPool,
+    tag: &str,
+    title_en: &str,
+    title_zh: &str,
+    content_en: &str,
+    content_zh: &str,
+) -> anyhow::Result<()> {
+    let model = Page::new(DbConn::pool(db), None);
+    let existing = model
+        .query()
+        .where_tag(Op::Eq, tag.to_string())
+        .first()
+        .await?;
+
+    if let Some(page) = existing {
+        model
+            .update()
+            .where_id(Op::Eq, page.id)
+            .set_tag(tag.to_string())
+            .set_is_system(PageSystemFlag::Yes)
+            .save()
+            .await?;
+        return Ok(());
+    }
+
+    let title_langs = build_multilang(title_en, title_zh)?;
+    let content_langs = build_multilang(content_en, content_zh)?;
+
+    model
+        .insert()
+        .set_id(generate_snowflake_i64())
+        .set_tag(tag.to_string())
+        .set_is_system(PageSystemFlag::Yes)
+        .set_title_langs(title_langs)
+        .set_content_langs(content_langs)
+        .save()
+        .await?;
+
+    Ok(())
+}
+
+fn build_multilang(en_value: &str, zh_value: &str) -> anyhow::Result<generated::MultiLang> {
+    let mut payload = serde_json::Map::new();
+    for &locale in generated::SUPPORTED_LOCALES {
+        let value = match locale {
+            "zh" => zh_value,
+            _ => en_value,
+        };
+        payload.insert(
+            locale.to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+
+    Ok(serde_json::from_value(serde_json::Value::Object(payload))?)
+}

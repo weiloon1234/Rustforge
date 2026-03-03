@@ -161,6 +161,56 @@
         @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
     }
 
+    .rf-rich {
+        @apply rounded-lg border border-input-border bg-input transition-colors duration-150;
+    }
+    .rf-rich:hover {
+        @apply border-input-border-hover;
+    }
+    .rf-rich:focus-within {
+        @apply border-input-focus ring-2 ring-ring/40;
+    }
+    .rf-rich-error {
+        @apply border-error;
+    }
+    .rf-rich-toolbar {
+        @apply flex items-center gap-1 border-b border-input-border px-2 py-1.5;
+    }
+    .rf-rich-btn {
+        @apply inline-flex h-7 w-7 items-center justify-center rounded text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed;
+    }
+    .rf-rich-btn-active {
+        @apply bg-primary text-primary-foreground hover:bg-primary;
+    }
+    .rf-rich-divider {
+        @apply mx-1 h-5 w-px bg-border;
+    }
+    .rf-rich-editor {
+        @apply min-h-32 px-3 py-2 text-sm text-foreground;
+    }
+    .rf-rich-editor .ProseMirror {
+        @apply min-h-28 outline-none;
+    }
+    .rf-rich-editor .ProseMirror p.is-editor-empty:first-child::before {
+        color: var(--color-input-placeholder);
+        content: attr(data-placeholder);
+        float: left;
+        height: 0;
+        pointer-events: none;
+    }
+    .rf-rich-editor .ProseMirror p {
+        @apply mb-2;
+    }
+    .rf-rich-editor .ProseMirror ul {
+        @apply list-disc pl-5;
+    }
+    .rf-rich-editor .ProseMirror ol {
+        @apply list-decimal pl-5;
+    }
+    .rf-rich-disabled {
+        @apply opacity-60;
+    }
+
     .rf-select {
         @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 pr-10 text-sm text-foreground
       transition-colors duration-150 hover:border-input-border-hover focus:outline-none focus:ring-2

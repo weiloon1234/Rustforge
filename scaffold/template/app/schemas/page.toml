@@ -1,0 +1,22 @@
+[PageSystemFlag]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "No", value = 0 },
+  { name = "Yes", value = 1 }
+]
+
+[model.page]
+table = "pages"
+pk = "id"
+pk_type = "i64"
+id_strategy = "snowflake"
+soft_delete = true
+multilang = ["title", "content", "cover"]
+fields = [
+  "id:i64",
+  "tag:string",
+  "is_system:PageSystemFlag",
+  "created_at:datetime",
+  "updated_at:datetime"
+]

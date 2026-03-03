@@ -40,6 +40,10 @@ impl AppApiState {
             "admin.webhook_log",
             crate::internal::datatables::v1::admin::app_webhook_log_datatable(ctx.db.clone()),
         );
+        datatable_registry.register_as(
+            "admin.page",
+            crate::internal::datatables::v1::admin::app_page_datatable(ctx.db.clone()),
+        );
 
         let datatable_registry = Arc::new(datatable_registry);
         let datatable_async_exports =

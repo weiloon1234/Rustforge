@@ -1,5 +1,6 @@
 pub mod account;
 pub mod http_client_log;
+pub mod page;
 pub mod webhook_log;
 
 pub use account::{
@@ -9,6 +10,10 @@ pub use account::{
 pub use http_client_log::{
     app_http_client_log_datatable, app_http_client_log_datatable_with_config,
     register_http_client_log_datatable, AppHttpClientLogDataTable, HttpClientLogDataTableAppHooks,
+};
+pub use page::{
+    app_page_datatable, app_page_datatable_with_config, register_page_datatable, AppPageDataTable,
+    PageDataTableAppHooks,
 };
 pub use webhook_log::{
     app_webhook_log_datatable, app_webhook_log_datatable_with_config,

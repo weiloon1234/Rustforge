@@ -10,6 +10,7 @@ import {
   DateTimePickerInput,
   TimePickerInput,
 } from "@shared/components/TemporalInput";
+import { TiptapInput } from "@shared/components/TiptapInput";
 import { FileInput, type FilePreviewItem } from "@shared/components/FileInput";
 
 type InputFieldType =
@@ -26,11 +27,13 @@ type InputFieldType =
   | "date"
   | "datetime-local"
   | "time";
+type RichEditorFieldType = "tapbit" | "tiptap";
 type AutoFormBodyType = "auto" | "json" | "multipart";
 type AutoFormDefaultValue = string | number | boolean | null | undefined | File | File[] | FilePreviewItem | FilePreviewItem[];
 
 type FieldDef =
   | { name: string; type: InputFieldType; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean }
+  | { name: string; type: RichEditorFieldType; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean }
   | { name: string; type: "textarea"; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean; rows?: number }
   | { name: string; type: "select"; label: string; options: SelectOption[]; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean }
   | { name: string; type: "checkbox"; label: string; span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean }
@@ -469,6 +472,22 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
                     errors={errors}
                     notes={field.notes}
                     placeholder={field.placeholder}
+                    required={field.required}
+                    disabled={field.disabled}
+                  />
+                </div>
+              );
+
+            case "tapbit":
+            case "tiptap":
+              return (
+                <div key={field.name} style={style}>
+                  <TiptapInput
+                    label={field.label}
+                    value={values[field.name] ?? ""}
+                    onChange={(e) => setValue(field.name, e.target.value)}
+                    errors={errors}
+                    notes={field.notes}
                     required={field.required}
                     disabled={field.disabled}
                   />

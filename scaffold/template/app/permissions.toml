@@ -12,3 +12,17 @@ guard = "admin"
 label = "Manage Admins"
 group = "admin"
 description = "Create/update/delete admin records and perform management actions."
+
+[[permissions]]
+key = "page.read"
+guard = "admin"
+label = "Read Pages"
+group = "page"
+description = "View policy pages and page datatable records."
+
+[[permissions]]
+key = "page.manage"
+guard = "admin"
+label = "Manage Pages"
+group = "page"
+description = "Update and delete non-system pages."

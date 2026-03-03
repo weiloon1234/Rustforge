@@ -1,0 +1,152 @@
+use std::collections::BTreeMap;
+
+use core_db::common::sql::{DbConn, Op};
+use core_i18n::t;
+use core_web::error::AppError;
+use generated::models::{Page, PageSystemFlag, PageView};
+
+use crate::{contracts::api::v1::admin::page::AdminPageUpdateInput, internal::api::state::AppApiState};
+
+pub async fn detail(state: &AppApiState, id: i64) -> Result<PageView, AppError> {
+    Page::new(DbConn::pool(&state.db), None)
+        .find(id)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::NotFound(t("Page not found")))
+}
+
+pub async fn update(
+    state: &AppApiState,
+    id: i64,
+    req: AdminPageUpdateInput,
+) -> Result<PageView, AppError> {
+    let tag = normalize_tag(&req.tag)?;
+    let title = normalize_localized_map(&req.title);
+    let content = normalize_localized_map(&req.content);
+    let cover = normalize_localized_map(&req.cover);
+
+    let existing = detail(state, id).await?;
+    if matches!(existing.is_system, PageSystemFlag::Yes) {
+        if existing.tag != tag {
+            return Err(AppError::Forbidden(t("Cannot change tag for system page")));
+        }
+
+        let existing_title = translations_to_map(existing.title_translations.as_ref());
+        if existing_title != title {
+            return Err(AppError::Forbidden(t("Cannot change title for system page")));
+        }
+    }
+
+    let title_langs = multilang_from_map(&title, true, "title")?;
+    let content_langs = multilang_from_map(&content, true, "content")?;
+    let cover_langs = multilang_from_map(&cover, false, "cover")?;
+
+    let mut update = Page::new(DbConn::pool(&state.db), None)
+        .update()
+        .where_id(Op::Eq, id)
+        .set_tag(tag)
+        .set_title_langs(title_langs)
+        .set_content_langs(content_langs);
+
+    if !cover.is_empty() {
+        update = update.set_cover_langs(cover_langs);
+    }
+
+    let affected = update.save().await.map_err(AppError::from)?;
+    if affected == 0 {
+        return Err(AppError::NotFound(t("Page not found")));
+    }
+
+    detail(state, id).await
+}
+
+pub async fn remove(state: &AppApiState, id: i64) -> Result<(), AppError> {
+    let existing = detail(state, id).await?;
+    if matches!(existing.is_system, PageSystemFlag::Yes) {
+        return Err(AppError::Forbidden(t("Cannot delete system page")));
+    }
+
+    let affected = Page::new(DbConn::pool(&state.db), None)
+        .delete(id)
+        .await
+        .map_err(AppError::from)?;
+    if affected == 0 {
+        return Err(AppError::NotFound(t("Page not found")));
+    }
+
+    Ok(())
+}
+
+fn normalize_tag(input: &str) -> Result<String, AppError> {
+    let normalized = input.trim().to_ascii_lowercase();
+    if normalized.is_empty() || !is_valid_snake_case_tag(&normalized) {
+        return Err(AppError::BadRequest(t(
+            "Tag must be lowercase snake_case",
+        )));
+    }
+    Ok(normalized)
+}
+
+fn is_valid_snake_case_tag(input: &str) -> bool {
+    if input.starts_with('_') || input.ends_with('_') {
+        return false;
+    }
+    let mut previous_underscore = false;
+    for ch in input.chars() {
+        if ch == '_' {
+            if previous_underscore {
+                return false;
+            }
+            previous_underscore = true;
+            continue;
+        }
+        previous_underscore = false;
+        if !ch.is_ascii_lowercase() && !ch.is_ascii_digit() {
+            return false;
+        }
+    }
+    true
+}
+
+fn normalize_localized_map(input: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    input
+        .iter()
+        .map(|(locale, value)| (locale.to_string(), value.trim().to_string()))
+        .collect()
+}
+
+fn translations_to_map(multilang: Option<&generated::MultiLang>) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for &locale in generated::SUPPORTED_LOCALES {
+        let value = multilang
+            .map(|current| current.get(locale).to_string())
+            .unwrap_or_default();
+        out.insert(locale.to_string(), value);
+    }
+    out
+}
+
+fn multilang_from_map(
+    input: &BTreeMap<String, String>,
+    require_all_locales: bool,
+    field_label: &str,
+) -> Result<generated::MultiLang, AppError> {
+    let mut payload = serde_json::Map::new();
+    for &locale in generated::SUPPORTED_LOCALES {
+        let value = input
+            .get(locale)
+            .map(|item| item.trim().to_string())
+            .unwrap_or_default();
+        if require_all_locales && value.is_empty() {
+            return Err(AppError::BadRequest(format!(
+                "{}: {} ({})",
+                t("Missing localized value"),
+                field_label,
+                locale
+            )));
+        }
+        payload.insert(locale.to_string(), serde_json::Value::String(value));
+    }
+
+    serde_json::from_value(serde_json::Value::Object(payload)).map_err(AppError::from)
+}

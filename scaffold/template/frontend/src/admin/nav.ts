@@ -1,4 +1,4 @@
-import { LayoutDashboard, List, Users, type LucideIcon } from "lucide-react";
+import { FileText, LayoutDashboard, List, Users, type LucideIcon } from "lucide-react";
 import { ADMIN_TYPE, PERMISSION, type AdminType, type Permission } from "@admin/types";
 
 export interface NavChild {
@@ -45,6 +45,12 @@ export const navigation: NavItem[] = [
     icon: Users,
     path: "/admins",
     permissions: [PERMISSION.ADMIN_READ, PERMISSION.ADMIN_MANAGE],
+  },
+  {
+    label: "Pages",
+    icon: FileText,
+    path: "/pages",
+    permissions: [PERMISSION.PAGE_READ, PERMISSION.PAGE_MANAGE],
   },
   {
     label: "Developer",

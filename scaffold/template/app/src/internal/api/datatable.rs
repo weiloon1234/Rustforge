@@ -25,6 +25,7 @@ use crate::contracts::datatable::admin::account::{
     AdminAdminDataTableContract, AdminDatatableSummaryOutput,
 };
 use crate::contracts::datatable::admin::http_client_log::AdminHttpClientLogDataTableContract;
+use crate::contracts::datatable::admin::page::AdminPageDataTableContract;
 use crate::contracts::datatable::admin::webhook_log::AdminWebhookLogDataTableContract;
 use crate::internal::api::state::AppApiState;
 
@@ -53,6 +54,14 @@ pub fn router(state: AppApiState) -> ApiRouter {
             require_bearer_auth: true,
         },
     );
+    let page_routes = core_web::datatable::routes_for_scoped_contract_with_options(
+        "/datatable/page",
+        state.clone(),
+        AdminPageDataTableContract,
+        DataTableRouteOptions {
+            require_bearer_auth: true,
+        },
+    );
 
     let summary_route = ApiRouter::new()
         .api_route(
@@ -68,6 +77,7 @@ pub fn router(state: AppApiState) -> ApiRouter {
     account_datatable_routes
         .merge(http_client_log_routes)
         .merge(webhook_log_routes)
+        .merge(page_routes)
         .merge(summary_route)
 }
 

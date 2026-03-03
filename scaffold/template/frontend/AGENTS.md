@@ -37,6 +37,7 @@ frontend/
     │       ├── index.ts               # Barrel export
     │       ├── FieldErrors.tsx          # Shared error renderer (FieldErrors, hasFieldError)
     │       ├── TextInput.tsx           # text, email, password, search, url, tel, number, money, atm, pin
+    │       ├── TiptapInput.tsx         # tapbit/tiptap WYSIWYG HTML editor input
     │       ├── TextArea.tsx            # Multi-line text
     │       ├── Select.tsx              # Dropdown with typed options
     │       ├── Checkbox.tsx            # Single checkbox
@@ -348,6 +349,7 @@ This means portals can have completely different visual styles while sharing ide
 | Component | Import | Description |
 |-----------|--------|-------------|
 | `TextInput` | `TextInputProps` | Text, email, password, search, url, tel, number + special `money`, `atm`, and `pin` types |
+| `TiptapInput` (`TapbitInput`) | `TiptapInputProps` | Rich text (WYSIWYG HTML) editor input |
 | `TextArea` | `TextAreaProps` | Multi-line text input |
 | `Select` | `SelectProps`, `SelectOption` | Dropdown with typed options |
 | `Checkbox` | `CheckboxProps` | Single checkbox with label |
@@ -356,13 +358,16 @@ This means portals can have completely different visual styles while sharing ide
 ### Usage
 
 ```tsx
-import { TextInput, TextArea, Select, Checkbox, Radio } from "@shared/components";
+import { TextInput, TiptapInput, TextArea, Select, Checkbox, Radio } from "@shared/components";
 
 // Basic text input with error
 <TextInput label="Email" type="email" required error={errors.email} />
 
 // Money input — displays formatted (1,234.56), onChange emits raw numeric string
 <TextInput label="Amount" type="money" onChange={(e) => setAmount(e.target.value)} />
+
+// Rich text editor input (for custom form wiring)
+<TiptapInput label="Description" value={html} onChange={(e) => setHtml(e.target.value)} />
 
 // ATM input — digit keypad style (1 -> 0.01, 12 -> 0.12, 123 -> 1.23)
 <TextInput label="Amount" type="atm" onChange={(e) => setAmount(e.target.value)} />
@@ -417,6 +422,9 @@ All components follow the same pattern:
 - **`money`**: Formats display value with commas (`1,234.56`), emits raw numeric string via `onChange`, uses `inputMode="decimal"` for mobile numeric keyboard
 - **`atm`**: ATM keypad style input (`1 -> 0.01`, `12 -> 0.12`, `123 -> 1.23`), emits normalized decimal string via `onChange`, uses `inputMode="numeric"`
 - **`pin`**: Renders as `type="password"`, strips non-digit characters, uses `inputMode="numeric"` for mobile numeric keyboard
+
+`useAutoForm` rich editor field types:
+- **`tapbit`** and **`tiptap`** are aliases for the same TipTap HTML editor input.
 
 ## DataTable Usage (Shared Component)
 
