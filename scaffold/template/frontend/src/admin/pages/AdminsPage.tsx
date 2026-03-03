@@ -416,7 +416,7 @@ export default function AdminsPage() {
           key: "actions",
           label: t("Actions"),
           sortable: false,
-          cellClassName: "px-4 py-3",
+          cellClassName: "text-foreground",
           render: (admin, ctx) => (
             <div className="flex gap-1">
               <button
@@ -441,38 +441,38 @@ export default function AdminsPage() {
         {
           key: "username",
           label: t("Username"),
-          cellClassName: "px-4 py-3 font-medium text-foreground",
+          cellClassName: "font-medium text-foreground",
           render: (admin) => admin.username,
         },
         {
           key: "email",
           label: t("Email"),
-          cellClassName: "px-4 py-3 text-muted",
+          cellClassName: "text-muted",
           render: (admin) => admin.email ?? "—",
         },
         {
           key: "name",
           label: t("Name"),
-          cellClassName: "px-4 py-3 text-foreground",
+          cellClassName: "text-foreground",
           render: (admin) => admin.name,
         },
         {
           key: "admin_type",
           label: t("Admin Type"),
-          cellClassName: "px-4 py-3",
+          cellClassName: "text-foreground",
           render: (admin) => <TypeBadge type={admin.admin_type} />,
         },
         {
           key: "abilities",
           label: t("Permissions"),
           sortable: false,
-          cellClassName: "px-4 py-3",
+          cellClassName: "text-foreground",
           render: (admin) => <PermissionBadges abilities={admin.abilities} />,
         },
         {
           key: "created_at",
           label: t("Created At"),
-          cellClassName: "px-4 py-3 tabular-nums text-muted",
+          cellClassName: "tabular-nums text-muted",
           render: (admin) => formatDateTime(admin.created_at),
         },
       ]}

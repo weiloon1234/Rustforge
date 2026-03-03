@@ -111,6 +111,50 @@
   .rf-note { @apply mt-1 text-xs text-muted; }
   .rf-form-grid { @apply grid grid-cols-2 gap-x-4; }
 
+  /* ── DataTable ─────────────────────────────────── */
+  .rf-dt-shell {
+    @apply overflow-hidden rounded-xl border border-border bg-surface;
+  }
+  .rf-dt-scroll {
+    @apply overflow-auto;
+    max-height: min(58vh, 40rem);
+  }
+  .rf-dt-table {
+    @apply min-w-full w-max text-left text-sm;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .rf-dt-head-row {
+    @apply bg-surface-hover/50;
+  }
+  .rf-dt-th {
+    @apply sticky top-0 z-20 whitespace-nowrap border-b border-border bg-surface-hover/95 px-4 py-3 font-medium text-muted;
+  }
+  .rf-dt-th-index {
+    @apply w-12;
+  }
+  .rf-dt-th-sortable {
+    @apply cursor-pointer select-none;
+  }
+  .rf-dt-row {
+    @apply hover:bg-surface-hover/30;
+  }
+  .rf-dt-td {
+    @apply whitespace-nowrap border-b border-border px-4 py-3 align-top text-foreground;
+  }
+  .rf-dt-td-index {
+    @apply tabular-nums text-muted;
+  }
+  .rf-dt-empty-cell {
+    @apply px-4 py-8 text-center text-muted;
+  }
+  .rf-dt-foot {
+    @apply bg-surface-hover/20;
+  }
+  .rf-dt-table tbody tr:last-child .rf-dt-td {
+    @apply border-b-0;
+  }
+
   /* ── Modal ──────────────────────────────────────── */
   .rf-modal-backdrop {
     @apply fixed inset-0 flex items-center justify-center bg-black/50;

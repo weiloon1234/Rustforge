@@ -122,7 +122,7 @@ export default function HttpClientLogsPage() {
           key: "actions",
           label: t("Actions"),
           sortable: false,
-          cellClassName: "px-4 py-3",
+          cellClassName: "text-foreground",
           render: (log) => (
             <button
               type="button"
@@ -137,7 +137,7 @@ export default function HttpClientLogsPage() {
         {
           key: "request_url",
           label: t("URL"),
-          cellClassName: "max-w-[36rem] break-all px-4 py-3 text-foreground",
+          cellClassName: "text-foreground",
           render: (log) => log.request_url,
         },
         {

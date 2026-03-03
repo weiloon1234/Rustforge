@@ -660,12 +660,13 @@ export function DataTable<T>({
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-border bg-surface">
-        <table className="w-full text-left text-sm">
+      <div className="rf-dt-shell">
+        <div className="rf-dt-scroll">
+          <table className="rf-dt-table">
           <thead>
-            <tr className="border-b border-border bg-surface-hover/50">
+            <tr className="rf-dt-head-row">
               {showIndexColumn && (
-                <th className="w-12 px-4 py-3 font-medium text-muted">{t("#")}</th>
+                <th className="rf-dt-th rf-dt-th-index">{t("#")}</th>
               )}
               {renderColumns.map((col) => {
                 const sortable = isColumnSortable(col);
@@ -674,8 +675,8 @@ export function DataTable<T>({
                 return (
                   <th
                     key={col.key}
-                    className={`px-4 py-3 font-medium text-muted ${
-                      sortable ? "cursor-pointer select-none" : ""
+                    className={`rf-dt-th ${
+                      sortable ? "rf-dt-th-sortable" : ""
                     } ${col.headerClassName ?? ""}`}
                     onClick={() => handleSort(col)}
                   >
@@ -699,14 +700,14 @@ export function DataTable<T>({
           <tbody>
             {loading && !data && (
               <tr>
-                <td colSpan={99} className="px-4 py-8 text-center text-muted">
+                <td colSpan={99} className="rf-dt-empty-cell">
                   {t("Loading…")}
                 </td>
               </tr>
             )}
             {data && data.records.length === 0 && (
               <tr>
-                <td colSpan={99} className="px-4 py-8 text-center text-muted">
+                <td colSpan={99} className="rf-dt-empty-cell">
                   {t("No records found.")}
                 </td>
               </tr>
@@ -718,10 +719,10 @@ export function DataTable<T>({
                 return (
                   <tr
                     key={resolveRowKey(record, index)}
-                    className="border-b border-border last:border-0 hover:bg-surface-hover/30"
+                    className="rf-dt-row"
                   >
                     {showIndexColumn && (
-                      <td className="px-4 py-3 tabular-nums text-muted">{absoluteIndex + 1}</td>
+                      <td className="rf-dt-td rf-dt-td-index">{absoluteIndex + 1}</td>
                     )}
                     {renderColumns.map((col) => {
                       const content = col.render
@@ -736,7 +737,7 @@ export function DataTable<T>({
                       return (
                         <td
                           key={col.key}
-                          className={`px-4 py-3 text-foreground ${col.cellClassName ?? ""}`}
+                          className={`rf-dt-td ${col.cellClassName ?? ""}`}
                         >
                           {content}
                         </td>
@@ -747,7 +748,7 @@ export function DataTable<T>({
               })}
           </tbody>
           {data && renderTableFooter && (
-            <tfoot className="border-t border-border bg-surface-hover/20">
+            <tfoot className="rf-dt-foot">
               {renderTableFooter({
                 records: data.records,
                 visibleColumns: metaColumns,
@@ -756,7 +757,8 @@ export function DataTable<T>({
               })}
             </tfoot>
           )}
-        </table>
+          </table>
+        </div>
       </div>
 
       {data && (
