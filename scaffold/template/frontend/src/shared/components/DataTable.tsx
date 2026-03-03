@@ -23,6 +23,11 @@ import {
 import type { AxiosInstance } from "axios";
 import { TextInput } from "@shared/components/TextInput";
 import { Select } from "@shared/components/Select";
+import {
+  DatePickerInput,
+  DateTimePickerInput,
+  TimePickerInput,
+} from "@shared/components/TemporalInput";
 import type {
   ApiResponse,
   DataTableQueryResponse,
@@ -264,9 +269,8 @@ function FilterField({
       );
     case "datetime":
       return (
-        <TextInput
+        <DateTimePickerInput
           containerClassName="mb-0"
-          type="datetime-local"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -276,9 +280,19 @@ function FilterField({
       );
     case "date":
       return (
-        <TextInput
+        <DatePickerInput
           containerClassName="mb-0"
-          type="date"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={translatedPlaceholder}
+          className="!py-1.5 !text-sm"
+        />
+      );
+    case "time":
+      return (
+        <TimePickerInput
+          containerClassName="mb-0"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}

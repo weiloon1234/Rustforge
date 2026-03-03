@@ -64,6 +64,64 @@
         @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
     }
 
+    .rf-picker {
+        @apply relative;
+    }
+    .react-datepicker-wrapper,
+    .react-datepicker__input-container {
+        @apply block w-full;
+    }
+    .rf-picker-input {
+        @apply pr-10;
+    }
+    .rf-picker-icon {
+        @apply pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted;
+    }
+    .rf-picker-popper {
+        @apply z-40;
+    }
+    .rf-picker-calendar {
+        @apply rounded-xl border border-border bg-surface text-foreground shadow-xl;
+        font-family: inherit;
+    }
+    .rf-picker-calendar .react-datepicker__header {
+        @apply border-border bg-surface;
+    }
+    .rf-picker-calendar .react-datepicker__current-month,
+    .rf-picker-calendar .react-datepicker-time__header,
+    .rf-picker-calendar .react-datepicker-year-header,
+    .rf-picker-calendar .react-datepicker__day-name {
+        @apply text-foreground;
+    }
+    .rf-picker-calendar .react-datepicker__day,
+    .rf-picker-calendar .react-datepicker__time-name {
+        @apply text-foreground;
+    }
+    .rf-picker-calendar .react-datepicker__day:hover,
+    .rf-picker-calendar .react-datepicker__time-list-item:hover,
+    .rf-picker-calendar .react-datepicker__month-text:hover,
+    .rf-picker-calendar .react-datepicker__quarter-text:hover,
+    .rf-picker-calendar .react-datepicker__year-text:hover {
+        @apply bg-surface-hover rounded-md;
+    }
+    .rf-picker-calendar .react-datepicker__day--selected,
+    .rf-picker-calendar .react-datepicker__day--keyboard-selected,
+    .rf-picker-calendar .react-datepicker__month-text--selected,
+    .rf-picker-calendar .react-datepicker__quarter-text--selected,
+    .rf-picker-calendar .react-datepicker__year-text--selected,
+    .rf-picker-calendar .react-datepicker__time-list-item--selected {
+        @apply bg-primary text-primary-foreground rounded-md;
+    }
+    .rf-picker-calendar .react-datepicker__triangle {
+        @apply hidden;
+    }
+    .rf-picker-calendar .react-datepicker__time-container {
+        @apply border-border;
+    }
+    .rf-picker-calendar .react-datepicker__time-box {
+        @apply bg-surface;
+    }
+
     .rf-textarea {
         @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-foreground
       placeholder:text-input-placeholder transition-colors duration-150

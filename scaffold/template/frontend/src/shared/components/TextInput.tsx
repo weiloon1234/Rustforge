@@ -13,7 +13,8 @@ type InputType =
   | "atm"
   | "pin"
   | "date"
-  | "datetime-local";
+  | "datetime-local"
+  | "time";
 
 export interface TextInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
   type?: InputType;

@@ -5,9 +5,27 @@ import { TextArea } from "@shared/components/TextArea";
 import { Select, type SelectOption } from "@shared/components/Select";
 import { Checkbox } from "@shared/components/Checkbox";
 import { Radio, type RadioOption } from "@shared/components/Radio";
+import {
+  DatePickerInput,
+  DateTimePickerInput,
+  TimePickerInput,
+} from "@shared/components/TemporalInput";
 import { FileInput, type FilePreviewItem } from "@shared/components/FileInput";
 
-type InputFieldType = "text" | "email" | "password" | "search" | "url" | "tel" | "number" | "money" | "atm" | "pin";
+type InputFieldType =
+  | "text"
+  | "email"
+  | "password"
+  | "search"
+  | "url"
+  | "tel"
+  | "number"
+  | "money"
+  | "atm"
+  | "pin"
+  | "date"
+  | "datetime-local"
+  | "time";
 type AutoFormBodyType = "auto" | "json" | "multipart";
 type AutoFormDefaultValue = string | number | boolean | null | undefined | File | File[] | FilePreviewItem | FilePreviewItem[];
 
@@ -403,6 +421,54 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
                     onChange={(v) => setValue(field.name, v)}
                     errors={errors}
                     notes={field.notes}
+                    required={field.required}
+                    disabled={field.disabled}
+                  />
+                </div>
+              );
+
+            case "date":
+              return (
+                <div key={field.name} style={style}>
+                  <DatePickerInput
+                    label={field.label}
+                    value={values[field.name] ?? ""}
+                    onChange={(e) => setValue(field.name, e.target.value)}
+                    errors={errors}
+                    notes={field.notes}
+                    placeholder={field.placeholder}
+                    required={field.required}
+                    disabled={field.disabled}
+                  />
+                </div>
+              );
+
+            case "datetime-local":
+              return (
+                <div key={field.name} style={style}>
+                  <DateTimePickerInput
+                    label={field.label}
+                    value={values[field.name] ?? ""}
+                    onChange={(e) => setValue(field.name, e.target.value)}
+                    errors={errors}
+                    notes={field.notes}
+                    placeholder={field.placeholder}
+                    required={field.required}
+                    disabled={field.disabled}
+                  />
+                </div>
+              );
+
+            case "time":
+              return (
+                <div key={field.name} style={style}>
+                  <TimePickerInput
+                    label={field.label}
+                    value={values[field.name] ?? ""}
+                    onChange={(e) => setValue(field.name, e.target.value)}
+                    errors={errors}
+                    notes={field.notes}
+                    placeholder={field.placeholder}
                     required={field.required}
                     disabled={field.disabled}
                   />

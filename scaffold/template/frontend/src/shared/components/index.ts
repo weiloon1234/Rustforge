@@ -16,6 +16,13 @@ export type { CheckboxProps } from "@shared/components/Checkbox";
 export { Radio } from "@shared/components/Radio";
 export type { RadioProps, RadioOption } from "@shared/components/Radio";
 
+export {
+  DatePickerInput,
+  DateTimePickerInput,
+  TimePickerInput,
+} from "@shared/components/TemporalInput";
+export type { TemporalInputProps, TemporalInputType } from "@shared/components/TemporalInput";
+
 export { FileInput } from "@shared/components/FileInput";
 export type { FileInputProps, FilePreviewItem } from "@shared/components/FileInput";
 
