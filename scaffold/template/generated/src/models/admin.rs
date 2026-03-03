@@ -26,6 +26,7 @@ pub struct AdminRow {
     pub id: i64,
     pub username: String,
     pub email: Option<String>,
+    pub locale: Option<String>,
     pub password: String,
     pub name: String,
     pub admin_type: AdminType,
@@ -46,6 +47,7 @@ pub struct AdminView {
     pub id: i64,
     pub username: String,
     pub email: Option<String>,
+    pub locale: Option<String>,
     pub password: String,
     pub name: String,
     pub admin_type: AdminType,
@@ -70,6 +72,7 @@ impl AdminView {
             id: self.id.clone(),
             username: self.username.clone(),
             email: self.email.clone(),
+            locale: self.locale.clone(),
             password: self.password.clone(),
             name: self.name.clone(),
             admin_type: self.admin_type.clone(),
@@ -101,6 +104,7 @@ pub struct AdminJson {
     pub id: i64,
     pub username: String,
     pub email: Option<String>,
+    pub locale: Option<String>,
     pub password: String,
     pub name: String,
     pub admin_type: AdminType,
@@ -118,6 +122,7 @@ fn hydrate_view(row: AdminRow, loc: &LocalizedMap, base_url: Option<&str>) -> Ad
         id: row.id,
         username: row.username,
         email: row.email,
+        locale: row.locale,
         password: row.password,
         name: row.name,
         admin_type: row.admin_type,
@@ -134,6 +139,7 @@ pub enum AdminCol {
     Id,
     Username,
     Email,
+    Locale,
     Password,
     Name,
     AdminType,
@@ -145,13 +151,14 @@ pub enum AdminCol {
 
 impl AdminCol {
     pub const fn all() -> &'static [AdminCol] {
-        &[AdminCol::Id, AdminCol::Username, AdminCol::Email, AdminCol::Password, AdminCol::Name, AdminCol::AdminType, AdminCol::Abilities, AdminCol::CreatedAt, AdminCol::UpdatedAt, AdminCol::DeletedAt]
+        &[AdminCol::Id, AdminCol::Username, AdminCol::Email, AdminCol::Locale, AdminCol::Password, AdminCol::Name, AdminCol::AdminType, AdminCol::Abilities, AdminCol::CreatedAt, AdminCol::UpdatedAt, AdminCol::DeletedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
             AdminCol::Id => "id",
             AdminCol::Username => "username",
             AdminCol::Email => "email",
+            AdminCol::Locale => "locale",
             AdminCol::Password => "password",
             AdminCol::Name => "name",
             AdminCol::AdminType => "admin_type",
@@ -212,7 +219,7 @@ pub struct AdminQuery<'db> {
 
 impl<'db> AdminQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, username, email, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![], with_deleted: false, only_deleted: false }
+        Self { db, base_url, select_sql: Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![], with_deleted: false, only_deleted: false }
     }
     pub fn unsafe_sql(self) -> AdminUnsafeQuery<'db> { AdminUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
@@ -248,6 +255,18 @@ impl<'db> AdminQuery<'db> {
     pub fn where_email_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_locale(mut self, op: Op, val: Option<String>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_locale_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -455,10 +474,10 @@ impl<'db> AdminQuery<'db> {
     }
     pub fn select_cols(mut self, cols: &[AdminCol]) -> Self {
         if cols.is_empty() {
-            self.select_sql = Some("id, username, email, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
+            self.select_sql = Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
         } else {
             let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, username, email, password, name, admin_type, abilities, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect();
+            let mut list: Vec<String> = "id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect();
             for s in &list { seen.insert(s.clone()); }
             for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
             self.select_sql = Some(list.join(", "));
@@ -469,7 +488,7 @@ impl<'db> AdminQuery<'db> {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, username, email, password, name, admin_type, abilities, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect(),
+            _ => "id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect(),
         };
         for s in &list { seen.insert(s.clone()); }
         for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
@@ -479,16 +498,16 @@ impl<'db> AdminQuery<'db> {
     fn select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() {
-            self.select_sql = Some("id, username, email, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
+            self.select_sql = Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
         } else {
-            self.select_sql = Some(format!("id, username, email, password, name, admin_type, abilities, created_at, updated_at, deleted_at, {}", s));
+            self.select_sql = Some(format!("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at, {}", s));
         }
         self
     }
     fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, username, email, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
+        let mut base = self.select_sql.take().unwrap_or_else(|| "id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
         if !base.is_empty() { base.push_str(", "); }
         base.push_str(&s);
         self.select_sql = Some(base);
@@ -1213,6 +1232,11 @@ impl<'db> AdminInsert<'db> {
         self.binds.push(val.into());
         self
     }
+    pub fn set_locale(mut self, val: Option<String>) -> Self {
+        self.cols.push(AdminCol::Locale);
+        self.binds.push(val.into());
+        self
+    }
     pub fn set_password(mut self, val: &str) -> anyhow::Result<Self> {
         let hashed = core_db::common::auth::hash::hash_password(val)?;
         self.cols.push(AdminCol::Password);
@@ -1363,6 +1387,10 @@ impl<'db> AdminUpdate<'db> {
         self.sets.push((AdminCol::Email , val.into()));
         self
     }
+    pub fn set_locale(mut self, val: Option<String>) -> Self {
+        self.sets.push((AdminCol::Locale , val.into()));
+        self
+    }
     pub fn set_password(mut self, val: &str) -> anyhow::Result<Self> {
         let hashed = core_db::common::auth::hash::hash_password(val)?;
         self.sets.push((AdminCol::Password , hashed.into()));
@@ -1411,6 +1439,12 @@ impl<'db> AdminUpdate<'db> {
     pub fn where_email(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_locale(mut self, op: Op, val: Option<String>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -1567,6 +1601,7 @@ impl AdminTableAdapter {
             "id" => Some(AdminCol::Id),
             "username" => Some(AdminCol::Username),
             "email" => Some(AdminCol::Email),
+            "locale" => Some(AdminCol::Locale),
             "password" => Some(AdminCol::Password),
             "name" => Some(AdminCol::Name),
             "admin_type" => Some(AdminCol::AdminType),
@@ -1591,6 +1626,7 @@ impl AdminTableAdapter {
         match name {
             "username" => Some(AdminCol::Username),
             "email" => Some(AdminCol::Email),
+            "locale" => Some(AdminCol::Locale),
             "password" => Some(AdminCol::Password),
             "name" => Some(AdminCol::Name),
             _ => None,
@@ -1601,6 +1637,7 @@ impl AdminTableAdapter {
             "id" => raw.trim().parse::<i64>().ok().map(Into::into),
             "username" => Some(raw.trim().to_string().into()),
             "email" => Some(Self::parse_bind(raw.trim())),
+            "locale" => Some(Self::parse_bind(raw.trim())),
             "password" => Some(raw.trim().to_string().into()),
             "name" => Some(raw.trim().to_string().into()),
             "admin_type" => Some(Self::parse_bind(raw.trim())),
@@ -1640,13 +1677,14 @@ impl GeneratedTableAdapter for AdminTableAdapter {
     type Query<'db> = AdminQuery<'db>;
     type Row = AdminView;
     fn model_key(&self) -> &'static str { "Admin" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "username", "email", "password", "name", "admin_type", "created_at", "updated_at", "deleted_at"] }
+    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "username", "email", "locale", "password", "name", "admin_type", "created_at", "updated_at", "deleted_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at", "deleted_at"] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
         &[
             DataTableColumnDescriptor { name: "id", label: "ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "username", label: "Username", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
             DataTableColumnDescriptor { name: "email", label: "Email", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "locale", label: "Locale", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
             DataTableColumnDescriptor { name: "password", label: "Password", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
             DataTableColumnDescriptor { name: "name", label: "Name", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
             DataTableColumnDescriptor { name: "admin_type", label: "Admin Type", data_type: "AdminType", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
@@ -1774,6 +1812,7 @@ impl GeneratedTableAdapter for AdminTableAdapter {
             "id" => query.order_by(AdminCol::Id, dir),
             "username" => query.order_by(AdminCol::Username, dir),
             "email" => query.order_by(AdminCol::Email, dir),
+            "locale" => query.order_by(AdminCol::Locale, dir),
             "password" => query.order_by(AdminCol::Password, dir),
             "name" => query.order_by(AdminCol::Name, dir),
             "admin_type" => query.order_by(AdminCol::AdminType, dir),
@@ -1796,6 +1835,7 @@ impl GeneratedTableAdapter for AdminTableAdapter {
             "id" => Some(row.id.to_string()),
             "username" => Some(row.username.clone()),
             "email" => row.email.as_ref().map(|v| v.to_string()),
+            "locale" => row.locale.as_ref().map(|v| v.to_string()),
             "password" => Some(row.password.clone()),
             "name" => Some(row.name.clone()),
             "created_at" => row.created_at.format(&time::format_description::well_known::Rfc3339).ok(),

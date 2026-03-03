@@ -58,6 +58,14 @@ pub struct AdminProfileUpdateInput {
 #[rustforge_contract]
 #[derive(TS)]
 #[ts(export, export_to = "admin/types/")]
+pub struct AdminLocaleUpdateInput {
+    #[rf(length(min = 2, max = 16))]
+    pub locale: String,
+}
+
+#[rustforge_contract]
+#[derive(TS)]
+#[ts(export, export_to = "admin/types/")]
 pub struct AdminPasswordUpdateInput {
     #[rf(length(min = 8, max = 128))]
     pub current_password: String,
@@ -88,6 +96,7 @@ pub struct AdminMeOutput {
     pub identity: String,
     pub username: String,
     pub email: Option<String>,
+    pub locale: Option<String>,
     pub name: String,
     #[ts(type = "AdminType")]
     pub admin_type: AdminType,
@@ -102,9 +111,16 @@ pub struct AdminProfileUpdateOutput {
     pub identity: String,
     pub username: String,
     pub email: Option<String>,
+    pub locale: Option<String>,
     pub name: String,
     #[ts(type = "AdminType")]
     pub admin_type: AdminType,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
+pub struct AdminLocaleUpdateOutput {
+    pub locale: String,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]

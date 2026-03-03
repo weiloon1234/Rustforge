@@ -16,6 +16,7 @@ fields = [
   "id:i64",
   "username:string",
   "email:Option<String>",
+  "locale:Option<String>",
   "password:hashed",
   "name:string",
   "admin_type:AdminType",

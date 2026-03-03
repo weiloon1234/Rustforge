@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { resolveLocaleHeader } from "@shared/localeHeader";
 
 export interface Account {
   id: number;
@@ -13,6 +14,7 @@ export interface AuthState<A extends Account = Account> {
   isLoading: boolean;
   isInitialized: boolean;
   error: string | null;
+  setAccount: (account: A | null) => void;
   setToken: (token: string) => void;
   login: (credentials: Record<string, unknown>) => Promise<void>;
   logout: () => void;
@@ -62,6 +64,8 @@ export function createAuthStore<A extends Account = Account>(
         isLoading: false,
         isInitialized: false,
         error: null,
+        setAccount: (account) =>
+          set({ account } as Partial<AuthState<A>>),
 
         setToken: (token: string) =>
           set({ token } as Partial<AuthState<A>>),
@@ -71,7 +75,10 @@ export function createAuthStore<A extends Account = Account>(
           try {
             const res = await fetch(config.loginEndpoint, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                "X-Locale": resolveLocaleHeader(),
+              },
               credentials: "include",
               body: JSON.stringify({ ...credentials, client_type: "web" }),
             });
@@ -102,7 +109,10 @@ export function createAuthStore<A extends Account = Account>(
           set({ isLoading: true } as Partial<AuthState<A>>);
           try {
             const res = await fetch(config.meEndpoint, {
-              headers: { Authorization: `Bearer ${token}` },
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "X-Locale": resolveLocaleHeader(),
+              },
               credentials: "include",
             });
             if (!res.ok) throw new Error("Failed to fetch account");
@@ -118,7 +128,10 @@ export function createAuthStore<A extends Account = Account>(
         refreshToken: async () => {
           const res = await fetch(config.refreshEndpoint, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              "X-Locale": resolveLocaleHeader(),
+            },
             credentials: "include",
             body: JSON.stringify({ client_type: "web" }),
           });

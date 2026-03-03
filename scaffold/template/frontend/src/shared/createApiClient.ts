@@ -1,4 +1,5 @@
 import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from "axios";
+import { resolveLocaleHeader } from "@shared/localeHeader";
 
 export interface ApiClientConfig {
   /** Read the current access token (from auth store). */
@@ -24,6 +25,7 @@ export function createApiClient(config: ApiClientConfig): AxiosInstance {
     if (token) {
       req.headers.Authorization = `Bearer ${token}`;
     }
+    req.headers["X-Locale"] = resolveLocaleHeader();
     req.headers["X-Timezone"] = Intl.DateTimeFormat().resolvedOptions().timeZone;
     return req;
   });

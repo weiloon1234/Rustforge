@@ -13,7 +13,9 @@ use generated::{
     permissions::Permission,
 };
 
-use crate::contracts::api::v1::admin::auth::{AdminPasswordUpdateInput, AdminProfileUpdateInput};
+use crate::contracts::api::v1::admin::auth::{
+    AdminLocaleUpdateInput, AdminPasswordUpdateInput, AdminProfileUpdateInput,
+};
 use crate::internal::api::state::AppApiState;
 
 pub fn resolve_scope_grant(admin: &AdminView) -> TokenScopeGrant {
@@ -133,6 +135,29 @@ pub async fn profile_update(
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(t("Admin not found")))
+}
+
+pub async fn locale_update(
+    state: &AppApiState,
+    admin_id: i64,
+    req: AdminLocaleUpdateInput,
+) -> Result<String, AppError> {
+    let normalized = core_i18n::match_supported_locale(req.locale.trim())
+        .ok_or_else(|| AppError::BadRequest(t("Unsupported locale")))?;
+
+    let affected = Admin::new(DbConn::pool(&state.db), None)
+        .update()
+        .where_id(Op::Eq, admin_id)
+        .set_locale(Some(normalized.to_string()))
+        .save()
+        .await
+        .map_err(AppError::from)?;
+
+    if affected == 0 {
+        return Err(AppError::NotFound(t("Admin not found")));
+    }
+
+    Ok(normalized.to_string())
 }
 
 pub async fn password_update(

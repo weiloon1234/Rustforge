@@ -24,9 +24,10 @@ use tower_cookies::Cookies;
 
 use crate::{
     contracts::api::v1::admin::auth::{
-        AdminAuthOutput, AdminLoginInput, AdminLogoutInput, AdminLogoutOutput, AdminMeOutput,
-        AdminPasswordUpdateInput, AdminPasswordUpdateOutput, AdminProfileUpdateInput,
-        AdminProfileUpdateOutput, AdminRefreshInput,
+        AdminAuthOutput, AdminLocaleUpdateInput, AdminLocaleUpdateOutput, AdminLoginInput,
+        AdminLogoutInput, AdminLogoutOutput, AdminMeOutput, AdminPasswordUpdateInput,
+        AdminPasswordUpdateOutput, AdminProfileUpdateInput, AdminProfileUpdateOutput,
+        AdminRefreshInput,
     },
     internal::{api::state::AppApiState, workflows::admin_auth as workflow},
 };
@@ -77,6 +78,12 @@ pub fn router(state: AppApiState) -> ApiRouter {
             "/profile_update",
             patch_with(profile_update, |op| {
                 op.summary("Update own profile").tag("Admin Authentication")
+            }),
+        )
+        .api_route(
+            "/locale_update",
+            patch_with(locale_update, |op| {
+                op.summary("Update own locale").tag("Admin Authentication")
             }),
         )
         .api_route(
@@ -177,6 +184,7 @@ async fn me(auth: AuthUser<AdminGuard>) -> Result<ApiResponse<AdminMeOutput>, Ap
             identity,
             username: user.username,
             email: user.email,
+            locale: user.locale,
             name: user.name,
             admin_type: user.admin_type,
             scopes: auth.abilities,
@@ -199,10 +207,24 @@ async fn profile_update(
             identity,
             username: admin.username,
             email: admin.email,
+            locale: admin.locale,
             name: admin.name,
             admin_type: admin.admin_type,
         },
         &t("Profile updated successfully"),
+    ))
+}
+
+async fn locale_update(
+    State(state): State<AppApiState>,
+    auth: AuthUser<AdminGuard>,
+    req: ContractJson<AdminLocaleUpdateInput>,
+) -> Result<ApiResponse<AdminLocaleUpdateOutput>, AppError> {
+    let req = req.0;
+    let locale = workflow::locale_update(&state, auth.user.id, req).await?;
+    Ok(ApiResponse::success(
+        AdminLocaleUpdateOutput { locale },
+        &t("Locale updated successfully"),
     ))
 }
 

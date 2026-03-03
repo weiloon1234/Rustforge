@@ -1,5 +1,17 @@
 {
   "Welcome back, :name": "Welcome back, :name",
   "Page :page of :total_pages (:total_records total)": "Page :page of :total_pages (:total_records total)",
-  "Are you sure you want to delete \":username\"?": "Are you sure you want to delete \":username\"?"
+  "Are you sure you want to delete \":username\"?": "Are you sure you want to delete \":username\"?",
+  "Language": "Language",
+  "Open account menu": "Open account menu",
+  "Edit Profile": "Edit Profile",
+  "Account Security": "Account Security",
+  "Current Password": "Current Password",
+  "New Password": "New Password",
+  "Confirm Password": "Confirm Password",
+  "Enter current password": "Enter current password",
+  "Confirm new password": "Confirm new password",
+  "Unsupported locale": "Unsupported locale",
+  "Failed to update locale.": "Failed to update locale.",
+  "Locale updated successfully": "Locale updated successfully"
 }
