@@ -18,7 +18,7 @@ function ProfileModal({
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
   const { submit, busy, form, errors } = useAutoForm(api, {
-    url: "/api/v1/admin/auth/profile_update",
+    url: "auth/profile_update",
     method: "patch",
     fields: [
       { name: "name", type: "text", label: t("Name"), placeholder: t("Enter full name"), required: true },
@@ -59,7 +59,7 @@ function SecurityModal() {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
   const { submit, busy, form, errors } = useAutoForm(api, {
-    url: "/api/v1/admin/auth/password_update",
+    url: "auth/password_update",
     method: "patch",
     fields: [
       { name: "current_password", type: "password", label: t("Current Password"), placeholder: t("Enter current password"), required: true },
@@ -179,7 +179,7 @@ export default function Header({
   const handleLogout = async () => {
     setMenuOpen(false);
     try {
-      await api.post("/api/v1/admin/auth/logout", { client_type: "web" });
+      await api.post("auth/logout", { client_type: "web" });
     } catch {
       // Always clear local auth state even if revoke call fails.
     } finally {

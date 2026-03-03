@@ -113,7 +113,7 @@ export default function WebhookLogsPage() {
 
   return (
     <DataTable<WebhookLogDatatableRow>
-      url="/api/v1/admin/datatable/webhook-log/query"
+      url="datatable/webhook-log/query"
       title={t("Webhook Logs")}
       subtitle={t("Inspect inbound webhook requests and responses")}
       columns={[

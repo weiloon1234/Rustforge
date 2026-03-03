@@ -5,7 +5,7 @@ import { createLocalePersistence } from "@shared/createLocalePersistence";
 
 export const adminLocalePersistence = createLocalePersistence<AdminMeOutput>({
   api,
-  updateEndpoint: "/api/v1/admin/auth/locale_update",
+  updateEndpoint: "auth/locale_update",
   getAccount: () => useAuthStore.getState().account,
   setAccount: (account) => useAuthStore.getState().setAccount(account),
 });

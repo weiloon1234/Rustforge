@@ -142,7 +142,7 @@ function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
   const [abilities, setAbilities] = useState<Permission[]>([]);
 
   const { submit, busy, form, errors } = useAutoForm(api, {
-    url: "/api/v1/admin/admins",
+    url: "admins",
     method: "post",
     extraPayload: { abilities },
     fields: [
@@ -225,7 +225,7 @@ function EditAdminForm({
   );
 
   const { submit, busy, form, errors } = useAutoForm(api, {
-    url: `/api/v1/admin/admins/${admin.id}`,
+    url: `admins/${admin.id}`,
     method: "patch",
     extraPayload: isNormalAdmin ? { abilities } : {},
     fields: [
@@ -314,7 +314,7 @@ export default function AdminsPage() {
 
     void api
       .post<ApiResponse<AdminDatatableSummaryOutput>>(
-        "/api/v1/admin/datatable/admin/summary",
+        "datatable/admin/summary",
         payload,
       )
       .then((res) => {
@@ -354,7 +354,7 @@ export default function AdminsPage() {
         if (result.isConfirmed) {
           try {
             await api.delete<ApiResponse<AdminDeleteOutput>>(
-              `/api/v1/admin/admins/${admin.id}`,
+              `admins/${admin.id}`,
             );
             alertSuccess({ title: t("Deleted"), message: t("Admin deleted") });
             refresh();
@@ -371,7 +371,7 @@ export default function AdminsPage() {
 
   return (
     <DataTable<AdminDatatableRow>
-      url="/api/v1/admin/datatable/admin/query"
+      url="datatable/admin/query"
       title={t("Admins")}
       subtitle={t("Manage administrator accounts")}
       headerActions={(refresh) => (

@@ -133,5 +133,12 @@
   "Request Headers": "请求头",
   "Request Body": "请求体",
   "Response Headers": "响应头",
-  "Response Body": "响应体"
+  "Response Body": "响应体",
+  "All methods": "全部方法",
+  "e.g. 200": "例如 200",
+  "e.g. 50": "例如 50",
+  "e.g. 10": "例如 10",
+  "e.g. 3000": "例如 3000",
+  "Min Duration (ms)": "最低耗时（毫秒）",
+  "Max Duration (ms)": "最高耗时（毫秒）"
 }

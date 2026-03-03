@@ -11,7 +11,7 @@ export default function LoginPage() {
   const setToken = useAuthStore((s) => s.setToken);
 
   const { submit, busy, form, errors } = useAutoForm(api, {
-    url: "/api/v1/admin/auth/login",
+    url: "auth/login",
     method: "post",
     extraPayload: { client_type: "web" },
     fields: [

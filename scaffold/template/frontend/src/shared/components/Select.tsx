@@ -14,16 +14,17 @@ export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement
   errors?: string[];
   notes?: string;
   placeholder?: string;
+  containerClassName?: string;
 }
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ options, label, error, errors, notes, required, placeholder, className, value, defaultValue, id: externalId, ...rest }, ref) => {
+  ({ options, label, error, errors, notes, required, placeholder, className, containerClassName, value, defaultValue, id: externalId, ...rest }, ref) => {
     const autoId = useId();
     const id = externalId ?? autoId;
     const isPlaceholder = value === "" || (value === undefined && defaultValue === undefined);
 
     return (
-      <div className="rf-field">
+      <div className={`rf-field ${containerClassName ?? ""}`}>
         {label && (
           <label htmlFor={id} className={`rf-label ${required ? "rf-label-required" : ""}`}>
             {label}

@@ -1,7 +1,18 @@
 import { forwardRef, useId, useState, type InputHTMLAttributes } from "react";
 import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
 
-type InputType = "text" | "email" | "password" | "search" | "url" | "tel" | "number" | "money" | "pin";
+type InputType =
+  | "text"
+  | "email"
+  | "password"
+  | "search"
+  | "url"
+  | "tel"
+  | "number"
+  | "money"
+  | "pin"
+  | "date"
+  | "datetime-local";
 
 export interface TextInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
   type?: InputType;
@@ -9,6 +20,7 @@ export interface TextInputProps extends Omit<InputHTMLAttributes<HTMLInputElemen
   error?: string;
   errors?: string[];
   notes?: string;
+  containerClassName?: string;
 }
 
 function formatMoney(value: string): string {
@@ -25,7 +37,7 @@ function rawMoney(display: string): string {
 }
 
 export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
-  ({ type = "text", label, error, errors, notes, required, className, onChange, value, defaultValue, id: externalId, ...rest }, ref) => {
+  ({ type = "text", label, error, errors, notes, required, className, containerClassName, onChange, value, defaultValue, id: externalId, ...rest }, ref) => {
     const autoId = useId();
     const id = externalId ?? autoId;
     const isMoney = type === "money";
@@ -55,7 +67,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
     const inputMode = isMoney ? "decimal" as const : isPin ? "numeric" as const : undefined;
 
     return (
-      <div className="rf-field">
+      <div className={`rf-field ${containerClassName ?? ""}`}>
         {label && (
           <label htmlFor={id} className={`rf-label ${required ? "rf-label-required" : ""}`}>
             {label}

@@ -2,6 +2,7 @@ import { createApiClient } from "@shared/createApiClient";
 import { useAuthStore } from "@user/stores/auth";
 
 export const api = createApiClient({
+  apiPrefix: "/api/v1",
   getToken: () => useAuthStore.getState().token,
   refreshAuth: () => useAuthStore.getState().refreshToken(),
   onAuthFailure: () => {

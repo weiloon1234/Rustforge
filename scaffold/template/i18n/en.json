@@ -16,5 +16,12 @@
   "Unsupported locale": "Unsupported locale",
   "Failed to update locale.": "Failed to update locale.",
   "Locale updated successfully": "Locale updated successfully",
-  "Hello, Welcome to :app_name": "Hello, Welcome to :app_name"
+  "Hello, Welcome to :app_name": "Hello, Welcome to :app_name",
+  "All methods": "All methods",
+  "e.g. 200": "e.g. 200",
+  "e.g. 50": "e.g. 50",
+  "e.g. 10": "e.g. 10",
+  "e.g. 3000": "e.g. 3000",
+  "Min Duration (ms)": "Min Duration (ms)",
+  "Max Duration (ms)": "Max Duration (ms)"
 }

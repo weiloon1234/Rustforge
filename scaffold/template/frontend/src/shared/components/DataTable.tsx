@@ -21,6 +21,8 @@ import {
   X,
 } from "lucide-react";
 import type { AxiosInstance } from "axios";
+import { TextInput } from "@shared/components/TextInput";
+import { Select } from "@shared/components/Select";
 import type {
   ApiResponse,
   DataTableQueryResponse,
@@ -224,6 +226,7 @@ function FilterField({
   onEnter: () => void;
 }) {
   const { t } = useTranslation();
+  const translatedPlaceholder = field.placeholder ? t(field.placeholder) : "";
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") onEnter();
   };
@@ -231,73 +234,80 @@ function FilterField({
   switch (field.type) {
     case "select":
       return (
-        <select
+        <Select
+          containerClassName="mb-0"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="rf-select !py-1.5 !text-sm"
-        >
-          <option value="">{field.placeholder ?? t("All")}</option>
-          {(field.options ?? []).map((o) => (
-            <option key={o.value} value={o.value}>
-              {t(o.label)}
-            </option>
-          ))}
-        </select>
+          className="!py-1.5 !text-sm"
+          options={[
+            { value: "", label: translatedPlaceholder || t("All") },
+            ...((field.options ?? []).map((o) => ({
+              value: o.value,
+              label: t(o.label),
+            }))),
+          ]}
+        />
       );
     case "boolean":
       return (
-        <select
+        <Select
+          containerClassName="mb-0"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="rf-select !py-1.5 !text-sm"
-        >
-          <option value="">{field.placeholder ?? t("All")}</option>
-          <option value="true">{t("Yes")}</option>
-          <option value="false">{t("No")}</option>
-        </select>
+          className="!py-1.5 !text-sm"
+          options={[
+            { value: "", label: translatedPlaceholder || t("All") },
+            { value: "true", label: t("Yes") },
+            { value: "false", label: t("No") },
+          ]}
+        />
       );
     case "datetime":
       return (
-        <input
+        <TextInput
+          containerClassName="mb-0"
           type="datetime-local"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={field.placeholder ?? ""}
-          className="rf-input !py-1.5 !text-sm"
+          placeholder={translatedPlaceholder}
+          className="!py-1.5 !text-sm"
         />
       );
     case "date":
       return (
-        <input
+        <TextInput
+          containerClassName="mb-0"
           type="date"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={field.placeholder ?? ""}
-          className="rf-input !py-1.5 !text-sm"
+          placeholder={translatedPlaceholder}
+          className="!py-1.5 !text-sm"
         />
       );
     case "number":
       return (
-        <input
+        <TextInput
+          containerClassName="mb-0"
           type="number"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={field.placeholder ?? ""}
-          className="rf-input !py-1.5 !text-sm"
+          placeholder={translatedPlaceholder}
+          className="!py-1.5 !text-sm"
         />
       );
     default:
       return (
-        <input
+        <TextInput
+          containerClassName="mb-0"
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={field.placeholder ?? ""}
-          className="rf-input !py-1.5 !text-sm"
+          placeholder={translatedPlaceholder}
+          className="!py-1.5 !text-sm"
         />
       );
   }
@@ -752,17 +762,16 @@ export function DataTable<T>({
       {data && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-sm text-muted">
-            <select
-              value={perPage}
+            <Select
+              containerClassName="mb-0"
+              value={String(perPage)}
               onChange={(e) => handlePerPageChange(Number(e.target.value))}
-              className="rf-select !w-auto !py-1 !pr-8 !text-xs"
-            >
-              {PER_PAGE_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
+              className="!w-auto !py-1 !pr-8 !text-xs"
+              options={PER_PAGE_OPTIONS.map((n) => ({
+                value: String(n),
+                label: String(n),
+              }))}
+            />
             <span>
               {t("Page :page of :total_pages (:total_records total)", {
                 page: data.page,
@@ -810,14 +819,15 @@ export function DataTable<T>({
                 <ChevronsRight size={14} />
               </button>
               <div className="ml-2 flex items-center gap-1">
-                <input
+                <TextInput
+                  containerClassName="mb-0"
                   type="text"
                   inputMode="numeric"
                   value={jumpValue}
                   onChange={(e) => setJumpValue(e.target.value.replace(/\D/g, ""))}
                   onKeyDown={(e) => e.key === "Enter" && handleJump()}
                   placeholder={t("Go to")}
-                  className="rf-input !w-16 !py-1 !text-xs text-center"
+                  className="!w-16 !py-1 !text-xs text-center"
                 />
               </div>
             </div>

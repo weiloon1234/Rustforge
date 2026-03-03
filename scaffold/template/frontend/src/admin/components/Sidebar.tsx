@@ -1,8 +1,9 @@
 import { useLocation, Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { navigation, type NavItem, type NavChild } from "@admin/nav";
+import type { AdminType, Permission } from "@admin/types";
 import { useAuthStore } from "@admin/stores/auth";
 import { useNotificationStore } from "@admin/stores/notifications";
 
@@ -33,14 +34,14 @@ function permissionMatches(granted: string, required: string): boolean {
   return matchPattern(g, r) || matchPattern(r, g);
 }
 
-function hasAccess(scopes: string[], required?: string[]): boolean {
+function hasAccess(scopes: readonly string[], required?: readonly Permission[]): boolean {
   if (!required || required.length === 0) return true;
   return required.some((r) => scopes.some((g) => permissionMatches(g, r)));
 }
 
 function hasAdminTypeAccess(
-  adminType: string | null,
-  required?: string[],
+  adminType: AdminType | null,
+  required?: readonly AdminType[],
 ): boolean {
   if (!required || required.length === 0) return true;
   if (!adminType) return false;
@@ -94,7 +95,7 @@ function ParentNav({
   item: NavItem;
   collapsed: boolean;
   scopes: string[];
-  adminType: string | null;
+  adminType: AdminType | null;
 }) {
   const { t } = useTranslation();
   const location = useLocation();
@@ -114,6 +115,12 @@ function ParentNav({
   const isChildActive = visibleChildren.some(
     (c) => location.pathname === c.path,
   );
+
+  useEffect(() => {
+    if (isChildActive) {
+      setOpen(true);
+    }
+  }, [isChildActive]);
 
   const Icon = item.icon;
 

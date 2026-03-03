@@ -1,13 +1,11 @@
-import { FileText, LayoutDashboard, List, Users, type LucideIcon } from "lucide-react";
-import type { Permission } from "@admin/types";
-
-type AdminTypeVisibility = "developer" | "superadmin" | "admin";
+import { LayoutDashboard, List, Users, type LucideIcon } from "lucide-react";
+import { ADMIN_TYPE, PERMISSION, type AdminType, type Permission } from "@admin/types";
 
 export interface NavChild {
   label: string;
   path: string;
   permissions?: Permission[];
-  admin_types?: AdminTypeVisibility[];
+  admin_types?: AdminType[];
   notificationKey?: string;
 }
 
@@ -16,7 +14,7 @@ export interface NavItem {
   icon: LucideIcon;
   path?: string;
   permissions?: Permission[];
-  admin_types?: AdminTypeVisibility[];
+  admin_types?: AdminType[];
   notificationKey?: string;
   children?: NavChild[];
 }
@@ -46,20 +44,25 @@ export const navigation: NavItem[] = [
     label: "Admins",
     icon: Users,
     path: "/admins",
-    permissions: ["admin.read", "admin.manage"],
+    permissions: [PERMISSION.ADMIN_READ, PERMISSION.ADMIN_MANAGE],
   },
   {
-    label: "HTTP Client Logs",
-    icon: FileText,
-    path: "/http-client-logs",
-    permissions: ["admin.read", "admin.manage"],
-    admin_types: ["developer"],
-  },
-  {
-    label: "Webhook Logs",
+    label: "Developer",
     icon: List,
-    path: "/webhook-logs",
-    permissions: ["admin.read", "admin.manage"],
-    admin_types: ["developer"],
+    admin_types: [ADMIN_TYPE.DEVELOPER],
+    children: [
+      {
+        label: "HTTP Client Logs",
+        path: "/http-client-logs",
+        permissions: [PERMISSION.ADMIN_READ, PERMISSION.ADMIN_MANAGE],
+        admin_types: [ADMIN_TYPE.DEVELOPER],
+      },
+      {
+        label: "Webhook Logs",
+        path: "/webhook-logs",
+        permissions: [PERMISSION.ADMIN_READ, PERMISSION.ADMIN_MANAGE],
+        admin_types: [ADMIN_TYPE.DEVELOPER],
+      },
+    ],
   },
 ];

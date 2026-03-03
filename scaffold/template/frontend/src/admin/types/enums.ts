@@ -3,6 +3,18 @@
 
 export type AdminType = "developer" | "superadmin" | "admin";
 
+export const ADMIN_TYPE: Readonly<Record<string, AdminType>> = {
+  DEVELOPER: "developer",
+  SUPERADMIN: "superadmin",
+  ADMIN: "admin",
+};
+
+export const ADMIN_TYPES: ReadonlyArray<AdminType> = [
+  "developer",
+  "superadmin",
+  "admin",
+];
+
 export type AuthClientType = "web" | "mobile";
 
 export type Permission = "admin.read" | "admin.manage";
@@ -24,3 +36,13 @@ export const PERMISSIONS: ReadonlyArray<Permission> = [
   "admin.read",
   "admin.manage",
 ];
+
+export const PERMISSION: Readonly<Record<string, Permission>> = {
+  ADMIN_READ: "admin.read",
+  ADMIN_MANAGE: "admin.manage",
+};
+
+export const PERMISSION_META_BY_KEY: Readonly<Record<Permission, PermissionMeta>> = {
+  "admin.read": { key: "admin.read", guard: "admin", label: "Read Admins", group: "admin", description: "View admin profile and datatable records." },
+  "admin.manage": { key: "admin.manage", guard: "admin", label: "Manage Admins", group: "admin", description: "Create/update/delete admin records and perform management actions." },
+};

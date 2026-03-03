@@ -114,7 +114,7 @@ export default function HttpClientLogsPage() {
 
   return (
     <DataTable<HttpClientLogDatatableRow>
-      url="/api/v1/admin/datatable/http-client-log/query"
+      url="datatable/http-client-log/query"
       title={t("HTTP Client Logs")}
       subtitle={t("Inspect outbound HTTP requests and responses")}
       columns={[

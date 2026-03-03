@@ -2,6 +2,8 @@ import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from "axio
 import { resolveLocaleHeader } from "@shared/localeHeader";
 
 export interface ApiClientConfig {
+  /** Optional per-portal API prefix, e.g. "/api/v1/admin". */
+  apiPrefix?: string;
   /** Read the current access token (from auth store). */
   getToken: () => string | null;
   /** Attempt to refresh the session. Must throw on failure. */
@@ -17,7 +19,15 @@ export interface ApiClientConfig {
  *   retries the original request. Concurrent 401s share one refresh call.
  */
 export function createApiClient(config: ApiClientConfig): AxiosInstance {
-  const api = axios.create({ withCredentials: true });
+  const baseURL =
+    config.apiPrefix && config.apiPrefix.trim()
+      ? config.apiPrefix.replace(/\/+$/, "")
+      : undefined;
+
+  const api = axios.create({
+    withCredentials: true,
+    baseURL,
+  });
 
   // ── Request: attach bearer token + timezone ─────────────
   api.interceptors.request.use((req) => {
