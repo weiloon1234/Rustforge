@@ -9,6 +9,7 @@ Thumbs.db
 *.tmp
 .env
 .env.*
+!scaffold/template/.env.example
 .idea/
 .vscode/
 logs/

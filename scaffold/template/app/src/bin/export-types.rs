@@ -425,6 +425,7 @@ export type AttachmentInput = AttachmentUploadDto;
 export interface Attachment {{
   id: string;
   path: string;
+  url: string;
   content_type: string;
   size: number;
   width: number | null;

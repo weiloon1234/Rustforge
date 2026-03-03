@@ -66,4 +66,5 @@ export {
   alertInfo,
   moneyFormat,
   formatDateTime,
+  attachmentUrl,
 } from "@shared/helpers";

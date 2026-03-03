@@ -6,7 +6,14 @@ import type { AdminContentPageOutput, AdminContentPageUpdateOutput } from "@admi
 import { CONTENT_PAGE_SYSTEM_FLAG } from "@admin/types";
 import { api } from "@admin/api";
 import type { ApiResponse, LocaleCode } from "@shared/types";
-import { FileInput, TextInput, TiptapInput, useLocaleStore, alertSuccess } from "@shared/components";
+import {
+  FileInput,
+  TextInput,
+  TiptapInput,
+  useLocaleStore,
+  alertSuccess,
+  attachmentUrl,
+} from "@shared/components";
 
 const CONTENT_PAGE_SYSTEM_YES = CONTENT_PAGE_SYSTEM_FLAG._1;
 
@@ -35,6 +42,7 @@ export default function ContentPageEditPage() {
   const [title, setTitle] = useState<Record<string, string>>({});
   const [content, setContent] = useState<Record<string, string>>({});
   const [cover, setCover] = useState<Record<string, string>>({});
+  const [coverUrl, setCoverUrl] = useState<Record<string, string>>({});
   const [coverFiles, setCoverFiles] = useState<Record<string, File | null>>({});
 
   useEffect(() => {
@@ -65,14 +73,17 @@ export default function ContentPageEditPage() {
         const nextTitle: Record<string, string> = {};
         const nextContent: Record<string, string> = {};
         const nextCover: Record<string, string> = {};
+        const nextCoverUrl: Record<string, string> = {};
         for (const locale of locales) {
           nextTitle[locale] = payload.title[locale] ?? "";
           nextContent[locale] = payload.content[locale] ?? "";
           nextCover[locale] = payload.cover[locale] ?? "";
+          nextCoverUrl[locale] = payload.cover_url[locale] ?? "";
         }
         setTitle(nextTitle);
         setContent(nextContent);
         setCover(nextCover);
+        setCoverUrl(nextCoverUrl);
         setBusy(false);
       })
       .catch((err) => {
@@ -196,7 +207,12 @@ export default function ContentPageEditPage() {
                 files={coverFiles[locale] ? [coverFiles[locale] as File] : []}
                 defaultFiles={
                   (cover[locale] ?? "").trim()
-                    ? [{ name: cover[locale], url: cover[locale] }]
+                    ? [
+                        {
+                          name: cover[locale],
+                          url: (coverUrl[locale] ?? "").trim() || attachmentUrl(cover[locale]),
+                        },
+                      ]
                     : []
                 }
                 onChange={(e) => {

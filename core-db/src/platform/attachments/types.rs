@@ -22,6 +22,8 @@ use schemars::JsonSchema;
 pub struct Attachment {
     pub id: Uuid,
     pub path: String,
+    #[serde(default)]
+    pub url: String,
     pub content_type: String,
     pub size: i64,
     pub width: Option<i32>,
@@ -33,14 +35,32 @@ pub struct Attachment {
 impl Attachment {
     /// Build a URL using an optional base (e.g. CDN). Falls back to the stored path.
     pub fn url_with_base(&self, base: Option<&str>) -> String {
-        if let Some(base) = base {
-            let base = base.trim_end_matches('/');
-            let path = self.path.trim_start_matches('/');
-            format!("{base}/{path}")
-        } else {
-            self.path.clone()
-        }
+        attachment_url(&self.path, base)
     }
+}
+
+pub fn attachment_url(path: &str, base: Option<&str>) -> String {
+    let path = path.trim();
+    if path.is_empty() {
+        return String::new();
+    }
+
+    if path.starts_with("//")
+        || path.starts_with("http://")
+        || path.starts_with("https://")
+        || path.starts_with("data:")
+        || path.starts_with("blob:")
+    {
+        return path.to_string();
+    }
+
+    let Some(base) = base.map(str::trim).filter(|value| !value.is_empty()) else {
+        return path.to_string();
+    };
+
+    let base = base.trim_end_matches('/');
+    let path = path.trim_start_matches('/');
+    format!("{base}/{path}")
 }
 
 #[derive(Debug, Clone, Default)]

@@ -8,7 +8,9 @@ use uuid::Uuid;
 
 use crate::common::sql::DbConn;
 use crate::platform::attachments::model::AttachmentRow;
-use crate::platform::attachments::types::{Attachment, AttachmentMap, AttachmentUploadDto};
+use crate::platform::attachments::types::{
+    Attachment, AttachmentMap, AttachmentUploadDto, attachment_url,
+};
 
 pub struct AttachmentRepo<'a> {
     db: DbConn<'a>,
@@ -62,10 +64,13 @@ impl<'a> AttachmentRepo<'a> {
         .bind(owner_ids)
         .bind(&fields_vec);
         let rows = self.db.fetch_all(q).await?;
+        let cdn_base = std::env::var("S3_URL").ok();
 
         let mut map: HashMap<String, HashMap<i64, Vec<Attachment>>> = HashMap::new();
 
         for r in rows {
+            let path = r.path;
+            let url = attachment_url(&path, cdn_base.as_deref());
             let entry = map
                 .entry(r.field.clone())
                 .or_default()
@@ -73,7 +78,8 @@ impl<'a> AttachmentRepo<'a> {
                 .or_default();
             entry.push(Attachment {
                 id: r.id,
-                path: r.path,
+                path,
+                url,
                 content_type: r.content_type,
                 size: r.size,
                 width: r.width,

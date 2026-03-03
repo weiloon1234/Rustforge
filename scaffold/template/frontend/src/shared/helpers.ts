@@ -75,6 +75,22 @@ export function moneyFormat(value: number, decimals: number = 2): string {
   });
 }
 
+const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:/;
+
+export function attachmentUrl(
+  path: string | null | undefined,
+  baseUrl: string | null | undefined = import.meta.env.VITE_S3_URL,
+): string {
+  const raw = (path ?? "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("//") || ABSOLUTE_URL_PATTERN.test(raw)) return raw;
+
+  const base = (baseUrl ?? "").trim().replace(/\/+$/, "");
+  if (!base) return raw;
+
+  return `${base}/${raw.replace(/^\/+/, "")}`;
+}
+
 /**
  * Converts a UTC/server timestamp string to the browser's local timezone.
  *
