@@ -330,12 +330,27 @@ export function DataTable<T>({
   const [jumpValue, setJumpValue] = useState("");
   const metaLoaded = useRef(false);
   const rowKeyWarned = useRef(false);
+  const onPreCallRef = useRef(onPreCall);
+  const onPostCallRef = useRef(onPostCall);
+  const filterRowsRef = useRef(meta?.filter_rows);
 
   const [sortColumn, setSortColumn] = useState("");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const appliedFiltersRef = useRef<Record<string, string>>({});
   const [filterVersion, setFilterVersion] = useState(0);
+
+  useEffect(() => {
+    onPreCallRef.current = onPreCall;
+  }, [onPreCall]);
+
+  useEffect(() => {
+    onPostCallRef.current = onPostCall;
+  }, [onPostCall]);
+
+  useEffect(() => {
+    filterRowsRef.current = meta?.filter_rows;
+  }, [meta?.filter_rows]);
 
   const metaColumns: DataTableColumnMetaDto[] = meta?.columns ?? [];
   const displaySortCol = sortColumn || meta?.defaults?.sorting_column || "";
@@ -389,7 +404,7 @@ export function DataTable<T>({
         ...extraBody,
         ...filterParams,
       };
-      const filterSnapshot = buildFilterSnapshot(meta?.filter_rows, filters);
+      const filterSnapshot = buildFilterSnapshot(filterRowsRef.current, filters);
       const callEvent: DataTablePreCallEvent = {
         url,
         payload,
@@ -400,7 +415,7 @@ export function DataTable<T>({
         includeMeta,
         filters: filterSnapshot,
       };
-      onPreCall?.(callEvent);
+      onPreCallRef.current?.(callEvent);
       try {
         const res = await api.post<ApiResponse<DataTableQueryResponse<T>>>(url, payload, {
           signal,
@@ -411,17 +426,17 @@ export function DataTable<T>({
           metaLoaded.current = true;
         }
         const postFilterSnapshot = buildFilterSnapshot(
-          res.data.data.meta?.filter_rows ?? meta?.filter_rows,
+          res.data.data.meta?.filter_rows ?? filterRowsRef.current,
           filters,
         );
-        onPostCall?.({
+        onPostCallRef.current?.({
           ...callEvent,
           filters: postFilterSnapshot,
           response: res.data.data,
         });
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        onPostCall?.({
+        onPostCallRef.current?.({
           ...callEvent,
           error: err,
         });
@@ -429,7 +444,7 @@ export function DataTable<T>({
         setLoading(false);
       }
     },
-    [api, extraBody, meta?.filter_rows, onPostCall, onPreCall, url],
+    [api, extraBody, url],
   );
 
   useEffect(() => {
