@@ -20,7 +20,7 @@ use generated::guards::AdminGuard;
 use generated::extensions::admin::types::AdminViewComputedExt;
 use std::ops::Deref;
 use time::Duration;
-use tower_cookies::Cookies;
+use tower_cookies::{cookie::SameSite, Cookie, Cookies};
 
 use crate::{
     contracts::api::v1::admin::auth::{
@@ -250,7 +250,7 @@ fn to_auth_output(
     match client_type {
         AuthClientType::Web => {
             if let Some(ttl) = refresh_cookie_ttl(state) {
-                cookie::set_guard_refresh(
+                set_guard_refresh_cookie(
                     cookies,
                     AdminGuard::name(),
                     &tokens.refresh_token,
@@ -281,4 +281,46 @@ fn refresh_cookie_ttl(state: &AppApiState) -> Option<Duration> {
     let days = state.auth.guard(AdminGuard::name())?.refresh_ttl_days;
     let days = i64::try_from(days).ok()?;
     Some(Duration::days(days))
+}
+
+fn bool_from_env(key: &str) -> Option<bool> {
+    let raw = std::env::var(key).ok()?;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn should_use_secure_cookie() -> bool {
+    if let Some(value) = bool_from_env("COOKIE_SECURE") {
+        return value;
+    }
+
+    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
+    !matches!(
+        app_env.trim().to_ascii_lowercase().as_str(),
+        "local" | "development" | "dev" | "test" | "testing"
+    )
+}
+
+fn set_guard_refresh_cookie(
+    cookies: &Cookies,
+    guard: &str,
+    refresh_token: &str,
+    ttl: Duration,
+    path: &str,
+) {
+    let mut refresh_cookie = Cookie::new(
+        cookie::guard_refresh_cookie_name(guard),
+        refresh_token.to_string(),
+    );
+    refresh_cookie.set_http_only(true);
+    refresh_cookie.set_secure(should_use_secure_cookie());
+    refresh_cookie.set_same_site(SameSite::Lax);
+    refresh_cookie.set_path(path.to_string());
+    refresh_cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(
+        ttl.whole_seconds(),
+    ));
+    cookies.add(refresh_cookie);
 }
