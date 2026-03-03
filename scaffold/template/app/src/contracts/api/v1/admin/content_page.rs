@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use generated::models::ContentPageSystemFlag;
 use schemars::JsonSchema;
 use serde::Serialize;
 use ts_rs::TS;
@@ -23,7 +22,7 @@ pub struct AdminContentPageOutput {
     pub id: i64,
     pub tag: String,
     #[ts(type = "ContentPageSystemFlag")]
-    pub is_system: ContentPageSystemFlag,
+    pub is_system: String,
     #[ts(type = "MultiLang")]
     pub title: BTreeMap<String, String>,
     #[ts(type = "MultiLang")]
@@ -44,7 +43,7 @@ pub struct AdminContentPageUpdateOutput {
     pub id: i64,
     pub tag: String,
     #[ts(type = "ContentPageSystemFlag")]
-    pub is_system: ContentPageSystemFlag,
+    pub is_system: String,
     #[ts(type = "MultiLang")]
     pub title: BTreeMap<String, String>,
     #[ts(type = "MultiLang")]
@@ -70,7 +69,7 @@ impl From<generated::models::ContentPageView> for AdminContentPageOutput {
         Self {
             id: value.id,
             tag: value.tag,
-            is_system: value.is_system,
+            is_system: value.is_system.as_str().to_string(),
             title: multilang_to_map(value.title_translations.as_ref()),
             content: multilang_to_map(value.content_translations.as_ref()),
             cover: multilang_to_map(value.cover_translations.as_ref()),
@@ -85,7 +84,7 @@ impl From<generated::models::ContentPageView> for AdminContentPageUpdateOutput {
         Self {
             id: value.id,
             tag: value.tag,
-            is_system: value.is_system,
+            is_system: value.is_system.as_str().to_string(),
             title: multilang_to_map(value.title_translations.as_ref()),
             content: multilang_to_map(value.content_translations.as_ref()),
             cover: multilang_to_map(value.cover_translations.as_ref()),

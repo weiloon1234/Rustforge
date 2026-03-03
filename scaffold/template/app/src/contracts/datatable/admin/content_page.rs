@@ -2,7 +2,6 @@ use core_web::datatable::{
     DataTableFilterFieldDto, DataTableFilterFieldType, DataTableGenericEmailExportRequest,
     DataTableGenericQueryRequest, DataTableScopedContract,
 };
-use generated::models::ContentPageSystemFlag;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -13,11 +12,11 @@ pub const ROUTE_PREFIX: &str = "/datatable/content_page";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct ContentPageDatatableRow {
-    pub id: i64,
+    pub id: String,
     pub tag: String,
     pub title: Option<String>,
     #[ts(type = "ContentPageSystemFlag")]
-    pub is_system: ContentPageSystemFlag,
+    pub is_system: String,
     #[schemars(with = "String")]
     #[ts(type = "string")]
     pub updated_at: String,
@@ -57,7 +56,7 @@ impl DataTableScopedContract for AdminContentPageDataTableContract {
                 label: "System".to_string(),
                 placeholder: Some("All".to_string()),
                 description: None,
-                options: Some(ContentPageSystemFlag::datatable_filter_options()),
+                options: Some(generated::models::ContentPageSystemFlag::datatable_filter_options()),
             },
         ]]
     }
