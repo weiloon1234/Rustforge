@@ -56,6 +56,8 @@ export interface AuthConfig {
 export function createAuthStore<A extends Account = Account>(
   config: AuthConfig,
 ) {
+  let initSessionPromise: Promise<void> | null = null;
+
   return create<AuthState<A>>()(
     persist(
       (set, get) => ({
@@ -144,25 +146,39 @@ export function createAuthStore<A extends Account = Account>(
         },
 
         initSession: async () => {
-          const { token, isInitialized } = get();
-          if (isInitialized) return;
-          if (!token) {
-            set({ isInitialized: true } as Partial<AuthState<A>>);
+          if (initSessionPromise) {
+            await initSessionPromise;
             return;
           }
-          try {
-            await get().fetchAccount();
-          } catch {
-            // Access token expired — try refresh
+
+          const { token, isInitialized } = get();
+          if (isInitialized) return;
+
+          initSessionPromise = (async () => {
+            if (!token) {
+              set({ isInitialized: true } as Partial<AuthState<A>>);
+              return;
+            }
             try {
-              await get().refreshToken();
               await get().fetchAccount();
             } catch {
-              // Refresh also failed — session is gone
-              set({ account: null, token: null } as Partial<AuthState<A>>);
+              // Access token expired — try refresh
+              try {
+                await get().refreshToken();
+                await get().fetchAccount();
+              } catch {
+                // Refresh also failed — session is gone
+                set({ account: null, token: null } as Partial<AuthState<A>>);
+              }
             }
+            set({ isInitialized: true } as Partial<AuthState<A>>);
+          })();
+
+          try {
+            await initSessionPromise;
+          } finally {
+            initSessionPromise = null;
           }
-          set({ isInitialized: true } as Partial<AuthState<A>>);
         },
       }),
       {

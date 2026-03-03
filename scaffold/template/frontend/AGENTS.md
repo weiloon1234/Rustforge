@@ -152,6 +152,39 @@ The refresh uses `client_type: "web"` — the Rust backend stores the refresh to
 4. **401 response**: interceptor calls `refreshToken()` → POST to refresh endpoint (cookie sent automatically) → new `access_token` → retry original request
 5. **Refresh failure**: clears auth state, redirects to `/login`
 
+### Avoid Duplicate Auth API Calls (`/me`, `/refresh`)
+
+Use **one source of truth** for session bootstrap: `ProtectedRoute -> initSession()`.
+
+Do:
+
+```tsx
+// Login success
+setToken(result.access_token);
+navigate("/", { replace: true });
+// ProtectedRoute/initSession will fetch /me once
+```
+
+Don't:
+
+```tsx
+// BAD: duplicates /me
+setToken(result.access_token);
+await fetchAccount(); // /me #1
+navigate("/");        // ProtectedRoute initSession -> /me #2
+```
+
+For effect-driven API calls, always guard against duplicate in-flight work.
+
+Do:
+1. Keep an in-flight promise/ref for init/bootstrap calls.
+2. Return existing promise when called again before completion.
+3. Prefer stable callbacks/refs for event hooks used inside shared components.
+
+Don't:
+1. Trigger the same bootstrap fetch from multiple mount points.
+2. Couple fetch effects directly to fast-changing objects/functions without dedupe.
+
 ## i18n (Shared with Rust)
 
 Frontend and Rust share the same `i18n/*.json` files. The Rust backend uses `:param` syntax; `src/shared/i18n.ts` transforms `:param` → `{{param}}` at init time so i18next can interpolate.
