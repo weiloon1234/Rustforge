@@ -32,7 +32,7 @@ interface AutoFormErrors {
 }
 
 interface AutoFormResult {
-  submit: () => Promise<void>;
+  submit: (event?: React.FormEvent<HTMLFormElement>) => Promise<void>;
   busy: boolean;
   form: ReactElement;
   errors: AutoFormErrors;
@@ -79,7 +79,11 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
     setValuesState((prev) => ({ ...prev, ...incoming }));
   }, []);
 
-  const submit = useCallback(async () => {
+  const submit = useCallback(async (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (busy) return;
+
     setBusy(true);
     setFieldErrors({});
     setGeneralError(null);
@@ -97,8 +101,10 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
     } catch (err) {
       const axiosErr = err as AxiosError<{ message?: string; errors?: Record<string, string[]> }>;
       const body = axiosErr.response?.data;
+      const status = axiosErr.response?.status;
       if (body) {
-        setGeneralError(body.message ?? "Something went wrong");
+        const message = body.message ?? "Something went wrong";
+        setGeneralError(status ? `[HTTP ${status}] ${message}` : message);
         if (body.errors) {
           const mapped: Record<string, string[]> = {};
           for (const [key, msgs] of Object.entries(body.errors)) {
@@ -111,13 +117,14 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
           setFieldErrors(mapped);
         }
       } else {
-        setGeneralError("Something went wrong");
+        const message = axiosErr.message || "Something went wrong";
+        setGeneralError(status ? `[HTTP ${status}] ${message}` : message);
       }
       onError?.(err);
     } finally {
       setBusy(false);
     }
-  }, [api, method, url, fields, values, extraPayload, onSuccess, onError]);
+  }, [api, method, url, fields, values, extraPayload, onSuccess, onError, busy]);
 
   const form = useMemo((): ReactElement => {
     return (
