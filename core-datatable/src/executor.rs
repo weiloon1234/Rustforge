@@ -109,6 +109,7 @@ pub async fn execute_datatable<T: AutoDataTable>(
 
     match input.export {
         DataTableExportMode::None => {
+            let summary = table.summary(query.clone(), input, ctx).await?;
             let (rows, total_records, total_pages, page, has_more, next_cursor, pagination_mode) =
                 match input.pagination_mode {
                     DataTablePaginationMode::Offset => {
@@ -189,6 +190,7 @@ pub async fn execute_datatable<T: AutoDataTable>(
                 pagination_mode,
                 has_more,
                 next_cursor,
+                summary,
                 diagnostics: make_diagnostics(),
             }))
         }

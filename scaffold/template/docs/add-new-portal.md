@@ -49,7 +49,7 @@ Add:
 Mount new routes in `app/src/internal/api/v1/mod.rs`.
 
 10. Datatable wiring (if used)
-Add portal executor under `app/src/internal/datatables/portal/{portal}/...` and register in `app/src/internal/api/state.rs`.
+Add portal executor under `app/src/internal/datatables/v1/{portal}/...` and register in `app/src/internal/api/state.rs`.
 
 11. Seed data
 Add portal bootstrap seeder under `app/src/seeds/`.
@@ -134,4 +134,3 @@ Ensure `build:{portal}` runs before `build:user` so nested portal outputs are pr
 - `/{portal}/login` loads in dev
 - protected routes redirect/refresh correctly
 - API auth + me + refresh endpoints work
-

@@ -333,6 +333,7 @@ pub struct DataTableResult {
     pub pagination_mode: DataTablePaginationMode,
     pub has_more: Option<bool>,
     pub next_cursor: Option<String>,
+    pub summary: Option<Value>,
     pub diagnostics: DataTableDiagnostics,
 }
 

@@ -90,7 +90,11 @@ Use in code: `Permission::ArticleRead.as_str()`, `Permission::from_str("article.
 
 ## Translations (i18n)
 
-All user-facing strings **must** go through `core_i18n::t()`.
+All user-facing strings **must** go through the translation layer.
+
+- Backend (Rust): use `core_i18n::t()` / `core_i18n::t_args()`.
+- Frontend (TypeScript/React): use `t(...)` from `react-i18next`.
+- Do **not** hardcode user-facing text in Rust, TS, or TSX.
 
 ```rust
 use core_i18n::t;
@@ -103,6 +107,15 @@ use core_i18n::t_args;
 t_args("Welcome :name", &[("name", &user.name)])
 ```
 
+```tsx
+import { useTranslation } from "react-i18next";
+
+function Header() {
+  const { t } = useTranslation();
+  return <h1>{t("Admin dashboard")}</h1>;
+}
+```
+
 ### Rules
 
 1. **Keys are English text.** The key itself is the fallback — if no translation is found, `t()` returns the key as-is.
@@ -110,6 +123,8 @@ t_args("Welcome :name", &[("name", &user.name)])
 3. **`en.json` only needs entries where key differs from display text**, or where the key has `:param` placeholders. If key and value are identical (e.g. `"Admin created": "Admin created"`), **omit it from `en.json`** — the fallback already returns the key.
 4. **Non-English locale files need every `t()` key** that appears in code.
 5. Parameters use `:paramName` syntax in both key and all translations.
+6. Frontend labels/buttons/placeholders/table headers/empty states/toasts/modal text must use `t(...)`.
+7. Allowed hardcoded strings: internal debug logs, telemetry keys, and non-user-facing constants only.
 
 ```json
 // i18n/en.json — only divergent or parameterized keys
@@ -132,6 +147,8 @@ t_args("Welcome :name", &[("name", &user.name)])
 - `AppError::NotFound(t("Article not found"))` — error messages
 - `AppError::Forbidden(t("Not allowed"))` — auth errors
 - `AppError::Validation { message: t("Validation failed"), errors }` — validation wrappers
+- React JSX labels/buttons/help text: `t("...")`
+- Frontend toast/dialog messages: `t("...")` unless the backend already returned a localized message
 
 Locale is resolved per-request: `X-Locale` header > `Accept-Language` header > default locale.
 
@@ -180,6 +197,12 @@ ApiResponse::created(data, &t("Created"))  // 201
 Keep root guidance small. For full custom command patterns (Clap enums, nested subcommands, `ProjectCommand` trait, and examples), open:
 
 - `docs/custom-project-commands.md`
+
+### Computed Model Values
+
+Keep root guidance small. For computed/read-only model fields (for example `identity`) and the correct extension point (`AdminView`, not `AdminRow`), open:
+
+- `docs/computed-model-values.md`
 
 ## Migrations
 

@@ -49,7 +49,7 @@ pub fn generate_datatable_skeletons(schema: &Schema, out_dir: &Path) -> Result<(
             )?;
             writeln!(
                 f,
-                "    // Override scope/authorize/filters/mappings when needed."
+                "    // Override scope/authorize/filters/mappings/summary when needed."
             )?;
             writeln!(f, "}}\n")?;
             writeln!(

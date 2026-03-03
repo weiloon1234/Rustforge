@@ -17,6 +17,7 @@ use core_web::{
     utils::cookie,
 };
 use generated::guards::AdminGuard;
+use generated::extensions::admin::types::AdminViewComputedExt;
 use std::ops::Deref;
 use time::Duration;
 use tower_cookies::Cookies;
@@ -169,9 +170,11 @@ async fn logout(
 
 async fn me(auth: AuthUser<AdminGuard>) -> Result<ApiResponse<AdminMeOutput>, AppError> {
     let user = auth.user;
+    let identity = user.identity();
     Ok(ApiResponse::success(
         AdminMeOutput {
             id: user.id,
+            identity,
             username: user.username,
             email: user.email,
             name: user.name,
@@ -189,9 +192,11 @@ async fn profile_update(
 ) -> Result<ApiResponse<AdminProfileUpdateOutput>, AppError> {
     let req = req.0;
     let admin = workflow::profile_update(&state, auth.user.id, req).await?;
+    let identity = admin.identity();
     Ok(ApiResponse::success(
         AdminProfileUpdateOutput {
             id: admin.id,
+            identity,
             username: admin.username,
             email: admin.email,
             name: admin.name,

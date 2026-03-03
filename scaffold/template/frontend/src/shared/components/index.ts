@@ -17,10 +17,19 @@ export { Radio } from "@shared/components/Radio";
 export type { RadioProps, RadioOption } from "@shared/components/Radio";
 
 export { DataTable } from "@shared/components/DataTable";
-export type { DataTableProps, DataTableSortState } from "@shared/components/DataTable";
+export type {
+  DataTableProps,
+  DataTableSortState,
+  DataTablePreCallEvent,
+  DataTablePostCallEvent,
+  DataTableFooterContext,
+  DataTableFilterSnapshot,
+} from "@shared/components/DataTable";
 
 export { useAutoForm } from "@shared/useAutoForm";
 export type { FieldDef, AutoFormConfig, AutoFormErrors, AutoFormResult } from "@shared/useAutoForm";
+export { useLocaleStore } from "@shared/stores/locale";
+export { getRuntimeConfig } from "@shared/runtimeConfig";
 
 export { Modal } from "@shared/components/Modal";
 export { ModalOutlet } from "@shared/components/ModalOutlet";

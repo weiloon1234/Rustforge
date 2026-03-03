@@ -11,6 +11,7 @@ use ts_rs::TS;
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminDatatableRow {
     pub id: i64,
+    pub identity: String,
     pub username: String,
     pub email: Option<String>,
     pub name: String,

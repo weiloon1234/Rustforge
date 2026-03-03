@@ -4,7 +4,12 @@ pub mod v1;
 
 use std::sync::Arc;
 
-use axum::{routing::get as axum_get, Json, Router, response::Html};
+use axum::{
+    Json, Router,
+    http::header,
+    response::Html,
+    routing::get as axum_get,
+};
 use bootstrap::boot::BootContext;
 use core_web::openapi::{
     aide::{
@@ -18,6 +23,7 @@ use state::AppApiState;
 
 pub async fn build_router(ctx: BootContext) -> anyhow::Result<Router> {
     let app_state = AppApiState::new(&ctx)?;
+    let bootstrap_script = render_frontend_bootstrap_script(&ctx.settings);
 
     let api_router = ApiRouter::new().nest("/api/v1", v1::router(app_state));
 
@@ -46,6 +52,25 @@ pub async fn build_router(ctx: BootContext) -> anyhow::Result<Router> {
             }),
         );
     }
+
+    router = router.route(
+        "/api/bootstrap.js",
+        axum_get({
+            let bootstrap_script = bootstrap_script.clone();
+            move || {
+                let bootstrap_script = bootstrap_script.clone();
+                async move {
+                    (
+                        [
+                            (header::CONTENT_TYPE, "application/javascript; charset=utf-8"),
+                            (header::CACHE_CONTROL, "no-store, max-age=0"),
+                        ],
+                        bootstrap_script,
+                    )
+                }
+            }
+        }),
+    );
 
     let public_path = core_web::static_assets::public_path_from_env();
 
@@ -80,6 +105,7 @@ async fn root() -> Html<&'static str> {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>App</title>
+    <script src="/api/bootstrap.js"></script>
     <script type="module" src="http://localhost:5173/@vite/client"></script>
     <script type="module">
       import RefreshRuntime from "http://localhost:5173/@react-refresh"
@@ -103,6 +129,7 @@ async fn admin_dev() -> Html<&'static str> {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Admin</title>
+    <script src="/api/bootstrap.js"></script>
     <script type="module" src="http://localhost:5174/admin/@vite/client"></script>
     <script type="module">
       import RefreshRuntime from "http://localhost:5174/admin/@react-refresh"
@@ -117,4 +144,35 @@ async fn admin_dev() -> Html<&'static str> {
     <script type="module" src="http://localhost:5174/admin/src/admin/main.tsx"></script>
   </body>
 </html>"#)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct FrontendBootstrapPayload {
+    i18n: FrontendI18nPayload,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct FrontendI18nPayload {
+    default_locale: String,
+    supported_locales: Vec<String>,
+    default_timezone: String,
+}
+
+fn render_frontend_bootstrap_script(settings: &core_config::Settings) -> String {
+    let payload = FrontendBootstrapPayload {
+        i18n: FrontendI18nPayload {
+            default_locale: settings.i18n.default_locale.to_string(),
+            supported_locales: settings
+                .i18n
+                .supported_locales
+                .iter()
+                .map(|locale| (*locale).to_string())
+                .collect(),
+            default_timezone: settings.i18n.default_timezone_str.clone(),
+        },
+    };
+
+    let mut json = serde_json::to_string(&payload).expect("frontend bootstrap payload");
+    json = json.replace("</", "<\\/");
+    format!("window.__RUSTFORGE_BOOTSTRAP__ = Object.freeze({json});\n")
 }

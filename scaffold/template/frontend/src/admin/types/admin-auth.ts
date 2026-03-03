@@ -37,6 +37,7 @@ export interface AdminAuthOutput {
 
 export interface AdminMeOutput {
   id: number;
+  identity: string;
   username: string;
   email: string | null;
   name: string;
@@ -46,6 +47,7 @@ export interface AdminMeOutput {
 
 export interface AdminProfileUpdateOutput {
   id: number;
+  identity: string;
   username: string;
   email: string | null;
   name: string;

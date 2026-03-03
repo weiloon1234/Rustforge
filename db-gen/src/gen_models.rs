@@ -5902,6 +5902,11 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         "    fn mappings(&self, _record: &mut serde_json::Map<String, serde_json::Value>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> {{ Ok(()) }}"
     )
     .unwrap();
+    writeln!(
+        out,
+        "    fn summary<'db>(&'db self, _query: {query_ident}<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> {{ Box::pin(async {{ Ok(None) }}) }}"
+    )
+    .unwrap();
     writeln!(out, "}}").unwrap();
 
     writeln!(out, "#[derive(Default)]").unwrap();
@@ -6009,6 +6014,11 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     writeln!(
         out,
         "    fn mappings(&self, record: &mut serde_json::Map<String, serde_json::Value>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> {{ self.hooks.mappings(record, input, ctx) }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    fn summary<'db>(&'db self, query: {query_ident}<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db {{ self.hooks.summary(query, input, ctx) }}"
     )
     .unwrap();
     writeln!(

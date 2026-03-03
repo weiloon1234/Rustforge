@@ -168,6 +168,20 @@ pub trait AutoDataTable: Send + Sync + 'static {
         Ok(())
     }
 
+    /// Optional summary payload computed from the fully filtered query
+    /// before pagination is applied. Use this for cross-page totals/cards.
+    fn summary<'db>(
+        &'db self,
+        _query: <Self::Adapter as GeneratedTableAdapter>::Query<'db>,
+        _input: &DataTableInput,
+        _ctx: &DataTableContext,
+    ) -> BoxFuture<'db, Result<Option<Value>>>
+    where
+        Self: 'db,
+    {
+        Box::pin(async { Ok(None) })
+    }
+
     fn default_sorting_column(&self) -> &'static str {
         "id"
     }

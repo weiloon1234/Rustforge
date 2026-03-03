@@ -88,6 +88,8 @@ The frontend ships two independent SPA portals, each with its own Vite config, d
 
 Both dev servers proxy `/api` to the Rust API on port 3000.
 
+**Frontend env (Laravel-style)**: put browser-safe keys in project-root `.env` using `VITE_` prefix (example: `VITE_APP_NAME=${APP_NAME}`). Vite loads from root `.env`, and only `VITE_*` is exposed to React via `import.meta.env`.
+
 **Tailwind 4**: No `tailwind.config.js` needed. Each portal customises design tokens via `@theme { }` in its own `app.css`.
 
 **Production build**: `make build-frontend` cleans `public/`, builds admin into `public/admin/`, then user into `public/`. The Rust API serves `public/admin/index.html` as the admin SPA fallback and `public/index.html` as the user SPA fallback.

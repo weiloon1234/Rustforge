@@ -156,6 +156,12 @@ The refresh uses `client_type: "web"` — the Rust backend stores the refresh to
 
 Frontend and Rust share the same `i18n/*.json` files. The Rust backend uses `:param` syntax; `src/shared/i18n.ts` transforms `:param` → `{{param}}` at init time so i18next can interpolate.
 
+Hard rule: all user-facing frontend text must use `t(...)`.
+
+- No hardcoded UI strings in TS/TSX for labels, button text, placeholders, table headers, empty states, validation messages, toasts, or modal content.
+- If backend already returns localized `message`, render it directly.
+- Hardcoded strings are only allowed for non-user-facing debug logs/telemetry keys.
+
 ```tsx
 import { useTranslation } from "react-i18next";
 

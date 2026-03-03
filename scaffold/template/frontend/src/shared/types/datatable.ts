@@ -94,6 +94,7 @@ export interface DataTableQueryResponse<T> {
   pagination_mode: string;
   has_more?: boolean;
   next_cursor?: string;
+  summary?: Record<string, unknown>;
   diagnostics: DataTableDiagnosticsDto;
   meta?: DataTableMetaDto;
 }

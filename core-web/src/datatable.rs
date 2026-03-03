@@ -284,6 +284,8 @@ where
     pub has_more: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<Value>,
     pub diagnostics: DataTableDiagnosticsDto,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<DataTableMetaDto>,
@@ -783,6 +785,7 @@ where
         pagination_mode: pagination_mode_to_str(page.pagination_mode).to_string(),
         has_more: page.has_more,
         next_cursor: page.next_cursor,
+        summary: page.summary,
         diagnostics: DataTableDiagnosticsDto {
             duration_ms: page.diagnostics.duration_ms,
             auto_filters_applied: page.diagnostics.auto_filters_applied,

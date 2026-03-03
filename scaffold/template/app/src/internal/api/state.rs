@@ -30,7 +30,7 @@ impl AppApiState {
         );
         datatable_registry.register_as(
             "admin.account",
-            crate::internal::datatables::portal::admin::app_admin_datatable(ctx.db.clone()),
+            crate::internal::datatables::v1::admin::app_admin_datatable(ctx.db.clone()),
         );
 
         let datatable_registry = Arc::new(datatable_registry);

@@ -44,7 +44,7 @@ export function Chapter8EndToEndFlow() {
                         Datatable contract: <code>app/src/contracts/datatable/admin/account.rs</code>
                     </li>
                     <li>
-                        Datatable hooks: <code>app/src/internal/datatables/portal/admin/account.rs</code>
+                        Datatable hooks: <code>app/src/internal/datatables/v1/admin/account.rs</code>
                     </li>
                 </ul>
 

@@ -2,6 +2,7 @@ import type { AdminType } from "@admin/types/enums";
 
 export interface AdminDatatableRow {
   id: number;
+  identity: string;
   username: string;
   email: string | null;
   name: string;

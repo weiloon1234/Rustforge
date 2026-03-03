@@ -2,6 +2,7 @@ use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
 use core_db::common::sql::Op;
 use core_web::authz::{has_required_permissions, PermissionMode};
 use generated::{
+    extensions::admin::types::admin_identity,
     models::{
         AdminCol, AdminDataTable, AdminDataTableConfig, AdminDataTableHooks, AdminQuery, AdminType,
     },
@@ -93,8 +94,16 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
             record.insert("abilities".to_string(), serde_json::to_value(strings)?);
         }
 
+        let username = record.get("username").and_then(|v| v.as_str());
+        let name = record.get("name").and_then(|v| v.as_str());
+        let email = record.get("email").and_then(|v| v.as_str());
+        let id = record.get("id").and_then(|v| v.as_i64());
+        let identity = admin_identity(username, name, email, id);
+        record.insert("identity".to_string(), serde_json::Value::String(identity));
+
         Ok(())
     }
+
 }
 
 fn parse_admin_type(value: &str) -> Option<AdminType> {

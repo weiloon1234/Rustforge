@@ -88,6 +88,42 @@ pub fn routes(state: AppApiState) -> ApiRouter<AppApiState> {
                     </li>
                 </ul>
 
+                <h2>Computed Model Value (Scaffold Now)</h2>
+                <p>
+                    Put computed/read-only fields on <code>AdminView</code> extension methods, not on raw
+                    <code> AdminRow</code>.
+                </p>
+                <ul>
+                    <li>
+                        Extension point: <code>generated/src/extensions.rs</code>
+                    </li>
+                    <li>
+                        API contract mapping: <code>app/src/contracts/api/v1/admin/*.rs</code>
+                    </li>
+                    <li>
+                        Optional datatable row injection: <code>app/src/internal/datatables/v1/admin/account.rs</code>
+                    </li>
+                </ul>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`use generated::extensions::admin::types::AdminViewComputedExt;
+
+impl From<generated::models::AdminView> for AdminOutput {
+    fn from(value: generated::models::AdminView) -> Self {
+        Self {
+            id: value.id,
+            identity: value.identity(), // username -> name -> email fallback
+            username: value.username,
+            email: value.email,
+            name: value.name,
+            admin_type: value.admin_type,
+            abilities: vec![],
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}`}</code>
+                </pre>
+
                 <h2>Verify</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-bash">{`cargo check -p app

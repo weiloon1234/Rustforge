@@ -5,6 +5,8 @@ import path from "path";
 export default defineConfig({
   plugins: [react()],
   root: ".",
+  envDir: path.resolve(__dirname, ".."),
+  envPrefix: "VITE_",
   base: "/admin/",
   resolve: {
     alias: {

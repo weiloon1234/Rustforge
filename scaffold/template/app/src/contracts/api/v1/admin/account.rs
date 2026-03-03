@@ -1,6 +1,8 @@
 use crate::contracts::types::username::UsernameString;
 use core_web::contracts::rustforge_contract;
-use generated::{models::AdminType, permissions::Permission};
+use generated::{
+    extensions::admin::types::AdminViewComputedExt, models::AdminType, permissions::Permission,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
 use ts_rs::TS;
@@ -63,6 +65,7 @@ impl UpdateAdminInput {
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminOutput {
     pub id: i64,
+    pub identity: String,
     pub username: String,
     pub email: Option<String>,
     pub name: String,
@@ -94,6 +97,7 @@ impl From<generated::models::AdminView> for AdminOutput {
 
         Self {
             id: value.id,
+            identity: value.identity(),
             username: value.username,
             email: value.email,
             name: value.name,

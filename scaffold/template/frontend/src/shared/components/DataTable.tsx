@@ -12,6 +12,34 @@ export interface DataTableSortState {
   handleSort: (colName: string) => void;
 }
 
+export interface DataTableFilterSnapshot {
+  all: Record<string, string>;
+  applied: Record<string, string>;
+}
+
+export interface DataTablePreCallEvent {
+  url: string;
+  payload: Record<string, unknown>;
+  page: number;
+  perPage: number;
+  sortingColumn: string;
+  sortingDirection: "asc" | "desc";
+  includeMeta: boolean;
+  filters: DataTableFilterSnapshot;
+}
+
+export interface DataTablePostCallEvent<T> extends DataTablePreCallEvent {
+  response?: DataTableQueryResponse<T>;
+  error?: unknown;
+}
+
+export interface DataTableFooterContext<T> {
+  records: T[];
+  visibleColumns: DataTableColumnMetaDto[];
+  sumColumn: (column: string, decimals?: number) => number;
+  refresh: () => void;
+}
+
 export interface DataTableProps<T> {
   url: string;
   api: AxiosInstance;
@@ -25,6 +53,9 @@ export interface DataTableProps<T> {
   columnRenderers?: Record<string, (value: unknown, record: T, refresh: () => void) => ReactNode>;
   rowKey: (record: T) => string | number;
   header?: ReactNode | ((refresh: () => void) => ReactNode);
+  renderTableFooter?: (ctx: DataTableFooterContext<T>) => ReactNode;
+  onPreCall?: (event: DataTablePreCallEvent) => void;
+  onPostCall?: (event: DataTablePostCallEvent<T>) => void;
   footer?: ReactNode;
 }
 
@@ -45,6 +76,51 @@ function formatCellValue(value: unknown): string {
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function flattenFilterKeys(filterRows?: (DataTableFilterFieldDto | DataTableFilterFieldDto[])[]): string[] {
+  if (!filterRows) return [];
+  const keys = new Set<string>();
+  for (const row of filterRows) {
+    if (Array.isArray(row)) {
+      for (const field of row) {
+        keys.add(field.filter_key);
+      }
+    } else {
+      keys.add(row.filter_key);
+    }
+  }
+  return Array.from(keys);
+}
+
+function buildFilterSnapshot(
+  filterRows: (DataTableFilterFieldDto | DataTableFilterFieldDto[])[] | undefined,
+  filters: Record<string, string>,
+): DataTableFilterSnapshot {
+  const keys = new Set<string>(flattenFilterKeys(filterRows));
+  for (const key of Object.keys(filters)) {
+    keys.add(key);
+  }
+
+  const all: Record<string, string> = {};
+  for (const key of Array.from(keys).sort()) {
+    all[key] = filters[key] ?? "";
+  }
+
+  const applied = Object.fromEntries(
+    Object.entries(filters).filter(([, value]) => value !== ""),
+  );
+
+  return { all, applied };
+}
+
+function parseNumericCell(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
 }
 
 function FilterField({
@@ -149,6 +225,9 @@ export function DataTable<T>({
   columnRenderers,
   rowKey,
   header,
+  renderTableFooter,
+  onPreCall,
+  onPostCall,
   footer,
 }: DataTableProps<T>) {
   const { t } = useTranslation();
@@ -187,25 +266,50 @@ export function DataTable<T>({
       const filterParams = Object.fromEntries(
         Object.entries(filters).filter(([, v]) => v !== ""),
       );
+      const payload: Record<string, unknown> = {
+        base,
+        ...extraBody,
+        ...filterParams,
+      };
+      const filterSnapshot = buildFilterSnapshot(meta?.filter_rows, filters);
+      const callEvent: DataTablePreCallEvent = {
+        url,
+        payload,
+        page: p,
+        perPage: pp,
+        sortingColumn: sc,
+        sortingDirection: (sd || "desc") as "asc" | "desc",
+        includeMeta,
+        filters: filterSnapshot,
+      };
+      onPreCall?.(callEvent);
       try {
-        const res = await api.post<ApiResponse<DataTableQueryResponse<T>>>(url, {
-          base,
-          ...extraBody,
-          ...filterParams,
-        }, { signal });
+        const res = await api.post<ApiResponse<DataTableQueryResponse<T>>>(url, payload, { signal });
         setData(res.data.data);
         if (includeMeta && res.data.data.meta) {
           setMeta(res.data.data.meta);
           metaLoaded.current = true;
         }
+        const postFilterSnapshot = buildFilterSnapshot(
+          res.data.data.meta?.filter_rows ?? meta?.filter_rows,
+          filters,
+        );
+        onPostCall?.({
+          ...callEvent,
+          filters: postFilterSnapshot,
+          response: res.data.data,
+        });
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
+        onPostCall?.({
+          ...callEvent,
+          error: err,
+        });
       } finally {
         setLoading(false);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [api, url],
+    [api, extraBody, meta, onPostCall, onPreCall, url],
   );
 
   useEffect(() => {
@@ -216,6 +320,23 @@ export function DataTable<T>({
   }, [page, perPage, sortColumn, sortDirection, filterVersion]);
 
   const refresh = () => fetchData(page, perPage, sortColumn, sortDirection, appliedFiltersRef.current);
+
+  const sumColumn = useCallback(
+    (column: string, decimals = 2) => {
+      if (!data) return 0;
+      let sum = 0;
+      for (const record of data.records) {
+        const value = (record as Record<string, unknown>)[column];
+        const numeric = parseNumericCell(value);
+        if (numeric !== null) {
+          sum += numeric;
+        }
+      }
+      const safeDecimals = Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 2;
+      return Number(sum.toFixed(safeDecimals));
+    },
+    [data],
+  );
 
   const totalPages = data?.total_pages ?? 1;
   const goTo = (p: number) => setPage(Math.max(1, Math.min(totalPages, p)));
@@ -406,6 +527,16 @@ export function DataTable<T>({
               </tr>
             ))}
           </tbody>
+          {data && renderTableFooter && (
+            <tfoot className="border-t border-border bg-surface-hover/20">
+              {renderTableFooter({
+                records: data.records,
+                visibleColumns,
+                sumColumn,
+                refresh,
+              })}
+            </tfoot>
+          )}
         </table>
       </div>
 

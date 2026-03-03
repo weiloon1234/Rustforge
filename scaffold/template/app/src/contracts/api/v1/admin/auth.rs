@@ -85,6 +85,7 @@ pub struct AdminAuthOutput {
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminMeOutput {
     pub id: i64,
+    pub identity: String,
     pub username: String,
     pub email: Option<String>,
     pub name: String,
@@ -98,6 +99,7 @@ pub struct AdminMeOutput {
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminProfileUpdateOutput {
     pub id: i64,
+    pub identity: String,
     pub username: String,
     pub email: Option<String>,
     pub name: String,

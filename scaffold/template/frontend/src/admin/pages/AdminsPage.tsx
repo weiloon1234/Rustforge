@@ -13,7 +13,7 @@ import {
   alertError,
   formatDateTime,
 } from "@shared/components";
-import type { DataTableSortState } from "@shared/components";
+import type { DataTablePostCallEvent, DataTableSortState } from "@shared/components";
 import { api } from "@admin/api";
 
 const TYPE_COLORS: Record<AdminType, string> = {
@@ -28,6 +28,31 @@ const PERMISSION_LABELS: Record<Permission, string> = {
   "admin.read": "Read Admins",
   "admin.manage": "Manage Admins",
 };
+
+interface AdminDatatableSummary {
+  total_filtered: number;
+  developer_count: number;
+  superadmin_count: number;
+  admin_count: number;
+}
+
+function parseAdminDatatableSummary(raw: unknown): AdminDatatableSummary | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const totalFiltered = Number(obj.total_filtered);
+  const developerCount = Number(obj.developer_count);
+  const superadminCount = Number(obj.superadmin_count);
+  const adminCount = Number(obj.admin_count);
+  if (![totalFiltered, developerCount, superadminCount, adminCount].every(Number.isFinite)) {
+    return null;
+  }
+  return {
+    total_filtered: totalFiltered,
+    developer_count: developerCount,
+    superadmin_count: superadminCount,
+    admin_count: adminCount,
+  };
+}
 
 function TypeBadge({ type }: { type: AdminType }) {
   return (
@@ -196,6 +221,12 @@ function EditAdminForm({
 
 export default function AdminsPage() {
   const { t } = useTranslation();
+  const [summary, setSummary] = useState<AdminDatatableSummary | null>(null);
+
+  const handleDatatablePostCall = (event: DataTablePostCallEvent<AdminDatatableRow>) => {
+    if (!event.response) return;
+    setSummary(parseAdminDatatableSummary(event.response.summary));
+  };
 
   const handleCreate = (refresh: () => void) => {
     useModalStore.getState().open({
@@ -289,19 +320,49 @@ export default function AdminsPage() {
         created_at: (v) => <td key="created_at" className="px-4 py-3 tabular-nums text-muted">{formatDateTime(v as string)}</td>,
       }}
       rowKey={(admin) => String(admin.id)}
+      onPostCall={handleDatatablePostCall}
+      renderTableFooter={({ records, sumColumn }) => (
+        <tr>
+          <td colSpan={99} className="px-4 py-2 text-xs text-muted">
+            {t("Page rows")}: {records.length} · {t("Page ID sum")}: {sumColumn("id", 0)}
+          </td>
+        </tr>
+      )}
       header={(refresh) => (
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">{t("Admins")}</h1>
-            <p className="mt-1 text-sm text-muted">{t("Manage administrator accounts")}</p>
+        <div>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">{t("Admins")}</h1>
+              <p className="mt-1 text-sm text-muted">{t("Manage administrator accounts")}</p>
+            </div>
+            <button
+              onClick={() => handleCreate(refresh)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary/90"
+            >
+              <Plus size={16} />
+              {t("Create Admin")}
+            </button>
           </div>
-          <button
-            onClick={() => handleCreate(refresh)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary/90"
-          >
-            <Plus size={16} />
-            {t("Create Admin")}
-          </button>
+          {summary && (
+            <div className="mt-3 grid gap-2 sm:grid-cols-4">
+              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+                <p className="text-xs text-muted">{t("Filtered Total")}</p>
+                <p className="font-semibold text-foreground">{summary.total_filtered}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+                <p className="text-xs text-muted">{t("Developers")}</p>
+                <p className="font-semibold text-foreground">{summary.developer_count}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+                <p className="text-xs text-muted">{t("Super Admins")}</p>
+                <p className="font-semibold text-foreground">{summary.superadmin_count}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+                <p className="text-xs text-muted">{t("Admins")}</p>
+                <p className="font-semibold text-foreground">{summary.admin_count}</p>
+              </div>
+            </div>
+          )}
         </div>
       )}
     />

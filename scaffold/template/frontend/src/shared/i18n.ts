@@ -1,5 +1,6 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
+import { getRuntimeConfig } from "@shared/runtimeConfig";
 import en from "../../../i18n/en.json";
 import zh from "../../../i18n/zh.json";
 
@@ -17,15 +18,20 @@ function transformParams(
   return result;
 }
 
+const runtimeConfig = getRuntimeConfig();
+const resources = {
+  en: { translation: transformParams(en) },
+  zh: { translation: transformParams(zh) },
+};
+
 i18n.use(initReactI18next).init({
-  fallbackLng: "en",
+  lng: runtimeConfig.i18n.defaultLocale,
+  fallbackLng: runtimeConfig.i18n.defaultLocale,
+  supportedLngs: runtimeConfig.i18n.supportedLocales,
   keySeparator: false,
   nsSeparator: false,
   interpolation: { escapeValue: false },
-  resources: {
-    en: { translation: transformParams(en) },
-    zh: { translation: transformParams(zh) },
-  },
+  resources,
 });
 
 export default i18n;

@@ -7,6 +7,7 @@ use crate::types::{
     DataTableContext, DataTableExecution, DataTableExportMode, DataTableInput,
     DataTablePaginationMode, DataTableUnknownFilterMode, SortDirection,
 };
+use serde_json::json;
 use serde::Serialize;
 use std::path::Path;
 use std::sync::Arc;
@@ -158,6 +159,22 @@ impl AutoDataTable for MockTable {
     fn default_unsortable(&self) -> &'static [&'static str] {
         &["name"]
     }
+
+    fn summary<'db>(
+        &'db self,
+        query: <Self::Adapter as GeneratedTableAdapter>::Query<'db>,
+        _input: &DataTableInput,
+        _ctx: &DataTableContext,
+    ) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>>
+    where
+        Self: 'db,
+    {
+        Box::pin(async move {
+            Ok(Some(json!({
+                "applied_filter_count": query.filters.len(),
+            })))
+        })
+    }
 }
 
 #[tokio::test]
@@ -207,6 +224,13 @@ async fn unknown_filter_is_ignored_and_sort_falls_back_to_default() {
     );
     assert_eq!(page.pagination_mode, DataTablePaginationMode::Offset);
     assert!(page.next_cursor.is_none());
+    assert_eq!(
+        page.summary
+            .as_ref()
+            .and_then(|v| v.get("applied_filter_count"))
+            .and_then(|v| v.as_u64()),
+        Some(1)
+    );
     assert_eq!(page.diagnostics.auto_filters_applied, 1);
     assert!(page.diagnostics.unknown_filters.is_empty());
 }

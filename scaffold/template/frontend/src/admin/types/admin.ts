@@ -17,6 +17,7 @@ export interface UpdateAdminInput {
 
 export interface AdminOutput {
   id: number;
+  identity: string;
   username: string;
   email: string | null;
   name: string;

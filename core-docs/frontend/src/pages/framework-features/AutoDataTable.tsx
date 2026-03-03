@@ -219,12 +219,12 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
                 <h2>Step 2: Datatable Hooks (Scope, Filters, Mappings)</h2>
                 <p>
                     Hooks are defined per-model in{' '}
-                    <code>app/src/internal/datatables/portal/admin/account.rs</code>. The generated hooks trait
+                    <code>app/src/internal/datatables/v1/admin/account.rs</code>. The generated hooks trait
                     provides <code>scope</code>, <code>authorize</code>,{' '}
                     <code>filter_query</code>, <code>filters</code>, and <code>mappings</code>.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`// app/src/internal/datatables/portal/admin/account.rs
+                    <code className="language-rust">{`// app/src/internal/datatables/v1/admin/account.rs
 use core_datatable::{DataTableContext, DataTableInput};
 use core_db::common::sql::Op;
 use generated::models::{AdminCol, AdminDataTableHooks, AdminQuery, AdminType};
