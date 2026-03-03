@@ -1,9 +1,12 @@
-import { LayoutDashboard, Users, type LucideIcon } from "lucide-react";
+import { FileText, LayoutDashboard, List, Users, type LucideIcon } from "lucide-react";
+
+type AdminTypeVisibility = "developer" | "superadmin" | "admin";
 
 export interface NavChild {
   label: string;
   path: string;
   permissions?: string[];
+  admin_types?: AdminTypeVisibility[];
   notificationKey?: string;
 }
 
@@ -12,6 +15,7 @@ export interface NavItem {
   icon: LucideIcon;
   path?: string;
   permissions?: string[];
+  admin_types?: AdminTypeVisibility[];
   notificationKey?: string;
   children?: NavChild[];
 }
@@ -42,5 +46,19 @@ export const navigation: NavItem[] = [
     icon: Users,
     path: "/admins",
     permissions: ["admin.read", "admin.manage"],
+  },
+  {
+    label: "HTTP Client Logs",
+    icon: FileText,
+    path: "/http-client-logs",
+    permissions: ["admin.read", "admin.manage"],
+    admin_types: ["developer"],
+  },
+  {
+    label: "Webhook Logs",
+    icon: List,
+    path: "/webhook-logs",
+    permissions: ["admin.read", "admin.manage"],
+    admin_types: ["developer"],
   },
 ];

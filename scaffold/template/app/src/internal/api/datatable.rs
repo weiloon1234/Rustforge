@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use axum::extract::State;
 use axum::http::HeaderMap;
-use axum::{extract::State};
-use core_i18n::t;
 use core_datatable::{
     DataTableActor, DataTableAsyncExportManager, DataTableContext, DataTableRegistry,
 };
 use core_db::infra::storage::Storage;
+use core_i18n::t;
 use core_web::auth::Guard;
 use core_web::datatable::{
     DataTableEmailExportManager, DataTableGenericQueryRequest, DataTableQueryRequestContract,
@@ -24,13 +24,31 @@ use generated::models::AdminDataTableHooks;
 use crate::contracts::datatable::admin::account::{
     AdminAdminDataTableContract, AdminDatatableSummaryOutput,
 };
+use crate::contracts::datatable::admin::http_client_log::AdminHttpClientLogDataTableContract;
+use crate::contracts::datatable::admin::webhook_log::AdminWebhookLogDataTableContract;
 use crate::internal::api::state::AppApiState;
 
 pub fn router(state: AppApiState) -> ApiRouter {
-    let datatable_routes = core_web::datatable::routes_for_scoped_contract_with_options(
+    let account_datatable_routes = core_web::datatable::routes_for_scoped_contract_with_options(
         "/datatable/admin",
         state.clone(),
         AdminAdminDataTableContract,
+        DataTableRouteOptions {
+            require_bearer_auth: true,
+        },
+    );
+    let http_client_log_routes = core_web::datatable::routes_for_scoped_contract_with_options(
+        "/datatable/http-client-log",
+        state.clone(),
+        AdminHttpClientLogDataTableContract,
+        DataTableRouteOptions {
+            require_bearer_auth: true,
+        },
+    );
+    let webhook_log_routes = core_web::datatable::routes_for_scoped_contract_with_options(
+        "/datatable/webhook-log",
+        state.clone(),
+        AdminWebhookLogDataTableContract,
         DataTableRouteOptions {
             require_bearer_auth: true,
         },
@@ -47,7 +65,10 @@ pub fn router(state: AppApiState) -> ApiRouter {
         )
         .with_state(state);
 
-    datatable_routes.merge(summary_route)
+    account_datatable_routes
+        .merge(http_client_log_routes)
+        .merge(webhook_log_routes)
+        .merge(summary_route)
 }
 
 async fn admin_summary(

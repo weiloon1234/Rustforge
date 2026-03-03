@@ -37,6 +37,15 @@ function hasAccess(scopes: string[], required?: string[]): boolean {
   return required.some((r) => scopes.some((g) => permissionMatches(g, r)));
 }
 
+function hasAdminTypeAccess(
+  adminType: string | null,
+  required?: string[],
+): boolean {
+  if (!required || required.length === 0) return true;
+  if (!adminType) return false;
+  return required.includes(adminType);
+}
+
 function Badge({ count }: { count: number }) {
   if (count <= 0) return null;
   return <span className="rf-badge">{count > 99 ? "99+" : count}</span>;
@@ -78,17 +87,20 @@ function ParentNav({
   item,
   collapsed,
   scopes,
+  adminType,
 }: {
   item: NavItem;
   collapsed: boolean;
   scopes: string[];
+  adminType: string | null;
 }) {
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const getCount = useNotificationStore((s) => s.getCount);
 
   const visibleChildren = (item.children ?? []).filter((c) =>
-    hasAccess(scopes, c.permissions),
+    hasAccess(scopes, c.permissions) &&
+    hasAdminTypeAccess(adminType, c.admin_types),
   );
 
   const totalCount = visibleChildren.reduce(
@@ -151,11 +163,17 @@ function ParentNav({
 export default function Sidebar({ collapsed }: { collapsed: boolean }) {
   const location = useLocation();
   const scopes = useAuthStore((s) => s.account?.scopes ?? []);
+  const adminType = useAuthStore((s) => s.account?.admin_type ?? null);
 
   const visibleItems = navigation.filter((item) => {
     if (!hasAccess(scopes, item.permissions)) return false;
+    if (!hasAdminTypeAccess(adminType, item.admin_types)) return false;
     if (item.children) {
-      return item.children.some((c) => hasAccess(scopes, c.permissions));
+      return item.children.some(
+        (c) =>
+          hasAccess(scopes, c.permissions) &&
+          hasAdminTypeAccess(adminType, c.admin_types),
+      );
     }
     return true;
   });
@@ -171,6 +189,7 @@ export default function Sidebar({ collapsed }: { collapsed: boolean }) {
                 item={item}
                 collapsed={collapsed}
                 scopes={scopes}
+                adminType={adminType}
               />
             );
           }

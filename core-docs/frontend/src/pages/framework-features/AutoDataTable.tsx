@@ -19,8 +19,9 @@ export function AutoDataTableFeature() {
             <div className="prose prose-orange max-w-none">
                 <h2>Scaffold Now (verified)</h2>
                 <p>
-                    This feature is wired by default for admin account datatable in scaffold.
-                    Additional scopes (for example merchant/article) are
+                    This feature is wired by default for multiple admin datatable scopes in scaffold:
+                    <code>admin.account</code>, <code>admin.http_client_log</code>, and{' '}
+                    <code>admin.webhook_log</code>. Additional scopes (for example merchant/article) are
                     <strong> Concept Extension (optional)</strong>.
                 </p>
 
@@ -123,7 +124,11 @@ f-locale-like-<col>            Localized LIKE     Via localization table`}</code
 POST   /api/v1/admin/datatable/admin/summary
 POST   /api/v1/admin/datatable/admin/export/csv
 POST   /api/v1/admin/datatable/admin/export/email
-GET    /api/v1/admin/datatable/admin/export/status?job_id=...`}</code>
+GET    /api/v1/admin/datatable/admin/export/status?job_id=...
+
+# Additional scaffold scopes (query/export)
+POST   /api/v1/admin/datatable/http-client-log/query
+POST   /api/v1/admin/datatable/webhook-log/query`}</code>
                 </pre>
 
                 <h2>Step 1: Contract SSOT (Row DTO + Filter Metadata)</h2>
@@ -341,6 +346,11 @@ Body:
   "f-admin_type": "admin"
 }`}</code>
                 </pre>
+                <p>
+                    Put complex aggregates in the same scoped datatable module where filtering/scope
+                    rules already live (for scaffold: <code>app/src/internal/datatables/v1/admin/account.rs</code>).
+                    Build the aggregate query from the same filtered base query to keep totals consistent.
+                </p>
 
                 <h2>Step 3: Register + Mount Routes</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
@@ -464,6 +474,23 @@ core_web::datatable::routes_for_scoped_contract_with_options(
   )}
 />`}</code>
                 </pre>
+                <h3>Page Footer Metrics vs Cross-Page Summary</h3>
+                <ul>
+                    <li>
+                        <strong>Page footer metrics</strong> (for example <code>records.length</code>,{' '}
+                        <code>sumColumn("amount")</code>) are client-side and only reflect the
+                        currently loaded page.
+                    </li>
+                    <li>
+                        <strong>Cross-page totals/cards</strong> must come from a backend aggregate
+                        query using the same applied filters and scope (example:
+                        <code> /api/v1/admin/datatable/admin/summary</code>).
+                    </li>
+                    <li>
+                        If you need both, use footer metrics for quick per-page context and a
+                        dedicated backend summary payload for business totals.
+                    </li>
+                </ul>
 
                 <h2>Curl Quick Check</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">

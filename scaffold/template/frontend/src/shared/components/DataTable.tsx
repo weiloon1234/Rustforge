@@ -486,20 +486,25 @@ export function DataTable<T>({
               {typeof prependColumns === "function"
                 ? prependColumns({ column: displaySortCol, direction: displaySortDir, handleSort })
                 : prependColumns}
-              {visibleColumns.map((col) => (
+              {visibleColumns.map((col) => {
+                const rawLabel = toColumnLabel(col);
+                const translatedLabel = t(rawLabel);
+                const displayLabel = translatedLabel.trim() ? translatedLabel : rawLabel;
+                return (
                 <th
                   key={col.name}
                   className={`px-4 py-3 font-medium text-muted ${col.sortable ? "cursor-pointer select-none" : ""}`}
                   onClick={() => handleSort(col.name)}
                 >
                   <span className="inline-flex items-center gap-1">
-                    {t(toColumnLabel(col))}
+                    {displayLabel}
                     {col.sortable && col.name === displaySortCol && displaySortDir === "asc" && <ArrowUp size={14} />}
                     {col.sortable && col.name === displaySortCol && displaySortDir === "desc" && <ArrowDown size={14} />}
                     {col.sortable && col.name !== displaySortCol && <ArrowUpDown size={14} className="opacity-30" />}
                   </span>
                 </th>
-              ))}
+                );
+              })}
               {appendColumns}
             </tr>
           </thead>
