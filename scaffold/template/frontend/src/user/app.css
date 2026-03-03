@@ -59,31 +59,47 @@
     @apply pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted;
   }
   .rf-picker-popper {
-    @apply z-40;
+    z-index: 1200 !important;
+  }
+  .react-datepicker-popper {
+    z-index: 1200 !important;
   }
   .rf-picker-calendar {
-    @apply rounded-xl border border-border bg-surface text-foreground shadow-xl;
+    @apply rounded-xl border shadow-xl;
+    background-color: var(--color-surface) !important;
+    border-color: var(--color-border) !important;
+    color: var(--color-foreground) !important;
     font-family: inherit;
   }
+  .rf-picker-calendar .react-datepicker {
+    background-color: var(--color-surface) !important;
+    border-color: var(--color-border) !important;
+    color: var(--color-foreground) !important;
+  }
   .rf-picker-calendar .react-datepicker__header {
-    @apply border-border bg-surface;
+    background-color: var(--color-surface) !important;
+    border-bottom-color: var(--color-border) !important;
   }
   .rf-picker-calendar .react-datepicker__current-month,
   .rf-picker-calendar .react-datepicker-time__header,
   .rf-picker-calendar .react-datepicker-year-header,
   .rf-picker-calendar .react-datepicker__day-name {
-    @apply text-foreground;
+    color: var(--color-foreground) !important;
   }
   .rf-picker-calendar .react-datepicker__day,
-  .rf-picker-calendar .react-datepicker__time-name {
-    @apply text-foreground;
+  .rf-picker-calendar .react-datepicker__time-name,
+  .rf-picker-calendar .react-datepicker__time-list-item {
+    color: var(--color-foreground) !important;
+    background-color: transparent !important;
   }
   .rf-picker-calendar .react-datepicker__day:hover,
   .rf-picker-calendar .react-datepicker__time-list-item:hover,
   .rf-picker-calendar .react-datepicker__month-text:hover,
   .rf-picker-calendar .react-datepicker__quarter-text:hover,
   .rf-picker-calendar .react-datepicker__year-text:hover {
-    @apply bg-surface-hover rounded-md;
+    background-color: var(--color-surface-hover) !important;
+    color: var(--color-foreground) !important;
+    border-radius: 0.375rem;
   }
   .rf-picker-calendar .react-datepicker__day--selected,
   .rf-picker-calendar .react-datepicker__day--keyboard-selected,
@@ -91,16 +107,29 @@
   .rf-picker-calendar .react-datepicker__quarter-text--selected,
   .rf-picker-calendar .react-datepicker__year-text--selected,
   .rf-picker-calendar .react-datepicker__time-list-item--selected {
-    @apply bg-primary text-primary-foreground rounded-md;
+    background-color: var(--color-primary) !important;
+    color: var(--color-primary-foreground) !important;
+    border-radius: 0.375rem;
+  }
+  .rf-picker-calendar .react-datepicker__day--outside-month {
+    color: var(--color-muted) !important;
+  }
+  .rf-picker-calendar .react-datepicker__navigation-icon::before {
+    border-color: var(--color-muted) !important;
   }
   .rf-picker-calendar .react-datepicker__triangle {
     @apply hidden;
   }
-  .rf-picker-calendar .react-datepicker__time-container {
-    @apply border-border;
+  .rf-picker-calendar .react-datepicker__time-container,
+  .rf-picker-calendar .react-datepicker__time,
+  .rf-picker-calendar .react-datepicker__time-box,
+  .rf-picker-calendar .react-datepicker__time-list,
+  .rf-picker-calendar .react-datepicker__month-container {
+    background-color: var(--color-surface) !important;
+    border-color: var(--color-border) !important;
   }
-  .rf-picker-calendar .react-datepicker__time-box {
-    @apply bg-surface;
+  .rf-picker-calendar .react-datepicker__time-list {
+    scrollbar-color: var(--color-border) transparent;
   }
 
   .rf-textarea {

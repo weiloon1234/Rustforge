@@ -174,6 +174,7 @@ function TemporalInput({
         autoComplete="off"
         popperPlacement="bottom-start"
         popperClassName="rf-picker-popper"
+        popperProps={{ strategy: "fixed" }}
         calendarClassName="rf-picker-calendar"
         customInput={
           <PickerTextInput
