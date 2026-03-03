@@ -13,27 +13,29 @@ import {
   formatDateTime,
 } from "@shared/components";
 
+const PAGE_SYSTEM_YES: PageSystemFlag = PAGE_SYSTEM_FLAG._1;
+
 function normalizeErrorMessage(error: unknown, fallback: string): string {
   const maybe = error as { response?: { data?: { message?: string } } };
   return maybe?.response?.data?.message ?? fallback;
 }
 
 function toSystemLabel(value: PageSystemFlag, t: (key: string) => string): string {
-  if (value === PAGE_SYSTEM_FLAG.YES) return t("System");
+  if (value === PAGE_SYSTEM_YES) return t("System");
   return t("Custom");
 }
 
 function toSystemBadgeClass(value: PageSystemFlag): string {
-  if (value === PAGE_SYSTEM_FLAG.YES) return "bg-amber-100 text-amber-700";
+  if (value === PAGE_SYSTEM_YES) return "bg-amber-100 text-amber-700";
   return "bg-emerald-100 text-emerald-700";
 }
 
-export default function PagesPage() {
+export default function ContentPagesPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
   const handleDelete = async (row: PageDatatableRow, refresh: () => void) => {
-    if (row.is_system === PAGE_SYSTEM_FLAG.YES) {
+    if (row.is_system === PAGE_SYSTEM_YES) {
       return;
     }
 
@@ -44,7 +46,9 @@ export default function PagesPage() {
       callback: async (result) => {
         if (!result.isConfirmed) return;
         try {
-          await api.delete<ApiResponse<AdminPageDeleteOutput>>(`pages/${row.id}`);
+          await api.delete<ApiResponse<AdminPageDeleteOutput>>(
+            `content_page/${row.id}`,
+          );
           alertSuccess({ title: t("Deleted"), message: t("Page deleted") });
           refresh();
         } catch (err) {
@@ -59,7 +63,7 @@ export default function PagesPage() {
 
   return (
     <DataTable<PageDatatableRow>
-      url="datatable/page/query"
+      url="datatable/content_page/query"
       title={t("Pages")}
       subtitle={t("Manage policy pages")}
       columns={[
@@ -72,13 +76,13 @@ export default function PagesPage() {
             <div className="flex gap-1">
               <button
                 type="button"
-                onClick={() => navigate(`/pages/${row.id}/edit`)}
+                onClick={() => navigate(`/content-pages/${row.id}/edit`)}
                 className="rounded-lg p-1.5 text-muted transition hover:bg-surface-hover hover:text-foreground"
                 title={t("Edit")}
               >
                 <Pencil size={16} />
               </button>
-              {row.is_system !== PAGE_SYSTEM_FLAG.YES && (
+              {row.is_system !== PAGE_SYSTEM_YES && (
                 <button
                   type="button"
                   onClick={() => handleDelete(row, ctx.refresh)}

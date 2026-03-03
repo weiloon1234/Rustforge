@@ -17,7 +17,19 @@ export const ADMIN_TYPES: ReadonlyArray<AdminType> = [
 
 export type AuthClientType = "web" | "mobile";
 
-export type Permission = "admin.read" | "admin.manage";
+export type PageSystemFlag = "0" | "1";
+
+export const PAGE_SYSTEM_FLAG: Readonly<Record<string, PageSystemFlag>> = {
+  _0: "0",
+  _1: "1",
+};
+
+export const PAGE_SYSTEM_FLAGS: ReadonlyArray<PageSystemFlag> = [
+  "0",
+  "1",
+];
+
+export type Permission = "admin.read" | "admin.manage" | "page.read" | "page.manage";
 
 export interface PermissionMeta {
   key: Permission;
@@ -30,19 +42,27 @@ export interface PermissionMeta {
 export const PERMISSION_META: ReadonlyArray<PermissionMeta> = [
   { key: "admin.read", guard: "admin", label: "Read Admins", group: "admin", description: "View admin profile and datatable records." },
   { key: "admin.manage", guard: "admin", label: "Manage Admins", group: "admin", description: "Create/update/delete admin records and perform management actions." },
+  { key: "page.read", guard: "admin", label: "Read Pages", group: "page", description: "View policy pages and page datatable records." },
+  { key: "page.manage", guard: "admin", label: "Manage Pages", group: "page", description: "Update and delete non-system pages." },
 ];
 
 export const PERMISSIONS: ReadonlyArray<Permission> = [
   "admin.read",
   "admin.manage",
+  "page.read",
+  "page.manage",
 ];
 
 export const PERMISSION: Readonly<Record<string, Permission>> = {
   ADMIN_READ: "admin.read",
   ADMIN_MANAGE: "admin.manage",
+  PAGE_READ: "page.read",
+  PAGE_MANAGE: "page.manage",
 };
 
 export const PERMISSION_META_BY_KEY: Readonly<Record<Permission, PermissionMeta>> = {
   "admin.read": { key: "admin.read", guard: "admin", label: "Read Admins", group: "admin", description: "View admin profile and datatable records." },
   "admin.manage": { key: "admin.manage", guard: "admin", label: "Manage Admins", group: "admin", description: "Create/update/delete admin records and perform management actions." },
+  "page.read": { key: "page.read", guard: "admin", label: "Read Pages", group: "page", description: "View policy pages and page datatable records." },
+  "page.manage": { key: "page.manage", guard: "admin", label: "Manage Pages", group: "page", description: "Update and delete non-system pages." },
 };

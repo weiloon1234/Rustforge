@@ -49,7 +49,7 @@ export const navigation: NavItem[] = [
   {
     label: "Pages",
     icon: FileText,
-    path: "/pages",
+    path: "/content-pages",
     permissions: [PERMISSION.PAGE_READ, PERMISSION.PAGE_MANAGE],
   },
   {

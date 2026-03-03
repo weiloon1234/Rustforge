@@ -65,8 +65,8 @@ pub struct AdminPageDeleteOutput {
     pub deleted: bool,
 }
 
-impl From<generated::models::PageView> for AdminPageOutput {
-    fn from(value: generated::models::PageView) -> Self {
+impl From<generated::models::ContentPageView> for AdminPageOutput {
+    fn from(value: generated::models::ContentPageView) -> Self {
         Self {
             id: value.id,
             tag: value.tag,
@@ -80,8 +80,8 @@ impl From<generated::models::PageView> for AdminPageOutput {
     }
 }
 
-impl From<generated::models::PageView> for AdminPageUpdateOutput {
-    fn from(value: generated::models::PageView) -> Self {
+impl From<generated::models::ContentPageView> for AdminPageUpdateOutput {
+    fn from(value: generated::models::ContentPageView) -> Self {
         Self {
             id: value.id,
             tag: value.tag,

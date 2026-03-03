@@ -1,15 +1,31 @@
 # Datatables
 
-Server-side datatable executors. Generated stubs come from `db-gen`; custom datatables are registered manually in `state.rs`.
+Canonical datatable runtime lives under `internal/datatables/v1/admin/*`.
 
-## Custom Datatable
+## SSOT Flow
 
-Override or extend generated datatables here. Registration happens in `AppApiState::new()`:
+1. Contract: `app/src/contracts/datatable/admin/<model>.rs`
+2. Hooks/runtime: `app/src/internal/datatables/v1/admin/<model>.rs`
+3. Catalog entry: `app/src/internal/datatables/v1/admin/mod.rs` (`ADMIN_SCOPED_DATATABLES`)
 
-```rust
-datatable_registry.register_as("article.list", custom_article_datatable(ctx.db.clone()));
-```
+Do not register datatables directly in `state.rs` or mount routes directly in `api/datatable.rs`.
 
-## Datatable Contract
+## Route Pattern
 
-Define query/export contracts in `contracts/datatable/{domain}/`. They specify filters, columns, and export formats available to the datatable.
+Scoped routes are mounted from the catalog and stay split:
+
+1. `POST /datatable/<scope>/query`
+2. `POST /datatable/<scope>/export/csv`
+3. `POST /datatable/<scope>/export/email`
+4. `GET /datatable/<scope>/export/status`
+
+No generic `/dt` route and no client-controlled model dispatch.
+
+## Contract Constants
+
+Each contract file must define:
+
+1. `SCOPED_KEY`
+2. `ROUTE_PREFIX`
+
+These constants are used by runtime registration and route mounting.

@@ -36,6 +36,10 @@ export function AutoDataTableFeature() {
                         <code>app/src/contracts/datatable/&lt;scope&gt;/&lt;model&gt;.rs</code>.
                     </li>
                     <li>
+                        Add a new datatable in 3 edits: contract file, hooks file, and one
+                        catalog entry in <code>app/src/internal/datatables/v1/admin/mod.rs</code>.
+                    </li>
+                    <li>
                         <strong>No per-datatable request structs needed.</strong>{' '}
                         <code>DataTableGenericQueryRequest</code> and{' '}
                         <code>DataTableGenericEmailExportRequest</code> handle all filter params
@@ -58,6 +62,10 @@ export function AutoDataTableFeature() {
                         Shared React datatable emits <code>onPreCall</code> and{' '}
                         <code>onPostCall</code> with full filter snapshot (<code>all</code> and{' '}
                         <code>applied</code>) so each portal can hook analytics/custom behavior.
+                    </li>
+                    <li>
+                        No generic <code>/dt</code> route and no client-controlled model
+                        dispatch. Scoped routes bind the model key internally.
                     </li>
                 </ul>
 
@@ -128,7 +136,8 @@ GET    /api/v1/admin/datatable/admin/export/status?job_id=...
 
 # Additional scaffold scopes (query/export)
 POST   /api/v1/admin/datatable/http-client-log/query
-POST   /api/v1/admin/datatable/webhook-log/query`}</code>
+POST   /api/v1/admin/datatable/webhook-log/query
+POST   /api/v1/admin/datatable/content_page/query`}</code>
                 </pre>
 
                 <h2>Step 1: Contract SSOT (Row DTO + Filter Metadata)</h2>
@@ -154,6 +163,9 @@ use generated::models::AdminType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+
+pub const SCOPED_KEY: &str = "admin.account";
+pub const ROUTE_PREFIX: &str = "/datatable/admin";
 
 /// Row DTO — the actual shape returned per record.
 /// Excludes sensitive fields (password, deleted_at),
@@ -189,7 +201,7 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
     type EmailRequest = DataTableGenericEmailExportRequest;
     type Row = AdminDatatableRow;
 
-    fn scoped_key(&self) -> &'static str { "admin.account" }
+    fn scoped_key(&self) -> &'static str { SCOPED_KEY }
     fn openapi_tag(&self) -> &'static str { "Admin Account" }
 
     // Optional overrides only. Default trait implementations already map:
@@ -352,19 +364,27 @@ Body:
                     Build the aggregate query from the same filtered base query to keep totals consistent.
                 </p>
 
-                <h2>Step 3: Register + Mount Routes</h2>
+                <h2>Step 3: Single Catalog Register + Mount</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`// app/src/internal/api/state.rs
-let mut datatable_registry = DataTableRegistry::new();
-crate::internal::datatables::register_all_generated_datatables(&mut datatable_registry, &ctx.db);
+                    <code className="language-rust">{`// app/src/internal/datatables/v1/admin/mod.rs
+pub static ADMIN_SCOPED_DATATABLES: &[ScopedDatatableSpec] = &[
+    ScopedDatatableSpec {
+        scoped_key: "admin.account",
+        route_prefix: "/datatable/admin",
+        register: account::register_scoped,
+        mount_routes: account::routes,
+    },
+    // ...http_client_log, webhook_log, content_page...
+];
+
+// app/src/internal/api/state.rs
+crate::internal::datatables::v1::admin::register_scoped_datatables(
+    &mut datatable_registry,
+    &ctx.db,
+);
 
 // app/src/internal/api/datatable.rs
-core_web::datatable::routes_for_scoped_contract_with_options(
-    "/datatable/admin",
-    state,
-    AdminAdminDataTableContract::default(),
-    DataTableRouteOptions { require_bearer_auth: true },
-)`}</code>
+crate::internal::datatables::v1::admin::mount_scoped_datatable_routes(state.clone());`}</code>
                 </pre>
 
                 <h2>Hook Execution Order</h2>

@@ -1,22 +1,33 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
 use core_web::authz::{has_required_permissions, PermissionMode};
+use core_web::datatable::{
+    routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
+};
+use core_web::openapi::ApiRouter;
 use generated::{
-    models::{PageDataTable, PageDataTableConfig, PageDataTableHooks},
+    models::{ContentPageDataTable, ContentPageDataTableConfig, ContentPageDataTableHooks},
     permissions::Permission,
     DEFAULT_LOCALE, SUPPORTED_LOCALES,
 };
 
-#[derive(Default, Clone)]
-pub struct PageDataTableAppHooks;
+use crate::contracts::datatable::admin::content_page::{
+    AdminPageDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
+};
 
-impl PageDataTableHooks for PageDataTableAppHooks {
+#[derive(Default, Clone)]
+pub struct ContentPageDataTableAppHooks;
+
+impl ContentPageDataTableHooks for ContentPageDataTableAppHooks {
     fn authorize(&self, _input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {
         let Some(actor) = ctx.actor.as_ref() else {
             return Ok(false);
         };
         Ok(has_required_permissions(
             &actor.permissions,
-            &[Permission::PageRead.as_str(), Permission::PageManage.as_str()],
+            &[
+                Permission::PageRead.as_str(),
+                Permission::PageManage.as_str(),
+            ],
             PermissionMode::Any,
         ))
     }
@@ -77,21 +88,39 @@ fn resolve_translated_title(
     None
 }
 
-pub type AppPageDataTable = PageDataTable<PageDataTableAppHooks>;
+pub type AppContentPageDataTable = ContentPageDataTable<ContentPageDataTableAppHooks>;
 
-pub fn app_page_datatable(db: sqlx::PgPool) -> AppPageDataTable {
-    PageDataTable::new(db).with_hooks(PageDataTableAppHooks::default())
+pub fn app_content_page_datatable(db: sqlx::PgPool) -> AppContentPageDataTable {
+    ContentPageDataTable::new(db).with_hooks(ContentPageDataTableAppHooks::default())
 }
 
-pub fn app_page_datatable_with_config(
+pub fn app_content_page_datatable_with_config(
     db: sqlx::PgPool,
-    config: PageDataTableConfig,
-) -> AppPageDataTable {
-    PageDataTable::new(db)
-        .with_hooks(PageDataTableAppHooks::default())
+    config: ContentPageDataTableConfig,
+) -> AppContentPageDataTable {
+    ContentPageDataTable::new(db)
+        .with_hooks(ContentPageDataTableAppHooks::default())
         .with_config(config)
 }
 
-pub fn register_page_datatable(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
-    registry.register(app_page_datatable(db));
+pub fn register_content_page_datatable(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
+    registry.register(app_content_page_datatable(db));
+}
+
+pub fn register_scoped(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
+    registry.register_as(SCOPED_KEY, app_content_page_datatable(db));
+}
+
+pub fn routes<S>(state: S) -> ApiRouter
+where
+    S: DataTableRouteState,
+{
+    routes_for_scoped_contract_with_options(
+        ROUTE_PREFIX,
+        state,
+        AdminPageDataTableContract,
+        DataTableRouteOptions {
+            require_bearer_auth: true,
+        },
+    )
 }

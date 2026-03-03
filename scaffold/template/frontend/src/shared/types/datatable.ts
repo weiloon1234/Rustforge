@@ -27,7 +27,6 @@ export type DataTableFilterFieldType =
   | "select"
   | "number"
   | "date"
-  | "time"
   | "datetime"
   | "boolean";
 

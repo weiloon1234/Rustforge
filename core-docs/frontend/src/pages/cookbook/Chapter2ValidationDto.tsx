@@ -33,6 +33,10 @@ export function Chapter2ValidationDto() {
                         Datatable contracts: <code>app/src/contracts/datatable/admin/*.rs</code>
                     </li>
                     <li>
+                        Scoped constants in each datatable contract: <code>SCOPED_KEY</code> +{' '}
+                        <code>ROUTE_PREFIX</code>
+                    </li>
+                    <li>
                         Handler boundary extractors: <code>ContractJson&lt;T&gt;</code> /{' '}
                         <code>AsyncContractJson&lt;T&gt;</code>
                     </li>

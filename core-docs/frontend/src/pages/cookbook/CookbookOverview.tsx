@@ -41,6 +41,10 @@ export function CookbookOverview() {
                         <code>app/src/contracts/datatable/*</code>
                     </li>
                     <li>
+                        Datatable runtime SSOT catalog:{' '}
+                        <code>app/src/internal/datatables/v1/admin/mod.rs</code>
+                    </li>
+                    <li>
                         Route composer: <code>app/src/internal/api/v1/mod.rs</code>
                     </li>
                     <li>

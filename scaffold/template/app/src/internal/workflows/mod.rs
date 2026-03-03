@@ -1,3 +1,3 @@
 pub mod admin;
 pub mod admin_auth;
-pub mod page;
+pub mod content_page;

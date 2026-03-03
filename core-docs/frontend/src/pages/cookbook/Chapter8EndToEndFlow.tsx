@@ -30,6 +30,9 @@ export function Chapter8EndToEndFlow() {
                         Query datatable via <code>/api/v1/admin/datatable/admin/query</code>.
                     </li>
                     <li>
+                        Query cross-page totals via <code>/api/v1/admin/datatable/admin/summary</code>.
+                    </li>
+                    <li>
                         Trigger export via <code>/api/v1/admin/datatable/admin/export/csv</code> or{' '}
                         <code>/export/email</code>.
                     </li>
@@ -45,6 +48,10 @@ export function Chapter8EndToEndFlow() {
                     </li>
                     <li>
                         Datatable hooks: <code>app/src/internal/datatables/v1/admin/account.rs</code>
+                    </li>
+                    <li>
+                        Datatable catalog (single register + mount source):{' '}
+                        <code>app/src/internal/datatables/v1/admin/mod.rs</code>
                     </li>
                 </ul>
 
@@ -70,7 +77,7 @@ export function Chapter8EndToEndFlow() {
                     <code className="language-bash">{`./bin/api-server
 ./bin/worker
 # 1) login and get token
-# 2) call admin datatable query
+# 2) call admin datatable query + summary
 # 3) trigger export and poll status
 # 4) optional: observe worker logs for async post-processing`}</code>
                 </pre>

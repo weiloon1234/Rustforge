@@ -6,8 +6,8 @@ variants = [
   { name = "Yes", value = 1 }
 ]
 
-[model.page]
-table = "pages"
+[model.content_page]
+table = "content_pages"
 pk = "id"
 pk_type = "i64"
 id_strategy = "snowflake"

@@ -3,12 +3,15 @@ use std::collections::BTreeMap;
 use core_db::common::sql::{DbConn, Op};
 use core_i18n::t;
 use core_web::error::AppError;
-use generated::models::{Page, PageSystemFlag, PageView};
+use generated::models::{ContentPage, ContentPageView, PageSystemFlag};
 
-use crate::{contracts::api::v1::admin::page::AdminPageUpdateInput, internal::api::state::AppApiState};
+use crate::{
+    contracts::api::v1::admin::content_page::AdminPageUpdateInput,
+    internal::api::state::AppApiState,
+};
 
-pub async fn detail(state: &AppApiState, id: i64) -> Result<PageView, AppError> {
-    Page::new(DbConn::pool(&state.db), None)
+pub async fn detail(state: &AppApiState, id: i64) -> Result<ContentPageView, AppError> {
+    ContentPage::new(DbConn::pool(&state.db), None)
         .find(id)
         .await
         .map_err(AppError::from)?
@@ -19,7 +22,7 @@ pub async fn update(
     state: &AppApiState,
     id: i64,
     req: AdminPageUpdateInput,
-) -> Result<PageView, AppError> {
+) -> Result<ContentPageView, AppError> {
     let tag = normalize_tag(&req.tag)?;
     let title = normalize_localized_map(&req.title);
     let content = normalize_localized_map(&req.content);
@@ -33,7 +36,9 @@ pub async fn update(
 
         let existing_title = translations_to_map(existing.title_translations.as_ref());
         if existing_title != title {
-            return Err(AppError::Forbidden(t("Cannot change title for system page")));
+            return Err(AppError::Forbidden(t(
+                "Cannot change title for system page",
+            )));
         }
     }
 
@@ -41,7 +46,7 @@ pub async fn update(
     let content_langs = multilang_from_map(&content, true, "content")?;
     let cover_langs = multilang_from_map(&cover, false, "cover")?;
 
-    let mut update = Page::new(DbConn::pool(&state.db), None)
+    let mut update = ContentPage::new(DbConn::pool(&state.db), None)
         .update()
         .where_id(Op::Eq, id)
         .set_tag(tag)
@@ -66,7 +71,7 @@ pub async fn remove(state: &AppApiState, id: i64) -> Result<(), AppError> {
         return Err(AppError::Forbidden(t("Cannot delete system page")));
     }
 
-    let affected = Page::new(DbConn::pool(&state.db), None)
+    let affected = ContentPage::new(DbConn::pool(&state.db), None)
         .delete(id)
         .await
         .map_err(AppError::from)?;
@@ -80,9 +85,7 @@ pub async fn remove(state: &AppApiState, id: i64) -> Result<(), AppError> {
 fn normalize_tag(input: &str) -> Result<String, AppError> {
     let normalized = input.trim().to_ascii_lowercase();
     if normalized.is_empty() || !is_valid_snake_case_tag(&normalized) {
-        return Err(AppError::BadRequest(t(
-            "Tag must be lowercase snake_case",
-        )));
+        return Err(AppError::BadRequest(t("Tag must be lowercase snake_case")));
     }
     Ok(normalized)
 }

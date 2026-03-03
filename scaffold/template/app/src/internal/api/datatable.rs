@@ -11,7 +11,7 @@ use core_i18n::t;
 use core_web::auth::Guard;
 use core_web::datatable::{
     DataTableEmailExportManager, DataTableGenericQueryRequest, DataTableQueryRequestContract,
-    DataTableRouteOptions, DataTableRouteState,
+    DataTableRouteState,
 };
 use core_web::error::AppError;
 use core_web::openapi::{aide::axum::routing::post_with, ApiRouter};
@@ -22,47 +22,13 @@ use generated::guards::AdminGuard;
 use generated::models::AdminDataTableHooks;
 
 use crate::contracts::datatable::admin::account::{
-    AdminAdminDataTableContract, AdminDatatableSummaryOutput,
+    AdminDatatableSummaryOutput, SCOPED_KEY as ADMIN_ACCOUNT_SCOPED_KEY,
 };
-use crate::contracts::datatable::admin::http_client_log::AdminHttpClientLogDataTableContract;
-use crate::contracts::datatable::admin::page::AdminPageDataTableContract;
-use crate::contracts::datatable::admin::webhook_log::AdminWebhookLogDataTableContract;
 use crate::internal::api::state::AppApiState;
 
 pub fn router(state: AppApiState) -> ApiRouter {
-    let account_datatable_routes = core_web::datatable::routes_for_scoped_contract_with_options(
-        "/datatable/admin",
-        state.clone(),
-        AdminAdminDataTableContract,
-        DataTableRouteOptions {
-            require_bearer_auth: true,
-        },
-    );
-    let http_client_log_routes = core_web::datatable::routes_for_scoped_contract_with_options(
-        "/datatable/http-client-log",
-        state.clone(),
-        AdminHttpClientLogDataTableContract,
-        DataTableRouteOptions {
-            require_bearer_auth: true,
-        },
-    );
-    let webhook_log_routes = core_web::datatable::routes_for_scoped_contract_with_options(
-        "/datatable/webhook-log",
-        state.clone(),
-        AdminWebhookLogDataTableContract,
-        DataTableRouteOptions {
-            require_bearer_auth: true,
-        },
-    );
-    let page_routes = core_web::datatable::routes_for_scoped_contract_with_options(
-        "/datatable/page",
-        state.clone(),
-        AdminPageDataTableContract,
-        DataTableRouteOptions {
-            require_bearer_auth: true,
-        },
-    );
-
+    let scoped_datatable_routes =
+        crate::internal::datatables::v1::admin::mount_scoped_datatable_routes(state.clone());
     let summary_route = ApiRouter::new()
         .api_route(
             "/datatable/admin/summary",
@@ -74,11 +40,7 @@ pub fn router(state: AppApiState) -> ApiRouter {
         )
         .with_state(state);
 
-    account_datatable_routes
-        .merge(http_client_log_routes)
-        .merge(webhook_log_routes)
-        .merge(page_routes)
-        .merge(summary_route)
+    scoped_datatable_routes.merge(summary_route)
 }
 
 async fn admin_summary(
@@ -87,7 +49,7 @@ async fn admin_summary(
     req: ContractJson<DataTableGenericQueryRequest>,
 ) -> Result<ApiResponse<AdminDatatableSummaryOutput>, AppError> {
     let mut input = req.0.datatable_query_to_input();
-    input.model = Some("admin.account".to_string());
+    input.model = Some(ADMIN_ACCOUNT_SCOPED_KEY.to_string());
 
     let ctx = state.datatable_context(&headers).await;
     let hooks = crate::internal::datatables::v1::admin::AdminDataTableAppHooks::default();

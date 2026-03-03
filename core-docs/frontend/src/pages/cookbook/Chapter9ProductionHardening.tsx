@@ -30,6 +30,10 @@ export function Chapter9ProductionHardening() {
                         Datatable export endpoints and status checks are available in scaffold admin portal.
                     </li>
                     <li>
+                        Datatable scoped registration and route mounting are centralized in{' '}
+                        <code>app/src/internal/datatables/v1/admin/mod.rs</code>.
+                    </li>
+                    <li>
                         Job infrastructure exists through <code>app/src/internal/jobs/mod.rs</code> and worker binary.
                     </li>
                     <li>

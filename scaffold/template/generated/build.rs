@@ -37,10 +37,6 @@ fn main() {
     db_gen::generate_localized(&cfgs.languages, &cfgs, &schema, out_dir)
         .expect("Failed to gen localized");
 
-    let app_datatables_out = app_dir.join("src").join("internal").join("datatables");
-    db_gen::generate_datatable_skeletons(&schema, &app_datatables_out)
-        .expect("Failed to gen app datatable skeletons");
-
     let root_lib = out_dir.join("lib.rs");
     let mut f = std::fs::File::create(&root_lib).expect("Failed to create root lib.rs");
     use std::io::Write;
@@ -64,13 +60,35 @@ fn apply_updated_at_save_hotfix(models_out: &std::path::Path) -> std::io::Result
         }
 
         let source = std::fs::read_to_string(&path)?;
-        let Some(patched) = patch_model_updated_at_save(&source) else {
-            continue;
-        };
-        std::fs::write(&path, patched)?;
+        let mut patched = source.clone();
+        let mut changed = false;
+
+        if let Some(next) = patch_model_updated_at_save(&patched) {
+            patched = next;
+            changed = true;
+        }
+
+        if let Some(next) = patch_localized_repo_db_clone(&patched) {
+            patched = next;
+            changed = true;
+        }
+
+        if changed {
+            std::fs::write(&path, patched)?;
+        }
     }
 
     Ok(())
+}
+
+fn patch_localized_repo_db_clone(source: &str) -> Option<String> {
+    const FROM: &str = "LocalizedRepo::new(db);";
+    const TO: &str = "LocalizedRepo::new(db.clone());";
+
+    if !source.contains(FROM) {
+        return None;
+    }
+    Some(source.replace(FROM, TO))
 }
 
 fn patch_model_updated_at_save(source: &str) -> Option<String> {
@@ -101,7 +119,8 @@ fn patch_model_updated_at_save(source: &str) -> Option<String> {
 "
     );
 
-    let inject_anchor = "let (mut cols, mut set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();\n";
+    let inject_anchor =
+        "let (mut cols, mut set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();\n";
     if let Some(pos) = out.find(inject_anchor) {
         out.insert_str(pos + inject_anchor.len(), &auto_touch);
     } else {

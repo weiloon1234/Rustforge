@@ -1,5 +1,13 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
+use core_web::datatable::{
+    routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
+};
+use core_web::openapi::ApiRouter;
 use generated::models::{WebhookLogDataTable, WebhookLogDataTableConfig, WebhookLogDataTableHooks};
+
+use crate::contracts::datatable::admin::webhook_log::{
+    AdminWebhookLogDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
+};
 
 #[derive(Default, Clone)]
 pub struct WebhookLogDataTableAppHooks;
@@ -35,4 +43,22 @@ pub fn app_webhook_log_datatable_with_config(
 
 pub fn register_webhook_log_datatable(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
     registry.register(app_webhook_log_datatable(db));
+}
+
+pub fn register_scoped(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
+    registry.register_as(SCOPED_KEY, app_webhook_log_datatable(db));
+}
+
+pub fn routes<S>(state: S) -> ApiRouter
+where
+    S: DataTableRouteState,
+{
+    routes_for_scoped_contract_with_options(
+        ROUTE_PREFIX,
+        state,
+        AdminWebhookLogDataTableContract,
+        DataTableRouteOptions {
+            require_bearer_auth: true,
+        },
+    )
 }

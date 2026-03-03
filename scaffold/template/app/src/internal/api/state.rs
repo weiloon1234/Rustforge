@@ -24,25 +24,9 @@ pub struct AppApiState {
 impl AppApiState {
     pub fn new(ctx: &BootContext) -> anyhow::Result<Self> {
         let mut datatable_registry = DataTableRegistry::new();
-        crate::internal::datatables::register_all_generated_datatables(
+        crate::internal::datatables::v1::admin::register_scoped_datatables(
             &mut datatable_registry,
             &ctx.db,
-        );
-        datatable_registry.register_as(
-            "admin.account",
-            crate::internal::datatables::v1::admin::app_admin_datatable(ctx.db.clone()),
-        );
-        datatable_registry.register_as(
-            "admin.http_client_log",
-            crate::internal::datatables::v1::admin::app_http_client_log_datatable(ctx.db.clone()),
-        );
-        datatable_registry.register_as(
-            "admin.webhook_log",
-            crate::internal::datatables::v1::admin::app_webhook_log_datatable(ctx.db.clone()),
-        );
-        datatable_registry.register_as(
-            "admin.page",
-            crate::internal::datatables::v1::admin::app_page_datatable(ctx.db.clone()),
         );
 
         let datatable_registry = Arc::new(datatable_registry);

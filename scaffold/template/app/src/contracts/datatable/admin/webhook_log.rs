@@ -6,6 +6,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub const SCOPED_KEY: &str = "admin.webhook_log";
+pub const ROUTE_PREFIX: &str = "/datatable/webhook-log";
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct WebhookLogDatatableRow {
@@ -32,7 +35,7 @@ impl DataTableScopedContract for AdminWebhookLogDataTableContract {
     type Row = WebhookLogDatatableRow;
 
     fn scoped_key(&self) -> &'static str {
-        "admin.webhook_log"
+        SCOPED_KEY
     }
 
     fn openapi_tag(&self) -> &'static str {

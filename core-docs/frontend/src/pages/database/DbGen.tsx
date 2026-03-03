@@ -14,9 +14,12 @@ export function DbGen() {
                     code into <code>generated/src</code>.
                 </p>
                 <p>
-                    Datatable hooks are scaffolded into <code>app/src/internal/datatables</code>.
-                    Generator keeps <code>mod.generated.rs</code> in sync and creates per-model
-                    hook files once.
+                    Datatable runtime hooks are maintained manually in scaffold under{' '}
+                    <code>app/src/internal/datatables/v1/admin/</code> and registered through a
+                    single SSOT catalog in <code>app/src/internal/datatables/v1/admin/mod.rs</code>.
+                    db-gen still generates model datatable types (for example{' '}
+                    <code>*DataTable</code>, <code>*DataTableHooks</code>) in{' '}
+                    <code>generated/src/models</code>.
                 </p>
 
                 <h2>Generation Commands</h2>
@@ -27,15 +30,15 @@ cargo check -p generated`}</code>
 
                 <h2>Generated Surface</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`Article
-ArticleQuery
-ArticleInsert
-ArticleUpdate
-ArticleView
-ArticleDataTable
-ArticleDataTableConfig
-ArticleDataTableHooks
-ArticleViewsExt`}</code>
+                    <code className="language-rust">{`Admin
+AdminQuery
+AdminInsert
+AdminUpdate
+AdminView
+AdminDataTable
+AdminDataTableConfig
+AdminDataTableHooks
+AdminViewsExt`}</code>
                 </pre>
             </div>
         </div>

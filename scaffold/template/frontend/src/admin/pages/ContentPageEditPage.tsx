@@ -8,12 +8,14 @@ import { api } from "@admin/api";
 import type { ApiResponse, LocaleCode } from "@shared/types";
 import { FileInput, TextInput, TiptapInput, useLocaleStore, alertSuccess } from "@shared/components";
 
+const PAGE_SYSTEM_YES = PAGE_SYSTEM_FLAG._1;
+
 function normalizeErrorMessage(error: unknown, fallback: string): string {
   const maybe = error as { response?: { data?: { message?: string } } };
   return maybe?.response?.data?.message ?? fallback;
 }
 
-export default function PageEditPage() {
+export default function ContentPageEditPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const params = useParams<{ id: string }>();
@@ -47,7 +49,7 @@ export default function PageEditPage() {
     setError(null);
 
     void api
-      .get<ApiResponse<AdminPageOutput>>(`pages/${pageId}`)
+      .get<ApiResponse<AdminPageOutput>>(`content_page/${pageId}`)
       .then((res) => {
         if (!active) return;
         const payload = res.data?.data;
@@ -84,7 +86,7 @@ export default function PageEditPage() {
     };
   }, [pageId, locales, t]);
 
-  const isSystem = page?.is_system === PAGE_SYSTEM_FLAG.YES;
+  const isSystem = page?.is_system === PAGE_SYSTEM_YES;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -114,11 +116,11 @@ export default function PageEditPage() {
       }
 
       await api.patch<ApiResponse<AdminPageUpdateOutput>>(
-        `pages/${pageId}`,
+        `content_page/${pageId}`,
         formData,
       );
       alertSuccess({ title: t("Success"), message: t("Page updated") });
-      navigate("/pages");
+      navigate("/content-pages");
     } catch (err) {
       setError(normalizeErrorMessage(err, t("Failed to update page.")));
     } finally {
@@ -134,7 +136,7 @@ export default function PageEditPage() {
           <p className="text-sm text-muted">{t("Update localized content and cover")}</p>
         </div>
         <Link
-          to="/pages"
+          to="/content-pages"
           className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-surface-hover"
         >
           <ArrowLeft size={16} />

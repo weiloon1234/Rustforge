@@ -6,6 +6,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub const SCOPED_KEY: &str = "admin.http_client_log";
+pub const ROUTE_PREFIX: &str = "/datatable/http-client-log";
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct HttpClientLogDatatableRow {
@@ -34,7 +37,7 @@ impl DataTableScopedContract for AdminHttpClientLogDataTableContract {
     type Row = HttpClientLogDatatableRow;
 
     fn scoped_key(&self) -> &'static str {
-        "admin.http_client_log"
+        SCOPED_KEY
     }
 
     fn openapi_tag(&self) -> &'static str {

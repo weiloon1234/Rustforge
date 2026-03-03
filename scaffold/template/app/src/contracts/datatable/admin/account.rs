@@ -7,6 +7,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub const SCOPED_KEY: &str = "admin.account";
+pub const ROUTE_PREFIX: &str = "/datatable/admin";
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminDatatableRow {
@@ -47,7 +50,7 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
     type Row = AdminDatatableRow;
 
     fn scoped_key(&self) -> &'static str {
-        "admin.account"
+        SCOPED_KEY
     }
 
     fn openapi_tag(&self) -> &'static str {

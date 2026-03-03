@@ -90,47 +90,47 @@ impl LocalizedMapHelper for core_db::platform::localized::types::LocalizedMap {
     }
 }
 
-pub const PAGE_OWNER_TYPE: &str = "page";
-pub const PAGE_FIELDS: &[&str] = &[
+pub const CONTENT_PAGE_OWNER_TYPE: &str = "content_page";
+pub const CONTENT_PAGE_FIELDS: &[&str] = &[
     "title",
     "content",
     "cover",
 ];
 
-pub async fn load_page_localized<'a>(db: DbConn<'a>, ids: &[i64]) -> Result<core_db::platform::localized::types::LocalizedMap> {
+pub async fn load_content_page_localized<'a>(db: DbConn<'a>, ids: &[i64]) -> Result<core_db::platform::localized::types::LocalizedMap> {
     core_db::platform::localized::repo::LocalizedRepo::new(db)
-        .load_for_owners(PAGE_OWNER_TYPE, ids, PAGE_FIELDS)
+        .load_for_owners(CONTENT_PAGE_OWNER_TYPE, ids, CONTENT_PAGE_FIELDS)
         .await
 }
 
-pub trait PageLocalized {
-    fn page_title_translations(&self, id: i64) -> Option<crate::generated::MultiLang>;
-    fn page_title(&self, id: i64) -> Option<String>;
-    fn page_content_translations(&self, id: i64) -> Option<crate::generated::MultiLang>;
-    fn page_content(&self, id: i64) -> Option<String>;
-    fn page_cover_translations(&self, id: i64) -> Option<crate::generated::MultiLang>;
-    fn page_cover(&self, id: i64) -> Option<String>;
+pub trait ContentPageLocalized {
+    fn content_page_title_translations(&self, id: i64) -> Option<crate::generated::MultiLang>;
+    fn content_page_title(&self, id: i64) -> Option<String>;
+    fn content_page_content_translations(&self, id: i64) -> Option<crate::generated::MultiLang>;
+    fn content_page_content(&self, id: i64) -> Option<String>;
+    fn content_page_cover_translations(&self, id: i64) -> Option<crate::generated::MultiLang>;
+    fn content_page_cover(&self, id: i64) -> Option<String>;
 }
 
-impl PageLocalized for core_db::platform::localized::types::LocalizedMap {
-    fn page_title_translations(&self, id: i64) -> Option<crate::generated::MultiLang> {
+impl ContentPageLocalized for core_db::platform::localized::types::LocalizedMap {
+    fn content_page_title_translations(&self, id: i64) -> Option<crate::generated::MultiLang> {
         self.get_multilang("title", id)
     }
-    fn page_title(&self, id: i64) -> Option<String> {
+    fn content_page_title(&self, id: i64) -> Option<String> {
         let locale = core_i18n::current_locale();
         self.get_value("title", id, locale)
     }
-    fn page_content_translations(&self, id: i64) -> Option<crate::generated::MultiLang> {
+    fn content_page_content_translations(&self, id: i64) -> Option<crate::generated::MultiLang> {
         self.get_multilang("content", id)
     }
-    fn page_content(&self, id: i64) -> Option<String> {
+    fn content_page_content(&self, id: i64) -> Option<String> {
         let locale = core_i18n::current_locale();
         self.get_value("content", id, locale)
     }
-    fn page_cover_translations(&self, id: i64) -> Option<crate::generated::MultiLang> {
+    fn content_page_cover_translations(&self, id: i64) -> Option<crate::generated::MultiLang> {
         self.get_multilang("cover", id)
     }
-    fn page_cover(&self, id: i64) -> Option<String> {
+    fn content_page_cover(&self, id: i64) -> Option<String> {
         let locale = core_i18n::current_locale();
         self.get_value("cover", id, locale)
     }

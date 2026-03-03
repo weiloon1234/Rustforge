@@ -49,6 +49,11 @@ export function Chapter11TestingRecipe() {
                         Add end-to-end tests for admin auth + datatable query/export success/failure paths.
                     </li>
                     <li>
+                        Add datatable catalog tests/guards to ensure unique{' '}
+                        <code>SCOPED_KEY</code>/<code>ROUTE_PREFIX</code> entries in{' '}
+                        <code>app/src/internal/datatables/v1/admin/mod.rs</code>.
+                    </li>
+                    <li>
                         Add worker-path tests for outbox dispatch and retry handling.
                     </li>
                 </ul>

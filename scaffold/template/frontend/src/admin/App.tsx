@@ -7,8 +7,8 @@ import DashboardPage from "@admin/pages/DashboardPage";
 import AdminsPage from "@admin/pages/AdminsPage";
 import HttpClientLogsPage from "@admin/pages/HttpClientLogsPage";
 import WebhookLogsPage from "@admin/pages/WebhookLogsPage";
-import PagesPage from "@admin/pages/PagesPage";
-import PageEditPage from "@admin/pages/PageEditPage";
+import ContentPagesPage from "@admin/pages/ContentPagesPage";
+import ContentPageEditPage from "@admin/pages/ContentPageEditPage";
 
 export default function App() {
   return (
@@ -18,8 +18,8 @@ export default function App() {
         <Route element={<AdminLayout />}>
           <Route index element={<DashboardPage />} />
           <Route path="/admins" element={<AdminsPage />} />
-          <Route path="/pages" element={<PagesPage />} />
-          <Route path="/pages/:id/edit" element={<PageEditPage />} />
+          <Route path="/content-pages" element={<ContentPagesPage />} />
+          <Route path="/content-pages/:id/edit" element={<ContentPageEditPage />} />
           <Route path="/http-client-logs" element={<HttpClientLogsPage />} />
           <Route path="/webhook-logs" element={<WebhookLogsPage />} />
         </Route>

@@ -1,6 +1,10 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
 use core_db::common::sql::Op;
 use core_web::authz::{has_required_permissions, PermissionMode};
+use core_web::datatable::{
+    routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
+};
+use core_web::openapi::ApiRouter;
 use generated::{
     extensions::admin::types::admin_identity,
     models::{
@@ -10,7 +14,9 @@ use generated::{
     permissions::Permission,
 };
 
-use crate::contracts::datatable::admin::account::AdminDatatableSummaryOutput;
+use crate::contracts::datatable::admin::account::{
+    AdminAdminDataTableContract, AdminDatatableSummaryOutput, ROUTE_PREFIX, SCOPED_KEY,
+};
 
 #[derive(Default, Clone)]
 pub struct AdminDataTableAppHooks;
@@ -244,4 +250,22 @@ pub fn app_admin_datatable_with_config(
 
 pub fn register_admin_datatable(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
     registry.register(app_admin_datatable(db));
+}
+
+pub fn register_scoped(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
+    registry.register_as(SCOPED_KEY, app_admin_datatable(db));
+}
+
+pub fn routes<S>(state: S) -> ApiRouter
+where
+    S: DataTableRouteState,
+{
+    routes_for_scoped_contract_with_options(
+        ROUTE_PREFIX,
+        state,
+        AdminAdminDataTableContract,
+        DataTableRouteOptions {
+            require_bearer_auth: true,
+        },
+    )
 }

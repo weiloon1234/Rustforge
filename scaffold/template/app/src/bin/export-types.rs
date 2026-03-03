@@ -340,6 +340,9 @@ fn detect_enum_references(
     for builtin in ts_builtins() {
         used_identifiers.remove(*builtin);
     }
+    for shared in ts_shared_types() {
+        used_identifiers.remove(*shared);
+    }
 
     let mut enums = BTreeSet::new();
     let mut unknown = Vec::new();
@@ -541,6 +544,24 @@ fn ts_builtins() -> &'static [&'static str] {
         "ReadonlyArray",
         "Record",
         "Set",
+    ]
+}
+
+fn ts_shared_types() -> &'static [&'static str] {
+    &[
+        "ApiResponse",
+        "Attachment",
+        "AttachmentInput",
+        "AttachmentMap",
+        "AttachmentUploadDto",
+        "JsonObject",
+        "JsonPrimitive",
+        "JsonValue",
+        "LocaleCode",
+        "LocalizedMap",
+        "MetaMap",
+        "MetaRecord",
+        "MultiLang",
     ]
 }
 

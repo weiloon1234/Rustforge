@@ -3,10 +3,14 @@ use std::collections::BTreeMap;
 use axum::extract::Multipart;
 use core_i18n::t;
 use core_web::error::AppError;
+use uuid::Uuid;
 
-use crate::{contracts::api::v1::admin::page::AdminPageUpdateInput, internal::api::state::AppApiState};
+use crate::{
+    contracts::api::v1::admin::content_page::AdminPageUpdateInput,
+    internal::api::state::AppApiState,
+};
 
-pub async fn parse_page_update_multipart(
+pub async fn parse_content_page_update_multipart(
     state: &AppApiState,
     mut multipart: Multipart,
 ) -> Result<AdminPageUpdateInput, AppError> {
@@ -51,17 +55,14 @@ pub async fn parse_page_update_multipart(
                     continue;
                 }
 
-                let attachment = core_db::platform::attachments::service::process_and_upload_with_type(
-                    state.storage.as_ref(),
-                    "image",
-                    "page",
-                    &format!("cover_{locale}"),
+                let attachment = upload_content_page_cover(
+                    state,
+                    locale,
                     filename.as_deref(),
                     &content_type,
                     bytes,
                 )
-                .await
-                .map_err(AppError::from)?;
+                .await?;
 
                 cover.insert(locale.to_string(), attachment.path);
             } else {
@@ -93,8 +94,107 @@ pub async fn parse_page_update_multipart(
     })
 }
 
-fn localized_field_locale<'a>(field_name: &'a str, prefix: &str) -> Result<Option<&'a str>, AppError> {
-    let Some(locale_raw) = field_name.strip_prefix(prefix).and_then(|rest| rest.strip_prefix('.'))
+async fn upload_content_page_cover(
+    state: &AppApiState,
+    locale: &str,
+    filename: Option<&str>,
+    content_type: &str,
+    bytes: axum::body::Bytes,
+) -> Result<core_db::platform::attachments::AttachmentUploadDto, AppError> {
+    let rules = generated::get_attachment_rules("image")
+        .ok_or_else(|| AppError::BadRequest(t("Unknown attachment type: image")))?;
+
+    validate_attachment_allowed(&rules.allowed, filename, content_type)?;
+
+    let ext = filename
+        .and_then(|name| {
+            std::path::Path::new(name)
+                .extension()
+                .and_then(|item| item.to_str())
+        })
+        .unwrap_or_else(|| content_type.split('/').nth(1).unwrap_or("bin"));
+
+    let now = time::OffsetDateTime::now_utc();
+    let object_key = format!(
+        "content_page/{:04}/{:02}/{:02}/cover_{locale}/{}.{}",
+        now.year(),
+        now.month() as u8,
+        now.day(),
+        Uuid::new_v4(),
+        ext
+    );
+
+    state
+        .storage
+        .put(&object_key, bytes.clone(), content_type)
+        .await
+        .map_err(AppError::from)?;
+
+    let mut dto = core_db::platform::attachments::AttachmentUploadDto::new(
+        object_key,
+        content_type.to_string(),
+        bytes.len() as i64,
+        None,
+        None,
+    );
+    if let Some(name) = filename {
+        dto = dto.with_name(name.to_string());
+    }
+    Ok(dto)
+}
+
+fn validate_attachment_allowed(
+    allowed: &[String],
+    filename: Option<&str>,
+    content_type: &str,
+) -> Result<(), AppError> {
+    if allowed.is_empty() {
+        return Ok(());
+    }
+
+    let ct = content_type.to_ascii_lowercase();
+    let filename_lower = filename.map(|item| item.to_ascii_lowercase());
+
+    let mut ok = false;
+    for rule in allowed {
+        let rule = rule.to_ascii_lowercase();
+        if rule == "*" || rule == "*/*" {
+            ok = true;
+            break;
+        }
+        if rule.starts_with("image/") && ct.starts_with("image/") {
+            ok = true;
+            break;
+        }
+        if rule.starts_with('.') {
+            if let Some(name) = filename_lower.as_deref() {
+                if name.ends_with(&rule) {
+                    ok = true;
+                    break;
+                }
+            }
+            continue;
+        }
+        if ct == rule {
+            ok = true;
+            break;
+        }
+    }
+
+    if ok {
+        Ok(())
+    } else {
+        Err(AppError::BadRequest(t("Attachment type not allowed")))
+    }
+}
+
+fn localized_field_locale<'a>(
+    field_name: &'a str,
+    prefix: &str,
+) -> Result<Option<&'a str>, AppError> {
+    let Some(locale_raw) = field_name
+        .strip_prefix(prefix)
+        .and_then(|rest| rest.strip_prefix('.'))
     else {
         return Ok(None);
     };

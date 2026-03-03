@@ -33,8 +33,6 @@ use crate::openapi::{
 };
 use crate::response::ApiResponse;
 
-pub const DEFAULT_DATATABLE_PREFIX: &str = "/api/v1/admin/datatable";
-
 #[derive(Debug, Clone)]
 pub struct DataTableRouteOptions {
     pub require_bearer_auth: bool,

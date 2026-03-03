@@ -3,13 +3,13 @@ use core_db::{
     common::sql::{generate_snowflake_i64, DbConn, Op},
     seeder::Seeder,
 };
-use generated::models::{Page, PageSystemFlag};
+use generated::models::{ContentPage, PageSystemFlag};
 
 #[derive(Debug, Default)]
-pub struct PageBootstrapSeeder;
+pub struct ContentPageBootstrapSeeder;
 
 #[async_trait]
-impl Seeder for PageBootstrapSeeder {
+impl Seeder for ContentPageBootstrapSeeder {
     async fn run(&self, db: &sqlx::PgPool) -> anyhow::Result<()> {
         ensure_page(
             db,
@@ -35,7 +35,7 @@ impl Seeder for PageBootstrapSeeder {
     }
 
     fn name(&self) -> &str {
-        "PageBootstrapSeeder"
+        "ContentPageBootstrapSeeder"
     }
 }
 
@@ -47,7 +47,7 @@ async fn ensure_page(
     content_en: &str,
     content_zh: &str,
 ) -> anyhow::Result<()> {
-    let model = Page::new(DbConn::pool(db), None);
+    let model = ContentPage::new(DbConn::pool(db), None);
     let existing = model
         .query()
         .where_tag(Op::Eq, tag.to_string())

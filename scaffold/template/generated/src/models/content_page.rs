@@ -15,7 +15,7 @@ use crate::generated::models::common::{Page, renumber_placeholders};
 use core_db::common::collection::TypedCollectionExt;
 use crate::generated::localized;
 use core_i18n::current_locale;
-use crate::extensions::page::types::*;
+use crate::extensions::content_page::types::*;
 use crate::generated::localized::LocalizedMapHelper;
 use super::common::*;
 use super::enums::*;
@@ -26,7 +26,7 @@ const HAS_SOFT_DELETE: bool = true;
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
-pub struct PageRow {
+pub struct ContentPageRow {
     pub id: i64,
     pub tag: String,
     pub is_system: PageSystemFlag,
@@ -42,7 +42,7 @@ pub struct PageRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct PageView {
+pub struct ContentPageView {
     pub id: i64,
     pub tag: String,
     pub is_system: PageSystemFlag,
@@ -60,15 +60,15 @@ pub struct PageView {
     pub cover_translations: Option<localized::MultiLang>,
 }
 
-impl PageView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> PageUpdate<'db> {
-        Page::new(db.into(), None).update().where_id(Op::Eq, self.id)
+impl ContentPageView {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> ContentPageUpdate<'db> {
+        ContentPage::new(db.into(), None).update().where_id(Op::Eq, self.id)
     }
-    pub fn update_with<'db>(&self, model: &Page<'db>) -> PageUpdate<'db> {
+    pub fn update_with<'db>(&self, model: &ContentPage<'db>) -> ContentPageUpdate<'db> {
         model.update().where_id(Op::Eq, self.id)
     }
-    pub fn to_json(&self) -> PageJson {
-        PageJson {
+    pub fn to_json(&self) -> ContentPageJson {
+        ContentPageJson {
             id: self.id.clone(),
             tag: self.tag.clone(),
             is_system: self.is_system.clone(),
@@ -85,23 +85,23 @@ impl PageView {
     }
 }
 
-pub trait PageViewsExt {
+pub trait ContentPageViewsExt {
     fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&PageView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&PageView) -> K) -> std::collections::HashMap<K, PageView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&PageView) -> K) -> std::collections::HashMap<K, Vec<PageView>> where K: Eq + std::hash::Hash;
+    fn pluck<R>(&self, f: impl Fn(&ContentPageView) -> R) -> Vec<R>;
+    fn key_by<K>(&self, f: impl Fn(&ContentPageView) -> K) -> std::collections::HashMap<K, ContentPageView> where K: Eq + std::hash::Hash;
+    fn group_by<K>(&self, f: impl Fn(&ContentPageView) -> K) -> std::collections::HashMap<K, Vec<ContentPageView>> where K: Eq + std::hash::Hash;
 }
 
-impl PageViewsExt for Vec<PageView> {
+impl ContentPageViewsExt for Vec<ContentPageView> {
     fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&PageView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&PageView) -> K) -> std::collections::HashMap<K, PageView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&PageView) -> K) -> std::collections::HashMap<K, Vec<PageView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
+    fn pluck<R>(&self, f: impl Fn(&ContentPageView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
+    fn key_by<K>(&self, f: impl Fn(&ContentPageView) -> K) -> std::collections::HashMap<K, ContentPageView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
+    fn group_by<K>(&self, f: impl Fn(&ContentPageView) -> K) -> std::collections::HashMap<K, Vec<ContentPageView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
-pub struct PageJson {
+pub struct ContentPageJson {
     pub id: i64,
     pub tag: String,
     pub is_system: PageSystemFlag,
@@ -119,9 +119,9 @@ pub struct PageJson {
     pub cover_translations: Option<localized::MultiLang>,
 }
 
-fn hydrate_view(row: PageRow, loc: &LocalizedMap, base_url: Option<&str>) -> PageView {
+fn hydrate_view(row: ContentPageRow, loc: &LocalizedMap, base_url: Option<&str>) -> ContentPageView {
     let locale = current_locale();
-    let mut view = PageView {
+    let mut view = ContentPageView {
         id: row.id,
         tag: row.tag,
         is_system: row.is_system,
@@ -154,7 +154,7 @@ fn hydrate_view(row: PageRow, loc: &LocalizedMap, base_url: Option<&str>) -> Pag
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum PageCol {
+pub enum ContentPageCol {
     Id,
     Tag,
     IsSystem,
@@ -163,35 +163,35 @@ pub enum PageCol {
     DeletedAt,
 }
 
-impl PageCol {
-    pub const fn all() -> &'static [PageCol] {
-        &[PageCol::Id, PageCol::Tag, PageCol::IsSystem, PageCol::CreatedAt, PageCol::UpdatedAt, PageCol::DeletedAt]
+impl ContentPageCol {
+    pub const fn all() -> &'static [ContentPageCol] {
+        &[ContentPageCol::Id, ContentPageCol::Tag, ContentPageCol::IsSystem, ContentPageCol::CreatedAt, ContentPageCol::UpdatedAt, ContentPageCol::DeletedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            PageCol::Id => "id",
-            PageCol::Tag => "tag",
-            PageCol::IsSystem => "is_system",
-            PageCol::CreatedAt => "created_at",
-            PageCol::UpdatedAt => "updated_at",
-            PageCol::DeletedAt => "deleted_at",
+            ContentPageCol::Id => "id",
+            ContentPageCol::Tag => "tag",
+            ContentPageCol::IsSystem => "is_system",
+            ContentPageCol::CreatedAt => "created_at",
+            ContentPageCol::UpdatedAt => "updated_at",
+            ContentPageCol::DeletedAt => "deleted_at",
         }
     }
 }
 
-pub struct Page<'db> {
+pub struct ContentPage<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
 }
 
-impl<'db> Page<'db> {
-    pub const TABLE: &'static str = "pages";
+impl<'db> ContentPage<'db> {
+    pub const TABLE: &'static str = "content_pages";
     pub const PK: &'static str = "id";
     pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> PageQuery<'db> { PageQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> PageInsert<'db> { PageInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> PageUpdate<'db> { PageUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<PageView>> {
+    pub fn query(&self) -> ContentPageQuery<'db> { ContentPageQuery::new(self.db.clone(), self.base_url.clone()) }
+    pub fn insert(&self) -> ContentPageInsert<'db> { ContentPageInsert::new(self.db.clone(), self.base_url.clone()) }
+    pub fn update(&self) -> ContentPageUpdate<'db> { ContentPageUpdate::new(self.db.clone(), self.base_url.clone()) }
+    pub async fn find(&self, id: i64) -> Result<Option<ContentPageView>> {
         self.query().find(id).await
     }
     pub async fn delete(&self, id: i64) -> Result<u64> {
@@ -203,7 +203,7 @@ impl<'db> Page<'db> {
 }
 
 #[derive(Clone)]
-pub struct PageQuery<'db> {
+pub struct ContentPageQuery<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -226,86 +226,86 @@ pub struct PageQuery<'db> {
     only_deleted: bool,
 }
 
-impl<'db> PageQuery<'db> {
+impl<'db> ContentPageQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, tag, is_system, created_at, updated_at, deleted_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![], with_deleted: false, only_deleted: false }
     }
-    pub fn unsafe_sql(self) -> PageUnsafeQuery<'db> { PageUnsafeQuery::new(self) }
+    pub fn unsafe_sql(self) -> ContentPageUnsafeQuery<'db> { ContentPageUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_tag(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::Tag.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::Tag.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_tag_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::Tag.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::Tag.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_is_system(mut self, op: Op, val: PageSystemFlag) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::IsSystem.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::IsSystem.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_is_system_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::IsSystem.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::IsSystem.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(PageCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: PageCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(ContentPageCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: ContentPageCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -324,7 +324,7 @@ impl<'db> PageQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: PageCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: ContentPageCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -339,7 +339,7 @@ impl<'db> PageQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: PageCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: ContentPageCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -351,7 +351,7 @@ impl<'db> PageQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: PageCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: ContentPageCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -359,15 +359,15 @@ impl<'db> PageQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: PageCol) -> Self {
+    pub fn where_null(mut self, col: ContentPageCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: PageCol) -> Self {
+    pub fn where_not_null(mut self, col: ContentPageCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: PageCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: ContentPageCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -421,7 +421,7 @@ impl<'db> PageQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[PageCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[ContentPageCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, tag, is_system, created_at, updated_at, deleted_at".to_string());
         } else {
@@ -433,7 +433,7 @@ impl<'db> PageQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[PageCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[ContentPageCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -514,26 +514,26 @@ impl<'db> PageQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: PageCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: ContentPageCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: PageCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: ContentPageCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: PageCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: ContentPageCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[PageCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[ContentPageCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[PageCol]) -> Self {
+    pub fn select(mut self, cols: &[ContentPageCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -581,7 +581,7 @@ impl<'db> PageQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[PageCol]) -> Self {
+    pub fn group_by(mut self, cols: &[ContentPageCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -621,7 +621,7 @@ impl<'db> PageQuery<'db> {
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "pages".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
         let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
         if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
         if !where_sql.is_empty() {
@@ -656,14 +656,14 @@ impl<'db> PageQuery<'db> {
         Ok(db.fetch_all(q).await?)
     }
 
-    pub async fn get(self) -> Result<Vec<PageView>> {
+    pub async fn get(self) -> Result<Vec<ContentPageView>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , with_deleted, only_deleted, .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
             }
         }
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -671,7 +671,7 @@ impl<'db> PageQuery<'db> {
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "pages".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
         let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
         if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
         if !where_sql.is_empty() {
@@ -699,7 +699,7 @@ impl<'db> PageQuery<'db> {
             sql.push_str(&l.to_string());
         }
         if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut q = sqlx::query_as::<_, PageRow>(&sql);
+        let mut q = sqlx::query_as::<_, ContentPageRow>(&sql);
         for b in binds {
             q = bind(q, b);
         }
@@ -707,7 +707,7 @@ impl<'db> PageQuery<'db> {
         for b in having_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
-        let localized = localized::load_page_localized(db.clone(), &ids).await?;
+        let localized = localized::load_content_page_localized(db.clone(), &ids).await?;
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
             out_vec.push(hydrate_view(r, &localized, base_url.as_deref()));
@@ -715,68 +715,68 @@ impl<'db> PageQuery<'db> {
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<PageView>> {
+    pub async fn first(self) -> Result<Option<ContentPageView>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<PageView> {
-        self.first().await?.ok_or_else(|| anyhow::anyhow!("pages: record not found"))
+    pub async fn first_or_fail(self) -> Result<ContentPageView> {
+        self.first().await?.ok_or_else(|| anyhow::anyhow!("content_pages: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<PageView>> {
+    pub async fn find(self, id: i64) -> Result<Option<ContentPageView>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<PageView> {
-        self.find(id).await?.ok_or_else(|| anyhow::anyhow!("pages: record not found"))
+    pub async fn find_or_fail(self, id: i64) -> Result<ContentPageView> {
+        self.find(id).await?.ok_or_else(|| anyhow::anyhow!("content_pages: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(PageInsert<'db>) -> PageInsert<'db>) -> Result<PageView> {
+    pub async fn first_or_create(self, create: impl FnOnce(ContentPageInsert<'db>) -> ContentPageInsert<'db>) -> Result<ContentPageView> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(PageInsert::new(db, base_url));
+        let insert_builder = create(ContentPageInsert::new(db, base_url));
         insert_builder.save().await
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(PageUpdate<'db>) -> PageUpdate<'db>,
-        on_create: impl FnOnce(PageInsert<'db>) -> PageInsert<'db>,
-    ) -> Result<PageView> {
+        on_update: impl FnOnce(ContentPageUpdate<'db>) -> ContentPageUpdate<'db>,
+        on_create: impl FnOnce(ContentPageInsert<'db>) -> ContentPageInsert<'db>,
+    ) -> Result<ContentPageView> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = PageUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = ContentPageUpdate::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Page::new(db, base_url.clone()).query().find(existing.id).await.map(|r| r.unwrap());
+            return ContentPage::new(db, base_url.clone()).query().find(existing.id).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(PageInsert::new(db, base_url));
+        let insert_builder = on_create(ContentPageInsert::new(db, base_url));
         insert_builder.save().await
     }
 
-    pub async fn increment(self, col: PageCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: ContentPageCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
         if HAS_SOFT_DELETE && !self.with_deleted {
-            where_sql.push(format!("{} IS NULL", PageCol::DeletedAt.as_sql()));
+            where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
         }
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("UPDATE pages SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
+        let sql = format!("UPDATE content_pages SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
         let mut q = sqlx::query(&sql);
         for b in binds { q = bind_query(q, b); }
         let res = db.execute(q).await?;
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: PageCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: ContentPageCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -785,12 +785,12 @@ impl<'db> PageQuery<'db> {
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
             }
         }
-        let table_name = from_sql.unwrap_or_else(|| "pages".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -815,12 +815,12 @@ impl<'db> PageQuery<'db> {
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
             }
         }
-        let table_name = from_sql.unwrap_or_else(|| "pages".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
         let from_clause = if join_sql.is_empty() { format!("FROM {}", table_name) } else { format!("FROM {} {}", table_name, join_sql.join(" ")) };
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let order_clause = if order_sql.is_empty() { String::new() } else { format!(" ORDER BY {}", order_sql.join(", ")) };
@@ -836,13 +836,13 @@ impl<'db> PageQuery<'db> {
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<PageView>) -> Fut,
+        F: FnMut(Vec<ContentPageView>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = PageQuery::new(db.clone(), self.base_url.clone());
+            let mut query = ContentPageQuery::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -856,11 +856,11 @@ impl<'db> PageQuery<'db> {
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(PageCol::CreatedAt, OrderDir::Desc)
+        self.order_by(ContentPageCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(PageCol::CreatedAt, OrderDir::Asc)
+        self.order_by(ContentPageCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -871,7 +871,7 @@ impl<'db> PageQuery<'db> {
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<PageView> {
+    pub async fn sole(self) -> Result<ContentPageView> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -890,7 +890,7 @@ impl<'db> PageQuery<'db> {
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&PageView) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&ContentPageView) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -898,17 +898,17 @@ impl<'db> PageQuery<'db> {
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: PageCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: ContentPageCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
             }
         }
-        let table_name = from_sql.unwrap_or_else(|| "pages".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -923,17 +923,17 @@ impl<'db> PageQuery<'db> {
         Ok(result)
     }
 
-    pub async fn avg(self, col: PageCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: ContentPageCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
             }
         }
-        let table_name = from_sql.unwrap_or_else(|| "pages".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -948,17 +948,17 @@ impl<'db> PageQuery<'db> {
         Ok(result)
     }
 
-    pub async fn min_val(self, col: PageCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: ContentPageCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
             }
         }
-        let table_name = from_sql.unwrap_or_else(|| "pages".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -973,17 +973,17 @@ impl<'db> PageQuery<'db> {
         Ok(result)
     }
 
-    pub async fn max_val(self, col: PageCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: ContentPageCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
             }
         }
-        let table_name = from_sql.unwrap_or_else(|| "pages".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -998,16 +998,16 @@ impl<'db> PageQuery<'db> {
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<PageView>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<ContentPageView>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , with_deleted, only_deleted, .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
             }
         }
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -1015,7 +1015,7 @@ impl<'db> PageQuery<'db> {
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "pages".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1043,12 +1043,12 @@ impl<'db> PageQuery<'db> {
         sql.push_str(&format!(" OFFSET {}", offset_val));
         sql.push_str(&format!(" LIMIT {}", per_page));
         if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut q = sqlx::query_as::<_, PageRow>(&sql);
+        let mut q = sqlx::query_as::<_, ContentPageRow>(&sql);
         for b in binds.iter().cloned() { q = bind(q, b); }
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
-        let localized = localized::load_page_localized(db, &ids).await?;
+        let localized = localized::load_content_page_localized(db, &ids).await?;
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
             data.push(hydrate_view(r, &localized, base_url.as_deref()));
@@ -1060,9 +1060,9 @@ impl<'db> PageQuery<'db> {
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
             }
         }
         (where_sql, binds)
@@ -1076,12 +1076,12 @@ impl<'db> PageQuery<'db> {
         if HAS_SOFT_DELETE {
             let mut where_sql = where_sql;
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", PageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
             }
             let idx = binds.len() + 1;
-            let mut sql = format!("UPDATE pages SET {} = ${}", PageCol::DeletedAt.as_sql(), idx);
+            let mut sql = format!("UPDATE content_pages SET {} = ${}", ContentPageCol::DeletedAt.as_sql(), idx);
             if !where_sql.is_empty() {
                 sql.push_str(" WHERE ");
                 sql.push_str(&where_sql.join(" AND "));
@@ -1092,7 +1092,7 @@ impl<'db> PageQuery<'db> {
             let res = db.execute(q).await?;
             return Ok(res.rows_affected());
         }
-        let mut sql = String::from("DELETE FROM pages");
+        let mut sql = String::from("DELETE FROM content_pages");
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&where_sql.join(" AND "));
@@ -1111,9 +1111,9 @@ impl<'db> PageQuery<'db> {
         if where_sql.is_empty() { anyhow::bail!("restore(): no conditions set"); }
         let mut where_sql = where_sql;
         if !with_deleted && !only_deleted {
-            where_sql.push(format!("{} IS NOT NULL", PageCol::DeletedAt.as_sql()));
+            where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
         }
-        let mut sql = format!("UPDATE pages SET {} = NULL", PageCol::DeletedAt.as_sql());
+        let mut sql = format!("UPDATE content_pages SET {} = NULL", ContentPageCol::DeletedAt.as_sql());
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&where_sql.join(" AND "));
@@ -1126,12 +1126,12 @@ impl<'db> PageQuery<'db> {
 }
 
 #[doc(hidden)]
-pub struct PageUnsafeQuery<'db> {
-    inner: PageQuery<'db>,
+pub struct ContentPageUnsafeQuery<'db> {
+    inner: ContentPageQuery<'db>,
 }
 
-impl<'db> PageUnsafeQuery<'db> {
-    fn new(inner: PageQuery<'db>) -> Self { Self { inner } }
+impl<'db> ContentPageUnsafeQuery<'db> {
+    fn new(inner: ContentPageQuery<'db>) -> Self { Self { inner } }
     pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
     pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
     pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
@@ -1143,20 +1143,20 @@ impl<'db> PageUnsafeQuery<'db> {
     pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
     pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
     pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> PageQuery<'db> { self.inner }
+    pub fn done(self) -> ContentPageQuery<'db> { self.inner }
 }
 
-pub struct PageInsert<'db> {
+pub struct ContentPageInsert<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<PageCol>,
+    cols: Vec<ContentPageCol>,
     binds: Vec<BindValue>,
     translations: HashMap<&'static str, HashMap<String, String>>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<PageCol>,
+    conflict_cols: Vec<ContentPageCol>,
 }
 
-impl<'db> PageInsert<'db> {
+impl<'db> ContentPageInsert<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1169,32 +1169,32 @@ impl<'db> PageInsert<'db> {
         }
     }
     pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(PageCol::Id);
+        self.cols.push(ContentPageCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_tag(mut self, val: String) -> Self {
-        self.cols.push(PageCol::Tag);
+        self.cols.push(ContentPageCol::Tag);
         self.binds.push(val.into());
         self
     }
     pub fn set_is_system(mut self, val: PageSystemFlag) -> Self {
-        self.cols.push(PageCol::IsSystem);
+        self.cols.push(ContentPageCol::IsSystem);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(PageCol::CreatedAt);
+        self.cols.push(ContentPageCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(PageCol::UpdatedAt);
+        self.cols.push(ContentPageCol::UpdatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.cols.push(PageCol::DeletedAt);
+        self.cols.push(ContentPageCol::DeletedAt);
         self.binds.push(val.into());
         self
     }
@@ -1225,17 +1225,17 @@ impl<'db> PageInsert<'db> {
         if !langs.zh.is_empty() { self = self.set_cover_lang(localized::Locale::Zh, langs.zh); }
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[PageCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[ContentPageCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[PageCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[ContentPageCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub async fn save(self) -> Result<PageView> {
+    pub async fn save(self) -> Result<ContentPageView> {
         let db_conn = self.db.clone();
         match db_conn {
             DbConn::Pool(pool) => {
@@ -1255,21 +1255,21 @@ impl<'db> PageInsert<'db> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<PageView> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<ContentPageView> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, PageCol::Id)) {
-            cols.push(PageCol::Id);
+        if !cols.iter().any(|c| matches!(c, ContentPageCol::Id)) {
+            cols.push(ContentPageCol::Id);
             binds.push(generate_snowflake_i64().into());
         }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, PageCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, ContentPageCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(PageCol::CreatedAt);
+            cols.push(ContentPageCol::CreatedAt);
             binds.push(now.into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, PageCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, ContentPageCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(PageCol::UpdatedAt);
+            cols.push(ContentPageCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1277,7 +1277,7 @@ impl<'db> PageInsert<'db> {
         }
         let col_sql: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         let placeholders: Vec<String> = (1..=binds.len()).map(|i| format!("${}", i)).collect();
-        let mut sql = format!("INSERT INTO {} ({}) VALUES ({})", "pages", col_sql.join(", "), placeholders.join(", "));
+        let mut sql = format!("INSERT INTO {} ({}) VALUES ({})", "content_pages", col_sql.join(", "), placeholders.join(", "));
         if let Some(action) = self.conflict_action {
             if !self.conflict_cols.is_empty() {
                 let conflict_col_sql: Vec<&'static str> = self.conflict_cols.iter().map(|c| c.as_sql()).collect();
@@ -1294,13 +1294,13 @@ impl<'db> PageInsert<'db> {
             }
         }
         sql.push_str(" RETURNING *");
-        let mut q = sqlx::query_as::<_, PageRow>(&sql);
+        let mut q = sqlx::query_as::<_, ContentPageRow>(&sql);
         for b in binds {
             q = bind(q, b);
         }
         let row = db.fetch_one(q).await?;
         if !self.translations.is_empty() {
-            let repo = LocalizedRepo::new(db);
+            let repo = LocalizedRepo::new(db.clone());
             let supported = localized::SUPPORTED_LOCALES;
             if let Some(map) = self.translations.get("title") {
                 let mut filtered = HashMap::new();
@@ -1308,7 +1308,7 @@ impl<'db> PageInsert<'db> {
                     if supported.contains(&loc.as_str()) { filtered.insert(loc.clone(), val.clone()); }
                 }
                 if !filtered.is_empty() {
-                    repo.upsert_many(localized::PAGE_OWNER_TYPE, row.id, "title", &filtered).await?;
+                    repo.upsert_many(localized::CONTENT_PAGE_OWNER_TYPE, row.id, "title", &filtered).await?;
                 }
             }
             if let Some(map) = self.translations.get("content") {
@@ -1317,7 +1317,7 @@ impl<'db> PageInsert<'db> {
                     if supported.contains(&loc.as_str()) { filtered.insert(loc.clone(), val.clone()); }
                 }
                 if !filtered.is_empty() {
-                    repo.upsert_many(localized::PAGE_OWNER_TYPE, row.id, "content", &filtered).await?;
+                    repo.upsert_many(localized::CONTENT_PAGE_OWNER_TYPE, row.id, "content", &filtered).await?;
                 }
             }
             if let Some(map) = self.translations.get("cover") {
@@ -1326,24 +1326,24 @@ impl<'db> PageInsert<'db> {
                     if supported.contains(&loc.as_str()) { filtered.insert(loc.clone(), val.clone()); }
                 }
                 if !filtered.is_empty() {
-                    repo.upsert_many(localized::PAGE_OWNER_TYPE, row.id, "cover", &filtered).await?;
+                    repo.upsert_many(localized::CONTENT_PAGE_OWNER_TYPE, row.id, "cover", &filtered).await?;
                 }
             }
         }
-        let localized = localized::load_page_localized(db, &[row.id]).await?;
+        let localized = localized::load_content_page_localized(db, &[row.id]).await?;
         Ok(hydrate_view(row, &localized, self.base_url.as_deref()))
     }
 }
-pub struct PageUpdate<'db> {
+pub struct ContentPageUpdate<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(PageCol, BindValue)>,
+    sets: Vec<(ContentPageCol, BindValue)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
     translations: HashMap<&'static str, HashMap<String, String>>,
 }
 
-impl<'db> PageUpdate<'db> {
+impl<'db> ContentPageUpdate<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1354,29 +1354,29 @@ impl<'db> PageUpdate<'db> {
             translations: HashMap::new(),
         }
     }
-    pub fn unsafe_sql(self) -> PageUnsafeUpdate<'db> { PageUnsafeUpdate::new(self) }
+    pub fn unsafe_sql(self) -> ContentPageUnsafeUpdate<'db> { ContentPageUnsafeUpdate::new(self) }
     pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((PageCol::Id , val.into()));
+        self.sets.push((ContentPageCol::Id , val.into()));
         self
     }
     pub fn set_tag(mut self, val: String) -> Self {
-        self.sets.push((PageCol::Tag , val.into()));
+        self.sets.push((ContentPageCol::Tag , val.into()));
         self
     }
     pub fn set_is_system(mut self, val: PageSystemFlag) -> Self {
-        self.sets.push((PageCol::IsSystem , val.into()));
+        self.sets.push((ContentPageCol::IsSystem , val.into()));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((PageCol::CreatedAt , val.into()));
+        self.sets.push((ContentPageCol::CreatedAt , val.into()));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((PageCol::UpdatedAt , val.into()));
+        self.sets.push((ContentPageCol::UpdatedAt , val.into()));
         self
     }
     pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((PageCol::DeletedAt , val.into()));
+        self.sets.push((ContentPageCol::DeletedAt , val.into()));
         self
     }
     pub fn set_title_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
@@ -1408,41 +1408,41 @@ impl<'db> PageUpdate<'db> {
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_tag(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::Tag.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::Tag.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_is_system(mut self, op: Op, val: PageSystemFlag) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::IsSystem.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::IsSystem.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PageCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: PageCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: ContentPageCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1485,13 +1485,13 @@ impl<'db> PageUpdate<'db> {
 
     async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<u64> {
         let (mut cols, mut set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, PageCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, ContentPageCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(PageCol::UpdatedAt);
+            cols.push(ContentPageCol::UpdatedAt);
             set_binds.push(now.into());
         }
         // find target ids for localized updates
-        let select_sql = format!("SELECT id FROM pages WHERE {}", self.where_sql.join(" AND "));
+        let select_sql = format!("SELECT id FROM content_pages WHERE {}", self.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
         for b in &self.binds { select_q = bind_scalar(select_q, b.clone()); }
         let target_ids = db.fetch_all_scalar(select_q).await?;
@@ -1507,7 +1507,7 @@ impl<'db> PageUpdate<'db> {
             renumbered.push(renumber_placeholders(&clause, offset + 1));
         }
         where_sql = renumbered;
-        let mut sql = String::from("UPDATE pages SET ");
+        let mut sql = String::from("UPDATE content_pages SET ");
         sql.push_str(&parts.join(", "));
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
@@ -1518,7 +1518,7 @@ impl<'db> PageUpdate<'db> {
         for b in &binds { q = bind_query(q, b.clone()); }
         let res = db.execute(q).await?;
         if res.rows_affected() > 0 && !self.translations.is_empty() && !target_ids.is_empty() {
-            let repo = LocalizedRepo::new(db);
+            let repo = LocalizedRepo::new(db.clone());
             let supported = localized::SUPPORTED_LOCALES;
             if let Some(map) = self.translations.get("title") {
                 let mut filtered = HashMap::new();
@@ -1527,7 +1527,7 @@ impl<'db> PageUpdate<'db> {
                 }
                 if !filtered.is_empty() {
                     for id in &target_ids {
-                        repo.upsert_many(localized::PAGE_OWNER_TYPE, *id, "title", &filtered).await?;
+                        repo.upsert_many(localized::CONTENT_PAGE_OWNER_TYPE, *id, "title", &filtered).await?;
                     }
                 }
             }
@@ -1538,7 +1538,7 @@ impl<'db> PageUpdate<'db> {
                 }
                 if !filtered.is_empty() {
                     for id in &target_ids {
-                        repo.upsert_many(localized::PAGE_OWNER_TYPE, *id, "content", &filtered).await?;
+                        repo.upsert_many(localized::CONTENT_PAGE_OWNER_TYPE, *id, "content", &filtered).await?;
                     }
                 }
             }
@@ -1549,7 +1549,7 @@ impl<'db> PageUpdate<'db> {
                 }
                 if !filtered.is_empty() {
                     for id in &target_ids {
-                        repo.upsert_many(localized::PAGE_OWNER_TYPE, *id, "cover", &filtered).await?;
+                        repo.upsert_many(localized::CONTENT_PAGE_OWNER_TYPE, *id, "cover", &filtered).await?;
                     }
                 }
             }
@@ -1558,25 +1558,25 @@ impl<'db> PageUpdate<'db> {
     }
 }
 #[doc(hidden)]
-pub struct PageUnsafeUpdate<'db> {
-    inner: PageUpdate<'db>,
+pub struct ContentPageUnsafeUpdate<'db> {
+    inner: ContentPageUpdate<'db>,
 }
 
-impl<'db> PageUnsafeUpdate<'db> {
-    fn new(inner: PageUpdate<'db>) -> Self { Self { inner } }
+impl<'db> ContentPageUnsafeUpdate<'db> {
+    fn new(inner: ContentPageUpdate<'db>) -> Self { Self { inner } }
     pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> PageUpdate<'db> { self.inner }
+    pub fn done(self) -> ContentPageUpdate<'db> { self.inner }
 }
-pub struct PageTableAdapter;
-impl PageTableAdapter {
-    fn parse_col(name: &str) -> Option<PageCol> {
+pub struct ContentPageTableAdapter;
+impl ContentPageTableAdapter {
+    fn parse_col(name: &str) -> Option<ContentPageCol> {
         match name {
-            "id" => Some(PageCol::Id),
-            "tag" => Some(PageCol::Tag),
-            "is_system" => Some(PageCol::IsSystem),
-            "created_at" => Some(PageCol::CreatedAt),
-            "updated_at" => Some(PageCol::UpdatedAt),
-            "deleted_at" => Some(PageCol::DeletedAt),
+            "id" => Some(ContentPageCol::Id),
+            "tag" => Some(ContentPageCol::Tag),
+            "is_system" => Some(ContentPageCol::IsSystem),
+            "created_at" => Some(ContentPageCol::CreatedAt),
+            "updated_at" => Some(ContentPageCol::UpdatedAt),
+            "deleted_at" => Some(ContentPageCol::DeletedAt),
             _ => None,
         }
     }
@@ -1593,9 +1593,9 @@ impl PageTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<PageCol> {
+    fn parse_like_col(name: &str) -> Option<ContentPageCol> {
         match name {
-            "tag" => Some(PageCol::Tag),
+            "tag" => Some(ContentPageCol::Tag),
             _ => None,
         }
     }
@@ -1635,10 +1635,10 @@ impl PageTableAdapter {
         None
     }
 }
-impl GeneratedTableAdapter for PageTableAdapter {
-    type Query<'db> = PageQuery<'db>;
-    type Row = PageView;
-    fn model_key(&self) -> &'static str { "Page" }
+impl GeneratedTableAdapter for ContentPageTableAdapter {
+    type Query<'db> = ContentPageQuery<'db>;
+    type Row = ContentPageView;
+    fn model_key(&self) -> &'static str { "ContentPage" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "tag", "is_system", "created_at", "updated_at", "deleted_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at", "deleted_at"] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
@@ -1674,7 +1674,7 @@ impl GeneratedTableAdapter for PageTableAdapter {
             "f-locale-like-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: PageQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<PageQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: ContentPageQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<ContentPageQuery<'db>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -1710,15 +1710,15 @@ impl GeneratedTableAdapter for PageTableAdapter {
             ParsedFilter::LocaleEq { column } => {
                 let Some(field) = Self::parse_locale_field(column.as_str()) else { return Ok(None); };
                 let locale = core_i18n::current_locale().to_string();
-                let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = pages.id AND l.field = ? AND l.locale = ? AND l.value = ?)".to_string();
-                Ok(Some(query.where_exists(clause, vec![localized::PAGE_OWNER_TYPE.to_string(), field.to_string(), locale, trimmed.to_string()])))
+                let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = content_pages.id AND l.field = ? AND l.locale = ? AND l.value = ?)".to_string();
+                Ok(Some(query.where_exists(clause, vec![localized::CONTENT_PAGE_OWNER_TYPE.to_string(), field.to_string(), locale, trimmed.to_string()])))
             }
             ParsedFilter::LocaleLike { column } => {
                 let Some(field) = Self::parse_locale_field(column.as_str()) else { return Ok(None); };
                 let locale = core_i18n::current_locale().to_string();
                 let pattern = format!("%{}%", trimmed);
-                let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = pages.id AND l.field = ? AND l.locale = ? AND l.value LIKE ?)".to_string();
-                Ok(Some(query.where_exists(clause, vec![localized::PAGE_OWNER_TYPE.to_string(), field.to_string(), locale, pattern])))
+                let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = content_pages.id AND l.field = ? AND l.locale = ? AND l.value LIKE ?)".to_string();
+                Ok(Some(query.where_exists(clause, vec![localized::CONTENT_PAGE_OWNER_TYPE.to_string(), field.to_string(), locale, pattern])))
             }
             ParsedFilter::LikeAny { columns } => {
                 let mut applied = false;
@@ -1775,26 +1775,26 @@ impl GeneratedTableAdapter for PageTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: PageQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<PageQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: ContentPageQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<ContentPageQuery<'db>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(PageCol::Id, dir),
-            "tag" => query.order_by(PageCol::Tag, dir),
-            "is_system" => query.order_by(PageCol::IsSystem, dir),
-            "created_at" => query.order_by(PageCol::CreatedAt, dir),
-            "updated_at" => query.order_by(PageCol::UpdatedAt, dir),
-            "deleted_at" => query.order_by(PageCol::DeletedAt, dir),
+            "id" => query.order_by(ContentPageCol::Id, dir),
+            "tag" => query.order_by(ContentPageCol::Tag, dir),
+            "is_system" => query.order_by(ContentPageCol::IsSystem, dir),
+            "created_at" => query.order_by(ContentPageCol::CreatedAt, dir),
+            "updated_at" => query.order_by(ContentPageCol::UpdatedAt, dir),
+            "deleted_at" => query.order_by(ContentPageCol::DeletedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: PageQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<PageQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: ContentPageQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<ContentPageQuery<'db>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &PageView, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &ContentPageView, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "tag" => Some(row.tag.clone()),
@@ -1804,15 +1804,15 @@ impl GeneratedTableAdapter for PageTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: PageQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: ContentPageQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: PageQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<PageView>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: ContentPageQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<ContentPageView>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
 #[derive(Debug, Clone, Copy)]
-pub struct PageDataTableConfig {
+pub struct ContentPageDataTableConfig {
     pub default_sorting_column: &'static str,
     pub default_sorted: SortDirection,
     pub default_export_ignore_columns: &'static [&'static str],
@@ -1820,7 +1820,7 @@ pub struct PageDataTableConfig {
     pub default_unsortable: &'static [&'static str],
     pub default_row_per_page: Option<i64>,
 }
-impl Default for PageDataTableConfig {
+impl Default for ContentPageDataTableConfig {
     fn default() -> Self {
         Self {
             default_sorting_column: "id",
@@ -1832,55 +1832,55 @@ impl Default for PageDataTableConfig {
         }
     }
 }
-pub trait PageDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: PageQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> PageQuery<'db> { query }
+pub trait ContentPageDataTableHooks: Send + Sync + 'static {
+    fn scope<'db>(&'db self, query: ContentPageQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> ContentPageQuery<'db> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: PageQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<PageQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: PageQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<PageQuery<'db>> { Ok(query) }
+    fn filter_query<'db>(&'db self, _query: ContentPageQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<ContentPageQuery<'db>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: ContentPageQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<ContentPageQuery<'db>> { Ok(query) }
     fn mappings(&self, _record: &mut serde_json::Map<String, serde_json::Value>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
 }
 #[derive(Default)]
-pub struct PageDefaultDataTableHooks;
-impl PageDataTableHooks for PageDefaultDataTableHooks {}
-pub struct PageDataTable<H = PageDefaultDataTableHooks> where H: PageDataTableHooks {
+pub struct ContentPageDefaultDataTableHooks;
+impl ContentPageDataTableHooks for ContentPageDefaultDataTableHooks {}
+pub struct ContentPageDataTable<H = ContentPageDefaultDataTableHooks> where H: ContentPageDataTableHooks {
     pub db: sqlx::PgPool,
     pub hooks: H,
-    pub config: PageDataTableConfig,
-    adapter: PageTableAdapter,
+    pub config: ContentPageDataTableConfig,
+    adapter: ContentPageTableAdapter,
 }
-impl PageDataTable<PageDefaultDataTableHooks> {
+impl ContentPageDataTable<ContentPageDefaultDataTableHooks> {
     pub fn new(db: sqlx::PgPool) -> Self {
         Self {
             db,
-            hooks: PageDefaultDataTableHooks,
-            config: PageDataTableConfig::default(),
-            adapter: PageTableAdapter,
+            hooks: ContentPageDefaultDataTableHooks,
+            config: ContentPageDataTableConfig::default(),
+            adapter: ContentPageTableAdapter,
         }
     }
 }
-impl<H: PageDataTableHooks> PageDataTable<H> {
-    pub fn with_hooks<NH: PageDataTableHooks>(self, hooks: NH) -> PageDataTable<NH> {
-        PageDataTable {
+impl<H: ContentPageDataTableHooks> ContentPageDataTable<H> {
+    pub fn with_hooks<NH: ContentPageDataTableHooks>(self, hooks: NH) -> ContentPageDataTable<NH> {
+        ContentPageDataTable {
             db: self.db,
             hooks,
             config: self.config,
-            adapter: PageTableAdapter,
+            adapter: ContentPageTableAdapter,
         }
     }
-    pub fn with_config(mut self, config: PageDataTableConfig) -> Self {
+    pub fn with_config(mut self, config: ContentPageDataTableConfig) -> Self {
         self.config = config;
         self
     }
 }
-impl<H: PageDataTableHooks> AutoDataTable for PageDataTable<H> {
-    type Adapter = PageTableAdapter;
+impl<H: ContentPageDataTableHooks> AutoDataTable for ContentPageDataTable<H> {
+    type Adapter = ContentPageTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> PageQuery<'db> {
-        self.hooks.scope(Page::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> ContentPageQuery<'db> {
+        self.hooks.scope(ContentPage::new(&self.db, None).query(), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: PageQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<PageQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: PageQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<PageQuery<'db>> { self.hooks.filters(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: ContentPageQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<ContentPageQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: ContentPageQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<ContentPageQuery<'db>> { self.hooks.filters(query, input, ctx) }
     fn mappings(&self, record: &mut serde_json::Map<String, serde_json::Value>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.mappings(record, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
@@ -1892,9 +1892,9 @@ impl<H: PageDataTableHooks> AutoDataTable for PageDataTable<H> {
 
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for PageView {
+impl ActiveRecord for ContentPageView {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Page::new(db, None).find(id).await.map_err(|e| e.into())
+        ContentPage::new(db, None).find(id).await.map_err(|e| e.into())
     }
 }
