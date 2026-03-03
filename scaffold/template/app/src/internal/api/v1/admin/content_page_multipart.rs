@@ -6,14 +6,14 @@ use core_web::error::AppError;
 use uuid::Uuid;
 
 use crate::{
-    contracts::api::v1::admin::content_page::AdminPageUpdateInput,
+    contracts::api::v1::admin::content_page::AdminContentPageUpdateInput,
     internal::api::state::AppApiState,
 };
 
 pub async fn parse_content_page_update_multipart(
     state: &AppApiState,
     mut multipart: Multipart,
-) -> Result<AdminPageUpdateInput, AppError> {
+) -> Result<AdminContentPageUpdateInput, AppError> {
     let mut tag: Option<String> = None;
     let mut title: BTreeMap<String, String> = BTreeMap::new();
     let mut content: BTreeMap<String, String> = BTreeMap::new();
@@ -86,7 +86,7 @@ pub async fn parse_content_page_update_multipart(
     ensure_required_locales("title", &title)?;
     ensure_required_locales("content", &content)?;
 
-    Ok(AdminPageUpdateInput {
+    Ok(AdminContentPageUpdateInput {
         tag,
         title,
         content,

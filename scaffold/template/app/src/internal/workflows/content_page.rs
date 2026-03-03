@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 use core_db::common::sql::{DbConn, Op};
 use core_i18n::t;
 use core_web::error::AppError;
-use generated::models::{ContentPage, ContentPageView, PageSystemFlag};
+use generated::models::{ContentPage, ContentPageView, ContentPageSystemFlag};
 
 use crate::{
-    contracts::api::v1::admin::content_page::AdminPageUpdateInput,
+    contracts::api::v1::admin::content_page::AdminContentPageUpdateInput,
     internal::api::state::AppApiState,
 };
 
@@ -21,7 +21,7 @@ pub async fn detail(state: &AppApiState, id: i64) -> Result<ContentPageView, App
 pub async fn update(
     state: &AppApiState,
     id: i64,
-    req: AdminPageUpdateInput,
+    req: AdminContentPageUpdateInput,
 ) -> Result<ContentPageView, AppError> {
     let tag = normalize_tag(&req.tag)?;
     let title = normalize_localized_map(&req.title);
@@ -29,7 +29,7 @@ pub async fn update(
     let cover = normalize_localized_map(&req.cover);
 
     let existing = detail(state, id).await?;
-    if matches!(existing.is_system, PageSystemFlag::Yes) {
+    if matches!(existing.is_system, ContentPageSystemFlag::Yes) {
         if existing.tag != tag {
             return Err(AppError::Forbidden(t("Cannot change tag for system page")));
         }
@@ -67,7 +67,7 @@ pub async fn update(
 
 pub async fn remove(state: &AppApiState, id: i64) -> Result<(), AppError> {
     let existing = detail(state, id).await?;
-    if matches!(existing.is_system, PageSystemFlag::Yes) {
+    if matches!(existing.is_system, ContentPageSystemFlag::Yes) {
         return Err(AppError::Forbidden(t("Cannot delete system page")));
     }
 

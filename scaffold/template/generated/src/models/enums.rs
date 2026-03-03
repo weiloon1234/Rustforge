@@ -87,18 +87,18 @@ impl From<AdminType> for core_db::common::sql::BindValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[repr(i16)]
-pub enum PageSystemFlag {
+pub enum ContentPageSystemFlag {
     No = 0,
     Yes = 1,
 }
 
-impl Default for PageSystemFlag {
+impl Default for ContentPageSystemFlag {
     fn default() -> Self {
         Self::No
     }
 }
 
-impl PageSystemFlag {
+impl ContentPageSystemFlag {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::No => "0",
@@ -125,32 +125,32 @@ impl PageSystemFlag {
 }
 
 // sqlx support for integer storage
-impl sqlx::Encode<'_, sqlx::Postgres> for PageSystemFlag {
+impl sqlx::Encode<'_, sqlx::Postgres> for ContentPageSystemFlag {
     fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
         <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
     }
 }
 
-impl sqlx::Decode<'_, sqlx::Postgres> for PageSystemFlag {
+impl sqlx::Decode<'_, sqlx::Postgres> for ContentPageSystemFlag {
     fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
         let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
         match num {
             0 => Ok(Self::No),
             1 => Ok(Self::Yes),
-            _ => Err(format!("Invalid PageSystemFlag: {}", num).into()),
+            _ => Err(format!("Invalid ContentPageSystemFlag: {}", num).into()),
         }
     }
 }
 
-impl sqlx::Type<sqlx::Postgres> for PageSystemFlag {
+impl sqlx::Type<sqlx::Postgres> for ContentPageSystemFlag {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
         <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
     }
 }
 
 // For ActiveRecord BindValue
-impl From<PageSystemFlag> for core_db::common::sql::BindValue {
-    fn from(v: PageSystemFlag) -> Self {
+impl From<ContentPageSystemFlag> for core_db::common::sql::BindValue {
+    fn from(v: ContentPageSystemFlag) -> Self {
         core_db::common::sql::BindValue::I64(v as i64)
     }
 }

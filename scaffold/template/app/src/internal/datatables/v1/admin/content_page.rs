@@ -11,7 +11,7 @@ use generated::{
 };
 
 use crate::contracts::datatable::admin::content_page::{
-    AdminPageDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
+    AdminContentPageDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
 };
 
 #[derive(Default, Clone)]
@@ -105,7 +105,7 @@ where
     routes_for_scoped_contract_with_options(
         ROUTE_PREFIX,
         state,
-        AdminPageDataTableContract,
+        AdminContentPageDataTableContract,
         DataTableRouteOptions {
             require_bearer_auth: true,
         },

@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 
-use generated::models::PageSystemFlag;
+use generated::models::ContentPageSystemFlag;
 use schemars::JsonSchema;
 use serde::Serialize;
 use ts_rs::TS;
 
 #[derive(Debug, Clone, Default, TS)]
 #[ts(export, export_to = "admin/types/")]
-pub struct AdminPageUpdateInput {
+pub struct AdminContentPageUpdateInput {
     pub tag: String,
     #[ts(type = "MultiLang")]
     pub title: BTreeMap<String, String>,
@@ -19,11 +19,11 @@ pub struct AdminPageUpdateInput {
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
-pub struct AdminPageOutput {
+pub struct AdminContentPageOutput {
     pub id: i64,
     pub tag: String,
-    #[ts(type = "PageSystemFlag")]
-    pub is_system: PageSystemFlag,
+    #[ts(type = "ContentPageSystemFlag")]
+    pub is_system: ContentPageSystemFlag,
     #[ts(type = "MultiLang")]
     pub title: BTreeMap<String, String>,
     #[ts(type = "MultiLang")]
@@ -40,11 +40,11 @@ pub struct AdminPageOutput {
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
-pub struct AdminPageUpdateOutput {
+pub struct AdminContentPageUpdateOutput {
     pub id: i64,
     pub tag: String,
-    #[ts(type = "PageSystemFlag")]
-    pub is_system: PageSystemFlag,
+    #[ts(type = "ContentPageSystemFlag")]
+    pub is_system: ContentPageSystemFlag,
     #[ts(type = "MultiLang")]
     pub title: BTreeMap<String, String>,
     #[ts(type = "MultiLang")]
@@ -61,11 +61,11 @@ pub struct AdminPageUpdateOutput {
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
-pub struct AdminPageDeleteOutput {
+pub struct AdminContentPageDeleteOutput {
     pub deleted: bool,
 }
 
-impl From<generated::models::ContentPageView> for AdminPageOutput {
+impl From<generated::models::ContentPageView> for AdminContentPageOutput {
     fn from(value: generated::models::ContentPageView) -> Self {
         Self {
             id: value.id,
@@ -80,7 +80,7 @@ impl From<generated::models::ContentPageView> for AdminPageOutput {
     }
 }
 
-impl From<generated::models::ContentPageView> for AdminPageUpdateOutput {
+impl From<generated::models::ContentPageView> for AdminContentPageUpdateOutput {
     fn from(value: generated::models::ContentPageView) -> Self {
         Self {
             id: value.id,

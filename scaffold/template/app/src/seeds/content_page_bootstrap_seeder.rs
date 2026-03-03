@@ -3,7 +3,7 @@ use core_db::{
     common::sql::{generate_snowflake_i64, DbConn, Op},
     seeder::Seeder,
 };
-use generated::models::{ContentPage, PageSystemFlag};
+use generated::models::{ContentPage, ContentPageSystemFlag};
 
 #[derive(Debug, Default)]
 pub struct ContentPageBootstrapSeeder;
@@ -59,7 +59,7 @@ async fn ensure_page(
             .update()
             .where_id(Op::Eq, page.id)
             .set_tag(tag.to_string())
-            .set_is_system(PageSystemFlag::Yes)
+            .set_is_system(ContentPageSystemFlag::Yes)
             .save()
             .await?;
         return Ok(());
@@ -72,7 +72,7 @@ async fn ensure_page(
         .insert()
         .set_id(generate_snowflake_i64())
         .set_tag(tag.to_string())
-        .set_is_system(PageSystemFlag::Yes)
+        .set_is_system(ContentPageSystemFlag::Yes)
         .set_title_langs(title_langs)
         .set_content_langs(content_langs)
         .save()

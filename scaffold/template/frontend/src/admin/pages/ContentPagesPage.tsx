@@ -1,8 +1,8 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { AdminPageDeleteOutput, PageDatatableRow, PageSystemFlag } from "@admin/types";
-import { PAGE_SYSTEM_FLAG } from "@admin/types";
+import type { AdminContentPageDeleteOutput, ContentPageDatatableRow, ContentPageSystemFlag } from "@admin/types";
+import { CONTENT_PAGE_SYSTEM_FLAG } from "@admin/types";
 import { api } from "@admin/api";
 import type { ApiResponse } from "@shared/types";
 import {
@@ -13,20 +13,20 @@ import {
   formatDateTime,
 } from "@shared/components";
 
-const PAGE_SYSTEM_YES: PageSystemFlag = PAGE_SYSTEM_FLAG._1;
+const CONTENT_PAGE_SYSTEM_YES: ContentPageSystemFlag = CONTENT_PAGE_SYSTEM_FLAG._1;
 
 function normalizeErrorMessage(error: unknown, fallback: string): string {
   const maybe = error as { response?: { data?: { message?: string } } };
   return maybe?.response?.data?.message ?? fallback;
 }
 
-function toSystemLabel(value: PageSystemFlag, t: (key: string) => string): string {
-  if (value === PAGE_SYSTEM_YES) return t("System");
+function toSystemLabel(value: ContentPageSystemFlag, t: (key: string) => string): string {
+  if (value === CONTENT_PAGE_SYSTEM_YES) return t("System");
   return t("Custom");
 }
 
-function toSystemBadgeClass(value: PageSystemFlag): string {
-  if (value === PAGE_SYSTEM_YES) return "bg-amber-100 text-amber-700";
+function toSystemBadgeClass(value: ContentPageSystemFlag): string {
+  if (value === CONTENT_PAGE_SYSTEM_YES) return "bg-amber-100 text-amber-700";
   return "bg-emerald-100 text-emerald-700";
 }
 
@@ -34,8 +34,8 @@ export default function ContentPagesPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
-  const handleDelete = async (row: PageDatatableRow, refresh: () => void) => {
-    if (row.is_system === PAGE_SYSTEM_YES) {
+  const handleDelete = async (row: ContentPageDatatableRow, refresh: () => void) => {
+    if (row.is_system === CONTENT_PAGE_SYSTEM_YES) {
       return;
     }
 
@@ -46,7 +46,7 @@ export default function ContentPagesPage() {
       callback: async (result) => {
         if (!result.isConfirmed) return;
         try {
-          await api.delete<ApiResponse<AdminPageDeleteOutput>>(
+          await api.delete<ApiResponse<AdminContentPageDeleteOutput>>(
             `content_page/${row.id}`,
           );
           alertSuccess({ title: t("Deleted"), message: t("Page deleted") });
@@ -62,7 +62,7 @@ export default function ContentPagesPage() {
   };
 
   return (
-    <DataTable<PageDatatableRow>
+    <DataTable<ContentPageDatatableRow>
       url="datatable/content_page/query"
       title={t("Pages")}
       subtitle={t("Manage policy pages")}
@@ -82,7 +82,7 @@ export default function ContentPagesPage() {
               >
                 <Pencil size={16} />
               </button>
-              {row.is_system !== PAGE_SYSTEM_YES && (
+              {row.is_system !== CONTENT_PAGE_SYSTEM_YES && (
                 <button
                   type="button"
                   onClick={() => handleDelete(row, ctx.refresh)}

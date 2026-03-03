@@ -17,14 +17,14 @@ export const ADMIN_TYPES: ReadonlyArray<AdminType> = [
 
 export type AuthClientType = "web" | "mobile";
 
-export type PageSystemFlag = "0" | "1";
+export type ContentPageSystemFlag = "0" | "1";
 
-export const PAGE_SYSTEM_FLAG: Readonly<Record<string, PageSystemFlag>> = {
+export const CONTENT_PAGE_SYSTEM_FLAG: Readonly<Record<string, ContentPageSystemFlag>> = {
   _0: "0",
   _1: "1",
 };
 
-export const PAGE_SYSTEM_FLAGS: ReadonlyArray<PageSystemFlag> = [
+export const CONTENT_PAGE_SYSTEM_FLAGS: ReadonlyArray<ContentPageSystemFlag> = [
   "0",
   "1",
 ];

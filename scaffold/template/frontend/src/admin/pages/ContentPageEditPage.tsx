@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Save } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { AdminPageOutput, AdminPageUpdateOutput } from "@admin/types";
-import { PAGE_SYSTEM_FLAG } from "@admin/types";
+import type { AdminContentPageOutput, AdminContentPageUpdateOutput } from "@admin/types";
+import { CONTENT_PAGE_SYSTEM_FLAG } from "@admin/types";
 import { api } from "@admin/api";
 import type { ApiResponse, LocaleCode } from "@shared/types";
 import { FileInput, TextInput, TiptapInput, useLocaleStore, alertSuccess } from "@shared/components";
 
-const PAGE_SYSTEM_YES = PAGE_SYSTEM_FLAG._1;
+const CONTENT_PAGE_SYSTEM_YES = CONTENT_PAGE_SYSTEM_FLAG._1;
 
 function normalizeErrorMessage(error: unknown, fallback: string): string {
   const maybe = error as { response?: { data?: { message?: string } } };
@@ -30,7 +30,7 @@ export default function ContentPageEditPage() {
   const [busy, setBusy] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState<AdminPageOutput | null>(null);
+  const [contentPage, setContentPage] = useState<AdminContentPageOutput | null>(null);
   const [tag, setTag] = useState("");
   const [title, setTitle] = useState<Record<string, string>>({});
   const [content, setContent] = useState<Record<string, string>>({});
@@ -49,7 +49,7 @@ export default function ContentPageEditPage() {
     setError(null);
 
     void api
-      .get<ApiResponse<AdminPageOutput>>(`content_page/${pageId}`)
+      .get<ApiResponse<AdminContentPageOutput>>(`content_page/${pageId}`)
       .then((res) => {
         if (!active) return;
         const payload = res.data?.data;
@@ -59,7 +59,7 @@ export default function ContentPageEditPage() {
           return;
         }
 
-        setPage(payload);
+        setContentPage(payload);
         setTag(payload.tag);
 
         const nextTitle: Record<string, string> = {};
@@ -86,7 +86,7 @@ export default function ContentPageEditPage() {
     };
   }, [pageId, locales, t]);
 
-  const isSystem = page?.is_system === PAGE_SYSTEM_YES;
+  const isSystem = contentPage?.is_system === CONTENT_PAGE_SYSTEM_YES;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -115,7 +115,7 @@ export default function ContentPageEditPage() {
         }
       }
 
-      await api.patch<ApiResponse<AdminPageUpdateOutput>>(
+      await api.patch<ApiResponse<AdminContentPageUpdateOutput>>(
         `content_page/${pageId}`,
         formData,
       );

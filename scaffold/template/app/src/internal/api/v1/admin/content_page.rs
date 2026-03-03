@@ -14,7 +14,7 @@ use generated::{guards::AdminGuard, permissions::Permission};
 
 use crate::{
     contracts::api::v1::admin::content_page::{
-        AdminPageDeleteOutput, AdminPageOutput, AdminPageUpdateOutput,
+        AdminContentPageDeleteOutput, AdminContentPageOutput, AdminContentPageUpdateOutput,
     },
     internal::{api::state::AppApiState, workflows::content_page as workflow},
 };
@@ -57,10 +57,10 @@ async fn detail(
     State(state): State<AppApiState>,
     _auth: AuthUser<AdminGuard>,
     Path(id): Path<i64>,
-) -> Result<ApiResponse<AdminPageOutput>, AppError> {
+) -> Result<ApiResponse<AdminContentPageOutput>, AppError> {
     let page = workflow::detail(&state, id).await?;
     Ok(ApiResponse::success(
-        AdminPageOutput::from(page),
+        AdminContentPageOutput::from(page),
         &t("Page loaded"),
     ))
 }
@@ -70,12 +70,12 @@ async fn update(
     _auth: AuthUser<AdminGuard>,
     Path(id): Path<i64>,
     multipart: Multipart,
-) -> Result<ApiResponse<AdminPageUpdateOutput>, AppError> {
+) -> Result<ApiResponse<AdminContentPageUpdateOutput>, AppError> {
     let req =
         content_page_multipart::parse_content_page_update_multipart(&state, multipart).await?;
     let page = workflow::update(&state, id, req).await?;
     Ok(ApiResponse::success(
-        AdminPageUpdateOutput::from(page),
+        AdminContentPageUpdateOutput::from(page),
         &t("Page updated"),
     ))
 }
@@ -84,10 +84,10 @@ async fn remove(
     State(state): State<AppApiState>,
     _auth: AuthUser<AdminGuard>,
     Path(id): Path<i64>,
-) -> Result<ApiResponse<AdminPageDeleteOutput>, AppError> {
+) -> Result<ApiResponse<AdminContentPageDeleteOutput>, AppError> {
     workflow::remove(&state, id).await?;
     Ok(ApiResponse::success(
-        AdminPageDeleteOutput { deleted: true },
+        AdminContentPageDeleteOutput { deleted: true },
         &t("Page deleted"),
     ))
 }

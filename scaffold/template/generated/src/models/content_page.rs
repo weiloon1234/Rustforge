@@ -29,7 +29,7 @@ const HAS_SOFT_DELETE: bool = true;
 pub struct ContentPageRow {
     pub id: i64,
     pub tag: String,
-    pub is_system: PageSystemFlag,
+    pub is_system: ContentPageSystemFlag,
     #[serde(with = "time::serde::rfc3339")]
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
@@ -45,7 +45,7 @@ pub struct ContentPageRow {
 pub struct ContentPageView {
     pub id: i64,
     pub tag: String,
-    pub is_system: PageSystemFlag,
+    pub is_system: ContentPageSystemFlag,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
     #[schemars(with = "String")]
@@ -104,7 +104,7 @@ impl ContentPageViewsExt for Vec<ContentPageView> {
 pub struct ContentPageJson {
     pub id: i64,
     pub tag: String,
-    pub is_system: PageSystemFlag,
+    pub is_system: ContentPageSystemFlag,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
     #[schemars(with = "String")]
@@ -255,7 +255,7 @@ impl<'db> ContentPageQuery<'db> {
         self.binds.push(val.into());
         self
     }
-    pub fn where_is_system(mut self, op: Op, val: PageSystemFlag) -> Self {
+    pub fn where_is_system(mut self, op: Op, val: ContentPageSystemFlag) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", ContentPageCol::IsSystem.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1178,7 +1178,7 @@ impl<'db> ContentPageInsert<'db> {
         self.binds.push(val.into());
         self
     }
-    pub fn set_is_system(mut self, val: PageSystemFlag) -> Self {
+    pub fn set_is_system(mut self, val: ContentPageSystemFlag) -> Self {
         self.cols.push(ContentPageCol::IsSystem);
         self.binds.push(val.into());
         self
@@ -1363,7 +1363,7 @@ impl<'db> ContentPageUpdate<'db> {
         self.sets.push((ContentPageCol::Tag , val.into()));
         self
     }
-    pub fn set_is_system(mut self, val: PageSystemFlag) -> Self {
+    pub fn set_is_system(mut self, val: ContentPageSystemFlag) -> Self {
         self.sets.push((ContentPageCol::IsSystem , val.into()));
         self
     }
@@ -1418,7 +1418,7 @@ impl<'db> ContentPageUpdate<'db> {
         self.binds.push(val.into());
         self
     }
-    pub fn where_is_system(mut self, op: Op, val: PageSystemFlag) -> Self {
+    pub fn where_is_system(mut self, op: Op, val: ContentPageSystemFlag) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", ContentPageCol::IsSystem.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1645,7 +1645,7 @@ impl GeneratedTableAdapter for ContentPageTableAdapter {
         &[
             DataTableColumnDescriptor { name: "id", label: "ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "tag", label: "Tag", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "is_system", label: "Is System", data_type: "PageSystemFlag", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "is_system", label: "Is System", data_type: "ContentPageSystemFlag", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "created_at", label: "Created At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
             DataTableColumnDescriptor { name: "updated_at", label: "Updated At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
             DataTableColumnDescriptor { name: "deleted_at", label: "Deleted At", data_type: "Option<time::OffsetDateTime>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
