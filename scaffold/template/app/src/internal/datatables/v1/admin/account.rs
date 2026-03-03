@@ -4,10 +4,13 @@ use core_web::authz::{has_required_permissions, PermissionMode};
 use generated::{
     extensions::admin::types::admin_identity,
     models::{
-        AdminCol, AdminDataTable, AdminDataTableConfig, AdminDataTableHooks, AdminQuery, AdminType,
+        Admin, AdminCol, AdminDataTable, AdminDataTableConfig, AdminDataTableHooks, AdminQuery,
+        AdminType,
     },
     permissions::Permission,
 };
+
+use crate::contracts::datatable::admin::account::AdminDatatableSummaryOutput;
 
 #[derive(Default, Clone)]
 pub struct AdminDataTableAppHooks;
@@ -19,22 +22,7 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
         _input: &DataTableInput,
         ctx: &DataTableContext,
     ) -> AdminQuery<'db> {
-        let Some(actor) = ctx.actor.as_ref() else {
-            return query.where_id(Op::Eq, -1);
-        };
-
-        let admin_type = actor
-            .attributes
-            .get("admin_type")
-            .and_then(|value| value.as_str())
-            .and_then(parse_admin_type);
-
-        match admin_type {
-            Some(AdminType::Developer) => query,
-            Some(AdminType::SuperAdmin) => query.where_admin_type(Op::Ne, AdminType::Developer),
-            Some(AdminType::Admin) => query.where_admin_type(Op::Eq, AdminType::Admin),
-            None => query.where_id(Op::Eq, -1),
-        }
+        apply_actor_scope(query, ctx)
     }
 
     fn authorize(&self, _input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {
@@ -60,14 +48,7 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
         _ctx: &DataTableContext,
     ) -> anyhow::Result<Option<AdminQuery<'db>>> {
         match filter_key {
-            "q" => {
-                let pattern = format!("%{value}%");
-                Ok(Some(query.where_group(|q| {
-                    q.where_col(AdminCol::Username, Op::Like, pattern.clone())
-                        .or_where_col(AdminCol::Name, Op::Like, pattern.clone())
-                        .or_where_col(AdminCol::Email, Op::Like, pattern)
-                })))
-            }
+            "q" => Ok(Some(apply_keyword_filter(query, value))),
             _ => Ok(None),
         }
     }
@@ -103,16 +84,148 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
 
         Ok(())
     }
-
 }
 
 fn parse_admin_type(value: &str) -> Option<AdminType> {
     match value.trim().to_ascii_lowercase().as_str() {
         "developer" => Some(AdminType::Developer),
-        "superadmin" => Some(AdminType::SuperAdmin),
+        "superadmin" | "super_admin" | "super-admin" => Some(AdminType::SuperAdmin),
         "admin" => Some(AdminType::Admin),
         _ => None,
     }
+}
+
+fn apply_actor_scope<'db>(query: AdminQuery<'db>, ctx: &DataTableContext) -> AdminQuery<'db> {
+    let Some(actor) = ctx.actor.as_ref() else {
+        return query.where_id(Op::Eq, -1);
+    };
+
+    let admin_type = actor
+        .attributes
+        .get("admin_type")
+        .and_then(|value| value.as_str())
+        .and_then(parse_admin_type);
+
+    match admin_type {
+        Some(AdminType::Developer) => query,
+        Some(AdminType::SuperAdmin) => query.where_admin_type(Op::Ne, AdminType::Developer),
+        Some(AdminType::Admin) => query.where_admin_type(Op::Eq, AdminType::Admin),
+        None => query.where_id(Op::Eq, -1),
+    }
+}
+
+fn apply_keyword_filter<'db>(query: AdminQuery<'db>, value: &str) -> AdminQuery<'db> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return query;
+    }
+    let pattern = format!("%{trimmed}%");
+    query.where_group(|q| {
+        q.where_col(AdminCol::Username, Op::Like, pattern.clone())
+            .or_where_col(AdminCol::Name, Op::Like, pattern.clone())
+            .or_where_col(AdminCol::Email, Op::Like, pattern)
+    })
+}
+
+fn parse_datetime(raw: &str, end_of_day: bool) -> Option<time::OffsetDateTime> {
+    let trimmed = raw.trim();
+    if let Ok(dt) = time::OffsetDateTime::parse(
+        trimmed,
+        &time::format_description::well_known::Rfc3339,
+    ) {
+        return Some(dt);
+    }
+    if trimmed.len() == 10 {
+        let date = time::Date::parse(
+            trimmed,
+            &time::macros::format_description!("[year]-[month]-[day]"),
+        )
+        .ok()?;
+        let t = if end_of_day {
+            time::Time::from_hms(23, 59, 59).ok()?
+        } else {
+            time::Time::MIDNIGHT
+        };
+        return Some(date.with_time(t).assume_offset(time::UtcOffset::UTC));
+    }
+    None
+}
+
+fn apply_summary_filters<'db>(
+    mut query: AdminQuery<'db>,
+    input: &DataTableInput,
+) -> AdminQuery<'db> {
+    for (key, value) in input.filter_entries() {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match key {
+            "f-like-email" => {
+                query = query.where_col(AdminCol::Email, Op::Like, format!("%{trimmed}%"));
+            }
+            "f-like-username" => {
+                query = query.where_col(AdminCol::Username, Op::Like, format!("%{trimmed}%"));
+            }
+            "f-admin_type" => {
+                if let Some(admin_type) = parse_admin_type(trimmed) {
+                    query = query.where_admin_type(Op::Eq, admin_type);
+                }
+            }
+            "f-date-from-created_at" => {
+                if let Some(ts) = parse_datetime(trimmed, false) {
+                    query = query.where_col(AdminCol::CreatedAt, Op::Ge, ts);
+                }
+            }
+            "f-date-to-created_at" => {
+                if let Some(ts) = parse_datetime(trimmed, true) {
+                    query = query.where_col(AdminCol::CreatedAt, Op::Le, ts);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for (key, value) in input.custom_filter_entries() {
+        if key == "q" {
+            query = apply_keyword_filter(query, value);
+        }
+    }
+
+    query
+}
+
+pub async fn build_admin_summary_output(
+    db: &sqlx::PgPool,
+    input: &DataTableInput,
+    ctx: &DataTableContext,
+) -> anyhow::Result<AdminDatatableSummaryOutput> {
+    let scoped = apply_actor_scope(Admin::new(db, None).query(), ctx);
+    let filtered = apply_summary_filters(scoped, input);
+
+    let total_filtered = filtered.clone().count().await?;
+    let developer_count = filtered
+        .clone()
+        .where_admin_type(Op::Eq, AdminType::Developer)
+        .count()
+        .await?;
+    let superadmin_count = filtered
+        .clone()
+        .where_admin_type(Op::Eq, AdminType::SuperAdmin)
+        .count()
+        .await?;
+    let admin_count = filtered
+        .where_admin_type(Op::Eq, AdminType::Admin)
+        .count()
+        .await?;
+
+    Ok(AdminDatatableSummaryOutput {
+        total_admin_counts: total_filtered,
+        total_filtered,
+        developer_count,
+        superadmin_count,
+        admin_count,
+    })
 }
 
 pub type AppAdminDataTable = AdminDataTable<AdminDataTableAppHooks>;

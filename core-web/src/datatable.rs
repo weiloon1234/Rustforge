@@ -227,6 +227,7 @@ pub struct DataTableFilterFieldDto {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct DataTableColumnMetaDto {
     pub name: String,
+    pub label: String,
     pub data_type: String,
     pub sortable: bool,
     pub localized: bool,
@@ -1151,6 +1152,7 @@ where
             .into_iter()
             .map(|col| DataTableColumnMetaDto {
                 name: col.name,
+                label: col.label,
                 data_type: col.data_type,
                 sortable: col.sortable,
                 localized: col.localized,

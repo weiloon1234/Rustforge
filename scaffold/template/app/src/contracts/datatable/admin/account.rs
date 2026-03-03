@@ -28,6 +28,16 @@ pub struct AdminDatatableRow {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
+pub struct AdminDatatableSummaryOutput {
+    pub total_admin_counts: i64,
+    pub total_filtered: i64,
+    pub developer_count: i64,
+    pub superadmin_count: i64,
+    pub admin_count: i64,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AdminAdminDataTableContract;
 

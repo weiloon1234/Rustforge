@@ -1,7 +1,13 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
-import type { AdminDeleteOutput, AdminDatatableRow, AdminType, Permission } from "@admin/types";
+import type {
+  AdminDatatableSummaryOutput,
+  AdminDeleteOutput,
+  AdminDatatableRow,
+  AdminType,
+  Permission,
+} from "@admin/types";
 import type { ApiResponse } from "@shared/types";
 import {
   Checkbox,
@@ -29,25 +35,28 @@ const PERMISSION_LABELS: Record<Permission, string> = {
   "admin.manage": "Manage Admins",
 };
 
+const ENABLE_SUMMARY_CARDS = true;
+
 interface AdminDatatableSummary {
-  total_filtered: number;
+  total_admin_counts: number;
   developer_count: number;
   superadmin_count: number;
   admin_count: number;
 }
 
-function parseAdminDatatableSummary(raw: unknown): AdminDatatableSummary | null {
-  if (!raw || typeof raw !== "object") return null;
-  const obj = raw as Record<string, unknown>;
-  const totalFiltered = Number(obj.total_filtered);
-  const developerCount = Number(obj.developer_count);
-  const superadminCount = Number(obj.superadmin_count);
-  const adminCount = Number(obj.admin_count);
-  if (![totalFiltered, developerCount, superadminCount, adminCount].every(Number.isFinite)) {
+function parseAdminDatatableSummary(
+  raw: AdminDatatableSummaryOutput | null | undefined,
+): AdminDatatableSummary | null {
+  if (!raw) return null;
+  const totalAdminCounts = Number(raw.total_admin_counts ?? raw.total_filtered);
+  const developerCount = Number(raw.developer_count);
+  const superadminCount = Number(raw.superadmin_count);
+  const adminCount = Number(raw.admin_count);
+  if (![totalAdminCounts, developerCount, superadminCount, adminCount].every(Number.isFinite)) {
     return null;
   }
   return {
-    total_filtered: totalFiltered,
+    total_admin_counts: totalAdminCounts,
     developer_count: developerCount,
     superadmin_count: superadminCount,
     admin_count: adminCount,
@@ -222,10 +231,36 @@ function EditAdminForm({
 export default function AdminsPage() {
   const { t } = useTranslation();
   const [summary, setSummary] = useState<AdminDatatableSummary | null>(null);
+  const summaryRequestId = useRef(0);
 
   const handleDatatablePostCall = (event: DataTablePostCallEvent<AdminDatatableRow>) => {
-    if (!event.response) return;
-    setSummary(parseAdminDatatableSummary(event.response.summary));
+    if (!ENABLE_SUMMARY_CARDS) return;
+    if (!event.response || event.error) {
+      setSummary(null);
+      return;
+    }
+
+    const requestId = ++summaryRequestId.current;
+    const payload: Record<string, unknown> = {
+      base: {
+        include_meta: false,
+      },
+      ...event.filters.applied,
+    };
+
+    void api
+      .post<ApiResponse<AdminDatatableSummaryOutput>>(
+        "/api/v1/admin/datatable/admin/summary",
+        payload,
+      )
+      .then((res) => {
+        if (summaryRequestId.current !== requestId) return;
+        setSummary(parseAdminDatatableSummary(res.data?.data));
+      })
+      .catch(() => {
+        if (summaryRequestId.current !== requestId) return;
+        setSummary(null);
+      });
   };
 
   const handleCreate = (refresh: () => void) => {
@@ -270,7 +305,7 @@ export default function AdminsPage() {
       url="/api/v1/admin/datatable/admin/query"
       api={api}
       perPage={30}
-      hiddenColumns={["id", "password", "updated_at", "deleted_at"]}
+      hiddenColumns={["id", "locale", "password", "updated_at", "deleted_at"]}
       prependColumns={({ column, direction, handleSort }: DataTableSortState) => (
         <>
           <th
@@ -320,14 +355,25 @@ export default function AdminsPage() {
         created_at: (v) => <td key="created_at" className="px-4 py-3 tabular-nums text-muted">{formatDateTime(v as string)}</td>,
       }}
       rowKey={(admin) => String(admin.id)}
-      onPostCall={handleDatatablePostCall}
-      renderTableFooter={({ records, sumColumn }) => (
-        <tr>
-          <td colSpan={99} className="px-4 py-2 text-xs text-muted">
-            {t("Page rows")}: {records.length} · {t("Page ID sum")}: {sumColumn("id", 0)}
-          </td>
-        </tr>
-      )}
+      onPostCall={ENABLE_SUMMARY_CARDS ? handleDatatablePostCall : undefined}
+      renderTableFooter={({ records }) => {
+        const pageDeveloperCount = records.filter((admin) => admin.admin_type === "developer").length;
+        const pageSuperadminCount = records.filter((admin) => admin.admin_type === "superadmin").length;
+        const pageAdminCount = records.filter((admin) => admin.admin_type === "admin").length;
+        return (
+          <tr>
+            <td colSpan={99} className="px-4 py-2 text-xs text-muted">
+              {t("Page rows")}: {records.length}
+              {" · "}
+              {t("Page developers")}: {pageDeveloperCount}
+              {" · "}
+              {t("Page super admins")}: {pageSuperadminCount}
+              {" · "}
+              {t("Page admins")}: {pageAdminCount}
+            </td>
+          </tr>
+        );
+      }}
       header={(refresh) => (
         <div>
           <div className="flex items-center justify-between">
@@ -343,11 +389,11 @@ export default function AdminsPage() {
               {t("Create Admin")}
             </button>
           </div>
-          {summary && (
+          {ENABLE_SUMMARY_CARDS && summary && (
             <div className="mt-3 grid gap-2 sm:grid-cols-4">
               <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
                 <p className="text-xs text-muted">{t("Filtered Total")}</p>
-                <p className="font-semibold text-foreground">{summary.total_filtered}</p>
+                <p className="font-semibold text-foreground">{summary.total_admin_counts}</p>
               </div>
               <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
                 <p className="text-xs text-muted">{t("Developers")}</p>

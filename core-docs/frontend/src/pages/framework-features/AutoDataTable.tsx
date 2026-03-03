@@ -48,6 +48,16 @@ export function AutoDataTableFeature() {
                         Filter layout metadata uses nested rows:{' '}
                         <code>filter_rows: Vec&lt;Vec&lt;DataTableFilterFieldDto&gt;&gt;</code>.
                     </li>
+                    <li>
+                        Cross-page totals are implemented as an optional summary endpoint
+                        that reuses the same filter payload (example:
+                        <code> /api/v1/admin/datatable/admin/summary</code>).
+                    </li>
+                    <li>
+                        Shared React datatable emits <code>onPreCall</code> and{' '}
+                        <code>onPostCall</code> with full filter snapshot (<code>all</code> and{' '}
+                        <code>applied</code>) so each portal can hook analytics/custom behavior.
+                    </li>
                 </ul>
 
                 <h2>Three-Tier Filter Pipeline</h2>
@@ -110,6 +120,7 @@ f-locale-like-<col>            Localized LIKE     Via localization table`}</code
                 <h2>Routes</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-text">{`POST   /api/v1/admin/datatable/admin/query
+POST   /api/v1/admin/datatable/admin/summary
 POST   /api/v1/admin/datatable/admin/export/csv
 POST   /api/v1/admin/datatable/admin/export/email
 GET    /api/v1/admin/datatable/admin/export/status?job_id=...`}</code>
@@ -281,6 +292,56 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
 }`}</code>
                 </pre>
 
+                <h3>Step 2B: Extra Summary Payload (Scaffold sample)</h3>
+                <p>
+                    Scaffold admin datatable provides a summary endpoint with{' '}
+                    <code>total_admin_counts</code> and per-type counts. This runs on the
+                    fully filtered query (no pagination limit) and returns a compact payload for
+                    dashboard cards.
+                </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`// app/src/internal/datatables/v1/admin/account.rs
+#[derive(Debug, Serialize)]
+struct AdminDatatableSummary {
+    total_admin_counts: i64,
+    total_filtered: i64, // compatibility alias
+    developer_count: i64,
+    superadmin_count: i64,
+    admin_count: i64,
+}
+
+async fn build_admin_summary(
+    db: &sqlx::PgPool,
+    input: &DataTableInput,
+    ctx: &DataTableContext,
+) -> anyhow::Result<serde_json::Value> {
+    let scoped = apply_actor_scope(Admin::new(db, None).query(), ctx);
+    let filtered = apply_summary_filters(scoped, input);
+
+    let total_filtered = filtered.clone().count().await?;
+    let developer_count = filtered.clone().where_admin_type(Op::Eq, AdminType::Developer).count().await?;
+    let superadmin_count = filtered.clone().where_admin_type(Op::Eq, AdminType::SuperAdmin).count().await?;
+    let admin_count = filtered.where_admin_type(Op::Eq, AdminType::Admin).count().await?;
+
+    Ok(serde_json::to_value(AdminDatatableSummary {
+        total_admin_counts: total_filtered,
+        total_filtered,
+        developer_count,
+        superadmin_count,
+        admin_count,
+    })?)
+}`}</code>
+                </pre>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-text">{`POST /api/v1/admin/datatable/admin/summary
+Body:
+{
+  "base": { "include_meta": false },
+  "q": "john",
+  "f-admin_type": "admin"
+}`}</code>
+                </pre>
+
                 <h2>Step 3: Register + Mount Routes</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`// app/src/internal/api/state.rs
@@ -349,6 +410,19 @@ core_web::datatable::routes_for_scoped_contract_with_options(
 }`}</code>
                 </pre>
 
+                <h3>Summary Response Shape (Optional Extension Endpoint)</h3>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-json">{`{
+  "data": {
+    "total_admin_counts": 42,
+    "developer_count": 1,
+    "superadmin_count": 6,
+    "admin_count": 35
+  },
+  "message": "datatable summary"
+}`}</code>
+                </pre>
+
                 <h2>Defaults</h2>
                 <ul>
                     <li>
@@ -366,6 +440,31 @@ core_web::datatable::routes_for_scoped_contract_with_options(
                     </li>
                 </ul>
 
+                <h2>Frontend Consumption Pattern</h2>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-ts">{`<DataTable<AdminDatatableRow>
+  onPreCall={(event) => {
+    // event.filters.all includes every filter key with current value (empty or non-empty)
+    // event.filters.applied includes only non-empty filters
+  }}
+  onPostCall={(event) => {
+    if (!event.response) return;
+    void api.post("/api/v1/admin/datatable/admin/summary", {
+      base: { include_meta: false },
+      ...event.filters.applied,
+    }).then((res) => {
+      const total = res.data?.data?.total_admin_counts ?? 0;
+      console.log("filtered total", total);
+    });
+  }}
+  renderTableFooter={({ records }) => (
+    <tr>
+      <td colSpan={99}>Page rows: {records.length}</td>
+    </tr>
+  )}
+/>`}</code>
+                </pre>
+
                 <h2>Curl Quick Check</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-bash">{`# query with metadata + keyword search
@@ -379,6 +478,12 @@ curl -X POST http://127.0.0.1:3000/api/v1/admin/datatable/admin/query \\
   -H 'Authorization: Bearer <TOKEN>' \\
   -H 'Content-Type: application/json' \\
   -d '{"base":{"page":1},"f-admin_type":"admin","f-like-email":"@example.com"}'
+
+# summary cards (cross-page totals)
+curl -X POST http://127.0.0.1:3000/api/v1/admin/datatable/admin/summary \\
+  -H 'Authorization: Bearer <TOKEN>' \\
+  -H 'Content-Type: application/json' \\
+  -d '{"base":{"include_meta":false},"f-admin_type":"admin"}'
 
 # queue email export
 curl -X POST http://127.0.0.1:3000/api/v1/admin/datatable/admin/export/email \\

@@ -78,6 +78,15 @@ function formatCellValue(value: unknown): string {
   return String(value);
 }
 
+function toColumnLabel(col: DataTableColumnMetaDto): string {
+  const explicit = col.label?.trim();
+  if (explicit) return explicit;
+  return col.name
+    .split("_")
+    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
+    .join(" ");
+}
+
 function flattenFilterKeys(filterRows?: (DataTableFilterFieldDto | DataTableFilterFieldDto[])[]): string[] {
   if (!filterRows) return [];
   const keys = new Set<string>();
@@ -484,7 +493,7 @@ export function DataTable<T>({
                   onClick={() => handleSort(col.name)}
                 >
                   <span className="inline-flex items-center gap-1">
-                    {t(col.label)}
+                    {t(toColumnLabel(col))}
                     {col.sortable && col.name === displaySortCol && displaySortDir === "asc" && <ArrowUp size={14} />}
                     {col.sortable && col.name === displaySortCol && displaySortDir === "desc" && <ArrowDown size={14} />}
                     {col.sortable && col.name !== displaySortCol && <ArrowUpDown size={14} className="opacity-30" />}

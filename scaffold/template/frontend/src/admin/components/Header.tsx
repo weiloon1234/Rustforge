@@ -6,6 +6,7 @@ import { useAutoForm, useLocaleStore, useModalStore, alertError, alertSuccess } 
 import { useAuthStore } from "@admin/stores/auth";
 import { api } from "@admin/api";
 import type { LocaleCode } from "@shared/types/platform";
+import { adminLocalePersistence } from "@admin/locale";
 
 function ProfileModal({
   account,
@@ -105,7 +106,6 @@ export default function Header({
   const locale = useLocaleStore((s) => s.locale);
   const defaultLocale = useLocaleStore((s) => s.defaultLocale);
   const availableLocales = useLocaleStore((s) => s.availableLocales);
-  const setLocale = useLocaleStore((s) => s.setLocale);
   const [menuOpen, setMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
@@ -169,27 +169,11 @@ export default function Header({
   };
 
   const handleLocaleChange = async (nextLocale: LocaleCode) => {
-    const previous = locale;
-    if (nextLocale === previous) {
-      setMenuOpen(false);
-      return;
-    }
-
-    await setLocale(nextLocale);
-    try {
-      const response = await api.patch<{ data: { locale: string } }>("/api/v1/admin/auth/locale_update", {
-        locale: nextLocale,
-      });
-      const saved = (response.data?.data?.locale ?? nextLocale) as LocaleCode;
-      if (account) {
-        setAccount({ ...account, locale: saved });
-      }
-    } catch {
-      await setLocale(previous);
+    const result = await adminLocalePersistence.changeAndPersist(nextLocale);
+    if (!result.ok) {
       void alertError({ title: t("Error"), message: t("Failed to update locale.") });
-    } finally {
-      setMenuOpen(false);
     }
+    setMenuOpen(false);
   };
 
   const handleLogout = async () => {
