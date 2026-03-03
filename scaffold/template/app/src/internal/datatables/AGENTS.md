@@ -2,6 +2,12 @@
 
 Canonical datatable runtime lives under `internal/datatables/v1/admin/*`.
 
+## Read This First
+
+1. `internal/datatables/AGENTS.md` (this file): high-level SSOT rules.
+2. `internal/datatables/v1/AGENTS.md`: version layer conventions.
+3. `internal/datatables/v1/admin/AGENTS.md`: concrete admin datatable implementation examples.
+
 ## SSOT Flow
 
 1. Contract: `app/src/contracts/datatable/admin/<model>.rs`

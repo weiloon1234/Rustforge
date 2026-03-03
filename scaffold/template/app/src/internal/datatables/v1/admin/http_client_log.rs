@@ -3,9 +3,7 @@ use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
-use generated::models::{
-    HttpClientLogDataTable, HttpClientLogDataTableConfig, HttpClientLogDataTableHooks,
-};
+use generated::models::{HttpClientLogDataTable, HttpClientLogDataTableHooks};
 
 use crate::contracts::datatable::admin::http_client_log::{
     AdminHttpClientLogDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
@@ -32,19 +30,6 @@ pub type AppHttpClientLogDataTable = HttpClientLogDataTable<HttpClientLogDataTab
 
 pub fn app_http_client_log_datatable(db: sqlx::PgPool) -> AppHttpClientLogDataTable {
     HttpClientLogDataTable::new(db).with_hooks(HttpClientLogDataTableAppHooks::default())
-}
-
-pub fn app_http_client_log_datatable_with_config(
-    db: sqlx::PgPool,
-    config: HttpClientLogDataTableConfig,
-) -> AppHttpClientLogDataTable {
-    HttpClientLogDataTable::new(db)
-        .with_hooks(HttpClientLogDataTableAppHooks::default())
-        .with_config(config)
-}
-
-pub fn register_http_client_log_datatable(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
-    registry.register(app_http_client_log_datatable(db));
 }
 
 pub fn register_scoped(registry: &mut DataTableRegistry, db: sqlx::PgPool) {

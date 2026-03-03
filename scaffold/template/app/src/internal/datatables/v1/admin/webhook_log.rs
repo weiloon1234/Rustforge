@@ -3,7 +3,7 @@ use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
-use generated::models::{WebhookLogDataTable, WebhookLogDataTableConfig, WebhookLogDataTableHooks};
+use generated::models::{WebhookLogDataTable, WebhookLogDataTableHooks};
 
 use crate::contracts::datatable::admin::webhook_log::{
     AdminWebhookLogDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
@@ -30,19 +30,6 @@ pub type AppWebhookLogDataTable = WebhookLogDataTable<WebhookLogDataTableAppHook
 
 pub fn app_webhook_log_datatable(db: sqlx::PgPool) -> AppWebhookLogDataTable {
     WebhookLogDataTable::new(db).with_hooks(WebhookLogDataTableAppHooks::default())
-}
-
-pub fn app_webhook_log_datatable_with_config(
-    db: sqlx::PgPool,
-    config: WebhookLogDataTableConfig,
-) -> AppWebhookLogDataTable {
-    WebhookLogDataTable::new(db)
-        .with_hooks(WebhookLogDataTableAppHooks::default())
-        .with_config(config)
-}
-
-pub fn register_webhook_log_datatable(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
-    registry.register(app_webhook_log_datatable(db));
 }
 
 pub fn register_scoped(registry: &mut DataTableRegistry, db: sqlx::PgPool) {

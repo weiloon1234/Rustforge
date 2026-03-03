@@ -5,7 +5,7 @@ use core_web::datatable::{
 };
 use core_web::openapi::ApiRouter;
 use generated::{
-    models::{ContentPageDataTable, ContentPageDataTableConfig, ContentPageDataTableHooks},
+    models::{ContentPageDataTable, ContentPageDataTableHooks},
     permissions::Permission,
     DEFAULT_LOCALE, SUPPORTED_LOCALES,
 };
@@ -92,19 +92,6 @@ pub type AppContentPageDataTable = ContentPageDataTable<ContentPageDataTableAppH
 
 pub fn app_content_page_datatable(db: sqlx::PgPool) -> AppContentPageDataTable {
     ContentPageDataTable::new(db).with_hooks(ContentPageDataTableAppHooks::default())
-}
-
-pub fn app_content_page_datatable_with_config(
-    db: sqlx::PgPool,
-    config: ContentPageDataTableConfig,
-) -> AppContentPageDataTable {
-    ContentPageDataTable::new(db)
-        .with_hooks(ContentPageDataTableAppHooks::default())
-        .with_config(config)
-}
-
-pub fn register_content_page_datatable(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
-    registry.register(app_content_page_datatable(db));
 }
 
 pub fn register_scoped(registry: &mut DataTableRegistry, db: sqlx::PgPool) {

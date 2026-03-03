@@ -8,8 +8,7 @@ use core_web::openapi::ApiRouter;
 use generated::{
     extensions::admin::types::admin_identity,
     models::{
-        Admin, AdminCol, AdminDataTable, AdminDataTableConfig, AdminDataTableHooks, AdminQuery,
-        AdminType,
+        Admin, AdminCol, AdminDataTable, AdminDataTableHooks, AdminQuery, AdminType,
     },
     permissions::Permission,
 };
@@ -237,19 +236,6 @@ pub type AppAdminDataTable = AdminDataTable<AdminDataTableAppHooks>;
 
 pub fn app_admin_datatable(db: sqlx::PgPool) -> AppAdminDataTable {
     AdminDataTable::new(db).with_hooks(AdminDataTableAppHooks::default())
-}
-
-pub fn app_admin_datatable_with_config(
-    db: sqlx::PgPool,
-    config: AdminDataTableConfig,
-) -> AppAdminDataTable {
-    AdminDataTable::new(db)
-        .with_hooks(AdminDataTableAppHooks::default())
-        .with_config(config)
-}
-
-pub fn register_admin_datatable(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
-    registry.register(app_admin_datatable(db));
 }
 
 pub fn register_scoped(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
