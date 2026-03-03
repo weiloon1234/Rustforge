@@ -25,6 +25,9 @@ fn register_seeders(seeders: &mut Vec<Box<dyn core_db::seeder::Seeder>>) {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    bootstrap::console::start_console::<ProjectCommands, fn(&mut Vec<Box<dyn core_db::seeder::Seeder>>)>(Some(register_seeders))
-        .await
+    bootstrap::console::start_console::<
+        ProjectCommands,
+        fn(&mut Vec<Box<dyn core_db::seeder::Seeder>>),
+    >(Some(register_seeders))
+    .await
 }

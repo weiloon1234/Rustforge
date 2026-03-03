@@ -129,10 +129,9 @@ fn apply_keyword_filter<'db>(query: AdminQuery<'db>, value: &str) -> AdminQuery<
 
 fn parse_datetime(raw: &str, end_of_day: bool) -> Option<time::OffsetDateTime> {
     let trimmed = raw.trim();
-    if let Ok(dt) = time::OffsetDateTime::parse(
-        trimmed,
-        &time::format_description::well_known::Rfc3339,
-    ) {
+    if let Ok(dt) =
+        time::OffsetDateTime::parse(trimmed, &time::format_description::well_known::Rfc3339)
+    {
         return Some(dt);
     }
     if trimmed.len() == 10 {

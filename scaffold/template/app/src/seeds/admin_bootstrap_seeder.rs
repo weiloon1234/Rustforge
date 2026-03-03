@@ -1,8 +1,5 @@
 use async_trait::async_trait;
-use core_db::{
-    common::auth::hash::hash_password,
-    seeder::Seeder,
-};
+use core_db::{common::auth::hash::hash_password, seeder::Seeder};
 
 #[derive(Debug, Default)]
 pub struct AdminBootstrapSeeder;

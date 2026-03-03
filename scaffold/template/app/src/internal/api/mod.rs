@@ -4,17 +4,10 @@ pub mod v1;
 
 use std::sync::Arc;
 
-use axum::{
-    Json, Router,
-    http::header,
-    response::Html,
-    routing::get as axum_get,
-};
+use axum::{http::header, response::Html, routing::get as axum_get, Json, Router};
 use bootstrap::boot::BootContext;
 use core_web::openapi::{
-    aide::{
-        openapi::{Info, OpenApi},
-    },
+    aide::openapi::{Info, OpenApi},
     ApiRouter,
 };
 use tower_http::services::{ServeDir, ServeFile};
@@ -62,7 +55,10 @@ pub async fn build_router(ctx: BootContext) -> anyhow::Result<Router> {
                 async move {
                     (
                         [
-                            (header::CONTENT_TYPE, "application/javascript; charset=utf-8"),
+                            (
+                                header::CONTENT_TYPE,
+                                "application/javascript; charset=utf-8",
+                            ),
                             (header::CACHE_CONTROL, "no-store, max-age=0"),
                         ],
                         bootstrap_script,
@@ -99,7 +95,8 @@ pub async fn build_router(ctx: BootContext) -> anyhow::Result<Router> {
 }
 
 async fn root() -> Html<&'static str> {
-    Html(r#"<!doctype html>
+    Html(
+        r#"<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -119,11 +116,13 @@ async fn root() -> Html<&'static str> {
     <div id="root"></div>
     <script type="module" src="http://localhost:5173/src/user/main.tsx"></script>
   </body>
-</html>"#)
+</html>"#,
+    )
 }
 
 async fn admin_dev() -> Html<&'static str> {
-    Html(r#"<!doctype html>
+    Html(
+        r#"<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -143,7 +142,8 @@ async fn admin_dev() -> Html<&'static str> {
     <div id="root"></div>
     <script type="module" src="http://localhost:5174/admin/src/admin/main.tsx"></script>
   </body>
-</html>"#)
+</html>"#,
+    )
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

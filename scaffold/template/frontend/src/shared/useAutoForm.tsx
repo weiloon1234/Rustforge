@@ -6,7 +6,7 @@ import { Select, type SelectOption } from "@shared/components/Select";
 import { Checkbox } from "@shared/components/Checkbox";
 import { Radio, type RadioOption } from "@shared/components/Radio";
 
-type InputFieldType = "text" | "email" | "password" | "search" | "url" | "tel" | "number" | "money" | "pin";
+type InputFieldType = "text" | "email" | "password" | "search" | "url" | "tel" | "number" | "money" | "atm" | "pin";
 
 type FieldDef =
   | { name: string; type: InputFieldType; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean }
@@ -195,7 +195,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
               );
 
             default: {
-              // All TextInput types: text, email, password, search, url, tel, number, money, pin
+              // All TextInput types: text, email, password, search, url, tel, number, money, atm, pin
               const inputField = field as FieldDef & { type: InputFieldType };
               return (
                 <div key={field.name} style={style}>
