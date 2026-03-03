@@ -1,8 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Menu, ChevronDown, ChevronUp, Check, User, Shield, LogOut } from "lucide-react";
+import {
+  Menu,
+  ChevronDown,
+  ChevronUp,
+  Check,
+  User,
+  Shield,
+  LogOut,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { AdminMeOutput, AdminProfileUpdateOutput } from "@admin/types";
-import { useAutoForm, useLocaleStore, useModalStore, alertError, alertSuccess } from "@shared/components";
+import {
+  useAutoForm,
+  useLocaleStore,
+  useModalStore,
+  alertError,
+  alertSuccess,
+} from "@shared/components";
 import { useAuthStore } from "@admin/stores/auth";
 import { api } from "@admin/api";
 import type { LocaleCode } from "@shared/types/platform";
@@ -23,8 +37,20 @@ function ProfileModal({
     url: "auth/profile_update",
     method: "patch",
     fields: [
-      { name: "name", type: "text", label: t("Name"), placeholder: t("Enter full name"), required: true },
-      { name: "email", type: "email", label: t("Email"), placeholder: t("Enter email"), required: false },
+      {
+        name: "name",
+        type: "text",
+        label: t("Name"),
+        placeholder: t("Enter full name"),
+        required: true,
+      },
+      {
+        name: "email",
+        type: "email",
+        label: t("Email"),
+        placeholder: t("Enter email"),
+        required: false,
+      },
     ],
     defaults: {
       name: account.name,
@@ -33,7 +59,10 @@ function ProfileModal({
     onSuccess: (data) => {
       onUpdated(data as AdminProfileUpdateOutput);
       close();
-      void alertSuccess({ title: t("Success"), message: t("Profile updated successfully") });
+      void alertSuccess({
+        title: t("Success"),
+        message: t("Profile updated successfully"),
+      });
     },
   });
 
@@ -56,13 +85,34 @@ function SecurityModal({ formId }: { formId: string }) {
     url: "auth/password_update",
     method: "patch",
     fields: [
-      { name: "current_password", type: "password", label: t("Current Password"), placeholder: t("Enter current password"), required: true },
-      { name: "password", type: "password", label: t("New Password"), placeholder: t("Enter password"), required: true },
-      { name: "password_confirmation", type: "password", label: t("Confirm Password"), placeholder: t("Confirm new password"), required: true },
+      {
+        name: "current_password",
+        type: "password",
+        label: t("Current Password"),
+        placeholder: t("Enter current password"),
+        required: true,
+      },
+      {
+        name: "password",
+        type: "password",
+        label: t("New Password"),
+        placeholder: t("Enter password"),
+        required: true,
+      },
+      {
+        name: "password_confirmation",
+        type: "password",
+        label: t("Confirm Password"),
+        placeholder: t("Confirm new password"),
+        required: true,
+      },
     ],
     onSuccess: () => {
       close();
-      void alertSuccess({ title: t("Success"), message: t("Password updated successfully") });
+      void alertSuccess({
+        title: t("Success"),
+        message: t("Password updated successfully"),
+      });
     },
   });
 
@@ -188,7 +238,10 @@ export default function Header({
   const handleLocaleChange = async (nextLocale: LocaleCode) => {
     const result = await adminLocalePersistence.changeAndPersist(nextLocale);
     if (!result.ok) {
-      void alertError({ title: t("Error"), message: t("Failed to update locale.") });
+      void alertError({
+        title: t("Error"),
+        message: t("Failed to update locale."),
+      });
     }
     setMenuOpen(false);
   };
@@ -244,8 +297,10 @@ export default function Header({
                   onClick={() => void handleLocaleChange(code)}
                   className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm text-foreground transition-colors hover:bg-surface-hover"
                 >
-                  <span>{t(`Locale ${code.toUpperCase()}`}</span>
-                  {locale === code && <Check size={16} className="text-primary" />}
+                  <span>{t(`Locale ${code.toUpperCase()}`)}</span>
+                  {locale === code && (
+                    <Check size={16} className="text-primary" />
+                  )}
                 </button>
               ))}
             </div>
