@@ -2,7 +2,6 @@ import { Eye } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { HttpClientLogDatatableRow } from "@admin/types";
 import { DataTable, formatDateTime, useModalStore } from "@shared/components";
-import { api } from "@admin/api";
 
 function statusBadgeClass(status: number | null): string {
   if (status === null) return "bg-gray-100 text-gray-700";
@@ -52,7 +51,9 @@ function prettyPayload(value: unknown): string {
 function JsonPanel({ title, value }: { title: string; value: unknown }) {
   return (
     <section className="space-y-1">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted">{title}</p>
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+        {title}
+      </p>
       <pre className="max-h-64 overflow-auto rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground">
         {prettyPayload(value)}
       </pre>
@@ -114,87 +115,80 @@ export default function HttpClientLogsPage() {
   return (
     <DataTable<HttpClientLogDatatableRow>
       url="/api/v1/admin/datatable/http-client-log/query"
-      api={api}
-      perPage={30}
-      hiddenColumns={[
-        "id",
-        "request_headers",
-        "request_body",
-        "response_headers",
-        "response_body",
-      ]}
-      prependColumns={<th className="px-4 py-3 font-medium text-muted">{t("Actions")}</th>}
-      renderPrependCells={(log) => (
-        <td className="px-4 py-3">
-          <button
-            type="button"
-            onClick={() => openDetailModal(log)}
-            className="rounded-lg p-1.5 text-muted transition hover:bg-surface-hover hover:text-foreground"
-            title={t("View Detail")}
-          >
-            <Eye size={16} />
-          </button>
-        </td>
-      )}
-      columnRenderers={{
-        request_url: (value) => (
-          <td key="request_url" className="max-w-[36rem] break-all px-4 py-3 text-foreground">
-            {String(value)}
-          </td>
-        ),
-        request_method: (value) => {
-          const method = String(value ?? "").toUpperCase();
-          return (
-            <td key="request_method" className="px-4 py-3">
+      title={t("HTTP Client Logs")}
+      subtitle={t("Inspect outbound HTTP requests and responses")}
+      columns={[
+        {
+          key: "actions",
+          label: t("Actions"),
+          sortable: false,
+          cellClassName: "px-4 py-3",
+          render: (log) => (
+            <button
+              type="button"
+              onClick={() => openDetailModal(log)}
+              className="rounded-lg p-1.5 text-muted transition hover:bg-surface-hover hover:text-foreground"
+              title={t("View Detail")}
+            >
+              <Eye size={16} />
+            </button>
+          ),
+        },
+        {
+          key: "request_url",
+          label: t("URL"),
+          cellClassName: "max-w-[36rem] break-all px-4 py-3 text-foreground",
+          render: (log) => log.request_url,
+        },
+        {
+          key: "request_method",
+          label: t("Method"),
+          render: (log) => {
+            const method = String(log.request_method ?? "").toUpperCase();
+            return (
               <span
                 className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${methodBadgeClass(method)}`}
               >
                 {method || "—"}
               </span>
-            </td>
-          );
+            );
+          },
         },
-        response_status: (value) => {
-          const statusNumber =
-            typeof value === "number"
-              ? value
-              : value === null || value === undefined
-                ? null
-                : Number(value);
-          const display =
-            statusNumber === null || Number.isNaN(statusNumber)
-              ? "—"
-              : String(statusNumber);
-          return (
-            <td key="response_status" className="px-4 py-3">
+        {
+          key: "response_status",
+          label: t("Status Code"),
+          render: (log) => {
+            const statusNumber =
+              typeof log.response_status === "number" ? log.response_status : null;
+            const display =
+              statusNumber === null || Number.isNaN(statusNumber)
+                ? "—"
+                : String(statusNumber);
+            return (
               <span
                 className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(statusNumber === null || Number.isNaN(statusNumber) ? null : statusNumber)}`}
               >
                 {display}
               </span>
-            </td>
-          );
+            );
+          },
         },
-        duration_ms: (value) => (
-          <td key="duration_ms" className="px-4 py-3 tabular-nums text-foreground">
-            {value === null || value === undefined ? "—" : `${value} ms`}
-          </td>
-        ),
-        created_at: (value) => (
-          <td key="created_at" className="px-4 py-3 tabular-nums text-muted">
-            {formatDateTime(value as string)}
-          </td>
-        ),
-      }}
-      rowKey={(log) => log.id}
-      header={() => (
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">{t("HTTP Client Logs")}</h1>
-          <p className="mt-1 text-sm text-muted">
-            {t("Inspect outbound HTTP requests and responses")}
-          </p>
-        </div>
-      )}
+        {
+          key: "duration_ms",
+          label: t("Duration (ms)"),
+          cellClassName: "tabular-nums text-foreground",
+          render: (log) =>
+            log.duration_ms === null || log.duration_ms === undefined
+              ? "—"
+              : `${log.duration_ms} ms`,
+        },
+        {
+          key: "created_at",
+          label: t("Created At"),
+          cellClassName: "tabular-nums text-muted",
+          render: (log) => formatDateTime(log.created_at),
+        },
+      ]}
     />
   );
 }

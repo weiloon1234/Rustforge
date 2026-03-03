@@ -6,3 +6,21 @@ export type AdminType = "developer" | "superadmin" | "admin";
 export type AuthClientType = "web" | "mobile";
 
 export type Permission = "admin.read" | "admin.manage";
+
+export interface PermissionMeta {
+  key: Permission;
+  guard: string;
+  label: string;
+  group: string;
+  description: string;
+}
+
+export const PERMISSION_META: ReadonlyArray<PermissionMeta> = [
+  { key: "admin.read", guard: "admin", label: "Read Admins", group: "admin", description: "View admin profile and datatable records." },
+  { key: "admin.manage", guard: "admin", label: "Manage Admins", group: "admin", description: "Create/update/delete admin records and perform management actions." },
+];
+
+export const PERMISSIONS: ReadonlyArray<Permission> = [
+  "admin.read",
+  "admin.manage",
+];

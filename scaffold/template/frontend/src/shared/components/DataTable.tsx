@@ -1,15 +1,60 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
-import { RefreshCw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, ArrowUp, ArrowDown, ArrowUpDown, Search, X } from "lucide-react";
+import {
+  RefreshCw,
+  ChevronsLeft,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsRight,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  Search,
+  X,
+} from "lucide-react";
 import type { AxiosInstance } from "axios";
-import type { ApiResponse, DataTableQueryResponse, DataTableMetaDto, DataTableColumnMetaDto, DataTableFilterFieldDto } from "@shared/types";
+import type {
+  ApiResponse,
+  DataTableQueryResponse,
+  DataTableMetaDto,
+  DataTableColumnMetaDto,
+  DataTableFilterFieldDto,
+} from "@shared/types";
 
 const PER_PAGE_OPTIONS = [30, 50, 100, 300, 1000, 3000];
 
-export interface DataTableSortState {
-  column: string;
-  direction: "asc" | "desc";
-  handleSort: (colName: string) => void;
+const DataTableApiContext = createContext<AxiosInstance | null>(null);
+
+export function DataTableApiProvider({
+  api,
+  children,
+}: {
+  api: AxiosInstance;
+  children: ReactNode;
+}) {
+  return (
+    <DataTableApiContext.Provider value={api}>
+      {children}
+    </DataTableApiContext.Provider>
+  );
+}
+
+export function useDataTableApi(): AxiosInstance {
+  const api = useContext(DataTableApiContext);
+  if (!api) {
+    throw new Error(
+      "DataTableApiProvider is missing. Wrap your portal app with <DataTableApiProvider api={...}>.",
+    );
+  }
+  return api;
 }
 
 export interface DataTableFilterSnapshot {
@@ -40,19 +85,36 @@ export interface DataTableFooterContext<T> {
   refresh: () => void;
 }
 
+export interface DataTableCellContext<T> {
+  index: number;
+  absoluteIndex: number;
+  refresh: () => void;
+  record: T;
+}
+
+export interface DataTableColumn<T> {
+  key: string;
+  label: string;
+  sortable?: boolean;
+  headerClassName?: string;
+  cellClassName?: string;
+  render?: (record: T, ctx: DataTableCellContext<T>) => ReactNode;
+}
+
+type RefreshSlot = ReactNode | ((refresh: () => void) => ReactNode);
+
 export interface DataTableProps<T> {
   url: string;
-  api: AxiosInstance;
   extraBody?: Record<string, unknown>;
   perPage?: number;
-  hiddenColumns?: string[];
-  prependColumns?: ReactNode | ((sort: DataTableSortState) => ReactNode);
-  appendColumns?: ReactNode;
-  renderPrependCells?: (record: T, index: number, refresh: () => void) => ReactNode;
-  renderAppendCells?: (record: T, index: number, refresh: () => void) => ReactNode;
-  columnRenderers?: Record<string, (value: unknown, record: T, refresh: () => void) => ReactNode>;
-  rowKey: (record: T) => string | number;
-  header?: ReactNode | ((refresh: () => void) => ReactNode);
+  columns?: DataTableColumn<T>[];
+  rowKey?: (record: T) => string | number | bigint;
+  showIndexColumn?: boolean;
+  title?: string;
+  subtitle?: string;
+  showRefresh?: boolean;
+  headerActions?: RefreshSlot;
+  headerContent?: RefreshSlot;
   renderTableFooter?: (ctx: DataTableFooterContext<T>) => ReactNode;
   onPreCall?: (event: DataTablePreCallEvent) => void;
   onPostCall?: (event: DataTablePostCallEvent<T>) => void;
@@ -87,7 +149,9 @@ function toColumnLabel(col: DataTableColumnMetaDto): string {
     .join(" ");
 }
 
-function flattenFilterKeys(filterRows?: (DataTableFilterFieldDto | DataTableFilterFieldDto[])[]): string[] {
+function flattenFilterKeys(
+  filterRows?: (DataTableFilterFieldDto | DataTableFilterFieldDto[])[],
+): string[] {
   if (!filterRows) return [];
   const keys = new Set<string>();
   for (const row of filterRows) {
@@ -132,6 +196,22 @@ function parseNumericCell(value: unknown): number | null {
   return null;
 }
 
+function resolveRefreshSlot(slot: RefreshSlot | undefined, refresh: () => void): ReactNode {
+  if (!slot) return null;
+  if (typeof slot === "function") {
+    return (slot as (refresh: () => void) => ReactNode)(refresh);
+  }
+  return slot;
+}
+
+function defaultRecordKey(record: unknown): string | number | null {
+  if (!record || typeof record !== "object") return null;
+  const value = (record as Record<string, unknown>).id;
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "string" || typeof value === "number") return value;
+  return null;
+}
+
 function FilterField({
   field,
   value,
@@ -158,7 +238,9 @@ function FilterField({
         >
           <option value="">{field.placeholder ?? t("All")}</option>
           {(field.options ?? []).map((o) => (
-            <option key={o.value} value={o.value}>{t(o.label)}</option>
+            <option key={o.value} value={o.value}>
+              {t(o.label)}
+            </option>
           ))}
         </select>
       );
@@ -223,22 +305,22 @@ function FilterField({
 
 export function DataTable<T>({
   url,
-  api,
   extraBody,
   perPage: defaultPerPage = 30,
-  hiddenColumns = [],
-  prependColumns,
-  appendColumns,
-  renderPrependCells,
-  renderAppendCells,
-  columnRenderers,
+  columns,
   rowKey,
-  header,
+  showIndexColumn = true,
+  title,
+  subtitle,
+  showRefresh = true,
+  headerActions,
+  headerContent,
   renderTableFooter,
   onPreCall,
   onPostCall,
   footer,
 }: DataTableProps<T>) {
+  const api = useDataTableApi();
   const { t } = useTranslation();
   const [data, setData] = useState<DataTableQueryResponse<T> | null>(null);
   const [meta, setMeta] = useState<DataTableMetaDto | null>(null);
@@ -247,6 +329,7 @@ export function DataTable<T>({
   const [perPage, setPerPage] = useState(defaultPerPage);
   const [jumpValue, setJumpValue] = useState("");
   const metaLoaded = useRef(false);
+  const rowKeyWarned = useRef(false);
 
   const [sortColumn, setSortColumn] = useState("");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
@@ -254,20 +337,46 @@ export function DataTable<T>({
   const appliedFiltersRef = useRef<Record<string, string>>({});
   const [filterVersion, setFilterVersion] = useState(0);
 
-  const visibleColumns: DataTableColumnMetaDto[] = (meta?.columns ?? []).filter(
-    (col) => !hiddenColumns.includes(col.name),
-  );
-
+  const metaColumns: DataTableColumnMetaDto[] = meta?.columns ?? [];
   const displaySortCol = sortColumn || meta?.defaults?.sorting_column || "";
   const displaySortDir = sortColumn
     ? sortDirection
     : ((meta?.defaults?.sorted ?? "desc") as "asc" | "desc");
 
+  const renderColumns: DataTableColumn<T>[] =
+    columns && columns.length > 0
+      ? columns
+      : metaColumns.map((col) => ({
+          key: col.name,
+          label: toColumnLabel(col),
+          sortable: col.sortable,
+        }));
+
+  const isColumnSortable = useCallback(
+    (col: DataTableColumn<T>): boolean => {
+      const fromMeta = metaColumns.find((m) => m.name === col.key);
+      if (!fromMeta?.sortable) return false;
+      return col.sortable !== false;
+    },
+    [metaColumns],
+  );
+
   const fetchData = useCallback(
-    async (p: number, pp: number, sc: string, sd: string, filters: Record<string, string>, signal?: AbortSignal) => {
+    async (
+      p: number,
+      pp: number,
+      sc: string,
+      sd: string,
+      filters: Record<string, string>,
+      signal?: AbortSignal,
+    ) => {
       setLoading(true);
       const includeMeta = !metaLoaded.current;
-      const base: Record<string, unknown> = { page: p, per_page: pp, include_meta: includeMeta };
+      const base: Record<string, unknown> = {
+        page: p,
+        per_page: pp,
+        include_meta: includeMeta,
+      };
       if (sc) {
         base.sorting_column = sc;
         base.sorting = sd;
@@ -293,7 +402,9 @@ export function DataTable<T>({
       };
       onPreCall?.(callEvent);
       try {
-        const res = await api.post<ApiResponse<DataTableQueryResponse<T>>>(url, payload, { signal });
+        const res = await api.post<ApiResponse<DataTableQueryResponse<T>>>(url, payload, {
+          signal,
+        });
         setData(res.data.data);
         if (includeMeta && res.data.data.meta) {
           setMeta(res.data.data.meta);
@@ -318,17 +429,26 @@ export function DataTable<T>({
         setLoading(false);
       }
     },
-    [api, extraBody, meta, onPostCall, onPreCall, url],
+    [api, extraBody, meta?.filter_rows, onPostCall, onPreCall, url],
   );
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchData(page, perPage, sortColumn, sortDirection, appliedFiltersRef.current, controller.signal);
+    fetchData(
+      page,
+      perPage,
+      sortColumn,
+      sortDirection,
+      appliedFiltersRef.current,
+      controller.signal,
+    );
     return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, perPage, sortColumn, sortDirection, filterVersion]);
+  }, [page, perPage, sortColumn, sortDirection, filterVersion, fetchData]);
 
-  const refresh = () => fetchData(page, perPage, sortColumn, sortDirection, appliedFiltersRef.current);
+  const refresh = useCallback(
+    () => fetchData(page, perPage, sortColumn, sortDirection, appliedFiltersRef.current),
+    [fetchData, page, perPage, sortColumn, sortDirection],
+  );
 
   const sumColumn = useCallback(
     (column: string, decimals = 2) => {
@@ -341,7 +461,9 @@ export function DataTable<T>({
           sum += numeric;
         }
       }
-      const safeDecimals = Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 2;
+      const safeDecimals = Number.isFinite(decimals)
+        ? Math.max(0, Math.trunc(decimals))
+        : 2;
       return Number(sum.toFixed(safeDecimals));
     },
     [data],
@@ -363,15 +485,14 @@ export function DataTable<T>({
     setJumpValue("");
   };
 
-  const handleSort = (colName: string) => {
-    const col = meta?.columns.find((c) => c.name === colName);
-    if (!col?.sortable) return;
-    if (colName === displaySortCol) {
+  const handleSort = (col: DataTableColumn<T>) => {
+    if (!isColumnSortable(col)) return;
+    if (col.key === displaySortCol) {
       setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
     } else {
       setSortDirection("desc");
     }
-    setSortColumn(colName);
+    setSortColumn(col.key);
     setPage(1);
   };
 
@@ -392,38 +513,64 @@ export function DataTable<T>({
     setFilterValues((prev) => ({ ...prev, [key]: value }));
   };
 
-  const pgBtn = "inline-flex items-center justify-center h-8 min-w-8 rounded-lg border border-border bg-surface text-sm font-medium text-foreground transition hover:bg-surface-hover disabled:opacity-40 disabled:pointer-events-none";
-  const pgBtnActive = "inline-flex items-center justify-center h-8 min-w-8 rounded-lg bg-primary text-sm font-medium text-primary-foreground";
+  const resolveRowKey = (record: T, index: number): string | number => {
+    if (rowKey) {
+      const value = rowKey(record);
+      return typeof value === "bigint" ? value.toString() : value;
+    }
+    const value = defaultRecordKey(record);
+    if (value !== null) return value;
+    if (!rowKeyWarned.current) {
+      rowKeyWarned.current = true;
+      console.error(
+        "DataTable: rowKey is missing and record.id is unavailable. Provide `rowKey` prop explicitly.",
+      );
+    }
+    return `rf-row-${page}-${index}`;
+  };
+
+  const pgBtn =
+    "inline-flex items-center justify-center h-8 min-w-8 rounded-lg border border-border bg-surface text-sm font-medium text-foreground transition hover:bg-surface-hover disabled:opacity-40 disabled:pointer-events-none";
+  const pgBtnActive =
+    "inline-flex items-center justify-center h-8 min-w-8 rounded-lg bg-primary text-sm font-medium text-primary-foreground";
 
   const filterRows = meta?.filter_rows;
   const hasFilters = filterRows && filterRows.length > 0;
 
+  const resolvedHeaderActions = resolveRefreshSlot(headerActions, refresh);
+  const resolvedHeaderContent = resolveRefreshSlot(headerContent, refresh);
+  const showTopHeader =
+    Boolean(title?.trim()) ||
+    Boolean(subtitle?.trim()) ||
+    Boolean(resolvedHeaderActions) ||
+    showRefresh;
+
   return (
     <div>
-      {header && (
-        <div className="mb-6 flex items-center justify-between">
-          <div className="flex-1">{typeof header === "function" ? header(refresh) : header}</div>
-          <button
-            onClick={refresh}
-            disabled={loading}
-            className="ml-3 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-surface-hover"
-          >
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-            {t("Refresh")}
-          </button>
-        </div>
-      )}
-
-      {!header && (
-        <div className="mb-4 flex justify-end">
-          <button
-            onClick={refresh}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-surface-hover"
-          >
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-            {t("Refresh")}
-          </button>
+      {(showTopHeader || resolvedHeaderContent) && (
+        <div className="mb-6 space-y-3">
+          {showTopHeader && (
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                {title && <h1 className="text-2xl font-bold text-foreground">{title}</h1>}
+                {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                {resolvedHeaderActions}
+                {showRefresh && (
+                  <button
+                    onClick={refresh}
+                    disabled={loading}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-surface-hover"
+                  >
+                    <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+                    {t("Refresh")}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {resolvedHeaderContent && <div>{resolvedHeaderContent}</div>}
         </div>
       )}
 
@@ -432,10 +579,16 @@ export function DataTable<T>({
           {filterRows.map((row, ri) => {
             if (Array.isArray(row)) {
               return (
-                <div key={ri} className={`grid gap-3`} style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))` }}>
+                <div
+                  key={ri}
+                  className="grid gap-3"
+                  style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))` }}
+                >
                   {row.map((field) => (
                     <div key={field.filter_key}>
-                      <label className="mb-1 block text-xs font-medium text-muted">{t(field.label)}</label>
+                      <label className="mb-1 block text-xs font-medium text-muted">
+                        {t(field.label)}
+                      </label>
                       <FilterField
                         field={field}
                         value={filterValues[field.filter_key] ?? ""}
@@ -447,10 +600,13 @@ export function DataTable<T>({
                 </div>
               );
             }
+
             const field = row as DataTableFilterFieldDto;
             return (
               <div key={field.filter_key}>
-                <label className="mb-1 block text-xs font-medium text-muted">{t(field.label)}</label>
+                <label className="mb-1 block text-xs font-medium text-muted">
+                  {t(field.label)}
+                </label>
                 <FilterField
                   field={field}
                   value={filterValues[field.filter_key] ?? ""}
@@ -483,29 +639,36 @@ export function DataTable<T>({
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-border bg-surface-hover/50">
-              {typeof prependColumns === "function"
-                ? prependColumns({ column: displaySortCol, direction: displaySortDir, handleSort })
-                : prependColumns}
-              {visibleColumns.map((col) => {
-                const rawLabel = toColumnLabel(col);
-                const translatedLabel = t(rawLabel);
-                const displayLabel = translatedLabel.trim() ? translatedLabel : rawLabel;
+              {showIndexColumn && (
+                <th className="w-12 px-4 py-3 font-medium text-muted">{t("#")}</th>
+              )}
+              {renderColumns.map((col) => {
+                const sortable = isColumnSortable(col);
+                const translatedLabel = t(col.label);
+                const displayLabel = translatedLabel.trim() ? translatedLabel : col.label;
                 return (
-                <th
-                  key={col.name}
-                  className={`px-4 py-3 font-medium text-muted ${col.sortable ? "cursor-pointer select-none" : ""}`}
-                  onClick={() => handleSort(col.name)}
-                >
-                  <span className="inline-flex items-center gap-1">
-                    {displayLabel}
-                    {col.sortable && col.name === displaySortCol && displaySortDir === "asc" && <ArrowUp size={14} />}
-                    {col.sortable && col.name === displaySortCol && displaySortDir === "desc" && <ArrowDown size={14} />}
-                    {col.sortable && col.name !== displaySortCol && <ArrowUpDown size={14} className="opacity-30" />}
-                  </span>
-                </th>
+                  <th
+                    key={col.key}
+                    className={`px-4 py-3 font-medium text-muted ${
+                      sortable ? "cursor-pointer select-none" : ""
+                    } ${col.headerClassName ?? ""}`}
+                    onClick={() => handleSort(col)}
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {displayLabel}
+                      {sortable &&
+                        col.key === displaySortCol &&
+                        displaySortDir === "asc" && <ArrowUp size={14} />}
+                      {sortable &&
+                        col.key === displaySortCol &&
+                        displaySortDir === "desc" && <ArrowDown size={14} />}
+                      {sortable && col.key !== displaySortCol && (
+                        <ArrowUpDown size={14} className="opacity-30" />
+                      )}
+                    </span>
+                  </th>
                 );
               })}
-              {appendColumns}
             </tr>
           </thead>
           <tbody>
@@ -523,29 +686,46 @@ export function DataTable<T>({
                 </td>
               </tr>
             )}
-            {data && data.records.length > 0 && data.records.map((record, index) => (
-              <tr key={rowKey(record)} className="border-b border-border last:border-0 hover:bg-surface-hover/30">
-                {renderPrependCells?.(record, index, refresh)}
-                {visibleColumns.map((col) => {
-                  const value = (record as Record<string, unknown>)[col.name];
-                  if (columnRenderers?.[col.name]) {
-                    return columnRenderers[col.name](value, record, refresh);
-                  }
-                  return (
-                    <td key={col.name} className="px-4 py-3 text-foreground">
-                      {formatCellValue(value)}
-                    </td>
-                  );
-                })}
-                {renderAppendCells?.(record, index, refresh)}
-              </tr>
-            ))}
+            {data &&
+              data.records.length > 0 &&
+              data.records.map((record, index) => {
+                const absoluteIndex = (data.page - 1) * data.per_page + index;
+                return (
+                  <tr
+                    key={resolveRowKey(record, index)}
+                    className="border-b border-border last:border-0 hover:bg-surface-hover/30"
+                  >
+                    {showIndexColumn && (
+                      <td className="px-4 py-3 tabular-nums text-muted">{absoluteIndex + 1}</td>
+                    )}
+                    {renderColumns.map((col) => {
+                      const content = col.render
+                        ? col.render(record, {
+                            index,
+                            absoluteIndex,
+                            refresh,
+                            record,
+                          })
+                        : formatCellValue((record as Record<string, unknown>)[col.key]);
+
+                      return (
+                        <td
+                          key={col.key}
+                          className={`px-4 py-3 text-foreground ${col.cellClassName ?? ""}`}
+                        >
+                          {content}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
           </tbody>
           {data && renderTableFooter && (
             <tfoot className="border-t border-border bg-surface-hover/20">
               {renderTableFooter({
                 records: data.records,
-                visibleColumns,
+                visibleColumns: metaColumns,
                 sumColumn,
                 refresh,
               })}
@@ -563,7 +743,9 @@ export function DataTable<T>({
               className="rf-select !w-auto !py-1 !pr-8 !text-xs"
             >
               {PER_PAGE_OPTIONS.map((n) => (
-                <option key={n} value={n}>{n}</option>
+                <option key={n} value={n}>
+                  {n}
+                </option>
               ))}
             </select>
             <span>
@@ -585,17 +767,31 @@ export function DataTable<T>({
               </button>
               {buildPageNumbers(page, data.total_pages).map((p, i) =>
                 p === "…" ? (
-                  <span key={`e${i}`} className="px-1 text-sm text-muted select-none">…</span>
+                  <span key={`e${i}`} className="px-1 text-sm text-muted select-none">
+                    …
+                  </span>
                 ) : (
-                  <button key={p} className={p === page ? pgBtnActive : pgBtn} onClick={() => goTo(p)}>
+                  <button
+                    key={p}
+                    className={p === page ? pgBtnActive : pgBtn}
+                    onClick={() => goTo(p)}
+                  >
                     {p}
                   </button>
                 ),
               )}
-              <button className={pgBtn} disabled={page >= data.total_pages} onClick={() => goTo(page + 1)}>
+              <button
+                className={pgBtn}
+                disabled={page >= data.total_pages}
+                onClick={() => goTo(page + 1)}
+              >
                 <ChevronRight size={14} />
               </button>
-              <button className={pgBtn} disabled={page >= data.total_pages} onClick={() => goTo(data.total_pages)}>
+              <button
+                className={pgBtn}
+                disabled={page >= data.total_pages}
+                onClick={() => goTo(data.total_pages)}
+              >
                 <ChevronsRight size={14} />
               </button>
               <div className="ml-2 flex items-center gap-1">

@@ -504,8 +504,36 @@ fn render_admin_type_enum() -> String {
 }
 
 fn render_permission_enum() -> String {
-    use generated::permissions::Permission;
-    enum_to_ts_type("Permission", Permission::all())
+    use generated::permissions::{Permission, PERMISSION_META};
+
+    let mut out = enum_to_ts_type("Permission", Permission::all());
+    out.push_str(
+        "\n\nexport interface PermissionMeta {\n  key: Permission;\n  guard: string;\n  label: string;\n  group: string;\n  description: string;\n}",
+    );
+
+    out.push_str("\n\nexport const PERMISSION_META: ReadonlyArray<PermissionMeta> = [");
+    for meta in PERMISSION_META {
+        out.push_str(&format!(
+            "\n  {{ key: {}, guard: {}, label: {}, group: {}, description: {} }},",
+            serde_json::to_string(&meta.key).expect("permission key"),
+            serde_json::to_string(&meta.guard).expect("permission guard"),
+            serde_json::to_string(&meta.label).expect("permission label"),
+            serde_json::to_string(&meta.group).expect("permission group"),
+            serde_json::to_string(&meta.description).expect("permission description"),
+        ));
+    }
+    out.push_str("\n];");
+
+    out.push_str("\n\nexport const PERMISSIONS: ReadonlyArray<Permission> = [");
+    for permission in Permission::all() {
+        out.push_str(&format!(
+            "\n  {},",
+            serde_json::to_string(&permission.as_str()).expect("permission value"),
+        ));
+    }
+    out.push_str("\n];");
+
+    out
 }
 
 fn render_auth_client_type_enum() -> String {

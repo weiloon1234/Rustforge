@@ -1,11 +1,12 @@
 import { FileText, LayoutDashboard, List, Users, type LucideIcon } from "lucide-react";
+import type { Permission } from "@admin/types";
 
 type AdminTypeVisibility = "developer" | "superadmin" | "admin";
 
 export interface NavChild {
   label: string;
   path: string;
-  permissions?: string[];
+  permissions?: Permission[];
   admin_types?: AdminTypeVisibility[];
   notificationKey?: string;
 }
@@ -14,7 +15,7 @@ export interface NavItem {
   label: string;
   icon: LucideIcon;
   path?: string;
-  permissions?: string[];
+  permissions?: Permission[];
   admin_types?: AdminTypeVisibility[];
   notificationKey?: string;
   children?: NavChild[];

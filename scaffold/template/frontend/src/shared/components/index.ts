@@ -19,12 +19,14 @@ export type { RadioProps, RadioOption } from "@shared/components/Radio";
 export { DataTable } from "@shared/components/DataTable";
 export type {
   DataTableProps,
-  DataTableSortState,
+  DataTableColumn,
+  DataTableCellContext,
   DataTablePreCallEvent,
   DataTablePostCallEvent,
   DataTableFooterContext,
   DataTableFilterSnapshot,
 } from "@shared/components/DataTable";
+export { DataTableApiProvider, useDataTableApi } from "@shared/components/DataTable";
 
 export { useAutoForm } from "@shared/useAutoForm";
 export type { FieldDef, AutoFormConfig, AutoFormErrors, AutoFormResult } from "@shared/useAutoForm";

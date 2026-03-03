@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { Plus, Pencil, Trash2 } from "lucide-react";
 import type {
   AdminDatatableSummaryOutput,
   AdminDeleteOutput,
@@ -8,6 +8,7 @@ import type {
   AdminType,
   Permission,
 } from "@admin/types";
+import { PERMISSIONS, PERMISSION_META } from "@admin/types";
 import type { ApiResponse } from "@shared/types";
 import {
   Checkbox,
@@ -19,7 +20,7 @@ import {
   alertError,
   formatDateTime,
 } from "@shared/components";
-import type { DataTablePostCallEvent, DataTableSortState } from "@shared/components";
+import type { DataTablePostCallEvent } from "@shared/components";
 import { api } from "@admin/api";
 
 const TYPE_COLORS: Record<AdminType, string> = {
@@ -28,12 +29,9 @@ const TYPE_COLORS: Record<AdminType, string> = {
   admin: "bg-blue-100 text-blue-700",
 };
 
-const ALL_PERMISSIONS: Permission[] = ["admin.read", "admin.manage"];
-
-const PERMISSION_LABELS: Record<Permission, string> = {
-  "admin.read": "Read Admins",
-  "admin.manage": "Manage Admins",
-};
+const ADMIN_PERMISSION_META = PERMISSION_META.filter(
+  (meta) => meta.guard.toLowerCase() === "admin",
+);
 
 const ENABLE_SUMMARY_CARDS = true;
 
@@ -52,7 +50,11 @@ function parseAdminDatatableSummary(
   const developerCount = Number(raw.developer_count);
   const superadminCount = Number(raw.superadmin_count);
   const adminCount = Number(raw.admin_count);
-  if (![totalAdminCounts, developerCount, superadminCount, adminCount].every(Number.isFinite)) {
+  if (
+    ![totalAdminCounts, developerCount, superadminCount, adminCount].every(
+      Number.isFinite,
+    )
+  ) {
     return null;
   }
   return {
@@ -82,16 +84,20 @@ function PermissionBadges({ abilities }: { abilities: string[] }) {
       </span>
     );
   }
+
   return (
     <div className="flex flex-wrap gap-1">
-      {abilities.map((a) => (
-        <span
-          key={a}
-          className="inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
-        >
-          {a}
-        </span>
-      ))}
+      {abilities.map((ability) => {
+        const meta = ADMIN_PERMISSION_META.find((item) => item.key === ability);
+        return (
+          <span
+            key={ability}
+            className="inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+          >
+            {t(meta?.label ?? ability)}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -100,24 +106,27 @@ function PermissionCheckboxes({
   abilities,
   onChange,
 }: {
-  abilities: string[];
-  onChange: (next: string[]) => void;
+  abilities: Permission[];
+  onChange: (next: Permission[]) => void;
 }) {
   const { t } = useTranslation();
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-medium text-foreground">{t("Permissions")}</legend>
+      <legend className="text-sm font-medium text-foreground">
+        {t("Permissions")}
+      </legend>
       <div className="flex flex-wrap gap-x-6 gap-y-1">
-        {ALL_PERMISSIONS.map((perm) => (
+        {ADMIN_PERMISSION_META.map((meta) => (
           <Checkbox
-            key={perm}
-            label={t(PERMISSION_LABELS[perm])}
-            checked={abilities.includes(perm)}
+            key={meta.key}
+            label={t(meta.label)}
+            checked={abilities.includes(meta.key as Permission)}
             onChange={(e) => {
+              const permission = meta.key as Permission;
               if (e.target.checked) {
-                onChange([...abilities, perm]);
+                onChange([...abilities, permission]);
               } else {
-                onChange(abilities.filter((a) => a !== perm));
+                onChange(abilities.filter((value) => value !== permission));
               }
             }}
           />
@@ -130,17 +139,41 @@ function PermissionCheckboxes({
 function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
-  const [abilities, setAbilities] = useState<string[]>([]);
+  const [abilities, setAbilities] = useState<Permission[]>([]);
 
   const { submit, busy, form, errors } = useAutoForm(api, {
     url: "/api/v1/admin/admins",
     method: "post",
     extraPayload: { abilities },
     fields: [
-      { name: "username", type: "text", label: t("Username"), placeholder: t("Enter username"), required: true },
-      { name: "name", type: "text", label: t("Name"), placeholder: t("Enter full name"), required: true },
-      { name: "email", type: "email", label: t("Email"), placeholder: t("Enter email"), required: false },
-      { name: "password", type: "password", label: t("Password"), placeholder: t("Enter password"), required: true },
+      {
+        name: "username",
+        type: "text",
+        label: t("Username"),
+        placeholder: t("Enter username"),
+        required: true,
+      },
+      {
+        name: "name",
+        type: "text",
+        label: t("Name"),
+        placeholder: t("Enter full name"),
+        required: true,
+      },
+      {
+        name: "email",
+        type: "email",
+        label: t("Email"),
+        placeholder: t("Enter email"),
+        required: false,
+      },
+      {
+        name: "password",
+        type: "password",
+        label: t("Password"),
+        placeholder: t("Enter password"),
+        required: true,
+      },
     ],
     onSuccess: () => {
       close();
@@ -159,7 +192,11 @@ function CreateAdminForm({ onCreated }: { onCreated: () => void }) {
       {form}
       <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
       <div className="flex justify-end gap-2 pt-2">
-        <button type="button" onClick={() => close()} className="rf-modal-btn-secondary">
+        <button
+          type="button"
+          onClick={() => close()}
+          className="rf-modal-btn-secondary"
+        >
           {t("Cancel")}
         </button>
         <button type="submit" disabled={busy} className="rf-modal-btn-primary">
@@ -180,8 +217,11 @@ function EditAdminForm({
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
   const isNormalAdmin = admin.admin_type === "admin";
-  const [abilities, setAbilities] = useState<string[]>(
-    admin.abilities.filter((a) => a !== "*"),
+  const [abilities, setAbilities] = useState<Permission[]>(
+    admin.abilities.filter(
+      (value): value is Permission =>
+        PERMISSIONS.includes(value as Permission),
+    ),
   );
 
   const { submit, busy, form, errors } = useAutoForm(api, {
@@ -189,9 +229,27 @@ function EditAdminForm({
     method: "patch",
     extraPayload: isNormalAdmin ? { abilities } : {},
     fields: [
-      { name: "username", type: "text", label: t("Username"), placeholder: t("Enter username"), required: true },
-      { name: "name", type: "text", label: t("Name"), placeholder: t("Enter full name"), required: true },
-      { name: "email", type: "email", label: t("Email"), placeholder: t("Enter email"), required: false },
+      {
+        name: "username",
+        type: "text",
+        label: t("Username"),
+        placeholder: t("Enter username"),
+        required: true,
+      },
+      {
+        name: "name",
+        type: "text",
+        label: t("Name"),
+        placeholder: t("Enter full name"),
+        required: true,
+      },
+      {
+        name: "email",
+        type: "email",
+        label: t("Email"),
+        placeholder: t("Enter email"),
+        required: false,
+      },
     ],
     defaults: {
       username: admin.username,
@@ -217,7 +275,11 @@ function EditAdminForm({
         <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
       )}
       <div className="flex justify-end gap-2 pt-2">
-        <button type="button" onClick={() => close()} className="rf-modal-btn-secondary">
+        <button
+          type="button"
+          onClick={() => close()}
+          className="rf-modal-btn-secondary"
+        >
           {t("Cancel")}
         </button>
         <button type="submit" disabled={busy} className="rf-modal-btn-primary">
@@ -233,7 +295,9 @@ export default function AdminsPage() {
   const [summary, setSummary] = useState<AdminDatatableSummary | null>(null);
   const summaryRequestId = useRef(0);
 
-  const handleDatatablePostCall = (event: DataTablePostCallEvent<AdminDatatableRow>) => {
+  const handleDatatablePostCall = (
+    event: DataTablePostCallEvent<AdminDatatableRow>,
+  ) => {
     if (!ENABLE_SUMMARY_CARDS) return;
     if (!event.response || event.error) {
       setSummary(null);
@@ -282,7 +346,9 @@ export default function AdminsPage() {
   const handleDelete = async (admin: AdminDatatableRow, refresh: () => void) => {
     await alertConfirm({
       title: t("Delete Admin"),
-      message: t('Are you sure you want to delete ":username"?', { username: admin.username }),
+      message: t('Are you sure you want to delete ":username"?', {
+        username: admin.username,
+      }),
       confirmText: t("Delete"),
       callback: async (result) => {
         if (result.isConfirmed) {
@@ -293,7 +359,10 @@ export default function AdminsPage() {
             alertSuccess({ title: t("Deleted"), message: t("Admin deleted") });
             refresh();
           } catch {
-            alertError({ title: t("Error"), message: t("Failed to delete admin.") });
+            alertError({
+              title: t("Error"),
+              message: t("Failed to delete admin."),
+            });
           }
         }
       },
@@ -303,32 +372,55 @@ export default function AdminsPage() {
   return (
     <DataTable<AdminDatatableRow>
       url="/api/v1/admin/datatable/admin/query"
-      api={api}
-      perPage={30}
-      hiddenColumns={["id", "locale", "password", "updated_at", "deleted_at"]}
-      prependColumns={({ column, direction, handleSort }: DataTableSortState) => (
-        <>
-          <th
-            className="w-12 px-4 py-3 font-medium text-muted cursor-pointer select-none"
-            onClick={() => handleSort("id")}
-          >
-            <span className="inline-flex items-center gap-1">
-              #
-              {column === "id" && direction === "asc" && <ArrowUp size={14} />}
-              {column === "id" && direction === "desc" && <ArrowDown size={14} />}
-              {column !== "id" && <ArrowUpDown size={14} className="opacity-30" />}
-            </span>
-          </th>
-          <th className="px-4 py-3 font-medium text-muted">{t("Actions")}</th>
-        </>
+      title={t("Admins")}
+      subtitle={t("Manage administrator accounts")}
+      headerActions={(refresh) => (
+        <button
+          onClick={() => handleCreate(refresh)}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary/90"
+        >
+          <Plus size={16} />
+          {t("Create Admin")}
+        </button>
       )}
-      renderPrependCells={(admin, index, refresh) => (
-        <>
-          <td className="px-4 py-3 tabular-nums text-muted">{index + 1}</td>
-          <td className="px-4 py-3">
+      headerContent={
+        ENABLE_SUMMARY_CARDS && summary ? (
+          <div className="grid gap-2 sm:grid-cols-4">
+            <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+              <p className="text-xs text-muted">{t("Filtered Total")}</p>
+              <p className="font-semibold text-foreground">
+                {summary.total_admin_counts}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+              <p className="text-xs text-muted">{t("Developers")}</p>
+              <p className="font-semibold text-foreground">
+                {summary.developer_count}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+              <p className="text-xs text-muted">{t("Super Admins")}</p>
+              <p className="font-semibold text-foreground">
+                {summary.superadmin_count}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+              <p className="text-xs text-muted">{t("Admins")}</p>
+              <p className="font-semibold text-foreground">{summary.admin_count}</p>
+            </div>
+          </div>
+        ) : undefined
+      }
+      columns={[
+        {
+          key: "actions",
+          label: t("Actions"),
+          sortable: false,
+          cellClassName: "px-4 py-3",
+          render: (admin, ctx) => (
             <div className="flex gap-1">
               <button
-                onClick={() => handleEdit(admin, refresh)}
+                onClick={() => handleEdit(admin, ctx.refresh)}
                 className="rounded-lg p-1.5 text-muted transition hover:bg-surface-hover hover:text-foreground"
                 title={t("Edit")}
               >
@@ -336,7 +428,7 @@ export default function AdminsPage() {
               </button>
               {admin.admin_type === "admin" && (
                 <button
-                  onClick={() => handleDelete(admin, refresh)}
+                  onClick={() => handleDelete(admin, ctx.refresh)}
                   className="rounded-lg p-1.5 text-muted transition hover:bg-red-50 hover:text-red-600"
                   title={t("Delete")}
                 >
@@ -344,22 +436,57 @@ export default function AdminsPage() {
                 </button>
               )}
             </div>
-          </td>
-        </>
-      )}
-      columnRenderers={{
-        username: (v) => <td key="username" className="px-4 py-3 font-medium text-foreground">{String(v)}</td>,
-        email: (v) => <td key="email" className="px-4 py-3 text-muted">{String(v ?? "—")}</td>,
-        admin_type: (_, record) => <td key="admin_type" className="px-4 py-3"><TypeBadge type={record.admin_type} /></td>,
-        abilities: (_, record) => <td key="abilities" className="px-4 py-3"><PermissionBadges abilities={record.abilities} /></td>,
-        created_at: (v) => <td key="created_at" className="px-4 py-3 tabular-nums text-muted">{formatDateTime(v as string)}</td>,
-      }}
-      rowKey={(admin) => String(admin.id)}
+          ),
+        },
+        {
+          key: "username",
+          label: t("Username"),
+          cellClassName: "px-4 py-3 font-medium text-foreground",
+          render: (admin) => admin.username,
+        },
+        {
+          key: "email",
+          label: t("Email"),
+          cellClassName: "px-4 py-3 text-muted",
+          render: (admin) => admin.email ?? "—",
+        },
+        {
+          key: "name",
+          label: t("Name"),
+          cellClassName: "px-4 py-3 text-foreground",
+          render: (admin) => admin.name,
+        },
+        {
+          key: "admin_type",
+          label: t("Admin Type"),
+          cellClassName: "px-4 py-3",
+          render: (admin) => <TypeBadge type={admin.admin_type} />,
+        },
+        {
+          key: "abilities",
+          label: t("Permissions"),
+          sortable: false,
+          cellClassName: "px-4 py-3",
+          render: (admin) => <PermissionBadges abilities={admin.abilities} />,
+        },
+        {
+          key: "created_at",
+          label: t("Created At"),
+          cellClassName: "px-4 py-3 tabular-nums text-muted",
+          render: (admin) => formatDateTime(admin.created_at),
+        },
+      ]}
       onPostCall={ENABLE_SUMMARY_CARDS ? handleDatatablePostCall : undefined}
       renderTableFooter={({ records }) => {
-        const pageDeveloperCount = records.filter((admin) => admin.admin_type === "developer").length;
-        const pageSuperadminCount = records.filter((admin) => admin.admin_type === "superadmin").length;
-        const pageAdminCount = records.filter((admin) => admin.admin_type === "admin").length;
+        const pageDeveloperCount = records.filter(
+          (admin) => admin.admin_type === "developer",
+        ).length;
+        const pageSuperadminCount = records.filter(
+          (admin) => admin.admin_type === "superadmin",
+        ).length;
+        const pageAdminCount = records.filter(
+          (admin) => admin.admin_type === "admin",
+        ).length;
         return (
           <tr>
             <td colSpan={99} className="px-4 py-2 text-xs text-muted">
@@ -374,43 +501,6 @@ export default function AdminsPage() {
           </tr>
         );
       }}
-      header={(refresh) => (
-        <div>
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">{t("Admins")}</h1>
-              <p className="mt-1 text-sm text-muted">{t("Manage administrator accounts")}</p>
-            </div>
-            <button
-              onClick={() => handleCreate(refresh)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary/90"
-            >
-              <Plus size={16} />
-              {t("Create Admin")}
-            </button>
-          </div>
-          {ENABLE_SUMMARY_CARDS && summary && (
-            <div className="mt-3 grid gap-2 sm:grid-cols-4">
-              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-                <p className="text-xs text-muted">{t("Filtered Total")}</p>
-                <p className="font-semibold text-foreground">{summary.total_admin_counts}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-                <p className="text-xs text-muted">{t("Developers")}</p>
-                <p className="font-semibold text-foreground">{summary.developer_count}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-                <p className="text-xs text-muted">{t("Super Admins")}</p>
-                <p className="font-semibold text-foreground">{summary.superadmin_count}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-                <p className="text-xs text-muted">{t("Admins")}</p>
-                <p className="font-semibold text-foreground">{summary.admin_count}</p>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     />
   );
 }

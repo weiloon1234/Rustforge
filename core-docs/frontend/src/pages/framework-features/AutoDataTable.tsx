@@ -452,11 +452,28 @@ core_web::datatable::routes_for_scoped_contract_with_options(
 
                 <h2>Frontend Consumption Pattern</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-ts">{`<DataTable<AdminDatatableRow>
-  onPreCall={(event) => {
-    // event.filters.all includes every filter key with current value (empty or non-empty)
-    // event.filters.applied includes only non-empty filters
-  }}
+                    <code className="language-ts">{`<DataTableApiProvider api={api}>
+  <DataTable<AdminDatatableRow>
+    url="/api/v1/admin/datatable/admin/query"
+    title="Admins"
+    subtitle="Manage administrator accounts"
+    columns={[
+      { key: "actions", label: "Actions", sortable: false, render: (record, ctx) => (
+          <button onClick={() => openEditModal(record, ctx.refresh)}>Edit</button>
+        ),
+      },
+      { key: "username", label: "Username", render: (record) => record.username },
+      { key: "email", label: "Email", render: (record) => record.email ?? "—" },
+      { key: "created_at", label: "Created At", render: (record) => formatDateTime(record.created_at) },
+    ]}
+    // # index column is auto-enabled by default
+    showIndexColumn
+    // rowKey optional; defaults to record.id when available
+    // rowKey={(record) => String(record.id)}
+    onPreCall={(event) => {
+      // event.filters.all includes every filter key with current value
+      // event.filters.applied includes only non-empty filters
+    }}
   onPostCall={(event) => {
     if (!event.response) return;
     void api.post("/api/v1/admin/datatable/admin/summary", {
@@ -472,8 +489,14 @@ core_web::datatable::routes_for_scoped_contract_with_options(
       <td colSpan={99}>Page rows: {records.length}</td>
     </tr>
   )}
-/>`}</code>
+  />
+</DataTableApiProvider>`}</code>
                 </pre>
+                <p>
+                    Frontend renderers now return inner content only (<code>span/div/text</code>);
+                    the shared datatable wraps cells with consistent <code>&lt;td&gt;</code> structure
+                    and classes.
+                </p>
                 <h3>Page Footer Metrics vs Cross-Page Summary</h3>
                 <ul>
                     <li>
