@@ -23,5 +23,8 @@
   "e.g. 10": "e.g. 10",
   "e.g. 3000": "e.g. 3000",
   "Min Duration (ms)": "Min Duration (ms)",
-  "Max Duration (ms)": "Max Duration (ms)"
+  "Max Duration (ms)": "Max Duration (ms)",
+  "No file selected": "No file selected",
+  ":count files selected": ":count files selected",
+  "Maximum :count files allowed": "Maximum :count files allowed"
 }

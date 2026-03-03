@@ -140,5 +140,8 @@
   "e.g. 10": "例如 10",
   "e.g. 3000": "例如 3000",
   "Min Duration (ms)": "最低耗时（毫秒）",
-  "Max Duration (ms)": "最高耗时（毫秒）"
+  "Max Duration (ms)": "最高耗时（毫秒）",
+  "No file selected": "未选择文件",
+  ":count files selected": "已选择 :count 个文件",
+  "Maximum :count files allowed": "最多允许 :count 个文件"
 }

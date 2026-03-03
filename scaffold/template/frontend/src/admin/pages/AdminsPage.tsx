@@ -8,7 +8,7 @@ import type {
   AdminType,
   Permission,
 } from "@admin/types";
-import { PERMISSIONS, PERMISSION_META } from "@admin/types";
+import { ADMIN_TYPE, PERMISSIONS, PERMISSION_META } from "@admin/types";
 import type { ApiResponse } from "@shared/types";
 import {
   Checkbox,
@@ -24,9 +24,9 @@ import type { DataTablePostCallEvent } from "@shared/components";
 import { api } from "@admin/api";
 
 const TYPE_COLORS: Record<AdminType, string> = {
-  developer: "bg-purple-100 text-purple-700",
-  superadmin: "bg-amber-100 text-amber-700",
-  admin: "bg-blue-100 text-blue-700",
+  [ADMIN_TYPE.DEVELOPER]: "bg-purple-100 text-purple-700",
+  [ADMIN_TYPE.SUPERADMIN]: "bg-amber-100 text-amber-700",
+  [ADMIN_TYPE.ADMIN]: "bg-blue-100 text-blue-700",
 };
 
 const ADMIN_PERMISSION_META = PERMISSION_META.filter(
@@ -182,7 +182,7 @@ function EditAdminForm({
 }) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
-  const isNormalAdmin = admin.admin_type === "admin";
+  const isNormalAdmin = admin.admin_type === ADMIN_TYPE.ADMIN;
   const [abilities, setAbilities] = useState<Permission[]>(
     admin.abilities.filter(
       (value): value is Permission =>
@@ -416,7 +416,7 @@ export default function AdminsPage() {
               >
                 <Pencil size={16} />
               </button>
-              {admin.admin_type === "admin" && (
+              {admin.admin_type === ADMIN_TYPE.ADMIN && (
                 <button
                   onClick={() => handleDelete(admin, ctx.refresh)}
                   className="rounded-lg p-1.5 text-muted transition hover:bg-red-50 hover:text-red-600"
@@ -469,13 +469,13 @@ export default function AdminsPage() {
       onPostCall={ENABLE_SUMMARY_CARDS ? handleDatatablePostCall : undefined}
       renderTableFooter={({ records }) => {
         const pageDeveloperCount = records.filter(
-          (admin) => admin.admin_type === "developer",
+          (admin) => admin.admin_type === ADMIN_TYPE.DEVELOPER,
         ).length;
         const pageSuperadminCount = records.filter(
-          (admin) => admin.admin_type === "superadmin",
+          (admin) => admin.admin_type === ADMIN_TYPE.SUPERADMIN,
         ).length;
         const pageAdminCount = records.filter(
-          (admin) => admin.admin_type === "admin",
+          (admin) => admin.admin_type === ADMIN_TYPE.ADMIN,
         ).length;
         return (
           <tr>
