@@ -3,6 +3,7 @@ import {
   useId,
   useMemo,
   useEffect,
+  useRef,
   useState,
   type ChangeEvent,
   type InputHTMLAttributes,
@@ -48,6 +49,7 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
       multiple,
       accepts,
       maxFiles,
+      disabled,
       onChange,
       ...rest
     },
@@ -56,6 +58,7 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
     const { t } = useTranslation();
     const autoId = useId();
     const id = externalId ?? autoId;
+    const inputRef = useRef<HTMLInputElement | null>(null);
     const [maxFilesWarning, setMaxFilesWarning] = useState<string | null>(null);
     const resolvedAccept = accept ?? accepts;
     const previewItems = useMemo(() => {
@@ -97,6 +100,13 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
       onChange?.(event);
     };
 
+    const selectLabel = multiple ? t("Choose files") : t("Choose file");
+    const selectedSummary = !hasPreview
+      ? t("No file selected")
+      : previewItems.length === 1
+        ? previewItems[0]?.name ?? t("No file selected")
+        : t(":count files selected", { count: previewItems.length });
+
     return (
       <div className={`rf-field ${containerClassName ?? ""}`}>
         {label && (
@@ -104,23 +114,40 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
             {label}
           </label>
         )}
+        <div
+          className={`rf-input flex items-center gap-2 ${hasFieldError(error, errors) ? "rf-input-error" : ""} ${className ?? ""}`}
+        >
+          <button
+            type="button"
+            className="rounded-md border border-border bg-surface px-2.5 py-1 text-xs font-medium text-foreground transition hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => inputRef.current?.click()}
+            disabled={disabled}
+          >
+            {selectLabel}
+          </button>
+          <p className="min-w-0 flex-1 truncate text-sm text-muted">{selectedSummary}</p>
+        </div>
         <input
-          ref={ref}
+          ref={(node) => {
+            inputRef.current = node;
+            if (typeof ref === "function") {
+              ref(node);
+            } else if (ref) {
+              ref.current = node;
+            }
+          }}
           id={id}
           type="file"
           required={required}
           accept={resolvedAccept}
           multiple={multiple}
+          disabled={disabled}
           onChange={handleChange}
-          className={`rf-input ${hasFieldError(error, errors) ? "rf-input-error" : ""} ${className ?? ""}`}
+          className="sr-only"
           {...rest}
         />
         {!hasFieldError(error, errors) && (
           <>
-            {!hasPreview && <p className="rf-note">{t("No file selected")}</p>}
-            {hasPreview && previewItems.length > 1 && (
-              <p className="rf-note">{t(":count files selected", { count: previewItems.length })}</p>
-            )}
             {hasPreview && previewItems.length === 1 && preview && (
               <div className="mt-2 flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2">
                 {isImagePreview ? (

@@ -2,6 +2,7 @@ import { useEffect, useId, type ChangeEvent } from "react";
 import { Bold, Italic, List, ListOrdered, Undo2, Redo2 } from "lucide-react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { useTranslation } from "react-i18next";
 import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
 
 export interface TiptapInputProps {
@@ -37,6 +38,7 @@ export function TiptapInput({
   className,
   id: externalId,
 }: TiptapInputProps) {
+  const { t } = useTranslation();
   const autoId = useId();
   const id = externalId ?? autoId;
   const hasError = hasFieldError(error, errors);
@@ -87,7 +89,8 @@ export function TiptapInput({
             className={btnClass(!!editor?.isActive("bold"))}
             onClick={() => editor?.chain().focus().toggleBold().run()}
             disabled={!editor || disabled}
-            title="Bold"
+            title={t("Bold")}
+            aria-label={t("Bold")}
           >
             <Bold size={14} />
           </button>
@@ -96,7 +99,8 @@ export function TiptapInput({
             className={btnClass(!!editor?.isActive("italic"))}
             onClick={() => editor?.chain().focus().toggleItalic().run()}
             disabled={!editor || disabled}
-            title="Italic"
+            title={t("Italic")}
+            aria-label={t("Italic")}
           >
             <Italic size={14} />
           </button>
@@ -105,7 +109,8 @@ export function TiptapInput({
             className={btnClass(!!editor?.isActive("bulletList"))}
             onClick={() => editor?.chain().focus().toggleBulletList().run()}
             disabled={!editor || disabled}
-            title="Bullet List"
+            title={t("Bullet List")}
+            aria-label={t("Bullet List")}
           >
             <List size={14} />
           </button>
@@ -114,7 +119,8 @@ export function TiptapInput({
             className={btnClass(!!editor?.isActive("orderedList"))}
             onClick={() => editor?.chain().focus().toggleOrderedList().run()}
             disabled={!editor || disabled}
-            title="Ordered List"
+            title={t("Ordered List")}
+            aria-label={t("Ordered List")}
           >
             <ListOrdered size={14} />
           </button>
@@ -124,7 +130,8 @@ export function TiptapInput({
             className={btnClass(false)}
             onClick={() => editor?.chain().focus().undo().run()}
             disabled={!editor || disabled || !canUndo}
-            title="Undo"
+            title={t("Undo")}
+            aria-label={t("Undo")}
           >
             <Undo2 size={14} />
           </button>
@@ -133,7 +140,8 @@ export function TiptapInput({
             className={btnClass(false)}
             onClick={() => editor?.chain().focus().redo().run()}
             disabled={!editor || disabled || !canRedo}
-            title="Redo"
+            title={t("Redo")}
+            aria-label={t("Redo")}
           >
             <Redo2 size={14} />
           </button>

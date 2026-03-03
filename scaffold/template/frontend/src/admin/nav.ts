@@ -1,5 +1,17 @@
-import { FileText, LayoutDashboard, List, Users, type LucideIcon } from "lucide-react";
-import { ADMIN_TYPE, PERMISSION, type AdminType, type Permission } from "@admin/types";
+import {
+  FileText,
+  LayoutDashboard,
+  List,
+  Users,
+  Settings,
+  type LucideIcon,
+} from "lucide-react";
+import {
+  ADMIN_TYPE,
+  PERMISSION,
+  type AdminType,
+  type Permission,
+} from "@admin/types";
 
 export interface NavChild {
   label: string;
@@ -41,16 +53,20 @@ export const navigation: NavItem[] = [
     path: "/",
   },
   {
-    label: "Admins",
-    icon: Users,
-    path: "/other/admins",
-    permissions: [PERMISSION.ADMIN_READ, PERMISSION.ADMIN_MANAGE],
-  },
-  {
-    label: "Pages",
-    icon: FileText,
-    path: "/other/content-pages",
-    permissions: [PERMISSION.PAGE_READ, PERMISSION.PAGE_MANAGE],
+    label: "Other",
+    icon: Settings,
+    children: [
+      {
+        label: "Admins",
+        path: "/other/admins",
+        permissions: [PERMISSION.ADMIN_READ, PERMISSION.ADMIN_MANAGE],
+      },
+      {
+        label: "Pages",
+        path: "/other/content-pages",
+        permissions: [PERMISSION.PAGE_READ, PERMISSION.PAGE_MANAGE],
+      },
+    ],
   },
   {
     label: "Developer",
