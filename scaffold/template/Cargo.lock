@@ -1047,6 +1047,7 @@ dependencies = [
 [[package]]
 name = "bootstrap"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1336,6 +1337,7 @@ dependencies = [
 [[package]]
 name = "core-config"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "anyhow",
  "core-i18n",
@@ -1347,6 +1349,7 @@ dependencies = [
 [[package]]
 name = "core-datatable"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1362,6 +1365,7 @@ dependencies = [
 [[package]]
 name = "core-db"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1402,6 +1406,7 @@ dependencies = [
 [[package]]
 name = "core-docs"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "axum",
  "tower-http",
@@ -1427,6 +1432,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 [[package]]
 name = "core-http-log"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1451,6 +1457,7 @@ dependencies = [
 [[package]]
 name = "core-i18n"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "anyhow",
  "axum",
@@ -1464,6 +1471,7 @@ dependencies = [
 [[package]]
 name = "core-jobs"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1486,6 +1494,7 @@ dependencies = [
 [[package]]
 name = "core-mailer"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1501,6 +1510,7 @@ dependencies = [
 [[package]]
 name = "core-notify"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1514,6 +1524,7 @@ dependencies = [
 [[package]]
 name = "core-realtime"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "anyhow",
  "axum",
@@ -1533,6 +1544,7 @@ dependencies = [
 [[package]]
 name = "core-web"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "aide",
  "anyhow",
@@ -1798,6 +1810,7 @@ checksum = "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
 [[package]]
 name = "db-gen"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "anyhow",
  "convert_case",
@@ -4250,6 +4263,7 @@ dependencies = [
 [[package]]
 name = "rustforge-contract-macros"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4261,6 +4275,7 @@ dependencies = [
 [[package]]
 name = "rustforge-contract-meta"
 version = "0.1.0"
+source = "git+https://github.com/weiloon1234/Rustforge.git?branch=main#589d92e5b8274524092de33ec0299465b45b4247"
 
 [[package]]
 name = "rustix"
