@@ -377,25 +377,25 @@ export default function AdminsPage() {
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Filtered Total")}</p>
               <p className="font-semibold text-foreground">
-                {Number(summary.total_admin_counts ?? summary.total_filtered)}
+                {summary.total_admin_counts ?? summary.total_filtered}
               </p>
             </div>
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Developers")}</p>
               <p className="font-semibold text-foreground">
-                {Number(summary.developer_count)}
+                {summary.developer_count}
               </p>
             </div>
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Super Admins")}</p>
               <p className="font-semibold text-foreground">
-                {Number(summary.superadmin_count)}
+                {summary.superadmin_count}
               </p>
             </div>
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Admins")}</p>
               <p className="font-semibold text-foreground">
-                {Number(summary.admin_count)}
+                {summary.admin_count}
               </p>
             </div>
           </div>

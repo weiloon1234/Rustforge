@@ -149,12 +149,14 @@ pub struct ArticleCreateInput {
                     build time.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`use ts_rs::TS;
+                    <code className="language-rust">{`use core_web::ids::SnowflakeId;
+use ts_rs::TS;
 
 #[derive(TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminMeOutput {
-    pub id: i64,
+    #[ts(type = "string")]
+    pub id: SnowflakeId,
     pub username: String,
     pub name: String,
     #[ts(type = "AdminType")]

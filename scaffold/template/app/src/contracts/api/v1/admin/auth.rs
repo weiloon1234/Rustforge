@@ -1,6 +1,7 @@
 use crate::contracts::types::username::UsernameString;
 use core_web::auth::AuthClientType;
 use core_web::contracts::rustforge_contract;
+use core_web::ids::SnowflakeId;
 use generated::models::AdminType;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -92,7 +93,8 @@ pub struct AdminAuthOutput {
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminMeOutput {
-    pub id: i64,
+    #[ts(type = "string")]
+    pub id: SnowflakeId,
     pub identity: String,
     pub username: String,
     pub email: Option<String>,
@@ -107,7 +109,8 @@ pub struct AdminMeOutput {
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminProfileUpdateOutput {
-    pub id: i64,
+    #[ts(type = "string")]
+    pub id: SnowflakeId,
     pub identity: String,
     pub username: String,
     pub email: Option<String>,

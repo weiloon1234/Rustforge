@@ -1,5 +1,6 @@
 use crate::contracts::types::username::UsernameString;
 use core_web::contracts::rustforge_contract;
+use core_web::ids::SnowflakeId;
 use generated::{
     extensions::admin::types::AdminViewComputedExt, models::AdminType, permissions::Permission,
 };
@@ -64,7 +65,8 @@ impl UpdateAdminInput {
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminOutput {
-    pub id: i64,
+    #[ts(type = "string")]
+    pub id: SnowflakeId,
     pub identity: String,
     pub username: String,
     pub email: Option<String>,
@@ -96,7 +98,7 @@ impl From<generated::models::AdminView> for AdminOutput {
             .unwrap_or_default();
 
         Self {
-            id: value.id,
+            id: value.id.into(),
             identity: value.identity(),
             username: value.username,
             email: value.email,

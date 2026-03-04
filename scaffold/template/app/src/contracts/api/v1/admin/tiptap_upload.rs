@@ -9,6 +9,7 @@ pub struct AdminTiptapImageUploadOutput {
     pub path: String,
     pub url: String,
     pub content_type: String,
+    #[ts(type = "number")]
     pub size: i64,
     pub width: Option<i32>,
     pub height: Option<i32>,

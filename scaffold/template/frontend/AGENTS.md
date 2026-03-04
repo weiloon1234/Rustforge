@@ -248,7 +248,8 @@ make gen          # Code generation + type generation
 | Rust | TypeScript | Notes |
 |------|-----------|-------|
 | `String` | `string` | |
-| `i64`, `u64`, `i128`, `u128` | `bigint` | Default ts-rs mapping (precision-safe for IDs) |
+| `core_web::ids::SnowflakeId` | `string` | Canonical API identifier type (`id`, `*_id`) |
+| `i64`, `u64`, `i128`, `u128` | `bigint` | Default ts-rs mapping for raw integers; prefer `#[ts(type = "number")]` for non-ID counts/sizes |
 | `f32`, `f64`, `i32`, `u32` | `number` | |
 | `bool` | `boolean` | |
 | `Option<T>` | `T \| null` | |

@@ -180,7 +180,7 @@ async fn me(auth: AuthUser<AdminGuard>) -> Result<ApiResponse<AdminMeOutput>, Ap
     let identity = user.identity();
     Ok(ApiResponse::success(
         AdminMeOutput {
-            id: user.id,
+            id: user.id.into(),
             identity,
             username: user.username,
             email: user.email,
@@ -203,7 +203,7 @@ async fn profile_update(
     let identity = admin.identity();
     Ok(ApiResponse::success(
         AdminProfileUpdateOutput {
-            id: admin.id,
+            id: admin.id.into(),
             identity,
             username: admin.username,
             email: admin.email,

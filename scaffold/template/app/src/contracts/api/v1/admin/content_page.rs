@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use core_web::ids::SnowflakeId;
 use schemars::JsonSchema;
 use serde::Serialize;
 use ts_rs::TS;
@@ -19,7 +20,8 @@ pub struct AdminContentPageUpdateInput {
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminContentPageOutput {
-    pub id: i64,
+    #[ts(type = "string")]
+    pub id: SnowflakeId,
     pub tag: String,
     #[ts(type = "ContentPageSystemFlag")]
     pub is_system: String,
@@ -42,7 +44,8 @@ pub struct AdminContentPageOutput {
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminContentPageUpdateOutput {
-    pub id: i64,
+    #[ts(type = "string")]
+    pub id: SnowflakeId,
     pub tag: String,
     #[ts(type = "ContentPageSystemFlag")]
     pub is_system: String,
@@ -72,7 +75,7 @@ impl From<generated::models::ContentPageView> for AdminContentPageOutput {
     fn from(value: generated::models::ContentPageView) -> Self {
         let cover = multilang_to_map(value.cover_translations.as_ref());
         Self {
-            id: value.id,
+            id: value.id.into(),
             tag: value.tag,
             is_system: value.is_system.as_str().to_string(),
             title: multilang_to_map(value.title_translations.as_ref()),
@@ -89,7 +92,7 @@ impl From<generated::models::ContentPageView> for AdminContentPageUpdateOutput {
     fn from(value: generated::models::ContentPageView) -> Self {
         let cover = multilang_to_map(value.cover_translations.as_ref());
         Self {
-            id: value.id,
+            id: value.id.into(),
             tag: value.tag,
             is_system: value.is_system.as_str().to_string(),
             title: multilang_to_map(value.title_translations.as_ref()),
@@ -118,7 +121,10 @@ fn attachment_urls_from_map(values: &BTreeMap<String, String>) -> BTreeMap<Strin
     values
         .iter()
         .map(|(locale, path)| {
-            (locale.to_string(), build_attachment_url(path, base.as_deref()))
+            (
+                locale.to_string(),
+                build_attachment_url(path, base.as_deref()),
+            )
         })
         .collect()
 }

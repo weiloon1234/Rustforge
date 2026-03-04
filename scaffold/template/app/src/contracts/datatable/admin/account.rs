@@ -2,6 +2,7 @@ use core_web::datatable::{
     DataTableFilterFieldDto, DataTableFilterFieldType, DataTableGenericEmailExportRequest,
     DataTableGenericQueryRequest, DataTableScopedContract,
 };
+use core_web::ids::SnowflakeId;
 use generated::models::AdminType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,8 @@ pub const ROUTE_PREFIX: &str = "/datatable/admin";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminDatatableRow {
-    pub id: i64,
+    #[ts(type = "string")]
+    pub id: SnowflakeId,
     pub identity: String,
     pub username: String,
     pub email: Option<String>,
@@ -34,10 +36,15 @@ pub struct AdminDatatableRow {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminDatatableSummaryOutput {
+    #[ts(type = "number")]
     pub total_admin_counts: i64,
+    #[ts(type = "number")]
     pub total_filtered: i64,
+    #[ts(type = "number")]
     pub developer_count: i64,
+    #[ts(type = "number")]
     pub superadmin_count: i64,
+    #[ts(type = "number")]
     pub admin_count: i64,
 }
 

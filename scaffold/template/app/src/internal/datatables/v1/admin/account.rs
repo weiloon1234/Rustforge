@@ -7,9 +7,7 @@ use core_web::datatable::{
 use core_web::openapi::ApiRouter;
 use generated::{
     extensions::admin::types::admin_identity,
-    models::{
-        Admin, AdminCol, AdminDataTable, AdminDataTableHooks, AdminQuery, AdminType,
-    },
+    models::{Admin, AdminCol, AdminDataTable, AdminDataTableHooks, AdminQuery, AdminType},
     permissions::Permission,
 };
 
@@ -86,6 +84,15 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
         let id = record.get("id").and_then(|v| v.as_i64());
         let identity = admin_identity(username, name, email, id);
         record.insert("identity".to_string(), serde_json::Value::String(identity));
+
+        if let Some(id_value) = record.get("id").cloned() {
+            let id_text = match id_value {
+                serde_json::Value::Number(number) => number.to_string(),
+                serde_json::Value::String(text) => text,
+                other => other.to_string(),
+            };
+            record.insert("id".to_string(), serde_json::Value::String(id_text));
+        }
 
         Ok(())
     }

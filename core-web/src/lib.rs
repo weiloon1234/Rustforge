@@ -5,6 +5,7 @@ pub mod authz;
 pub mod contracts;
 pub mod datatable;
 pub mod extract;
+pub mod ids;
 pub mod logging;
 pub mod middleware;
 pub mod openapi;
