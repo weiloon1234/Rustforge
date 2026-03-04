@@ -36,7 +36,7 @@ fields = [
 ]
 
 # localized fields
-multilang = ["title", "summary"]
+localized = ["title", "summary"]
 
 # relations
 relations = [
@@ -49,11 +49,11 @@ relations = [
                 <ul>
                     <li>
                         On insert/update: <code>set_&lt;field&gt;_lang(Locale, value)</code> and{' '}
-                        <code>set_&lt;field&gt;_langs(MultiLang)</code>.
+                        <code>set_&lt;field&gt;_langs(LocalizedText)</code>.
                     </li>
                     <li>
                         On view: <code>title: Option&lt;String&gt;</code> and{' '}
-                        <code>title_translations: Option&lt;MultiLang&gt;</code> (same pattern for
+                        <code>title_translations: Option&lt;LocalizedText&gt;</code> (same pattern for
                         other localized fields).
                     </li>
                     <li>
@@ -63,13 +63,13 @@ relations = [
                 </ul>
 
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`use crate::generated::localized::{Locale, MultiLang};
+                    <code className="language-rust">{`use crate::generated::localized::{Locale, LocalizedText};
 
 let article = article_model
     .insert()
     .set_title_lang(Locale::En, "Rust Performance Guide")
     .set_title_lang(Locale::Zh, "Rust 性能指南")
-    .set_summary_langs(MultiLang {
+    .set_summary_langs(LocalizedText {
         en: "Typed-first DX".to_string(),
         zh: "类型优先 DX".to_string(),
     })

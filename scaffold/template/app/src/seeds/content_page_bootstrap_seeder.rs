@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use core_db::{
     common::sql::{generate_snowflake_i64, DbConn, Op},
@@ -65,8 +67,8 @@ async fn ensure_page(
         return Ok(());
     }
 
-    let title_langs = build_multilang(title_en, title_zh)?;
-    let content_langs = build_multilang(content_en, content_zh)?;
+    let title_langs = build_localized_text(title_en, title_zh);
+    let content_langs = build_localized_text(content_en, content_zh);
 
     model
         .insert()
@@ -81,18 +83,14 @@ async fn ensure_page(
     Ok(())
 }
 
-fn build_multilang(en_value: &str, zh_value: &str) -> anyhow::Result<generated::MultiLang> {
-    let mut payload = serde_json::Map::new();
+fn build_localized_text(en_value: &str, zh_value: &str) -> generated::LocalizedText {
+    let mut payload = BTreeMap::new();
     for &locale in generated::SUPPORTED_LOCALES {
         let value = match locale {
             "zh" => zh_value,
             _ => en_value,
         };
-        payload.insert(
-            locale.to_string(),
-            serde_json::Value::String(value.to_string()),
-        );
+        payload.insert(locale.to_string(), value.to_string());
     }
-
-    Ok(serde_json::from_value(serde_json::Value::Object(payload))?)
+    generated::LocalizedText::from_map(&payload)
 }

@@ -15,10 +15,7 @@ pub struct ContentPageDatatableRow {
     pub id: String,
     pub tag: String,
     pub title: Option<String>,
-    #[ts(type = "ContentPageSystemFlag")]
-    pub is_system: String,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
+    pub is_system: generated::models::ContentPageSystemFlag,
     pub updated_at: String,
 }
 

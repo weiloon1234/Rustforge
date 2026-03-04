@@ -42,8 +42,8 @@ const MODEL_KEYS: ModelKeyRow[] = [
         remarks: 'Base DB fields in name:type format.',
     },
     {
-        key: 'multilang',
-        syntax: 'multilang = ["title", "summary"]',
+        key: 'localized',
+        syntax: 'localized = ["title", "summary"]',
         defaultValue: '[]',
         remarks: 'Generates locale-aware field getters/setters and translation maps.',
     },
@@ -287,7 +287,7 @@ pk = "id"
 pk_type = "i64"
 id_strategy = "snowflake"
 fields = ["id:i64", "status:ArticleStatus"]
-multilang = ["name"]
+localized = ["name"]
 soft_delete = true
 relations = ["articles:has_many:article:category_id:id"]
 
@@ -303,7 +303,7 @@ fields = [
   "slug:string",
   "published_at:datetime",
 ]
-multilang = ["title", "summary"]
+localized = ["title", "summary"]
 meta = ["seo_title:string", "reading_minutes:i32", "flags:json"]
 attachment = ["cover:image"]
 attachments = ["galleries:image"]

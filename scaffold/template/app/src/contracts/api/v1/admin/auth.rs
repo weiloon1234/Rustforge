@@ -13,13 +13,11 @@ use validator::Validate;
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminLoginInput {
     #[rf(nested)]
-    #[ts(type = "string")]
     pub username: UsernameString,
 
     #[rf(length(min = 8, max = 128))]
     pub password: String,
 
-    #[ts(type = "AuthClientType")]
     pub client_type: AuthClientType,
 }
 
@@ -27,7 +25,6 @@ pub struct AdminLoginInput {
 #[derive(TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminRefreshInput {
-    #[ts(type = "AuthClientType")]
     pub client_type: AuthClientType,
     #[serde(default)]
     #[rf(length(min = 1, max = 256))]
@@ -38,7 +35,6 @@ pub struct AdminRefreshInput {
 #[derive(TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminLogoutInput {
-    #[ts(type = "AuthClientType")]
     pub client_type: AuthClientType,
     #[serde(default)]
     #[rf(length(min = 1, max = 256))]
@@ -93,14 +89,12 @@ pub struct AdminAuthOutput {
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminMeOutput {
-    #[ts(type = "string")]
     pub id: SnowflakeId,
     pub identity: String,
     pub username: String,
     pub email: Option<String>,
     pub locale: Option<String>,
     pub name: String,
-    #[ts(type = "AdminType")]
     pub admin_type: AdminType,
     #[serde(default)]
     pub scopes: Vec<String>,
@@ -109,14 +103,12 @@ pub struct AdminMeOutput {
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminProfileUpdateOutput {
-    #[ts(type = "string")]
     pub id: SnowflakeId,
     pub identity: String,
     pub username: String,
     pub email: Option<String>,
     pub locale: Option<String>,
     pub name: String,
-    #[ts(type = "AdminType")]
     pub admin_type: AdminType,
 }
 

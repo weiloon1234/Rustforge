@@ -147,8 +147,8 @@ POST   /api/v1/admin/datatable/content_page/query`}</code>
                 </p>
                 <p>
                     Type generation note: datatable row DTOs participate in the same{' '}
-                    <code>make gen-types</code> scan as API DTOs. If a row field uses an enum via{' '}
-                    <code>#[ts(type = "EnumName")]</code>, that enum is auto-added to the generated{' '}
+                    <code>make gen-types</code> scan as API DTOs. If a row field uses a generated/
+                    framework enum directly, that enum is auto-added to the generated{' '}
                     <code>admin/types/enums.ts</code> only when referenced.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
@@ -159,6 +159,7 @@ use core_web::datatable::{
     DataTableGenericEmailExportRequest, DataTableGenericQueryRequest,
     DataTableScopedContract,
 };
+use core_web::ids::SnowflakeId;
 use generated::models::AdminType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -173,20 +174,14 @@ pub const ROUTE_PREFIX: &str = "/datatable/admin";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminDatatableRow {
-    pub id: i64,
+    pub id: SnowflakeId,
     pub username: String,
     pub email: Option<String>,
     pub name: String,
-    #[ts(type = "AdminType")]
     pub admin_type: AdminType,
     #[serde(default)]
-    #[ts(type = "string[]")]
     pub abilities: Vec<String>,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
     pub created_at: String,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
     pub updated_at: String,
 }
 

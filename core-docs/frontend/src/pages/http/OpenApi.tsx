@@ -100,8 +100,8 @@ pub struct ArticleCreateInput {
     #[rf(length(min = 1, max = 32))]
     pub status: generated::models::ArticleStatus,
 
-    pub title: generated::localized::MultiLang,
-    pub summary: generated::localized::MultiLang,
+    pub title: generated::localized::LocalizedText,
+    pub summary: generated::localized::LocalizedText,
 
     pub cover: Option<core_db::platform::attachments::types::AttachmentUploadDto>,
     pub galleries: Vec<core_db::platform::attachments::types::AttachmentUploadDto>,
@@ -155,11 +155,9 @@ use ts_rs::TS;
 #[derive(TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminMeOutput {
-    #[ts(type = "string")]
     pub id: SnowflakeId,
     pub username: String,
     pub name: String,
-    #[ts(type = "AdminType")]
     pub admin_type: generated::models::AdminType,
 }`}</code>
                 </pre>

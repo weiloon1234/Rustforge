@@ -88,9 +88,9 @@ pub async fn parse_content_page_update_multipart(
 
     Ok(AdminContentPageUpdateInput {
         tag,
-        title,
-        content,
-        cover,
+        title: generated::LocalizedText::from_map(&title),
+        content: generated::LocalizedText::from_map(&content),
+        cover: generated::LocalizedText::from_map(&cover),
     })
 }
 

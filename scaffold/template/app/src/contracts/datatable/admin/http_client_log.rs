@@ -23,8 +23,6 @@ pub struct HttpClientLogDatatableRow {
     #[ts(type = "Record<string, unknown> | null")]
     pub response_headers: Option<serde_json::Value>,
     pub response_body: Option<String>,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
     pub created_at: String,
 }
 

@@ -139,10 +139,8 @@ pub struct CreateArticleInput {
     #[rf(length(min = 1, max = 255))]
     pub title: String,
 
-    #[ts(type = "ArticleStatus")]           // generated enum — override type
     pub status: ArticleStatus,
 
-    #[ts(type = "string")]                  // newtype wrapper — flatten to string
     #[rf(nested)]
     pub slug: SlugString,
 
@@ -159,7 +157,6 @@ use core_web::ids::SnowflakeId;
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct ArticleOutput {
-    #[ts(type = "string")]                  // SnowflakeId -> JSON string
     pub id: SnowflakeId,
     pub title: String,
     #[ts(type = "string")]                  // OffsetDateTime → string
@@ -182,10 +179,11 @@ Per-portal `frontend/src/{portal}/types/index.ts` is generated automatically fro
 ### Conventions
 
 - Only **serde-visible** fields are exported (fields with `#[serde(skip)]` are excluded)
-- Use `#[ts(type = "TypeName")]` for types that don't derive `TS` (generated enums, framework types, newtypes)
-- Use `core_web::ids::SnowflakeId` + `#[ts(type = "string")]` for identifier semantics (`id`, `*_id`, owner/target/subject IDs)
-- Use `#[ts(type = "string")]` for `time::OffsetDateTime` and string newtypes
+- Generated enums/framework enums/string wrappers now map natively through `TS` impls (no per-field `#[ts(type = "...")]` needed)
+- Use `core_web::ids::SnowflakeId` directly for identifier semantics (`id`, `*_id`, owner/target/subject IDs)
+- Use `#[ts(type = "string")]` for `time::OffsetDateTime` (override-only case)
 - For non-identifier `i64` API fields (counts/size/timestamps where needed in UI), add explicit `#[ts(type = "number")]`
+- Keep `#[ts(type = "...")]` only when the TS shape must differ from Rust inference (e.g. `OffsetDateTime`, explicit `i64 -> number`, custom `serde_json::Value` shape)
 - `Option<T>` becomes `T | null` automatically
 - `Vec<T>` becomes `T[]` automatically
 - `#[serde(default)]` fields become optional in TypeScript (with `serde-compat` feature)

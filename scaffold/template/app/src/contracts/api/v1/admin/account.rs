@@ -15,7 +15,6 @@ use validator::Validate;
 pub struct CreateAdminInput {
     #[rf(nested)]
     #[rf(async_unique(table = "admin", column = "username"))]
-    #[ts(type = "string")]
     pub username: UsernameString,
     #[serde(default)]
     #[rf(email)]
@@ -25,7 +24,6 @@ pub struct CreateAdminInput {
     #[rf(length(min = 8, max = 128))]
     pub password: String,
     #[serde(default)]
-    #[ts(type = "Permission[]")]
     pub abilities: Vec<Permission>,
 }
 
@@ -42,7 +40,6 @@ pub struct UpdateAdminInput {
         column = "username",
         ignore(column = "id", field = "__target_id")
     ))]
-    #[ts(type = "string | null")]
     pub username: Option<UsernameString>,
     #[serde(default)]
     #[rf(email)]
@@ -51,7 +48,6 @@ pub struct UpdateAdminInput {
     #[rf(length(min = 1, max = 120))]
     pub name: Option<String>,
     #[serde(default)]
-    #[ts(type = "Permission[] | null")]
     pub abilities: Option<Vec<Permission>>,
 }
 
@@ -65,17 +61,14 @@ impl UpdateAdminInput {
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminOutput {
-    #[ts(type = "string")]
     pub id: SnowflakeId,
     pub identity: String,
     pub username: String,
     pub email: Option<String>,
     pub name: String,
-    #[ts(type = "AdminType")]
     pub admin_type: AdminType,
     #[serde(default)]
-    #[ts(type = "Permission[]")]
-    pub abilities: Vec<String>,
+    pub abilities: Vec<Permission>,
     #[schemars(with = "String")]
     #[ts(type = "string")]
     pub created_at: time::OffsetDateTime,
@@ -92,7 +85,8 @@ impl From<generated::models::AdminView> for AdminOutput {
             .map(|items| {
                 items
                     .iter()
-                    .filter_map(|item| item.as_str().map(ToString::to_string))
+                    .filter_map(|item| item.as_str())
+                    .filter_map(Permission::from_str)
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();

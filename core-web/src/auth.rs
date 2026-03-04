@@ -46,12 +46,43 @@ pub trait AuthState {
 }
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum AuthClientType {
     Web,
     Mobile,
+}
+
+impl ts_rs::TS for AuthClientType {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "AuthClientType".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("AuthClientType cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type AuthClientType = \"web\" | \"mobile\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
 }
 
 #[derive(Debug, Clone)]

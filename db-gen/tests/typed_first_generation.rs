@@ -421,7 +421,7 @@ supported = ["en", "zh"]
 [model.profile]
 table = "profiles"
 fields = ["id:i64", "display_name:string"]
-multilang = ["display_name"]
+localized = ["display_name"]
 "#,
     )
     .expect("failed to write profile schema");
@@ -443,7 +443,7 @@ relations = ["profile:belongs_to:profile:profile_id:id"]
 [model.article]
 table = "articles"
 fields = ["id:i64", "author_id:i64", "title:string"]
-multilang = ["title"]
+localized = ["title"]
 relations = ["author:belongs_to:user:author_id:id"]
 "#,
     )
@@ -476,6 +476,46 @@ relations = ["author:belongs_to:user:author_id:id"]
     assert!(article_rs.contains("f-locale-<col>"));
     assert!(article_rs.contains("f-locale-has-<relation>-<col>"));
     assert!(article_rs.contains("(\"author__profile\", \"display_name\") => Ok(Some("));
+
+    fs::remove_dir_all(root).expect("failed to remove temp dir");
+}
+
+#[test]
+fn schema_load_rejects_legacy_multilang_key() {
+    let root = temp_dir("legacy_multilang_key");
+    let schema_dir = root.join("schemas");
+    fs::create_dir_all(&schema_dir).expect("failed to create schemas dir");
+
+    let legacy_schema = r#"
+[model.article]
+table = "articles"
+fields = ["id:i64", "title:string"]
+multilang = ["title"]
+"#;
+
+    fs::write(schema_dir.join("article.toml"), legacy_schema).expect("failed to write schema");
+
+    let dir_err = schema::load(
+        schema_dir
+            .to_str()
+            .expect("schema path should be valid utf-8"),
+    )
+    .expect_err("directory schema load should reject legacy key");
+    let dir_err_text = dir_err.to_string();
+    assert!(dir_err_text.contains("Schema key 'multilang' is removed; use 'localized'"));
+    assert!(dir_err_text.contains("model: article"));
+
+    let single_schema = root.join("single_schema.toml");
+    fs::write(&single_schema, legacy_schema).expect("failed to write single schema file");
+    let file_err = schema::load(
+        single_schema
+            .to_str()
+            .expect("single schema path should be valid utf-8"),
+    )
+    .expect_err("single-file schema load should reject legacy key");
+    let file_err_text = file_err.to_string();
+    assert!(file_err_text.contains("Schema key 'multilang' is removed; use 'localized'"));
+    assert!(file_err_text.contains("model: article"));
 
     fs::remove_dir_all(root).expect("failed to remove temp dir");
 }

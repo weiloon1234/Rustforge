@@ -21,6 +21,7 @@ schemars = { workspace = true }
 validator = { workspace = true }
 time = { workspace = true }
 uuid = { workspace = true }
+ts-rs = { workspace = true }
 
 [build-dependencies]
 db-gen = { workspace = true }

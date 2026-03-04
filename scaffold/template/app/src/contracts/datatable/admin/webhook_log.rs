@@ -21,8 +21,6 @@ pub struct WebhookLogDatatableRow {
     pub request_headers: Option<serde_json::Value>,
     pub request_body: Option<String>,
     pub response_body: Option<String>,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
     pub created_at: String,
 }
 

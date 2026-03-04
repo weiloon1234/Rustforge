@@ -12,7 +12,7 @@ pk = "id"
 pk_type = "i64"
 id_strategy = "snowflake"
 soft_delete = true
-multilang = ["title", "content", "cover"]
+localized = ["title", "content", "cover"]
 fields = [
   "id:i64",
   "tag:string",

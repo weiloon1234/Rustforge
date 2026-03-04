@@ -44,7 +44,7 @@ let gallery_urls = view.gallery_urls.clone();`}</code>
 
                 <h2>Localized + Relations</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-toml">{`multilang = ["title", "body"]
+                    <code className="language-toml">{`localized = ["title", "body"]
 relations = ["author:belongs_to:User:author_id:id"]`}</code>
                 </pre>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">

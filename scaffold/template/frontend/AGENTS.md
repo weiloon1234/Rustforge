@@ -240,7 +240,7 @@ make gen          # Code generation + type generation
 ### Adding types for a new domain
 
 1. In your Rust contract, add `#[derive(TS)]` and `#[ts(export, export_to = "{portal}/types/")]`
-2. For fields using external types (generated enums, framework types), add `#[ts(type = "TypeName")]`
+2. Rely on native `TS` impls for generated/framework enums and supported newtypes
 3. Run `make gen-types` (types and portal barrels are discovered/generated automatically)
 
 ### Type mapping conventions
@@ -254,9 +254,10 @@ make gen          # Code generation + type generation
 | `bool` | `boolean` | |
 | `Option<T>` | `T \| null` | |
 | `Vec<T>` | `T[]` | |
-| `time::OffsetDateTime` | `string` | Use `#[ts(type = "string")]` |
-| `UsernameString` (newtype) | `string` | Use `#[ts(type = "string")]` |
-| `AdminType` (generated enum) | `AdminType` | Use `#[ts(type = "AdminType")]` |
+| `time::OffsetDateTime` | `string` | Use `#[ts(type = "string")]` (override-only case) |
+| `UsernameString` (newtype) | `string` | Auto via framework `TS` support |
+| `AdminType` (generated enum) | `AdminType` | Auto via generated enum `TS` support |
+| `generated::LocalizedText` | `LocalizedText` | Shared localized payload alias |
 | `#[serde(skip)]` field | omitted | ts-rs respects serde attrs |
 
 ## State Management (Zustand)

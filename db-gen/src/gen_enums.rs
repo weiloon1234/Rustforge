@@ -17,7 +17,6 @@ pub fn generate_enum(name: &str, spec: &EnumSpec) -> String {
 /// Generate string-based enum (stored as TEXT in database)
 fn generate_string_enum(name: &str, spec: &EnumSpec) -> String {
     let variants = extract_variant_names(&spec.variants);
-    let variant_list = variants.join(",\n    ");
     let variant_self_list = variants
         .iter()
         .map(|variant| format!("Self::{}", variant))
@@ -45,6 +44,17 @@ fn generate_string_enum(name: &str, spec: &EnumSpec) -> String {
             .collect(),
     };
 
+    let variant_list = value_map
+        .iter()
+        .map(|(variant, value)| {
+            format!(
+                "    #[serde(rename = \"{}\")]\n    {variant}",
+                escape_rust_string(value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n");
+
     let encode_arms: Vec<String> = value_map
         .iter()
         .map(|(variant, value)| format!("            Self::{} => \"{}\",", variant, value))
@@ -66,17 +76,46 @@ fn generate_string_enum(name: &str, spec: &EnumSpec) -> String {
     let decode_arms_str = decode_arms.join("\n");
     let encode_arms_str_qualified = encode_arms_qualified.join("\n");
     let as_str_arms_str = encode_arms.join("\n");
+    let ts_union = value_map
+        .iter()
+        .map(|(_, value)| format!("\"{}\"", escape_rust_string(value)))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let ts_union_literal = escape_rust_string(&ts_union);
 
     format!(
         r#"#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
 pub enum {name} {{
-    {variant_list}
+{variant_list}
 }}
 
 impl Default for {name} {{
     fn default() -> Self {{
         Self::{default_variant}
+    }}
+}}
+
+impl ts_rs::TS for {name} {{
+    type WithoutGenerics = Self;
+
+    fn name() -> String {{
+        "{name}".to_string()
+    }}
+
+    fn inline() -> String {{
+        Self::name()
+    }}
+
+    fn inline_flattened() -> String {{
+        panic!("{name} cannot be flattened")
+    }}
+
+    fn decl() -> String {{
+        "type {name} = {ts_union_literal};".to_string()
+    }}
+
+    fn decl_concrete() -> String {{
+        Self::decl()
     }}
 }}
 
@@ -157,7 +196,10 @@ fn generate_integer_enum(name: &str, spec: &EnumSpec) -> String {
                         "Integer enum '{}' variant '{}' must have integer value",
                         name, v.name
                     ));
-                    format!("    {} = {},", v.name, value)
+                    format!(
+                        "    #[serde(rename = \"{}\")]\n    {} = {},",
+                        value, v.name, value
+                    )
                 })
                 .collect();
             let map: Vec<(String, i64)> = vars
@@ -183,6 +225,12 @@ fn generate_integer_enum(name: &str, spec: &EnumSpec) -> String {
         .map(|(variant, _)| format!("Self::{}", variant))
         .collect::<Vec<_>>()
         .join(", ");
+    let ts_union = value_map
+        .iter()
+        .map(|(_, value)| format!("\"{}\"", value))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let ts_union_literal = escape_rust_string(&ts_union);
 
     format!(
         r#"#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -194,6 +242,30 @@ pub enum {name} {{
 impl Default for {name} {{
     fn default() -> Self {{
         Self::{default_variant}
+    }}
+}}
+
+impl ts_rs::TS for {name} {{
+    type WithoutGenerics = Self;
+
+    fn name() -> String {{
+        "{name}".to_string()
+    }}
+
+    fn inline() -> String {{
+        Self::name()
+    }}
+
+    fn inline_flattened() -> String {{
+        panic!("{name} cannot be flattened")
+    }}
+
+    fn decl() -> String {{
+        "type {name} = {ts_union_literal};".to_string()
+    }}
+
+    fn decl_concrete() -> String {{
+        Self::decl()
     }}
 }}
 
@@ -273,6 +345,10 @@ fn extract_variant_names(variants: &EnumVariants) -> Vec<String> {
         EnumVariants::Simple(names) => names.clone(),
         EnumVariants::Explicit(vars) => vars.iter().map(|v| v.name.clone()).collect(),
     }
+}
+
+fn escape_rust_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('\"', "\\\"")
 }
 
 /// Generate enums.rs from schema enum definitions.

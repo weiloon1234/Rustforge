@@ -133,6 +133,30 @@ impl JsonSchema for SnowflakeId {
     }
 }
 
+impl ts_rs::TS for SnowflakeId {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        <String as ts_rs::TS>::name()
+    }
+
+    fn inline() -> String {
+        <String as ts_rs::TS>::inline()
+    }
+
+    fn inline_flattened() -> String {
+        <String as ts_rs::TS>::inline_flattened()
+    }
+
+    fn decl() -> String {
+        <String as ts_rs::TS>::decl()
+    }
+
+    fn decl_concrete() -> String {
+        <String as ts_rs::TS>::decl_concrete()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use schemars::schema_for;

@@ -23,7 +23,7 @@ pub struct ModelSpec {
     /// - "snowflake" (default for i64 pk)
     /// - "manual" (caller sets id explicitly)
     pub id_strategy: Option<String>,
-    pub multilang: Option<Vec<String>>,
+    pub localized: Option<Vec<String>>,
     pub meta: Option<Vec<String>>,
     pub attachment: Option<Vec<String>>,
     pub attachments: Option<Vec<String>>,
@@ -143,6 +143,7 @@ pub fn load(path_str: &str) -> Result<Schema, Box<dyn Error>> {
             let p = entry.path();
             if p.is_file() && p.extension().map_or(false, |e| e == "toml") {
                 let raw = fs::read_to_string(&p)?;
+                reject_legacy_multilang_key(&raw, &p)?;
                 let partial: Schema = toml::from_str(&raw)?;
                 for (k, v) in partial.models {
                     if master.models.contains_key(&k) {
@@ -162,9 +163,42 @@ pub fn load(path_str: &str) -> Result<Schema, Box<dyn Error>> {
         Ok(master)
     } else {
         let raw = fs::read_to_string(path)?;
+        reject_legacy_multilang_key(&raw, path)?;
         let schema: Schema = toml::from_str(&raw)?;
         Ok(schema)
     }
+}
+
+fn reject_legacy_multilang_key(
+    raw: &str,
+    source: &std::path::Path,
+) -> Result<(), Box<dyn Error>> {
+    let parsed: toml::Value = toml::from_str(raw)?;
+    let Some(root) = parsed.as_table() else {
+        return Ok(());
+    };
+    let Some(model_section) = root.get("model") else {
+        return Ok(());
+    };
+    let Some(models) = model_section.as_table() else {
+        return Ok(());
+    };
+
+    for (model_name, model_cfg) in models {
+        let Some(model_table) = model_cfg.as_table() else {
+            continue;
+        };
+        if model_table.contains_key("multilang") {
+            let message = format!(
+                "Schema key 'multilang' is removed; use 'localized' (file: {}, model: {})",
+                source.display(),
+                model_name
+            );
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, message).into());
+        }
+    }
+
+    Ok(())
 }
 
 pub fn to_owner_type(s: &str) -> String {

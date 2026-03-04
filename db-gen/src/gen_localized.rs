@@ -12,7 +12,7 @@ pub fn generate_localized(
 ) -> Result<(), Box<dyn Error>> {
     let mut out = String::new();
     let has_loader_functions = schema.models.values().any(|cfg| {
-        cfg.multilang.is_some() || cfg.meta.is_some() || !parse_attachments(cfg).is_empty()
+        cfg.localized.is_some() || cfg.meta.is_some() || !parse_attachments(cfg).is_empty()
     });
     let needs_resize_rule = cfgs
         .attachment_types
@@ -51,7 +51,7 @@ pub fn generate_localized(
     out.push_str("];\n\n");
 
     // Generate Locale Enum
-    out.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]\n");
+    out.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema, ts_rs::TS)]\n");
     out.push_str("pub enum Locale {\n");
     for lang in &locales.supported {
         let variant = to_title_case(lang);
@@ -89,15 +89,15 @@ pub fn generate_localized(
     let mut owner_consts: BTreeSet<String> = BTreeSet::new();
 
     out.push_str(
-        "#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]\n",
+        "#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]\n",
     );
-    out.push_str("pub struct MultiLang {\n");
+    out.push_str("pub struct LocalizedText {\n");
     for lang in &locales.supported {
         out.push_str(&format!("    pub {}: String,\n", lang));
     }
     out.push_str("}\n\n");
 
-    out.push_str("impl MultiLang {\n");
+    out.push_str("impl LocalizedText {\n");
     out.push_str("    pub fn get(&self, locale: &str) -> &str {\n");
     out.push_str("        match locale {\n");
     for lang in &locales.supported {
@@ -106,21 +106,53 @@ pub fn generate_localized(
     out.push_str(&format!("            _ => &self.{},\n", locales.default));
     out.push_str("        }\n");
     out.push_str("    }\n");
+    out.push_str("    pub fn to_map(&self) -> std::collections::BTreeMap<String, String> {\n");
+    out.push_str("        let mut out = std::collections::BTreeMap::new();\n");
+    for lang in &locales.supported {
+        out.push_str(&format!(
+            "        out.insert(\"{lang}\".to_string(), self.{lang}.clone());\n"
+        ));
+    }
+    out.push_str("        out\n");
+    out.push_str("    }\n");
+    out.push_str(
+        "    pub fn from_map(map: &std::collections::BTreeMap<String, String>) -> Self {\n",
+    );
+    out.push_str("        Self {\n");
+    for lang in &locales.supported {
+        out.push_str(&format!(
+            "            {lang}: map.get(\"{lang}\").cloned().unwrap_or_default(),\n"
+        ));
+    }
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("impl ts_rs::TS for LocalizedText {\n");
+    out.push_str("    type WithoutGenerics = Self;\n");
+    out.push_str("    fn name() -> String { \"LocalizedText\".to_string() }\n");
+    out.push_str("    fn inline() -> String { Self::name() }\n");
+    out.push_str(
+        "    fn inline_flattened() -> String { panic!(\"LocalizedText cannot be flattened\") }\n",
+    );
+    out.push_str("    fn decl() -> String { panic!(\"LocalizedText declaration is provided by shared platform types\") }\n");
+    out.push_str("    fn decl_concrete() -> String { Self::decl() }\n");
     out.push_str("}\n\n");
     out.push_str("pub trait LocalizedMapHelper {\n");
-    out.push_str("    fn get_multilang(&self, field: &str, owner_id: i64) -> Option<MultiLang>;\n");
+    out.push_str(
+        "    fn get_localized_text(&self, field: &str, owner_id: i64) -> Option<LocalizedText>;\n",
+    );
     out.push_str("}\n\n");
 
     out.push_str(
         "impl LocalizedMapHelper for core_db::platform::localized::types::LocalizedMap {\n",
     );
     out.push_str(
-        "    fn get_multilang(&self, field: &str, owner_id: i64) -> Option<MultiLang> {\n",
+        "    fn get_localized_text(&self, field: &str, owner_id: i64) -> Option<LocalizedText> {\n",
     );
     out.push_str("        let by_owner = self.inner.get(field)?;\n");
     out.push_str("        let by_locale = by_owner.get(&owner_id)?;\n");
     out.push_str("        if by_locale.is_empty() { return None; }\n");
-    out.push_str("        let mut out = MultiLang {\n");
+    out.push_str("        let mut out = LocalizedText {\n");
     for lang in &locales.supported {
         out.push_str(&format!("            {}: String::new(),\n", lang));
     }
@@ -150,7 +182,7 @@ pub fn generate_localized(
     out.push_str("    }\n");
     out.push_str("}\n\n");
     for (name, cfg) in &schema.models {
-        let Some(multilang_fields) = &cfg.multilang else {
+        let Some(localized_fields) = &cfg.localized else {
             continue;
         };
         let model_snake = to_snake(name);
@@ -164,7 +196,7 @@ pub fn generate_localized(
             ));
         }
         out.push_str(&format!("pub const {model_const}_FIELDS: &[&str] = &[\n"));
-        for field in multilang_fields {
+        for field in localized_fields {
             out.push_str(&format!("    \"{}\",\n", field));
         }
         out.push_str("];\n\n");
@@ -179,10 +211,10 @@ pub fn generate_localized(
 
         let trait_name = format!("{}Localized", model_title);
         out.push_str(&format!("pub trait {} {{\n", trait_name));
-        for field in multilang_fields {
+        for field in localized_fields {
             let field_snake = to_snake(field);
             out.push_str(&format!(
-                "    fn {model_snake}_{field_snake}_translations(&self, id: i64) -> Option<crate::generated::MultiLang>;\n"
+                "    fn {model_snake}_{field_snake}_translations(&self, id: i64) -> Option<crate::generated::LocalizedText>;\n"
             ));
             out.push_str(&format!(
                 "    fn {model_snake}_{field_snake}(&self, id: i64) -> Option<String>;\n"
@@ -194,12 +226,15 @@ pub fn generate_localized(
             "impl {} for core_db::platform::localized::types::LocalizedMap {{\n",
             trait_name
         ));
-        for field in multilang_fields {
+        for field in localized_fields {
             let field_snake = to_snake(field);
             out.push_str(&format!(
-                "    fn {model_snake}_{field_snake}_translations(&self, id: i64) -> Option<crate::generated::MultiLang> {{\n"
+                "    fn {model_snake}_{field_snake}_translations(&self, id: i64) -> Option<crate::generated::LocalizedText> {{\n"
             ));
-            out.push_str(&format!("        self.get_multilang(\"{}\", id)\n", field));
+            out.push_str(&format!(
+                "        self.get_localized_text(\"{}\", id)\n",
+                field
+            ));
             out.push_str("    }\n");
 
             out.push_str(&format!(
@@ -264,7 +299,7 @@ pub fn generate_localized(
         let model_const = model_snake.to_uppercase();
         let owner_type = to_owner_type(name);
 
-        if cfg.multilang.is_none() && owner_consts.insert(model_const.clone()) {
+        if cfg.localized.is_none() && owner_consts.insert(model_const.clone()) {
             out.push_str(&format!(
                 "pub const {model_const}_OWNER_TYPE: &str = \"{owner_type}\";\n"
             ));
@@ -297,7 +332,7 @@ pub fn generate_localized(
         let model_snake = to_snake(name);
         let model_const = model_snake.to_uppercase();
         let owner_type = to_owner_type(name);
-        if cfg.multilang.is_none() && cfg.meta.is_none() && owner_consts.insert(model_const.clone())
+        if cfg.localized.is_none() && cfg.meta.is_none() && owner_consts.insert(model_const.clone())
         {
             out.push_str(&format!(
                 "pub const {model_const}_OWNER_TYPE: &str = \"{owner_type}\";\n"

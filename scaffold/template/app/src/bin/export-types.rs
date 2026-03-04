@@ -387,7 +387,7 @@ export type LocaleCode = {locale_union};
 export const DEFAULT_LOCALE: LocaleCode = \"{default_locale}\";
 
 // Localized text payload generated from app language settings.
-export type MultiLang<TLocale extends string = LocaleCode> = Record<TLocale, string>;
+export type LocalizedText<TLocale extends string = LocaleCode> = Record<TLocale, string>;
 
 // field -> owner_id -> locale -> value
 export type LocalizedMap<TLocale extends string = LocaleCode> = Record<
@@ -562,7 +562,7 @@ fn ts_shared_types() -> &'static [&'static str] {
         "LocalizedMap",
         "MetaMap",
         "MetaRecord",
-        "MultiLang",
+        "LocalizedText",
     ]
 }
 

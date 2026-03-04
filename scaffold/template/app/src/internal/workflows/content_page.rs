@@ -24,9 +24,10 @@ pub async fn update(
     req: AdminContentPageUpdateInput,
 ) -> Result<ContentPageView, AppError> {
     let tag = normalize_tag(&req.tag)?;
-    let title = normalize_localized_map(&req.title);
-    let content = normalize_localized_html_map(&req.content);
-    let cover = normalize_localized_map(&req.cover);
+    let title = normalize_localized_map(&req.title.to_map());
+    let content = normalize_localized_html_map(&req.content.to_map());
+    let cover = normalize_localized_map(&req.cover.to_map());
+    let has_cover_update = cover.values().any(|value| !value.is_empty());
 
     let existing = detail(state, id).await?;
     if matches!(existing.is_system, ContentPageSystemFlag::Yes) {
@@ -34,7 +35,7 @@ pub async fn update(
             return Err(AppError::Forbidden(t("Cannot change tag for system page")));
         }
 
-        let existing_title = translations_to_map(existing.title_translations.as_ref());
+        let existing_title = localized_text_to_map(existing.title_translations.as_ref());
         if existing_title != title {
             return Err(AppError::Forbidden(t(
                 "Cannot change title for system page",
@@ -42,9 +43,8 @@ pub async fn update(
         }
     }
 
-    let title_langs = multilang_from_map(&title, true, "title")?;
-    let content_langs = multilang_from_map(&content, true, "content")?;
-    let cover_langs = multilang_from_map(&cover, false, "cover")?;
+    let title_langs = localized_text_from_map(&title, true, "title")?;
+    let content_langs = localized_text_from_map(&content, true, "content")?;
 
     let mut update = ContentPage::new(DbConn::pool(&state.db), None)
         .update()
@@ -53,7 +53,8 @@ pub async fn update(
         .set_title_langs(title_langs)
         .set_content_langs(content_langs);
 
-    if !cover.is_empty() {
+    if has_cover_update {
+        let cover_langs = localized_text_from_map(&cover, false, "cover")?;
         update = update.set_cover_langs(cover_langs);
     }
 
@@ -184,10 +185,12 @@ fn sanitize_rich_html(input: &str) -> String {
     builder.clean(input).to_string()
 }
 
-fn translations_to_map(multilang: Option<&generated::MultiLang>) -> BTreeMap<String, String> {
+fn localized_text_to_map(
+    localized_text: Option<&generated::LocalizedText>,
+) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for &locale in generated::SUPPORTED_LOCALES {
-        let value = multilang
+        let value = localized_text
             .map(|current| current.get(locale).to_string())
             .unwrap_or_default();
         out.insert(locale.to_string(), value);
@@ -195,12 +198,12 @@ fn translations_to_map(multilang: Option<&generated::MultiLang>) -> BTreeMap<Str
     out
 }
 
-fn multilang_from_map(
+fn localized_text_from_map(
     input: &BTreeMap<String, String>,
     require_all_locales: bool,
     field_label: &str,
-) -> Result<generated::MultiLang, AppError> {
-    let mut payload = serde_json::Map::new();
+) -> Result<generated::LocalizedText, AppError> {
+    let mut payload = BTreeMap::new();
     for &locale in generated::SUPPORTED_LOCALES {
         let value = input
             .get(locale)
@@ -214,10 +217,10 @@ fn multilang_from_map(
                 locale
             )));
         }
-        payload.insert(locale.to_string(), serde_json::Value::String(value));
+        payload.insert(locale.to_string(), value);
     }
 
-    serde_json::from_value(serde_json::Value::Object(payload)).map_err(AppError::from)
+    Ok(generated::LocalizedText::from_map(&payload))
 }
 
 #[cfg(test)]
@@ -226,7 +229,8 @@ mod tests {
 
     #[test]
     fn sanitize_rich_html_keeps_links_without_panicking() {
-        let output = sanitize_rich_html(r#"<p><a href="https://example.com" target="_blank">x</a></p>"#);
+        let output =
+            sanitize_rich_html(r#"<p><a href="https://example.com" target="_blank">x</a></p>"#);
         assert!(output.contains("href=\"https://example.com\""));
         assert!(output.contains("rel=\"noopener noreferrer nofollow\""));
     }

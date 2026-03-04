@@ -140,7 +140,7 @@ model.query()
                 {/* Localized Fields */}
                 <h2>Localized Fields</h2>
                 <p>
-                    For fields listed in <code>multilang = ["field_name"]</code> in schema, the
+                    For fields listed in <code>localized = ["field_name"]</code> in schema, the
                     generated model provides strongly typed setters using the <code>Locale</code>{' '}
                     enum.
                 </p>
@@ -154,7 +154,7 @@ model.insert()
     .save()
     .await?;
     
-// Set from MultiLang struct (e.g. from request DTO)
+// Set from LocalizedText struct (e.g. from request DTO)
 model.insert()
     .set_title_langs(request.title_translations)
     .save()

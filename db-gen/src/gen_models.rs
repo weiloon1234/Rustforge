@@ -195,18 +195,18 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         .filter(|a| a.multiple)
         .collect();
     let has_attachments = !attachment_fields.is_empty();
-    let multilang_fields: Vec<String> = cfg
-        .multilang
+    let localized_fields: Vec<String> = cfg
+        .localized
         .clone()
         .unwrap_or_default()
         .into_iter()
         .map(|s| to_snake(&s))
         .collect();
-    let multilang_set: BTreeSet<String> = multilang_fields.iter().cloned().collect();
+    let localized_set: BTreeSet<String> = localized_fields.iter().cloned().collect();
     let db_fields: Vec<FieldSpec> = fields
         .iter()
         .cloned()
-        .filter(|f| !multilang_set.contains(&f.name))
+        .filter(|f| !localized_set.contains(&f.name))
         .collect();
 
     let parent_pk_ty = fields
@@ -283,7 +283,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     .unwrap();
     writeln!(out, "#![allow(unused)]").unwrap();
     writeln!(out, "use anyhow::Result;").unwrap();
-    if !relations.is_empty() || !multilang_fields.is_empty() || has_meta {
+    if !relations.is_empty() || !localized_fields.is_empty() || has_meta {
         writeln!(out, "use std::collections::HashMap;").unwrap();
     }
     if has_meta {
@@ -333,10 +333,10 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         writeln!(out, "use core_db::platform::meta::types::MetaMap;").unwrap();
         writeln!(out, "use core_db::platform::meta::repo::MetaRepo;").unwrap();
     }
-    if !multilang_fields.is_empty() || has_meta {
+    if !localized_fields.is_empty() || has_meta {
         writeln!(out, "use crate::generated::localized;").unwrap();
     }
-    if !multilang_fields.is_empty() {
+    if !localized_fields.is_empty() {
         writeln!(out, "use core_i18n::current_locale;").unwrap();
     }
     for rel in &relations {
@@ -385,7 +385,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         )
         .unwrap();
     }
-    if !multilang_fields.is_empty() {
+    if !localized_fields.is_empty() {
         writeln!(out, "use crate::generated::localized::LocalizedMapHelper;").unwrap();
     }
     // Import enums from common module
@@ -424,10 +424,10 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         }
         view_fields.push(format!("    pub {}: {},", f.name, f.ty));
     }
-    for f in &multilang_fields {
+    for f in &localized_fields {
         view_fields.push(format!("    pub {}: Option<String>,", f));
         view_fields.push(format!(
-            "    pub {f}_translations: Option<localized::MultiLang>,"
+            "    pub {f}_translations: Option<localized::LocalizedText>,"
         ));
     }
     for a in &single_attachments {
@@ -488,7 +488,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             writeln!(out, "            {}: self.{}.clone(),", f.name, f.name).unwrap();
         }
     }
-    for f in &multilang_fields {
+    for f in &localized_fields {
         if !hidden_fields.contains(f) {
             writeln!(out, "            {}: self.{}.clone(),", f, f).unwrap();
             writeln!(
@@ -661,12 +661,12 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             writeln!(out, "    pub {}: {},", f.name, f.ty).unwrap();
         }
     }
-    for f in &multilang_fields {
+    for f in &localized_fields {
         if !hidden_fields.contains(f) {
             writeln!(out, "    pub {}: Option<String>,", f).unwrap();
             writeln!(
                 out,
-                "    pub {f}_translations: Option<localized::MultiLang>,"
+                "    pub {f}_translations: Option<localized::LocalizedText>,"
             )
             .unwrap();
         }
@@ -717,14 +717,14 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     } else {
         writeln!(out, "fn hydrate_view(row: {row_ident}, loc: &LocalizedMap, base_url: Option<&str>) -> {view_ident} {{").unwrap();
     }
-    if !multilang_fields.is_empty() {
+    if !localized_fields.is_empty() {
         writeln!(out, "    let locale = current_locale();").unwrap();
     }
     writeln!(out, "    let mut view = {view_ident} {{").unwrap();
     for f in &db_fields {
         writeln!(out, "        {}: row.{},", f.name, f.name).unwrap();
     }
-    for f in &multilang_fields {
+    for f in &localized_fields {
         writeln!(out, "        {f}: None,").unwrap();
         writeln!(out, "        {f}_translations: None,").unwrap();
     }
@@ -740,8 +740,12 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         writeln!(out, "        meta: HashMap::new(),").unwrap();
     }
     writeln!(out, "    }};").unwrap();
-    for f in &multilang_fields {
-        writeln!(out, "    let ml_{f} = loc.get_multilang(\"{f}\", view.id);").unwrap();
+    for f in &localized_fields {
+        writeln!(
+            out,
+            "    let ml_{f} = loc.get_localized_text(\"{f}\", view.id);"
+        )
+        .unwrap();
         writeln!(out, "    if let Some(ref ml) = ml_{f} {{").unwrap();
         writeln!(out, "        view.{f} = Some(ml.get(locale).to_string());").unwrap();
         writeln!(out, "    }}").unwrap();
@@ -959,7 +963,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         writeln!(out, "    }}").unwrap();
     }
 
-    // multilang setters are provided on insert/update builders via *_lang methods
+    // localized setters are provided on insert/update builders via *_lang methods
     for rel in &relations {
         let fn_name = format!("load_{}", to_snake(&rel.name));
         let target_title = to_title_case(&rel.target_model);
@@ -2099,7 +2103,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             "        let ids: Vec<{parent_pk_ty}> = rows.iter().map(|r| r.{pk}.clone()).collect();"
         )
         .unwrap();
-        if multilang_fields.is_empty() {
+        if localized_fields.is_empty() {
             writeln!(out, "        let localized = LocalizedMap::default();").unwrap();
         } else {
             writeln!(out, "        let localized = localized::load_{model_snake}_localized(db.clone(), &ids).await?;").unwrap();
@@ -2121,7 +2125,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             (true, false) => writeln!(out, "            out_vec.push(hydrate_view(r, &localized, &meta_map, base_url.as_deref()));").unwrap(),
             (false, true) => writeln!(out, "            out_vec.push(hydrate_view(r, &localized, &attachments, base_url.as_deref()));").unwrap(),
             (false, false) => {
-                if multilang_fields.is_empty() {
+                if localized_fields.is_empty() {
                     writeln!(out, "            out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));").unwrap();
                 } else {
                     writeln!(out, "            out_vec.push(hydrate_view(r, &localized, base_url.as_deref()));").unwrap();
@@ -2222,7 +2226,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             "        let ids: Vec<i64> = rows.iter().map(|r| r.{pk}).collect();"
         )
         .unwrap();
-        if multilang_fields.is_empty() {
+        if localized_fields.is_empty() {
             writeln!(out, "        let localized = LocalizedMap::default();").unwrap();
         } else {
             writeln!(out, "        let localized = localized::load_{model_snake}_localized(db.clone(), &ids).await?;").unwrap();
@@ -2245,7 +2249,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             (true, false) => writeln!(out, "            let view = hydrate_view(row.clone(), &localized, &meta_map, base_url.as_deref());").unwrap(),
             (false, true) => writeln!(out, "            let view = hydrate_view(row.clone(), &localized, &attachments, base_url.as_deref());").unwrap(),
             (false, false) => {
-                if multilang_fields.is_empty() {
+                if localized_fields.is_empty() {
                     writeln!(out, "            let view = hydrate_view(row.clone(), &LocalizedMap::default(), base_url.as_deref());").unwrap();
                 } else {
                     writeln!(out, "            let view = hydrate_view(row.clone(), &localized, base_url.as_deref());").unwrap();
@@ -3064,7 +3068,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         "        let ids: Vec<{parent_pk_ty}> = rows.iter().map(|r| r.{pk}.clone()).collect();"
     )
     .unwrap();
-    if multilang_fields.is_empty() {
+    if localized_fields.is_empty() {
         writeln!(out, "        let localized = LocalizedMap::default();").unwrap();
     } else {
         writeln!(
@@ -3098,7 +3102,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         (true, false) => writeln!(out, "            data.push(hydrate_view(r, &localized, &meta_map, base_url.as_deref()));").unwrap(),
         (false, true) => writeln!(out, "            data.push(hydrate_view(r, &localized, &attachments, base_url.as_deref()));").unwrap(),
         (false, false) => {
-             if multilang_fields.is_empty() {
+             if localized_fields.is_empty() {
                 writeln!(out, "            data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));").unwrap();
             } else {
                 writeln!(out, "            data.push(hydrate_view(r, &localized, base_url.as_deref()));").unwrap();
@@ -3265,7 +3269,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             "        let ids: Vec<i64> = rows.iter().map(|r| r.{pk}).collect();"
         )
         .unwrap();
-        if multilang_fields.is_empty() {
+        if localized_fields.is_empty() {
             writeln!(out, "        let localized = LocalizedMap::default();").unwrap();
         } else {
             writeln!(out, "        let localized = localized::load_{model_snake}_localized(db.clone(), &ids).await?;").unwrap();
@@ -3288,7 +3292,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             (true, false) => writeln!(out, "            let view = hydrate_view(row.clone(), &localized, &meta_map, base_url.as_deref());").unwrap(),
             (false, true) => writeln!(out, "            let view = hydrate_view(row.clone(), &localized, &attachments, base_url.as_deref());").unwrap(),
             (false, false) => {
-                if multilang_fields.is_empty() {
+                if localized_fields.is_empty() {
                     writeln!(out, "            let view = hydrate_view(row.clone(), &LocalizedMap::default(), base_url.as_deref());").unwrap();
                 } else {
                     writeln!(out, "            let view = hydrate_view(row.clone(), &localized, base_url.as_deref());").unwrap();
@@ -3552,7 +3556,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     writeln!(out, "    base_url: Option<String>,").unwrap();
     writeln!(out, "    cols: Vec<{col_ident}>,").unwrap();
     writeln!(out, "    binds: Vec<BindValue>,").unwrap();
-    if !multilang_fields.is_empty() {
+    if !localized_fields.is_empty() {
         writeln!(
             out,
             "    translations: HashMap<&'static str, HashMap<String, String>>,"
@@ -3589,7 +3593,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     writeln!(out, "            base_url,").unwrap();
     writeln!(out, "            cols: vec![],").unwrap();
     writeln!(out, "            binds: vec![],").unwrap();
-    if !multilang_fields.is_empty() {
+    if !localized_fields.is_empty() {
         writeln!(out, "            translations: HashMap::new(),").unwrap();
     }
     if has_meta {
@@ -3666,8 +3670,8 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             writeln!(out, "    }}").unwrap();
         }
     }
-    if !multilang_fields.is_empty() {
-        for f in &multilang_fields {
+    if !localized_fields.is_empty() {
+        for f in &localized_fields {
             let fn_name = format!("set_{}_lang", to_snake(f));
             // Strong typed setter
             writeln!(out, "    pub fn {fn_name}(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {{").unwrap();
@@ -3679,7 +3683,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             let fn_name_bulk = format!("set_{}_langs", to_snake(f));
             writeln!(
                 out,
-                "    pub fn {fn_name_bulk}(mut self, langs: localized::MultiLang) -> Self {{"
+                "    pub fn {fn_name_bulk}(mut self, langs: localized::LocalizedText) -> Self {{"
             )
             .unwrap();
             for lang in &cfgs.languages.supported {
@@ -4010,7 +4014,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     writeln!(out, "            q = bind(q, b);").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "        let row = db.fetch_one(q).await?;").unwrap();
-    if !multilang_fields.is_empty() {
+    if !localized_fields.is_empty() {
         writeln!(out, "        if !self.translations.is_empty() {{").unwrap();
         writeln!(out, "            let repo = LocalizedRepo::new(db);").unwrap();
         writeln!(
@@ -4018,7 +4022,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             "            let supported = localized::SUPPORTED_LOCALES;"
         )
         .unwrap();
-        for f in &multilang_fields {
+        for f in &localized_fields {
             writeln!(
                 out,
                 "            if let Some(map) = self.translations.get(\"{f}\") {{"
@@ -4083,7 +4087,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         writeln!(out, "                .save().await?;").unwrap();
         writeln!(out, "        }}").unwrap();
     }
-    if multilang_fields.is_empty() {
+    if localized_fields.is_empty() {
         writeln!(out, "        let localized = LocalizedMap::default();").unwrap();
     } else {
         writeln!(out, "        let localized = localized::load_{model_snake}_localized(db, &[row.{pk}]).await?;").unwrap();
@@ -4109,7 +4113,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             )
             .unwrap(),
             false => {
-                if multilang_fields.is_empty() {
+                if localized_fields.is_empty() {
                     writeln!(out, "        Ok(hydrate_view(row, &LocalizedMap::default(), self.base_url.as_deref()))").unwrap();
                 } else {
                     writeln!(
@@ -4131,7 +4135,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     writeln!(out, "    sets: Vec<({col_ident}, BindValue)>,").unwrap();
     writeln!(out, "    where_sql: Vec<String>,").unwrap();
     writeln!(out, "    binds: Vec<BindValue>,").unwrap();
-    if !multilang_fields.is_empty() {
+    if !localized_fields.is_empty() {
         writeln!(
             out,
             "    translations: HashMap<&'static str, HashMap<String, String>>,"
@@ -4173,7 +4177,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     writeln!(out, "            sets: vec![],").unwrap();
     writeln!(out, "            where_sql: vec![],").unwrap();
     writeln!(out, "            binds: vec![],").unwrap();
-    if !multilang_fields.is_empty() {
+    if !localized_fields.is_empty() {
         writeln!(out, "            translations: HashMap::new(),").unwrap();
     }
     if has_meta {
@@ -4253,8 +4257,8 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         }
     }
 
-    if !multilang_fields.is_empty() {
-        for f in &multilang_fields {
+    if !localized_fields.is_empty() {
+        for f in &localized_fields {
             let fn_name = format!("set_{}_lang", to_snake(f));
             // Strong typed setter
             writeln!(out, "    pub fn {fn_name}(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {{").unwrap();
@@ -4266,7 +4270,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             let fn_name_bulk = format!("set_{}_langs", to_snake(f));
             writeln!(
                 out,
-                "    pub fn {fn_name_bulk}(mut self, langs: localized::MultiLang) -> Self {{"
+                "    pub fn {fn_name_bulk}(mut self, langs: localized::LocalizedText) -> Self {{"
             )
             .unwrap();
             for lang in &cfgs.languages.supported {
@@ -4582,11 +4586,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             "            let now = time::OffsetDateTime::now_utc();"
         )
         .unwrap();
-        writeln!(
-            out,
-            "            cols.push({col_ident}::UpdatedAt);"
-        )
-        .unwrap();
+        writeln!(out, "            cols.push({col_ident}::UpdatedAt);").unwrap();
         writeln!(out, "            set_binds.push(now.into());").unwrap();
         writeln!(out, "        }}").unwrap();
     }
@@ -4697,7 +4697,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     )
     .unwrap();
     writeln!(out, "        let res = db.execute(q).await?;").unwrap();
-    if !multilang_fields.is_empty() {
+    if !localized_fields.is_empty() {
         writeln!(out, "        if res.rows_affected() > 0 && !self.translations.is_empty() && !target_ids.is_empty() {{").unwrap();
         writeln!(out, "            let repo = LocalizedRepo::new(db);").unwrap();
         writeln!(
@@ -4705,7 +4705,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             "            let supported = localized::SUPPORTED_LOCALES;"
         )
         .unwrap();
-        for f in &multilang_fields {
+        for f in &localized_fields {
             writeln!(
                 out,
                 "            if let Some(map) = self.translations.get(\"{f}\") {{"
@@ -4873,14 +4873,14 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
                     rel_path.target_model
                 )
             });
-        let target_multilang_fields: Vec<String> = target_cfg
-            .multilang
+        let target_localized_fields: Vec<String> = target_cfg
+            .localized
             .clone()
             .unwrap_or_default()
             .into_iter()
             .map(|s| to_snake(&s))
             .collect();
-        for tf in &target_multilang_fields {
+        for tf in &target_localized_fields {
             writeln!(
                 out,
                 "            (\"{rel}\", \"{col}\") => Some(\"{col}\"),",
@@ -4900,7 +4900,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     )
     .unwrap();
     writeln!(out, "        match name {{").unwrap();
-    for f in &multilang_fields {
+    for f in &localized_fields {
         writeln!(out, "            \"{f}\" => Some(\"{f}\"),").unwrap();
     }
     writeln!(out, "            _ => None,").unwrap();
@@ -5128,7 +5128,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         )
         .unwrap();
     }
-    for f in &multilang_fields {
+    for f in &localized_fields {
         let label = crate::schema::to_label(f);
         writeln!(
             out,
@@ -5173,14 +5173,14 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             )
             .unwrap();
         }
-        let target_multilang_fields: Vec<String> = target_cfg
-            .multilang
+        let target_localized_fields: Vec<String> = target_cfg
+            .localized
             .clone()
             .unwrap_or_default()
             .into_iter()
             .map(|s| to_snake(&s))
             .collect();
-        for tf in &target_multilang_fields {
+        for tf in &target_localized_fields {
             writeln!(
                 out,
                 "            DataTableRelationColumnDescriptor {{ relation: \"{relation}\", column: \"{column}\", data_type: \"String\", filter_ops: &[\"locale_has_eq\", \"locale_has_like\"] }},",
@@ -5208,7 +5208,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     writeln!(out, "            \"f-any-<col1|col2|...>\",").unwrap();
     writeln!(out, "            \"f-has-<relation>-<col>\",").unwrap();
     writeln!(out, "            \"f-has-like-<relation>-<col>\",").unwrap();
-    if !multilang_fields.is_empty() {
+    if !localized_fields.is_empty() {
         writeln!(out, "            \"f-locale-<col>\",").unwrap();
         writeln!(out, "            \"f-locale-like-<col>\",").unwrap();
     }
@@ -5216,7 +5216,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         let Some(target_cfg) = schema.models.get(&rel_path.target_model) else {
             return false;
         };
-        !target_cfg.multilang.clone().unwrap_or_default().is_empty()
+        !target_cfg.localized.clone().unwrap_or_default().is_empty()
     });
     if has_relation_locale {
         writeln!(out, "            \"f-locale-has-<relation>-<col>\",").unwrap();
@@ -5334,7 +5334,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     .unwrap();
     writeln!(out, "            }}").unwrap();
     writeln!(out, "            ParsedFilter::LocaleEq {{ column }} => {{").unwrap();
-    if multilang_fields.is_empty() {
+    if localized_fields.is_empty() {
         writeln!(out, "                Ok(None)").unwrap();
     } else {
         writeln!(
@@ -5364,7 +5364,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         "            ParsedFilter::LocaleLike {{ column }} => {{"
     )
     .unwrap();
-    if multilang_fields.is_empty() {
+    if localized_fields.is_empty() {
         writeln!(out, "                Ok(None)").unwrap();
     } else {
         writeln!(
@@ -5592,8 +5592,8 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             .as_ref()
             .map(|s| s.to_string())
             .unwrap_or_else(|| "id".to_string());
-        let target_multilang_fields: Vec<String> = target_cfg
-            .multilang
+        let target_localized_fields: Vec<String> = target_cfg
+            .localized
             .clone()
             .unwrap_or_default()
             .into_iter()
@@ -5603,7 +5603,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             "{}_OWNER_TYPE",
             to_snake(&rel_path.target_model).to_uppercase()
         );
-        for tf in &target_multilang_fields {
+        for tf in &target_localized_fields {
             let leaf_expr = format!(
                 "{{var}}.where_exists(\"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {target_table}.{target_pk} AND l.field = ? AND l.locale = ? AND l.value = ?)\".to_string(), vec![localized::{target_owner_const}.to_string(), field.to_string(), locale.clone(), trimmed.to_string()])"
             );
@@ -5666,8 +5666,8 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             .as_ref()
             .map(|s| s.to_string())
             .unwrap_or_else(|| "id".to_string());
-        let target_multilang_fields: Vec<String> = target_cfg
-            .multilang
+        let target_localized_fields: Vec<String> = target_cfg
+            .localized
             .clone()
             .unwrap_or_default()
             .into_iter()
@@ -5677,7 +5677,7 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             "{}_OWNER_TYPE",
             to_snake(&rel_path.target_model).to_uppercase()
         );
-        for tf in &target_multilang_fields {
+        for tf in &target_localized_fields {
             let leaf_expr = format!(
                 "{{var}}.where_exists(\"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {target_table}.{target_pk} AND l.field = ? AND l.locale = ? AND l.value LIKE ?)\".to_string(), vec![localized::{target_owner_const}.to_string(), field.to_string(), locale.clone(), pattern.clone()])"
             );

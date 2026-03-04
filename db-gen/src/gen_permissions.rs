@@ -49,6 +49,23 @@ pub fn generate_permissions(
         writeln!(out, "    {name},")?;
     }
     out.push_str("}\n\n");
+    let ts_union = variants
+        .iter()
+        .map(|(_, entry)| format!("\"{}\"", escape(&entry.key)))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let ts_union_literal = escape(&ts_union);
+    writeln!(out, "impl ts_rs::TS for Permission {{")?;
+    out.push_str("    type WithoutGenerics = Self;\n");
+    out.push_str("    fn name() -> String { \"Permission\".to_string() }\n");
+    out.push_str("    fn inline() -> String { Self::name() }\n");
+    out.push_str("    fn inline_flattened() -> String { panic!(\"Permission cannot be flattened\") }\n");
+    writeln!(
+        out,
+        "    fn decl() -> String {{ \"type Permission = {ts_union_literal};\".to_string() }}"
+    )?;
+    out.push_str("    fn decl_concrete() -> String { Self::decl() }\n");
+    out.push_str("}\n\n");
 
     out.push_str("pub const PERMISSION_META: &[PermissionMeta] = &[\n");
     for (_, entry) in &variants {

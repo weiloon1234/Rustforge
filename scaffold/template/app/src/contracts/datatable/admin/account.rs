@@ -14,22 +14,15 @@ pub const ROUTE_PREFIX: &str = "/datatable/admin";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminDatatableRow {
-    #[ts(type = "string")]
     pub id: SnowflakeId,
     pub identity: String,
     pub username: String,
     pub email: Option<String>,
     pub name: String,
-    #[ts(type = "AdminType")]
     pub admin_type: AdminType,
     #[serde(default)]
-    #[ts(type = "string[]")]
     pub abilities: Vec<String>,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
     pub created_at: String,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
     pub updated_at: String,
 }
 

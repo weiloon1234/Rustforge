@@ -1,6 +1,5 @@
-use std::collections::BTreeMap;
-
 use core_web::ids::SnowflakeId;
+use generated::models::ContentPageSystemFlag;
 use schemars::JsonSchema;
 use serde::Serialize;
 use ts_rs::TS;
@@ -9,30 +8,21 @@ use ts_rs::TS;
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminContentPageUpdateInput {
     pub tag: String,
-    #[ts(type = "MultiLang")]
-    pub title: BTreeMap<String, String>,
-    #[ts(type = "MultiLang")]
-    pub content: BTreeMap<String, String>,
-    #[ts(type = "MultiLang")]
-    pub cover: BTreeMap<String, String>,
+    pub title: generated::LocalizedText,
+    pub content: generated::LocalizedText,
+    pub cover: generated::LocalizedText,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminContentPageOutput {
-    #[ts(type = "string")]
     pub id: SnowflakeId,
     pub tag: String,
-    #[ts(type = "ContentPageSystemFlag")]
-    pub is_system: String,
-    #[ts(type = "MultiLang")]
-    pub title: BTreeMap<String, String>,
-    #[ts(type = "MultiLang")]
-    pub content: BTreeMap<String, String>,
-    #[ts(type = "MultiLang")]
-    pub cover: BTreeMap<String, String>,
-    #[ts(type = "MultiLang")]
-    pub cover_url: BTreeMap<String, String>,
+    pub is_system: ContentPageSystemFlag,
+    pub title: generated::LocalizedText,
+    pub content: generated::LocalizedText,
+    pub cover: generated::LocalizedText,
+    pub cover_url: generated::LocalizedText,
     #[schemars(with = "String")]
     #[ts(type = "string")]
     pub created_at: time::OffsetDateTime,
@@ -44,19 +34,13 @@ pub struct AdminContentPageOutput {
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminContentPageUpdateOutput {
-    #[ts(type = "string")]
     pub id: SnowflakeId,
     pub tag: String,
-    #[ts(type = "ContentPageSystemFlag")]
-    pub is_system: String,
-    #[ts(type = "MultiLang")]
-    pub title: BTreeMap<String, String>,
-    #[ts(type = "MultiLang")]
-    pub content: BTreeMap<String, String>,
-    #[ts(type = "MultiLang")]
-    pub cover: BTreeMap<String, String>,
-    #[ts(type = "MultiLang")]
-    pub cover_url: BTreeMap<String, String>,
+    pub is_system: ContentPageSystemFlag,
+    pub title: generated::LocalizedText,
+    pub content: generated::LocalizedText,
+    pub cover: generated::LocalizedText,
+    pub cover_url: generated::LocalizedText,
     #[schemars(with = "String")]
     #[ts(type = "string")]
     pub created_at: time::OffsetDateTime,
@@ -73,14 +57,15 @@ pub struct AdminContentPageDeleteOutput {
 
 impl From<generated::models::ContentPageView> for AdminContentPageOutput {
     fn from(value: generated::models::ContentPageView) -> Self {
-        let cover = multilang_to_map(value.cover_translations.as_ref());
+        let cover = value.cover_translations.unwrap_or_default();
+        let cover_url = attachment_urls_from_localized_text(&cover);
         Self {
             id: value.id.into(),
             tag: value.tag,
-            is_system: value.is_system.as_str().to_string(),
-            title: multilang_to_map(value.title_translations.as_ref()),
-            content: multilang_to_map(value.content_translations.as_ref()),
-            cover_url: attachment_urls_from_map(&cover),
+            is_system: value.is_system,
+            title: value.title_translations.unwrap_or_default(),
+            content: value.content_translations.unwrap_or_default(),
+            cover_url,
             cover,
             created_at: value.created_at,
             updated_at: value.updated_at,
@@ -90,14 +75,15 @@ impl From<generated::models::ContentPageView> for AdminContentPageOutput {
 
 impl From<generated::models::ContentPageView> for AdminContentPageUpdateOutput {
     fn from(value: generated::models::ContentPageView) -> Self {
-        let cover = multilang_to_map(value.cover_translations.as_ref());
+        let cover = value.cover_translations.unwrap_or_default();
+        let cover_url = attachment_urls_from_localized_text(&cover);
         Self {
             id: value.id.into(),
             tag: value.tag,
-            is_system: value.is_system.as_str().to_string(),
-            title: multilang_to_map(value.title_translations.as_ref()),
-            content: multilang_to_map(value.content_translations.as_ref()),
-            cover_url: attachment_urls_from_map(&cover),
+            is_system: value.is_system,
+            title: value.title_translations.unwrap_or_default(),
+            content: value.content_translations.unwrap_or_default(),
+            cover_url,
             cover,
             created_at: value.created_at,
             updated_at: value.updated_at,
@@ -105,28 +91,15 @@ impl From<generated::models::ContentPageView> for AdminContentPageUpdateOutput {
     }
 }
 
-fn multilang_to_map(multilang: Option<&generated::MultiLang>) -> BTreeMap<String, String> {
-    let mut out = BTreeMap::new();
-    for &locale in generated::SUPPORTED_LOCALES {
-        let value = multilang
-            .map(|current| current.get(locale).to_string())
-            .unwrap_or_default();
-        out.insert(locale.to_string(), value);
-    }
-    out
-}
-
-fn attachment_urls_from_map(values: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+fn attachment_urls_from_localized_text(
+    values: &generated::LocalizedText,
+) -> generated::LocalizedText {
     let base = std::env::var("S3_URL").ok();
-    values
-        .iter()
-        .map(|(locale, path)| {
-            (
-                locale.to_string(),
-                build_attachment_url(path, base.as_deref()),
-            )
-        })
-        .collect()
+    let mut mapped = values.to_map();
+    for path in mapped.values_mut() {
+        *path = build_attachment_url(path, base.as_deref());
+    }
+    generated::LocalizedText::from_map(&mapped)
 }
 
 fn build_attachment_url(path: &str, base: Option<&str>) -> String {

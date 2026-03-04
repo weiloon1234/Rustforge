@@ -98,7 +98,7 @@ fields = [
   "updated_at:datetime"
 ]
 
-multilang = ["title", "summary"]
+localized = ["title", "summary"]
 meta = [
   "seo_title:string",
   "is_featured:bool",
@@ -144,7 +144,7 @@ relations = [
                                 </td>
                             </tr>
                             <tr>
-                                <td className="border p-2 font-mono">multilang / relations</td>
+                                <td className="border p-2 font-mono">localized / relations</td>
                                 <td className="border p-2 font-mono">
                                     set_*_lang, set_*_langs, where_has_*, get_with_relations
                                 </td>
