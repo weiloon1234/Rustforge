@@ -2,16 +2,42 @@
 // Generated from TOML schema enum definitions
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
 pub enum AdminType {
+    #[serde(rename = "developer")]
     Developer,
+    #[serde(rename = "superadmin")]
     SuperAdmin,
+    #[serde(rename = "admin")]
     Admin
 }
 
 impl Default for AdminType {
     fn default() -> Self {
         Self::Developer
+    }
+}
+
+impl ts_rs::TS for AdminType {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "AdminType".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("AdminType cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type AdminType = \"developer\" | \"superadmin\" | \"admin\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
     }
 }
 
@@ -88,13 +114,39 @@ impl From<AdminType> for core_db::common::sql::BindValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[repr(i16)]
 pub enum ContentPageSystemFlag {
+    #[serde(rename = "0")]
     No = 0,
+    #[serde(rename = "1")]
     Yes = 1,
 }
 
 impl Default for ContentPageSystemFlag {
     fn default() -> Self {
         Self::No
+    }
+}
+
+impl ts_rs::TS for ContentPageSystemFlag {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "ContentPageSystemFlag".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("ContentPageSystemFlag cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type ContentPageSystemFlag = \"0\" | \"1\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
     }
 }
 

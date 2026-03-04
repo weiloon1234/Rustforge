@@ -1862,6 +1862,7 @@ pub trait AdminDataTableHooks: Send + Sync + 'static {
     fn filter_query<'db>(&'db self, _query: AdminQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<AdminQuery<'db>>> { Ok(None) }
     fn filters<'db>(&'db self, query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<AdminQuery<'db>> { Ok(query) }
     fn mappings(&self, _record: &mut serde_json::Map<String, serde_json::Value>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn summary<'db>(&'db self, _query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct AdminDefaultDataTableHooks;
@@ -1906,6 +1907,7 @@ impl<H: AdminDataTableHooks> AutoDataTable for AdminDataTable<H> {
     fn filter_query<'db>(&'db self, query: AdminQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<AdminQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
     fn filters<'db>(&'db self, query: AdminQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<AdminQuery<'db>> { self.hooks.filters(query, input, ctx) }
     fn mappings(&self, record: &mut serde_json::Map<String, serde_json::Value>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.mappings(record, input, ctx) }
+    fn summary<'db>(&'db self, query: AdminQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }

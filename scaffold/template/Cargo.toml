@@ -23,14 +23,14 @@ tower-cookies = "0.11"
 tower-http = { version = "0.6", features = ["fs"] }
 ts-rs = { version = "10", features = ["serde-compat"] }
 
-bootstrap = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
-core-config = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
-core-db = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
-core-datatable = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
-core-mailer = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
-core-i18n = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
-core-jobs = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
-core-notify = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
-core-realtime = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
-core-web = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
-db-gen = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
+bootstrap = { path = "../../bootstrap" }
+core-config = { path = "../../core-config" }
+core-db = { path = "../../core-db" }
+core-datatable = { path = "../../core-datatable" }
+core-mailer = { path = "../../core-mailer" }
+core-i18n = { path = "../../core-i18n" }
+core-jobs = { path = "../../core-jobs" }
+core-notify = { path = "../../core-notify" }
+core-realtime = { path = "../../core-realtime" }
+core-web = { path = "../../core-web" }
+db-gen = { path = "../../db-gen" }

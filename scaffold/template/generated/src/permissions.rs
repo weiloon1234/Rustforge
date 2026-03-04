@@ -24,6 +24,15 @@ pub enum Permission {
     ContentPageManage,
 }
 
+impl ts_rs::TS for Permission {
+    type WithoutGenerics = Self;
+    fn name() -> String { "Permission".to_string() }
+    fn inline() -> String { Self::name() }
+    fn inline_flattened() -> String { panic!("Permission cannot be flattened") }
+    fn decl() -> String { "type Permission = \"admin.read\" | \"admin.manage\" | \"content_page.read\" | \"content_page.manage\";".to_string() }
+    fn decl_concrete() -> String { Self::decl() }
+}
+
 pub const PERMISSION_META: &[PermissionMeta] = &[
     PermissionMeta { key: "admin.read", guard: "admin", label: "Read Admins", group: "admin", description: "View admin profile and datatable records." },
     PermissionMeta { key: "admin.manage", guard: "admin", label: "Manage Admins", group: "admin", description: "Create/update/delete admin records and perform management actions." },

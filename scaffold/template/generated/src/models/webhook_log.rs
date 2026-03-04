@@ -1322,7 +1322,7 @@ impl<'db> WebhookLogUpdate<'db> {
     }
 
     async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<u64> {
-        let (cols, set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();
+        let (mut cols, mut set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();
         // find target ids for localized updates
         let select_sql = format!("SELECT id FROM webhook_logs WHERE {}", self.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
@@ -1637,6 +1637,7 @@ pub trait WebhookLogDataTableHooks: Send + Sync + 'static {
     fn filter_query<'db>(&'db self, _query: WebhookLogQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<WebhookLogQuery<'db>>> { Ok(None) }
     fn filters<'db>(&'db self, query: WebhookLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<WebhookLogQuery<'db>> { Ok(query) }
     fn mappings(&self, _record: &mut serde_json::Map<String, serde_json::Value>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn summary<'db>(&'db self, _query: WebhookLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct WebhookLogDefaultDataTableHooks;
@@ -1681,6 +1682,7 @@ impl<H: WebhookLogDataTableHooks> AutoDataTable for WebhookLogDataTable<H> {
     fn filter_query<'db>(&'db self, query: WebhookLogQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<WebhookLogQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
     fn filters<'db>(&'db self, query: WebhookLogQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<WebhookLogQuery<'db>> { self.hooks.filters(query, input, ctx) }
     fn mappings(&self, record: &mut serde_json::Map<String, serde_json::Value>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.mappings(record, input, ctx) }
+    fn summary<'db>(&'db self, query: WebhookLogQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
