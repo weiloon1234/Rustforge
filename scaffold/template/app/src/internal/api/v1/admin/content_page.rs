@@ -30,8 +30,8 @@ pub fn router(state: AppApiState) -> ApiRouter {
                 AdminGuard,
                 PermissionMode::Any,
                 [
-                    Permission::PageRead.as_str(),
-                    Permission::PageManage.as_str(),
+                    Permission::ContentPageRead.as_str(),
+                    Permission::ContentPageManage.as_str(),
                 ],
                 |op| op.summary("Get page detail").tag("Admin Page"),
             )
@@ -39,14 +39,14 @@ pub fn router(state: AppApiState) -> ApiRouter {
                 update,
                 AdminGuard,
                 PermissionMode::Any,
-                [Permission::PageManage.as_str()],
+                [Permission::ContentPageManage.as_str()],
                 |op| op.summary("Update page").tag("Admin Page"),
             ))
             .merge(with_permission_check_delete_with(
                 remove,
                 AdminGuard,
                 PermissionMode::Any,
-                [Permission::PageManage.as_str()],
+                [Permission::ContentPageManage.as_str()],
                 |op| op.summary("Delete page").tag("Admin Page"),
             )),
         )

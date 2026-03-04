@@ -2,6 +2,7 @@ export * from "@admin/types/enums";
 export * from "@admin/types/admin";
 export * from "@admin/types/admin-auth";
 export * from "@admin/types/admin-content_page";
+export * from "@admin/types/admin-tiptap_upload";
 export * from "@admin/types/datatable-admin";
 export * from "@admin/types/datatable-admin-content_page";
 export * from "@admin/types/datatable-admin-http_client_log";

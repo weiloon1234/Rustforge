@@ -29,7 +29,7 @@ export const CONTENT_PAGE_SYSTEM_FLAGS: ReadonlyArray<ContentPageSystemFlag> = [
   "1",
 ];
 
-export type Permission = "admin.read" | "admin.manage" | "page.read" | "page.manage";
+export type Permission = "admin.read" | "admin.manage" | "content_page.read" | "content_page.manage";
 
 export interface PermissionMeta {
   key: Permission;
@@ -42,27 +42,27 @@ export interface PermissionMeta {
 export const PERMISSION_META: ReadonlyArray<PermissionMeta> = [
   { key: "admin.read", guard: "admin", label: "Read Admins", group: "admin", description: "View admin profile and datatable records." },
   { key: "admin.manage", guard: "admin", label: "Manage Admins", group: "admin", description: "Create/update/delete admin records and perform management actions." },
-  { key: "page.read", guard: "admin", label: "Read Pages", group: "page", description: "View policy pages and page datatable records." },
-  { key: "page.manage", guard: "admin", label: "Manage Pages", group: "page", description: "Update and delete non-system pages." },
+  { key: "content_page.read", guard: "admin", label: "Read Content Pages", group: "content_page", description: "View policy pages and content-page datatable records." },
+  { key: "content_page.manage", guard: "admin", label: "Manage Content Pages", group: "content_page", description: "Update and delete non-system pages." },
 ];
 
 export const PERMISSIONS: ReadonlyArray<Permission> = [
   "admin.read",
   "admin.manage",
-  "page.read",
-  "page.manage",
+  "content_page.read",
+  "content_page.manage",
 ];
 
 export const PERMISSION: Readonly<Record<string, Permission>> = {
   ADMIN_READ: "admin.read",
   ADMIN_MANAGE: "admin.manage",
-  PAGE_READ: "page.read",
-  PAGE_MANAGE: "page.manage",
+  CONTENT_PAGE_READ: "content_page.read",
+  CONTENT_PAGE_MANAGE: "content_page.manage",
 };
 
 export const PERMISSION_META_BY_KEY: Readonly<Record<Permission, PermissionMeta>> = {
   "admin.read": { key: "admin.read", guard: "admin", label: "Read Admins", group: "admin", description: "View admin profile and datatable records." },
   "admin.manage": { key: "admin.manage", guard: "admin", label: "Manage Admins", group: "admin", description: "Create/update/delete admin records and perform management actions." },
-  "page.read": { key: "page.read", guard: "admin", label: "Read Pages", group: "page", description: "View policy pages and page datatable records." },
-  "page.manage": { key: "page.manage", guard: "admin", label: "Manage Pages", group: "page", description: "Update and delete non-system pages." },
+  "content_page.read": { key: "content_page.read", guard: "admin", label: "Read Content Pages", group: "content_page", description: "View policy pages and content-page datatable records." },
+  "content_page.manage": { key: "content_page.manage", guard: "admin", label: "Manage Content Pages", group: "content_page", description: "Update and delete non-system pages." },
 };

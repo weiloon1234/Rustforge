@@ -132,7 +132,7 @@ fn normalize_localized_html_map(input: &BTreeMap<String, String>) -> BTreeMap<St
 
 fn sanitize_rich_html(input: &str) -> String {
     let mut tag_attributes: HashMap<&str, HashSet<&str>> = HashMap::new();
-    tag_attributes.insert("a", HashSet::from(["href", "target", "rel"]));
+    tag_attributes.insert("a", HashSet::from(["href", "target"]));
     tag_attributes.insert(
         "img",
         HashSet::from(["src", "alt", "title", "width", "height"]),
@@ -218,4 +218,23 @@ fn multilang_from_map(
     }
 
     serde_json::from_value(serde_json::Value::Object(payload)).map_err(AppError::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_rich_html;
+
+    #[test]
+    fn sanitize_rich_html_keeps_links_without_panicking() {
+        let output = sanitize_rich_html(r#"<p><a href="https://example.com" target="_blank">x</a></p>"#);
+        assert!(output.contains("href=\"https://example.com\""));
+        assert!(output.contains("rel=\"noopener noreferrer nofollow\""));
+    }
+
+    #[test]
+    fn sanitize_rich_html_removes_script() {
+        let output = sanitize_rich_html("<p>ok</p><script>alert('x')</script>");
+        assert!(output.contains("<p>ok</p>"));
+        assert!(!output.contains("script"));
+    }
 }

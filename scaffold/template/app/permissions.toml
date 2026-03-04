@@ -14,15 +14,15 @@ group = "admin"
 description = "Create/update/delete admin records and perform management actions."
 
 [[permissions]]
-key = "page.read"
+key = "content_page.read"
 guard = "admin"
-label = "Read Pages"
-group = "page"
-description = "View policy pages and page datatable records."
+label = "Read Content Pages"
+group = "content_page"
+description = "View policy pages and content-page datatable records."
 
 [[permissions]]
-key = "page.manage"
+key = "content_page.manage"
 guard = "admin"
-label = "Manage Pages"
-group = "page"
+label = "Manage Content Pages"
+group = "content_page"
 description = "Update and delete non-system pages."

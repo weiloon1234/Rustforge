@@ -64,7 +64,7 @@ export const navigation: NavItem[] = [
       {
         label: "Pages",
         path: "/other/content-pages",
-        permissions: [PERMISSION.PAGE_READ, PERMISSION.PAGE_MANAGE],
+        permissions: [PERMISSION.CONTENT_PAGE_READ, PERMISSION.CONTENT_PAGE_MANAGE],
       },
     ],
   },

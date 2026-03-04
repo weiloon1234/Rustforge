@@ -19,7 +19,7 @@ use crate::{
 
 const MAX_TIPTAP_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 const TIPTAP_UPLOAD_FOLDER_PERMISSIONS: &[(&str, Permission)] =
-    &[("uploads/content_page", Permission::PageManage)];
+    &[("uploads/content_page", Permission::ContentPageManage)];
 
 struct UploadPayload {
     folder: String,

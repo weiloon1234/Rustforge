@@ -25,8 +25,8 @@ impl ContentPageDataTableHooks for ContentPageDataTableAppHooks {
         Ok(has_required_permissions(
             &actor.permissions,
             &[
-                Permission::PageRead.as_str(),
-                Permission::PageManage.as_str(),
+                Permission::ContentPageRead.as_str(),
+                Permission::ContentPageManage.as_str(),
             ],
             PermissionMode::Any,
         ))
