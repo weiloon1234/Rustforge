@@ -391,6 +391,17 @@ export function DataTable<T>({
           sortable: col.sortable,
         }));
 
+  const indexSortColumn = (() => {
+    const preferred = (meta?.defaults?.sorting_column ?? "").trim();
+    const preferredMeta = preferred
+      ? metaColumns.find((m) => m.name === preferred && m.sortable)
+      : undefined;
+    if (preferredMeta) return preferredMeta.name;
+    const idMeta = metaColumns.find((m) => m.name === "id" && m.sortable);
+    return idMeta?.name ?? "";
+  })();
+  const indexSortable = Boolean(indexSortColumn);
+
   const isColumnSortable = useCallback(
     (col: DataTableColumn<T>): boolean => {
       const fromMeta = metaColumns.find((m) => m.name === col.key);
@@ -532,6 +543,17 @@ export function DataTable<T>({
       setSortDirection("desc");
     }
     setSortColumn(col.key);
+    setPage(1);
+  };
+
+  const handleIndexSort = () => {
+    if (!indexSortable || !indexSortColumn) return;
+    if (indexSortColumn === displaySortCol) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortDirection("desc");
+    }
+    setSortColumn(indexSortColumn);
     setPage(1);
   };
 
@@ -680,7 +702,23 @@ export function DataTable<T>({
           <thead>
             <tr className="rf-dt-head-row">
               {showIndexColumn && (
-                <th className="rf-dt-th rf-dt-th-index">{t("#")}</th>
+                <th
+                  className={`rf-dt-th rf-dt-th-index ${indexSortable ? "rf-dt-th-sortable" : ""}`}
+                  onClick={handleIndexSort}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {t("#")}
+                    {indexSortable &&
+                      indexSortColumn === displaySortCol &&
+                      displaySortDir === "asc" && <ArrowUp size={14} />}
+                    {indexSortable &&
+                      indexSortColumn === displaySortCol &&
+                      displaySortDir === "desc" && <ArrowDown size={14} />}
+                    {indexSortable && indexSortColumn !== displaySortCol && (
+                      <ArrowUpDown size={14} className="opacity-30" />
+                    )}
+                  </span>
+                </th>
               )}
               {renderColumns.map((col) => {
                 const sortable = isColumnSortable(col);
