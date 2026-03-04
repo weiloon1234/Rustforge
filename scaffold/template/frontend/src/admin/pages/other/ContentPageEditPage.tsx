@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { AdminContentPageOutput, AdminContentPageUpdateOutput } from "@admin/types";
 import { CONTENT_PAGE_SYSTEM_FLAG } from "@admin/types";
 import { api } from "@admin/api";
+import { uploadAdminTiptapImage } from "@admin/tiptapUpload";
 import type { ApiResponse, LocaleCode } from "@shared/types";
 import {
   FileInput,
@@ -197,6 +198,9 @@ export default function ContentPageEditPage() {
                 onChange={(e) =>
                   setContent((prev) => ({ ...prev, [locale]: e.target.value }))
                 }
+                preset="full"
+                imageFolder="uploads/content_page"
+                imageUpload={uploadAdminTiptapImage}
                 disabled={saving}
               />
 

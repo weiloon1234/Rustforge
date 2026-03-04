@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use core_db::common::sql::{DbConn, Op};
 use core_i18n::t;
 use core_web::error::AppError;
-use generated::models::{ContentPage, ContentPageView, ContentPageSystemFlag};
+use generated::models::{ContentPage, ContentPageSystemFlag, ContentPageView};
 
 use crate::{
     contracts::api::v1::admin::content_page::AdminContentPageUpdateInput,
@@ -25,7 +25,7 @@ pub async fn update(
 ) -> Result<ContentPageView, AppError> {
     let tag = normalize_tag(&req.tag)?;
     let title = normalize_localized_map(&req.title);
-    let content = normalize_localized_map(&req.content);
+    let content = normalize_localized_html_map(&req.content);
     let cover = normalize_localized_map(&req.cover);
 
     let existing = detail(state, id).await?;
@@ -116,6 +116,72 @@ fn normalize_localized_map(input: &BTreeMap<String, String>) -> BTreeMap<String,
         .iter()
         .map(|(locale, value)| (locale.to_string(), value.trim().to_string()))
         .collect()
+}
+
+fn normalize_localized_html_map(input: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    input
+        .iter()
+        .map(|(locale, value)| {
+            (
+                locale.to_string(),
+                sanitize_rich_html(value.trim()).trim().to_string(),
+            )
+        })
+        .collect()
+}
+
+fn sanitize_rich_html(input: &str) -> String {
+    let mut tag_attributes: HashMap<&str, HashSet<&str>> = HashMap::new();
+    tag_attributes.insert("a", HashSet::from(["href", "target", "rel"]));
+    tag_attributes.insert(
+        "img",
+        HashSet::from(["src", "alt", "title", "width", "height"]),
+    );
+    tag_attributes.insert("th", HashSet::from(["colspan", "rowspan"]));
+    tag_attributes.insert("td", HashSet::from(["colspan", "rowspan"]));
+    tag_attributes.insert("ul", HashSet::from(["data-type"]));
+    tag_attributes.insert("li", HashSet::from(["data-type", "data-checked"]));
+    tag_attributes.insert("input", HashSet::from(["type", "checked", "disabled"]));
+
+    let mut builder = ammonia::Builder::default();
+    builder
+        .tags(HashSet::from([
+            "p",
+            "br",
+            "ul",
+            "ol",
+            "li",
+            "h2",
+            "h3",
+            "strong",
+            "em",
+            "s",
+            "blockquote",
+            "code",
+            "pre",
+            "hr",
+            "a",
+            "u",
+            "mark",
+            "img",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "th",
+            "td",
+            "label",
+            "input",
+            "span",
+            "div",
+        ]))
+        .tag_attributes(tag_attributes)
+        .url_schemes(HashSet::from(["http", "https"]))
+        .url_relative(ammonia::UrlRelative::PassThrough)
+        .link_rel(Some("noopener noreferrer nofollow"))
+        .clean_content_tags(HashSet::from(["script", "style", "iframe"]));
+
+    builder.clean(input).to_string()
 }
 
 fn translations_to_map(multilang: Option<&generated::MultiLang>) -> BTreeMap<String, String> {

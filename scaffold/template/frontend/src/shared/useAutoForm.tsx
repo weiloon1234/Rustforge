@@ -10,7 +10,11 @@ import {
   DateTimePickerInput,
   TimePickerInput,
 } from "@shared/components/TemporalInput";
-import { TiptapInput } from "@shared/components/TiptapInput";
+import {
+  TiptapInput,
+  type TiptapImageUploadHandler,
+  type TiptapPreset,
+} from "@shared/components/TiptapInput";
 import { FileInput, type FilePreviewItem } from "@shared/components/FileInput";
 
 type InputFieldType =
@@ -33,7 +37,18 @@ type AutoFormDefaultValue = string | number | boolean | null | undefined | File 
 
 type FieldDef =
   | { name: string; type: InputFieldType; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean }
-  | { name: string; type: RichEditorFieldType; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean }
+  | {
+      name: string;
+      type: RichEditorFieldType;
+      label: string;
+      span?: 1 | 2;
+      required?: boolean;
+      notes?: string;
+      placeholder?: string;
+      disabled?: boolean;
+      editorPreset?: TiptapPreset;
+      imageFolder?: string;
+    }
   | { name: string; type: "textarea"; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean; rows?: number }
   | { name: string; type: "select"; label: string; options: SelectOption[]; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean }
   | { name: string; type: "checkbox"; label: string; span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean }
@@ -70,6 +85,7 @@ interface AutoFormConfig {
   bodyType?: AutoFormBodyType;
   fields: FieldDef[];
   defaults?: Record<string, AutoFormDefaultValue>;
+  tiptapImageUpload?: TiptapImageUploadHandler;
   /** Static key-value pairs merged into every submission (not rendered as form fields). */
   extraPayload?: Record<string, unknown>;
   onSuccess?: (data: unknown) => void;
@@ -246,7 +262,17 @@ function appendFormDataValue(formData: FormData, key: string, value: unknown): v
 }
 
 export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFormResult {
-  const { url, method = "post", bodyType = "auto", fields, defaults, extraPayload, onSuccess, onError } = config;
+  const {
+    url,
+    method = "post",
+    bodyType = "auto",
+    fields,
+    defaults,
+    tiptapImageUpload,
+    extraPayload,
+    onSuccess,
+    onError,
+  } = config;
 
   const [values, setValuesState] = useState<Record<string, string>>(() => buildDefaults(fields, defaults));
   const [fileValues, setFileValues] = useState<Record<string, File[]>>({});
@@ -488,6 +514,10 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
                     onChange={(e) => setValue(field.name, e.target.value)}
                     errors={errors}
                     notes={field.notes}
+                    preset={field.editorPreset}
+                    placeholder={field.placeholder}
+                    imageFolder={field.imageFolder}
+                    imageUpload={tiptapImageUpload}
                     required={field.required}
                     disabled={field.disabled}
                   />
@@ -540,7 +570,17 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
         })}
       </div>
     );
-  }, [fields, values, fileValues, fieldErrors, defaultFilePreviews, fileInputVersion, setValue, setFiles]);
+  }, [
+    fields,
+    values,
+    fileValues,
+    fieldErrors,
+    defaultFilePreviews,
+    fileInputVersion,
+    setValue,
+    setFiles,
+    tiptapImageUpload,
+  ]);
 
   return {
     submit,

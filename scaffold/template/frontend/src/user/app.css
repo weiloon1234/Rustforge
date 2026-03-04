@@ -188,6 +188,58 @@
   .rf-rich-editor .ProseMirror ol {
     @apply list-decimal pl-5;
   }
+  .rf-rich-editor .ProseMirror h2 {
+    @apply mb-2 mt-3 text-lg font-semibold;
+  }
+  .rf-rich-editor .ProseMirror h3 {
+    @apply mb-2 mt-3 text-base font-semibold;
+  }
+  .rf-rich-editor .ProseMirror blockquote {
+    @apply my-2 border-l-4 border-border pl-3 text-muted;
+  }
+  .rf-rich-editor .ProseMirror code {
+    @apply rounded bg-surface px-1 py-0.5 font-mono text-xs;
+  }
+  .rf-rich-editor .ProseMirror pre {
+    @apply my-2 overflow-x-auto rounded bg-surface p-2;
+  }
+  .rf-rich-editor .ProseMirror pre code {
+    @apply bg-transparent p-0;
+  }
+  .rf-rich-editor .ProseMirror hr {
+    @apply my-3 border-border;
+  }
+  .rf-rich-editor .ProseMirror a {
+    @apply text-primary underline;
+  }
+  .rf-rich-editor .ProseMirror img {
+    @apply my-2 h-auto max-w-full rounded;
+  }
+  .rf-rich-editor .ProseMirror table {
+    @apply my-2 w-full border-collapse overflow-hidden rounded;
+  }
+  .rf-rich-editor .ProseMirror th,
+  .rf-rich-editor .ProseMirror td {
+    @apply border border-border px-2 py-1 align-top;
+  }
+  .rf-rich-editor .ProseMirror th {
+    @apply bg-surface font-semibold;
+  }
+  .rf-rich-editor .ProseMirror ul[data-type="taskList"] {
+    @apply list-none pl-0;
+  }
+  .rf-rich-editor .ProseMirror li[data-type="taskItem"] {
+    @apply my-1 flex items-start gap-2;
+  }
+  .rf-rich-editor .ProseMirror li[data-type="taskItem"] > label {
+    @apply mt-0.5;
+  }
+  .rf-rich-editor .ProseMirror li[data-type="taskItem"] > div {
+    @apply flex-1;
+  }
+  .rf-rich-btn-text {
+    @apply text-[11px] font-semibold leading-none;
+  }
   .rf-rich-disabled {
     @apply opacity-60;
   }
