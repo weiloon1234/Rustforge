@@ -217,13 +217,13 @@
         @apply my-2 border-l-4 border-border pl-3 text-muted;
     }
     .rf-rich-editor .ProseMirror code {
-        @apply rounded bg-surface px-1 py-0.5 font-mono text-xs;
+        @apply rounded border border-border bg-surface-hover px-1 py-0.5 font-mono text-xs;
     }
     .rf-rich-editor .ProseMirror pre {
-        @apply my-2 overflow-x-auto rounded bg-surface p-2;
+        @apply my-2 overflow-x-auto rounded border border-border bg-surface-hover p-3;
     }
     .rf-rich-editor .ProseMirror pre code {
-        @apply bg-transparent p-0;
+        @apply block border-0 bg-transparent p-0;
     }
     .rf-rich-editor .ProseMirror hr {
         @apply my-3 border-border;
@@ -247,14 +247,17 @@
     .rf-rich-editor .ProseMirror ul[data-type="taskList"] {
         @apply list-none pl-0;
     }
-    .rf-rich-editor .ProseMirror li[data-type="taskItem"] {
+    .rf-rich-editor .ProseMirror ul[data-type="taskList"] > li {
         @apply my-1 flex items-start gap-2;
     }
-    .rf-rich-editor .ProseMirror li[data-type="taskItem"] > label {
-        @apply mt-0.5;
+    .rf-rich-editor .ProseMirror ul[data-type="taskList"] > li > label {
+        @apply mt-0.5 flex items-center;
     }
-    .rf-rich-editor .ProseMirror li[data-type="taskItem"] > div {
-        @apply flex-1;
+    .rf-rich-editor .ProseMirror ul[data-type="taskList"] > li > div {
+        @apply min-w-0 flex-1;
+    }
+    .rf-rich-editor .ProseMirror ul[data-type="taskList"] > li > div > p {
+        @apply mb-0;
     }
     .rf-rich-btn-text {
         @apply text-[11px] font-semibold leading-none;
