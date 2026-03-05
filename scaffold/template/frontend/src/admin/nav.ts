@@ -66,6 +66,11 @@ export const navigation: NavItem[] = [
         path: "/other/content-pages",
         permissions: [PERMISSION.CONTENT_PAGE_READ, PERMISSION.CONTENT_PAGE_MANAGE],
       },
+      {
+        label: "Countries",
+        path: "/other/countries",
+        permissions: [PERMISSION.COUNTRY_READ, PERMISSION.COUNTRY_MANAGE],
+      },
     ],
   },
   {

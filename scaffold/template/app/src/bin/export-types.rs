@@ -435,6 +435,43 @@ export interface Attachment {{
 
 // field -> owner_id -> attachments
 export type AttachmentMap = Record<string, Record<number, Attachment[]>>;
+
+export type CountryStatus = \"enabled\" | \"disabled\";
+
+export interface CountryCurrency {{
+  code: string;
+  name?: string | null;
+  symbol?: string | null;
+  minor_units?: number | null;
+}}
+
+export interface CountryRuntime {{
+  iso2: string;
+  iso3: string;
+  iso_numeric?: string | null;
+  name: string;
+  official_name?: string | null;
+  capital?: string | null;
+  capitals: string[];
+  region?: string | null;
+  subregion?: string | null;
+  currencies: CountryCurrency[];
+  primary_currency_code?: string | null;
+  calling_code?: string | null;
+  calling_root?: string | null;
+  calling_suffixes: string[];
+  tlds: string[];
+  timezones: string[];
+  latitude?: number | null;
+  longitude?: number | null;
+  independent?: boolean | null;
+  status: CountryStatus;
+  assignment_status?: string | null;
+  un_member?: boolean | null;
+  flag_emoji?: string | null;
+  created_at: string;
+  updated_at: string;
+}}
 ",
         default_locale = DEFAULT_LOCALE
     )
@@ -555,6 +592,9 @@ fn ts_shared_types() -> &'static [&'static str] {
         "AttachmentInput",
         "AttachmentMap",
         "AttachmentUploadDto",
+        "CountryCurrency",
+        "CountryRuntime",
+        "CountryStatus",
         "JsonObject",
         "JsonPrimitive",
         "JsonValue",

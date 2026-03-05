@@ -9,6 +9,7 @@ import HttpClientLogsPage from "@admin/pages/developer/HttpClientLogsPage";
 import WebhookLogsPage from "@admin/pages/developer/WebhookLogsPage";
 import ContentPagesPage from "@admin/pages/other/ContentPagesPage";
 import ContentPageEditPage from "@admin/pages/other/ContentPageEditPage";
+import CountriesPage from "@admin/pages/other/CountriesPage";
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="/other/admins" element={<AdminsPage />} />
           <Route path="/other/content-pages" element={<ContentPagesPage />} />
           <Route path="/other/content-pages/:id/edit" element={<ContentPageEditPage />} />
+          <Route path="/other/countries" element={<CountriesPage />} />
           <Route path="/developer/http-client-logs" element={<HttpClientLogsPage />} />
           <Route path="/developer/webhook-logs" element={<WebhookLogsPage />} />
         </Route>

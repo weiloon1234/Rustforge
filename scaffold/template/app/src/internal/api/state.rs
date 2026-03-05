@@ -9,6 +9,7 @@ use core_web::datatable::DataTableEmailExportManager;
 #[derive(Clone)]
 pub struct AppApiState {
     pub db: sqlx::PgPool,
+    pub redis: core_db::infra::cache::Cache,
     pub auth: core_config::AuthSettings,
     pub storage: Arc<dyn Storage>,
     pub mailer: Arc<core_mailer::Mailer>,
@@ -19,6 +20,8 @@ pub struct AppApiState {
     pub datatable_unknown_filter_mode: DataTableUnknownFilterMode,
     pub datatable_export_link_ttl_secs: u64,
     pub app_timezone: String,
+    pub i18n_default_locale: String,
+    pub i18n_supported_locales: Vec<String>,
 }
 
 impl AppApiState {
@@ -35,6 +38,7 @@ impl AppApiState {
 
         Ok(Self {
             db: ctx.db.clone(),
+            redis: ctx.redis.clone(),
             auth: ctx.settings.auth.clone(),
             storage: ctx.storage.clone(),
             mailer: ctx.mailer.clone(),
@@ -47,6 +51,14 @@ impl AppApiState {
             ),
             datatable_export_link_ttl_secs: ctx.settings.app.datatable_export_link_ttl_secs,
             app_timezone: ctx.settings.i18n.default_timezone_str.clone(),
+            i18n_default_locale: ctx.settings.i18n.default_locale.to_string(),
+            i18n_supported_locales: ctx
+                .settings
+                .i18n
+                .supported_locales
+                .iter()
+                .map(|locale| (*locale).to_string())
+                .collect(),
         })
     }
 }

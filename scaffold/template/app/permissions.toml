@@ -28,6 +28,20 @@ group = "content_page"
 description = "Update and delete non-system pages."
 
 [[permissions]]
+key = "country.read"
+guard = "admin"
+label = "Read Countries"
+group = "country"
+description = "View countries and country datatable records."
+
+[[permissions]]
+key = "country.manage"
+guard = "admin"
+label = "Manage Countries"
+group = "country"
+description = "Update country status."
+
+[[permissions]]
 key = "export"
 guard = "admin"
 label = "Export Data"

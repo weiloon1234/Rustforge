@@ -4,8 +4,10 @@ pub mod v1;
 
 use std::sync::Arc;
 
-use axum::{http::header, response::Html, routing::get as axum_get, Json, Router};
+use axum::{extract::State, http::header, response::Html, routing::get as axum_get, Json, Router};
 use bootstrap::boot::BootContext;
+use core_db::platform::countries::Country;
+use core_web::error::AppError;
 use core_web::openapi::{
     aide::openapi::{Info, OpenApi},
     ApiRouter,
@@ -16,9 +18,8 @@ use state::AppApiState;
 
 pub async fn build_router(ctx: BootContext) -> anyhow::Result<Router> {
     let app_state = AppApiState::new(&ctx)?;
-    let bootstrap_script = render_frontend_bootstrap_script(&ctx.settings);
 
-    let api_router = ApiRouter::new().nest("/api/v1", v1::router(app_state));
+    let api_router = ApiRouter::new().nest("/api/v1", v1::router(app_state.clone()));
 
     let mut api = OpenApi::default();
     api.info = Info {
@@ -48,24 +49,7 @@ pub async fn build_router(ctx: BootContext) -> anyhow::Result<Router> {
 
     router = router.route(
         "/api/bootstrap.js",
-        axum_get({
-            let bootstrap_script = bootstrap_script.clone();
-            move || {
-                let bootstrap_script = bootstrap_script.clone();
-                async move {
-                    (
-                        [
-                            (
-                                header::CONTENT_TYPE,
-                                "application/javascript; charset=utf-8",
-                            ),
-                            (header::CACHE_CONTROL, "no-store, max-age=0"),
-                        ],
-                        bootstrap_script,
-                    )
-                }
-            }
-        }),
+        axum_get(bootstrap_script).with_state(app_state.clone()),
     );
 
     let public_path = core_web::static_assets::public_path_from_env();
@@ -149,6 +133,7 @@ async fn admin_dev() -> Html<&'static str> {
 #[derive(Debug, Clone, serde::Serialize)]
 struct FrontendBootstrapPayload {
     i18n: FrontendI18nPayload,
+    countries: Vec<Country>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -158,21 +143,31 @@ struct FrontendI18nPayload {
     default_timezone: String,
 }
 
-fn render_frontend_bootstrap_script(settings: &core_config::Settings) -> String {
+async fn bootstrap_script(
+    State(state): State<AppApiState>,
+) -> Result<([(header::HeaderName, &'static str); 2], String), AppError> {
+    let countries = crate::internal::workflows::country::list_enabled_for_bootstrap(&state).await?;
+
     let payload = FrontendBootstrapPayload {
         i18n: FrontendI18nPayload {
-            default_locale: settings.i18n.default_locale.to_string(),
-            supported_locales: settings
-                .i18n
-                .supported_locales
-                .iter()
-                .map(|locale| (*locale).to_string())
-                .collect(),
-            default_timezone: settings.i18n.default_timezone_str.clone(),
+            default_locale: state.i18n_default_locale.clone(),
+            supported_locales: state.i18n_supported_locales.clone(),
+            default_timezone: state.app_timezone.clone(),
         },
+        countries,
     };
 
-    let mut json = serde_json::to_string(&payload).expect("frontend bootstrap payload");
+    let mut json = serde_json::to_string(&payload).map_err(AppError::from)?;
     json = json.replace("</", "<\\/");
-    format!("window.__RUSTFORGE_BOOTSTRAP__ = Object.freeze({json});\n")
+
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/javascript; charset=utf-8",
+            ),
+            (header::CACHE_CONTROL, "no-store, max-age=0"),
+        ],
+        format!("window.__RUSTFORGE_BOOTSTRAP__ = Object.freeze({json});\n"),
+    ))
 }

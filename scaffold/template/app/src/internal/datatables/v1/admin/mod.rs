@@ -1,5 +1,6 @@
 pub mod account;
 pub mod content_page;
+pub mod country;
 pub mod http_client_log;
 pub mod webhook_log;
 
@@ -15,6 +16,7 @@ use crate::contracts::datatable::admin::{
     content_page::{
         ROUTE_PREFIX as CONTENT_PAGE_ROUTE_PREFIX, SCOPED_KEY as CONTENT_PAGE_SCOPED_KEY,
     },
+    country::{ROUTE_PREFIX as COUNTRY_ROUTE_PREFIX, SCOPED_KEY as COUNTRY_SCOPED_KEY},
     http_client_log::{
         ROUTE_PREFIX as HTTP_CLIENT_LOG_ROUTE_PREFIX, SCOPED_KEY as HTTP_CLIENT_LOG_SCOPED_KEY,
     },
@@ -24,6 +26,7 @@ use crate::internal::api::state::AppApiState;
 
 pub use account::{build_admin_summary_output, AdminDataTableAppHooks};
 pub use content_page::ContentPageDataTableAppHooks;
+pub use country::CountryDataTableAppHooks;
 pub use http_client_log::HttpClientLogDataTableAppHooks;
 pub use webhook_log::WebhookLogDataTableAppHooks;
 
@@ -66,6 +69,10 @@ fn content_page_routes(state: AppApiState) -> ApiRouter {
     content_page::routes(state)
 }
 
+fn country_routes(state: AppApiState) -> ApiRouter {
+    country::routes(state)
+}
+
 fn http_client_log_routes(state: AppApiState) -> ApiRouter {
     http_client_log::routes(state)
 }
@@ -98,6 +105,12 @@ pub static ADMIN_SCOPED_DATATABLES: &[ScopedDatatableSpec] = &[
         route_prefix: CONTENT_PAGE_ROUTE_PREFIX,
         register: content_page::register_scoped,
         mount_routes: content_page_routes,
+    },
+    ScopedDatatableSpec {
+        scoped_key: COUNTRY_SCOPED_KEY,
+        route_prefix: COUNTRY_ROUTE_PREFIX,
+        register: country::register_scoped,
+        mount_routes: country_routes,
     },
 ];
 

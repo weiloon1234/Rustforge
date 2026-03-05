@@ -4,6 +4,9 @@ export type { FieldErrorsProps } from "@shared/components/FieldErrors";
 export { TextInput } from "@shared/components/TextInput";
 export type { TextInputProps } from "@shared/components/TextInput";
 
+export { ContactInput } from "@shared/components/ContactInput";
+export type { ContactInputProps, ContactInputValue } from "@shared/components/ContactInput";
+
 export { TextArea } from "@shared/components/TextArea";
 export type { TextAreaProps } from "@shared/components/TextArea";
 

@@ -29,7 +29,7 @@ export const CONTENT_PAGE_SYSTEM_FLAGS: ReadonlyArray<ContentPageSystemFlag> = [
   "1",
 ];
 
-export type Permission = "admin.read" | "admin.manage" | "content_page.read" | "content_page.manage" | "export";
+export type Permission = "admin.read" | "admin.manage" | "content_page.read" | "content_page.manage" | "country.read" | "country.manage" | "export";
 
 export interface PermissionMeta {
   key: Permission;
@@ -44,6 +44,8 @@ export const PERMISSION_META: ReadonlyArray<PermissionMeta> = [
   { key: "admin.manage", guard: "admin", label: "Manage Admins", group: "admin", description: "Create/update/delete admin records and perform management actions." },
   { key: "content_page.read", guard: "admin", label: "Read Content Pages", group: "content_page", description: "View policy pages and content-page datatable records." },
   { key: "content_page.manage", guard: "admin", label: "Manage Content Pages", group: "content_page", description: "Update and delete non-system pages." },
+  { key: "country.read", guard: "admin", label: "Read Countries", group: "country", description: "View countries and country datatable records." },
+  { key: "country.manage", guard: "admin", label: "Manage Countries", group: "country", description: "Update country status." },
   { key: "export", guard: "admin", label: "Export Data", group: "datatable", description: "Export datatable records as CSV." },
 ];
 
@@ -52,6 +54,8 @@ export const PERMISSIONS: ReadonlyArray<Permission> = [
   "admin.manage",
   "content_page.read",
   "content_page.manage",
+  "country.read",
+  "country.manage",
   "export",
 ];
 
@@ -60,6 +64,8 @@ export const PERMISSION: Readonly<Record<string, Permission>> = {
   ADMIN_MANAGE: "admin.manage",
   CONTENT_PAGE_READ: "content_page.read",
   CONTENT_PAGE_MANAGE: "content_page.manage",
+  COUNTRY_READ: "country.read",
+  COUNTRY_MANAGE: "country.manage",
   EXPORT: "export",
 };
 
@@ -68,5 +74,7 @@ export const PERMISSION_META_BY_KEY: Readonly<Record<Permission, PermissionMeta>
   "admin.manage": { key: "admin.manage", guard: "admin", label: "Manage Admins", group: "admin", description: "Create/update/delete admin records and perform management actions." },
   "content_page.read": { key: "content_page.read", guard: "admin", label: "Read Content Pages", group: "content_page", description: "View policy pages and content-page datatable records." },
   "content_page.manage": { key: "content_page.manage", guard: "admin", label: "Manage Content Pages", group: "content_page", description: "Update and delete non-system pages." },
+  "country.read": { key: "country.read", guard: "admin", label: "Read Countries", group: "country", description: "View countries and country datatable records." },
+  "country.manage": { key: "country.manage", guard: "admin", label: "Manage Countries", group: "country", description: "Update country status." },
   "export": { key: "export", guard: "admin", label: "Export Data", group: "datatable", description: "Export datatable records as CSV." },
 };

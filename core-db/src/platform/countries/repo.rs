@@ -7,8 +7,8 @@ use crate::platform::countries::model::CountryRow;
 use crate::platform::countries::types::{Country, CountryCurrency, CountrySeed};
 
 const BUILTIN_COUNTRIES_JSON: &str = include_str!("seed/countries.seed.json");
-const COUNTRY_STATUS_ENABLED: &str = "enabled";
-const COUNTRY_STATUS_DISABLED: &str = "disabled";
+pub const COUNTRY_STATUS_ENABLED: &str = "enabled";
+pub const COUNTRY_STATUS_DISABLED: &str = "disabled";
 
 pub struct CountryRepo<'a> {
     db: DbConn<'a>,
@@ -163,6 +163,93 @@ impl<'a> CountryRepo<'a> {
         );
         let rows = self.db.fetch_all(q).await?;
         rows.into_iter().map(row_to_country).collect()
+    }
+
+    pub async fn list_enabled(&self) -> Result<Vec<Country>> {
+        let q = sqlx::query_as::<_, CountryRow>(
+            r#"
+            SELECT
+                iso2,
+                iso3,
+                iso_numeric,
+                name,
+                official_name,
+                capital,
+                capitals,
+                region,
+                subregion,
+                currencies,
+                primary_currency_code,
+                calling_code,
+                calling_root,
+                calling_suffixes,
+                tlds,
+                timezones,
+                latitude,
+                longitude,
+                independent,
+                status,
+                assignment_status,
+                un_member,
+                flag_emoji,
+                created_at,
+                updated_at
+            FROM countries
+            WHERE status = $1
+            ORDER BY name ASC
+            "#,
+        )
+        .bind(COUNTRY_STATUS_ENABLED);
+        let rows = self.db.fetch_all(q).await?;
+        rows.into_iter().map(row_to_country).collect()
+    }
+
+    pub async fn update_status(&self, iso2: &str, status: &str) -> Result<Option<Country>> {
+        let iso2 = iso2.trim().to_ascii_uppercase();
+        if iso2.is_empty() {
+            return Ok(None);
+        }
+
+        let normalized_status = normalize_country_status(status)
+            .ok_or_else(|| anyhow::anyhow!("invalid country status: {status}"))?;
+
+        let q = sqlx::query_as::<_, CountryRow>(
+            r#"
+            UPDATE countries
+            SET status = $1, updated_at = NOW()
+            WHERE iso2 = $2
+            RETURNING
+                iso2,
+                iso3,
+                iso_numeric,
+                name,
+                official_name,
+                capital,
+                capitals,
+                region,
+                subregion,
+                currencies,
+                primary_currency_code,
+                calling_code,
+                calling_root,
+                calling_suffixes,
+                tlds,
+                timezones,
+                latitude,
+                longitude,
+                independent,
+                status,
+                assignment_status,
+                un_member,
+                flag_emoji,
+                created_at,
+                updated_at
+            "#,
+        )
+        .bind(normalized_status)
+        .bind(iso2);
+        let row = self.db.fetch_optional(q).await?;
+        row.map(row_to_country).transpose()
     }
 
     pub async fn find_by_iso2(&self, iso2: &str) -> Result<Option<Country>> {
@@ -371,6 +458,14 @@ fn default_status_for_iso2(iso2: &str) -> &'static str {
         COUNTRY_STATUS_ENABLED
     } else {
         COUNTRY_STATUS_DISABLED
+    }
+}
+
+pub fn normalize_country_status(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        COUNTRY_STATUS_ENABLED => Some(COUNTRY_STATUS_ENABLED),
+        COUNTRY_STATUS_DISABLED => Some(COUNTRY_STATUS_DISABLED),
+        _ => None,
     }
 }
 
