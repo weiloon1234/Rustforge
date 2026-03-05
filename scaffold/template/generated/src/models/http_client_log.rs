@@ -1674,7 +1674,15 @@ pub trait HttpClientLogDataTableHooks: Send + Sync + 'static {
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
     fn filter_query<'db>(&'db self, _query: HttpClientLogQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<HttpClientLogQuery<'db>>> { Ok(None) }
     fn filters<'db>(&'db self, query: HttpClientLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<HttpClientLogQuery<'db>> { Ok(query) }
-    fn mappings(&self, _record: &mut serde_json::Map<String, serde_json::Value>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn map_row(&self, _row: &mut HttpClientLogView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: HttpClientLogView) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(row)?;
+        let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
+        Ok(record)
+    }
+    fn row_to_record(&self, row: HttpClientLogView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        self.default_row_to_record(row)
+    }
     fn summary<'db>(&'db self, _query: HttpClientLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
@@ -1719,7 +1727,8 @@ impl<H: HttpClientLogDataTableHooks> AutoDataTable for HttpClientLogDataTable<H>
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
     fn filter_query<'db>(&'db self, query: HttpClientLogQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<HttpClientLogQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
     fn filters<'db>(&'db self, query: HttpClientLogQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<HttpClientLogQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn mappings(&self, record: &mut serde_json::Map<String, serde_json::Value>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.mappings(record, input, ctx) }
+    fn map_row(&self, row: &mut HttpClientLogView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: HttpClientLogView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
     fn summary<'db>(&'db self, query: HttpClientLogQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }

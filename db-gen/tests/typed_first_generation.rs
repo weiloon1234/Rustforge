@@ -67,8 +67,11 @@ fields = [
 
     assert!(enums_rs.contains("pub enum AdminType"));
     assert!(enums_rs.contains("pub enum ContentPageSystemFlag"));
-    assert!(enums_rs.contains("let label = (*v).as_label();"));
+    assert!(enums_rs.contains("let label = (*v).explained_label();"));
     assert!(enums_rs.contains("let value = (*v).as_str();"));
+    assert!(enums_rs.contains("pub fn from_storage(raw: &str) -> Option<Self> {"));
+    assert!(enums_rs.contains("pub const fn i18n_key(self) -> &'static str {"));
+    assert!(enums_rs.contains("pub fn explained_label(self) -> String {"));
 
     // String enum: label is variant name, value is storage value.
     assert!(enums_rs.contains("Self::Developer => \"Developer\","));
@@ -160,6 +163,9 @@ meta = ["flags:bool", "extra:json"]
     assert!(article_rs.contains("pub struct ArticleTableAdapter;"));
     assert!(article_rs.contains("pub struct ArticleDataTableConfig {"));
     assert!(article_rs.contains("pub trait ArticleDataTableHooks: Send + Sync + 'static {"));
+    assert!(article_rs.contains("fn map_row(&self, _row: &mut ArticleView"));
+    assert!(article_rs.contains("fn default_row_to_record(&self, row: ArticleView)"));
+    assert!(article_rs.contains("fn row_to_record(&self, row: ArticleView"));
     assert!(article_rs.contains("pub struct ArticleDataTable<H = ArticleDefaultDataTableHooks> where H: ArticleDataTableHooks {"));
     assert!(article_rs
         .contains("impl<H: ArticleDataTableHooks> AutoDataTable for ArticleDataTable<H> {"));
@@ -220,6 +226,9 @@ meta = ["flags:bool", "extra:json"]
     // i64 PK default strategy is snowflake.
     assert!(article_rs.contains("binds.push(generate_snowflake_i64().into());"));
     assert!(article_rs.contains("matches!(c, ArticleCol::Id)"));
+    assert!(article_rs.contains("pub status_explained: String,"));
+    assert!(article_rs.contains("status_explained: row.status.explained_label(),"));
+    assert!(article_rs.contains("record.insert(\"id\".to_string(), serde_json::Value::String(id_text));"));
 
     fs::remove_dir_all(root).expect("failed to remove temp dir");
 }

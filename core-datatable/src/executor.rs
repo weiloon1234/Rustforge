@@ -174,10 +174,10 @@ pub async fn execute_datatable<T: AutoDataTable>(
                 .collect::<Vec<_>>();
 
             let mut records = Vec::with_capacity(rows.len());
-            for row in rows {
-                let mut record = adapter.row_to_map(row)?;
+            for mut row in rows {
+                table.map_row(&mut row, input, ctx)?;
+                let mut record = table.row_to_record(row, input, ctx)?;
                 apply_timezone_to_fields(&mut record, &timestamp_columns, &tz);
-                table.mappings(&mut record, input, ctx)?;
                 records.push(Value::Object(record));
             }
 
@@ -240,10 +240,10 @@ pub async fn execute_datatable<T: AutoDataTable>(
                     continue;
                 }
 
-                for row in rows {
-                    let mut record = adapter.row_to_map(row)?;
+                for mut row in rows {
+                    table.map_row(&mut row, input, ctx)?;
+                    let mut record = table.row_to_record(row, input, ctx)?;
                     apply_timezone_to_fields(&mut record, &timestamp_columns, &tz);
-                    table.mappings(&mut record, input, ctx)?;
 
                     if !wrote_header {
                         if let Some(spec) = &header_spec {

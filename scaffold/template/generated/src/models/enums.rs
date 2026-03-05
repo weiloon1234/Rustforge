@@ -50,6 +50,45 @@ impl AdminType {
         }
     }
 
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Developer => "Developer",
+            Self::SuperAdmin => "SuperAdmin",
+            Self::Admin => "Admin",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "developer" => Some(Self::Developer),
+            "superadmin" => Some(Self::SuperAdmin),
+            "admin" => Some(Self::Admin),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Developer => "enum.admin_type.developer",
+            Self::SuperAdmin => "enum.admin_type.super_admin",
+            Self::Admin => "enum.admin_type.admin",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
     pub const fn variants() -> &'static [Self] {
         &[Self::Developer, Self::SuperAdmin, Self::Admin]
     }
@@ -58,10 +97,11 @@ impl AdminType {
         Self::variants()
             .iter()
             .map(|v| {
-                let s = (*v).as_str();
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
                 core_web::datatable::DataTableFilterOptionDto {
-                    label: s.to_string(),
-                    value: s.to_string(),
+                    label,
+                    value: value.to_string(),
                 }
             })
             .collect()
@@ -158,6 +198,43 @@ impl ContentPageSystemFlag {
         }
     }
 
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::No => "No",
+            Self::Yes => "Yes",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            0 => Some(Self::No),
+            1 => Some(Self::Yes),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::No => "enum.content_page_system_flag.no",
+            Self::Yes => "enum.content_page_system_flag.yes",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
     pub const fn variants() -> &'static [Self] {
         &[Self::No, Self::Yes]
     }
@@ -166,10 +243,11 @@ impl ContentPageSystemFlag {
         Self::variants()
             .iter()
             .map(|v| {
-                let s = (*v).as_str();
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
                 core_web::datatable::DataTableFilterOptionDto {
-                    label: s.to_string(),
-                    value: s.to_string(),
+                    label,
+                    value: value.to_string(),
                 }
             })
             .collect()

@@ -297,18 +297,6 @@ impl CountryDataTableAppHooks {
         }
     }
 
-    fn mappings(
-        &self,
-        record: &mut serde_json::Map<String, serde_json::Value>,
-    ) -> anyhow::Result<()> {
-        if let Some(iso2) = record.get("iso2").and_then(|value| value.as_str()) {
-            record.insert(
-                "id".to_string(),
-                serde_json::Value::String(iso2.to_string()),
-            );
-        }
-        Ok(())
-    }
 }
 
 pub struct CountryDataTable {
@@ -353,15 +341,6 @@ impl AutoDataTable for CountryDataTable {
         _ctx: &DataTableContext,
     ) -> anyhow::Result<Option<<Self::Adapter as GeneratedTableAdapter>::Query<'db>>> {
         Ok(self.hooks.filter_query(query, filter_key, value))
-    }
-
-    fn mappings(
-        &self,
-        record: &mut serde_json::Map<String, serde_json::Value>,
-        _input: &DataTableInput,
-        _ctx: &DataTableContext,
-    ) -> anyhow::Result<()> {
-        self.hooks.mappings(record)
     }
 
     fn default_sorting_column(&self) -> &'static str {

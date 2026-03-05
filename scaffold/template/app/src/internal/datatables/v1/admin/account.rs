@@ -59,15 +59,19 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
         }
     }
 
-    fn mappings(
+    fn row_to_record(
         &self,
-        record: &mut serde_json::Map<String, serde_json::Value>,
+        row: generated::models::AdminView,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<()> {
-        record.remove("password");
-        record.remove("deleted_at");
-
+    ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let identity = admin_identity(
+            Some(row.username.as_str()),
+            Some(row.name.as_str()),
+            row.email.as_deref(),
+            Some(row.id),
+        );
+        let mut record = self.default_row_to_record(row)?;
         if let Some(abilities_val) = record.get("abilities") {
             let strings: Vec<String> = abilities_val
                 .as_array()
@@ -80,24 +84,11 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
                 .unwrap_or_default();
             record.insert("abilities".to_string(), serde_json::to_value(strings)?);
         }
-
-        let username = record.get("username").and_then(|v| v.as_str());
-        let name = record.get("name").and_then(|v| v.as_str());
-        let email = record.get("email").and_then(|v| v.as_str());
-        let id = record.get("id").and_then(|v| v.as_i64());
-        let identity = admin_identity(username, name, email, id);
         record.insert("identity".to_string(), serde_json::Value::String(identity));
+        record.remove("password");
+        record.remove("deleted_at");
 
-        if let Some(id_value) = record.get("id").cloned() {
-            let id_text = match id_value {
-                serde_json::Value::Number(number) => number.to_string(),
-                serde_json::Value::String(text) => text,
-                other => other.to_string(),
-            };
-            record.insert("id".to_string(), serde_json::Value::String(id_text));
-        }
-
-        Ok(())
+        Ok(record)
     }
 }
 

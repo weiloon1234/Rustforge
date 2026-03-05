@@ -52,6 +52,7 @@ struct MockQuery {
 struct MockRow {
     applied_filters: Vec<String>,
     sort_column: Option<String>,
+    mapped: bool,
 }
 
 struct MockAdapter;
@@ -128,6 +129,7 @@ impl GeneratedTableAdapter for MockAdapter {
             Ok(vec![MockRow {
                 applied_filters: query.filters,
                 sort_column: query.sort.map(|x| x.0),
+                mapped: false,
             }])
         })
     }
@@ -158,6 +160,27 @@ impl AutoDataTable for MockTable {
 
     fn default_unsortable(&self) -> &'static [&'static str] {
         &["name"]
+    }
+
+    fn map_row(
+        &self,
+        row: &mut <Self::Adapter as GeneratedTableAdapter>::Row,
+        _input: &DataTableInput,
+        _ctx: &DataTableContext,
+    ) -> anyhow::Result<()> {
+        row.mapped = true;
+        Ok(())
+    }
+
+    fn row_to_record(
+        &self,
+        row: <Self::Adapter as GeneratedTableAdapter>::Row,
+        _input: &DataTableInput,
+        _ctx: &DataTableContext,
+    ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let mut record = self.adapter().row_to_map(row)?;
+        record.insert("hook".to_string(), serde_json::Value::String("typed".to_string()));
+        Ok(record)
     }
 
     fn summary<'db>(
@@ -222,6 +245,8 @@ async fn unknown_filter_is_ignored_and_sort_falls_back_to_default() {
         first.get("sort_column").and_then(|v| v.as_str()),
         Some("id")
     );
+    assert_eq!(first.get("mapped").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(first.get("hook").and_then(|v| v.as_str()), Some("typed"));
     assert_eq!(page.pagination_mode, DataTablePaginationMode::Offset);
     assert!(page.next_cursor.is_none());
     assert_eq!(
@@ -400,5 +425,8 @@ async fn async_export_manager_completes_csv_job() {
     assert!(status.error.is_none());
     let csv = status.csv.expect("csv metadata should exist");
     assert!(Path::new(&csv.file_path).exists());
+    let csv_raw = std::fs::read_to_string(&csv.file_path).expect("read csv output");
+    assert!(csv_raw.contains("hook"), "csv should include typed hook column");
+    assert!(csv_raw.contains("typed"), "csv should include typed hook value");
     let _ = std::fs::remove_file(&csv.file_path);
 }

@@ -83,9 +83,7 @@ function PermissionCheckboxes({
   const { t } = useTranslation();
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">
-        {t("Permissions")}
-      </legend>
+      <legend className="text-sm font-medium">{t("Permissions")}</legend>
       <div className="flex flex-wrap gap-x-6 gap-y-1">
         {ADMIN_PERMISSION_META.map((meta) => (
           <Checkbox
@@ -185,9 +183,8 @@ function EditAdminForm({
   const close = useModalStore((s) => s.close);
   const isNormalAdmin = admin.admin_type === ADMIN_TYPE.ADMIN;
   const [abilities, setAbilities] = useState<Permission[]>(
-    admin.abilities.filter(
-      (value): value is Permission =>
-        PERMISSIONS.includes(value as Permission),
+    admin.abilities.filter((value): value is Permission =>
+      PERMISSIONS.includes(value as Permission),
     ),
   );
 
@@ -215,7 +212,7 @@ function EditAdminForm({
         type: "email",
         label: t("Email"),
         placeholder: t("Enter email"),
-        required: false,
+        required: true,
       },
     ],
     defaults: {
@@ -332,7 +329,10 @@ export default function AdminsPage() {
     });
   };
 
-  const handleDelete = async (admin: AdminDatatableRow, refresh: () => void) => {
+  const handleDelete = async (
+    admin: AdminDatatableRow,
+    refresh: () => void,
+  ) => {
     await alertConfirm({
       title: t("Delete Admin"),
       message: t('Are you sure you want to delete ":username"?', {
@@ -384,21 +384,15 @@ export default function AdminsPage() {
             </div>
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Developers")}</p>
-              <p className="font-semibold">
-                {summary.developer_count}
-              </p>
+              <p className="font-semibold">{summary.developer_count}</p>
             </div>
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Super Admins")}</p>
-              <p className="font-semibold">
-                {summary.superadmin_count}
-              </p>
+              <p className="font-semibold">{summary.superadmin_count}</p>
             </div>
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Admins")}</p>
-              <p className="font-semibold">
-                {summary.admin_count}
-              </p>
+              <p className="font-semibold">{summary.admin_count}</p>
             </div>
           </div>
         ) : undefined

@@ -118,7 +118,7 @@ export default function ContentPagesPage() {
             <span
               className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${toSystemBadgeClass(row.is_system)}`}
             >
-              {toSystemLabel(row.is_system, t)}
+              {row.is_system_explained ?? toSystemLabel(row.is_system, t)}
             </span>
           ),
         },

@@ -1,8 +1,8 @@
 use crate::config::ConfigsFile;
 use crate::schema::{
     parse_attachments, parse_computed, parse_fields, parse_meta, parse_relations, to_snake,
-    to_title_case, AttachmentFieldSpec, FieldSpec, MetaType, ModelSpec, RelationKind, Schema,
-    SpecialType,
+    to_title_case, AttachmentFieldSpec, EnumOrOther, FieldSpec, MetaType, ModelSpec,
+    RelationKind, Schema, SpecialType,
 };
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -16,6 +16,54 @@ const DATATABLE_REL_FILTER_MAX_DEPTH: usize = 3;
 struct RelationPathSpec {
     path: Vec<String>,
     target_model: String,
+}
+
+#[derive(Debug, Clone)]
+struct EnumExplainedFieldSpec {
+    name: String,
+    explained_name: String,
+    optional: bool,
+}
+
+fn parse_option_inner_type(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if !trimmed.starts_with("Option<") || !trimmed.ends_with('>') {
+        return None;
+    }
+    let inner = trimmed
+        .strip_prefix("Option<")
+        .and_then(|value| value.strip_suffix('>'))?
+        .trim();
+    if inner.is_empty() {
+        None
+    } else {
+        Some(inner.to_string())
+    }
+}
+
+fn enum_field_spec(
+    field_name: &str,
+    field_type: &str,
+    enum_type_names: &BTreeSet<String>,
+) -> Option<EnumExplainedFieldSpec> {
+    if enum_type_names.contains(field_type.trim()) {
+        return Some(EnumExplainedFieldSpec {
+            name: field_name.to_string(),
+            explained_name: format!("{field_name}_explained"),
+            optional: false,
+        });
+    }
+
+    let inner = parse_option_inner_type(field_type)?;
+    if !enum_type_names.contains(inner.as_str()) {
+        return None;
+    }
+
+    Some(EnumExplainedFieldSpec {
+        name: field_name.to_string(),
+        explained_name: format!("{field_name}_explained"),
+        optional: true,
+    })
 }
 
 fn collect_relation_paths(
@@ -207,6 +255,18 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         .iter()
         .cloned()
         .filter(|f| !localized_set.contains(&f.name))
+        .collect();
+    let enum_type_names: BTreeSet<String> = schema
+        .extra_sections
+        .iter()
+        .filter_map(|(name, section)| match section {
+            EnumOrOther::Enum(spec) if spec.type_name == "enum" => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+    let enum_explained_fields: Vec<EnumExplainedFieldSpec> = db_fields
+        .iter()
+        .filter_map(|field| enum_field_spec(&field.name, &field.ty, &enum_type_names))
         .collect();
 
     let parent_pk_ty = fields
@@ -424,6 +484,13 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
         }
         view_fields.push(format!("    pub {}: {},", f.name, f.ty));
     }
+    for enum_field in &enum_explained_fields {
+        if enum_field.optional {
+            view_fields.push(format!("    pub {}: Option<String>,", enum_field.explained_name));
+        } else {
+            view_fields.push(format!("    pub {}: String,", enum_field.explained_name));
+        }
+    }
     for f in &localized_fields {
         view_fields.push(format!("    pub {}: Option<String>,", f));
         view_fields.push(format!(
@@ -486,6 +553,16 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     for f in &db_fields {
         if !hidden_fields.contains(&f.name) {
             writeln!(out, "            {}: self.{}.clone(),", f.name, f.name).unwrap();
+        }
+    }
+    for enum_field in &enum_explained_fields {
+        if !hidden_fields.contains(&enum_field.name) {
+            writeln!(
+                out,
+                "            {}: self.{}.clone(),",
+                enum_field.explained_name, enum_field.explained_name
+            )
+            .unwrap();
         }
     }
     for f in &localized_fields {
@@ -661,6 +738,15 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             writeln!(out, "    pub {}: {},", f.name, f.ty).unwrap();
         }
     }
+    for enum_field in &enum_explained_fields {
+        if !hidden_fields.contains(&enum_field.name) {
+            if enum_field.optional {
+                writeln!(out, "    pub {}: Option<String>,", enum_field.explained_name).unwrap();
+            } else {
+                writeln!(out, "    pub {}: String,", enum_field.explained_name).unwrap();
+            }
+        }
+    }
     for f in &localized_fields {
         if !hidden_fields.contains(f) {
             writeln!(out, "    pub {}: Option<String>,", f).unwrap();
@@ -723,6 +809,23 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     writeln!(out, "    let mut view = {view_ident} {{").unwrap();
     for f in &db_fields {
         writeln!(out, "        {}: row.{},", f.name, f.name).unwrap();
+    }
+    for enum_field in &enum_explained_fields {
+        if enum_field.optional {
+            writeln!(
+                out,
+                "        {}: row.{}.map(|value| value.explained_label()),",
+                enum_field.explained_name, enum_field.name
+            )
+            .unwrap();
+        } else {
+            writeln!(
+                out,
+                "        {}: row.{}.explained_label(),",
+                enum_field.explained_name, enum_field.name
+            )
+            .unwrap();
+        }
     }
     for f in &localized_fields {
         writeln!(out, "        {f}: None,").unwrap();
@@ -5863,9 +5966,51 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     .unwrap();
     writeln!(
         out,
-        "    fn mappings(&self, _record: &mut serde_json::Map<String, serde_json::Value>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> {{ Ok(()) }}"
+        "    fn map_row(&self, _row: &mut {view_ident}, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> {{ Ok(()) }}"
     )
     .unwrap();
+    writeln!(
+        out,
+        "    fn default_row_to_record(&self, row: {view_ident}) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {{"
+    )
+    .unwrap();
+    writeln!(out, "        let value = serde_json::to_value(row)?;").unwrap();
+    writeln!(
+        out,
+        "        let mut record = match value {{ serde_json::Value::Object(map) => map, _ => anyhow::bail!(\"Generated row must serialize to a JSON object\"), }};"
+    )
+    .unwrap();
+    if use_snowflake_id {
+        writeln!(
+            out,
+            "        if let Some(id_value) = record.get(\"{pk}\").cloned() {{"
+        )
+        .unwrap();
+        writeln!(out, "            let id_text = match id_value {{").unwrap();
+        writeln!(
+            out,
+            "                serde_json::Value::Number(number) => number.to_string(),"
+        )
+        .unwrap();
+        writeln!(out, "                serde_json::Value::String(text) => text,").unwrap();
+        writeln!(out, "                other => other.to_string(),").unwrap();
+        writeln!(out, "            }};").unwrap();
+        writeln!(
+            out,
+            "            record.insert(\"{pk}\".to_string(), serde_json::Value::String(id_text));"
+        )
+        .unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    writeln!(out, "        Ok(record)").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn row_to_record(&self, row: {view_ident}, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {{"
+    )
+    .unwrap();
+    writeln!(out, "        self.default_row_to_record(row)").unwrap();
+    writeln!(out, "    }}").unwrap();
     writeln!(
         out,
         "    fn summary<'db>(&'db self, _query: {query_ident}<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> {{ Box::pin(async {{ Ok(None) }}) }}"
@@ -5977,7 +6122,12 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     .unwrap();
     writeln!(
         out,
-        "    fn mappings(&self, record: &mut serde_json::Map<String, serde_json::Value>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> {{ self.hooks.mappings(record, input, ctx) }}"
+        "    fn map_row(&self, row: &mut {view_ident}, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> {{ self.hooks.map_row(row, input, ctx) }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    fn row_to_record(&self, row: {view_ident}, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {{ self.hooks.row_to_record(row, input, ctx) }}"
     )
     .unwrap();
     writeln!(

@@ -159,13 +159,22 @@ pub trait AutoDataTable: Send + Sync + 'static {
         Ok(query)
     }
 
-    fn mappings(
+    fn map_row(
         &self,
-        _record: &mut Map<String, Value>,
+        _row: &mut <Self::Adapter as GeneratedTableAdapter>::Row,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> Result<()> {
         Ok(())
+    }
+
+    fn row_to_record(
+        &self,
+        row: <Self::Adapter as GeneratedTableAdapter>::Row,
+        _input: &DataTableInput,
+        _ctx: &DataTableContext,
+    ) -> Result<Map<String, Value>> {
+        self.adapter().row_to_map(row)
     }
 
     /// Optional summary payload computed from the fully filtered query

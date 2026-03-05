@@ -1,4 +1,4 @@
-use crate::schema::{EnumSpec, EnumVariants};
+use crate::schema::{to_snake, EnumSpec, EnumVariants};
 
 /// Generate Rust enum code from EnumSpec
 pub fn generate_enum(name: &str, spec: &EnumSpec) -> String {
@@ -87,6 +87,24 @@ fn generate_string_enum(name: &str, spec: &EnumSpec) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let from_storage_arms_str = value_map
+        .iter()
+        .map(|(variant, value)| format!("            \"{}\" => Some(Self::{}),", value, variant))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let enum_key = to_snake(name);
+    let i18n_key_arms_str = value_map
+        .iter()
+        .map(|(variant, _)| {
+            format!(
+                "            Self::{} => \"enum.{}.{}\",",
+                variant,
+                enum_key,
+                to_snake(variant)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let ts_union = value_map
         .iter()
         .map(|(_, value)| format!("\"{}\"", escape_rust_string(value)))
@@ -143,6 +161,33 @@ impl {name} {{
         }}
     }}
 
+    pub fn from_storage(raw: &str) -> Option<Self> {{
+        match raw.trim() {{
+{from_storage_arms_str}
+            _ => None,
+        }}
+    }}
+
+    pub const fn i18n_key(self) -> &'static str {{
+        match self {{
+{i18n_key_arms_str}
+        }}
+    }}
+
+    pub fn explained_label(self) -> String {{
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {{
+            return translated_key;
+        }}
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {{
+            return translated_label;
+        }}
+        fallback_label.to_string()
+    }}
+
     pub const fn variants() -> &'static [Self] {{
         &[{variant_self_list}]
     }}
@@ -151,10 +196,10 @@ impl {name} {{
         Self::variants()
             .iter()
             .map(|v| {{
-                let label = (*v).as_label();
+                let label = (*v).explained_label();
                 let value = (*v).as_str();
                 core_web::datatable::DataTableFilterOptionDto {{
-                    label: label.to_string(),
+                    label,
                     value: value.to_string(),
                 }}
             }})
@@ -249,6 +294,24 @@ fn generate_integer_enum(name: &str, spec: &EnumSpec) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let from_storage_arms = value_map
+        .iter()
+        .map(|(variant, value)| format!("            {} => Some(Self::{}),", value, variant))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let enum_key = to_snake(name);
+    let i18n_key_arms = value_map
+        .iter()
+        .map(|(variant, _)| {
+            format!(
+                "            Self::{} => \"enum.{}.{}\",",
+                variant,
+                enum_key,
+                to_snake(variant)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let variant_self_list = value_map
         .iter()
         .map(|(variant, _)| format!("Self::{}", variant))
@@ -311,6 +374,34 @@ impl {name} {{
         }}
     }}
 
+    pub fn from_storage(raw: &str) -> Option<Self> {{
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {{
+{from_storage_arms}
+            _ => None,
+        }}
+    }}
+
+    pub const fn i18n_key(self) -> &'static str {{
+        match self {{
+{i18n_key_arms}
+        }}
+    }}
+
+    pub fn explained_label(self) -> String {{
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {{
+            return translated_key;
+        }}
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {{
+            return translated_label;
+        }}
+        fallback_label.to_string()
+    }}
+
     pub const fn variants() -> &'static [Self] {{
         &[{variant_self_list}]
     }}
@@ -319,10 +410,10 @@ impl {name} {{
         Self::variants()
             .iter()
             .map(|v| {{
-                let label = (*v).as_label();
+                let label = (*v).explained_label();
                 let value = (*v).as_str();
                 core_web::datatable::DataTableFilterOptionDto {{
-                    label: label.to_string(),
+                    label,
                     value: value.to_string(),
                 }}
             }})
