@@ -93,20 +93,56 @@ fn scaffold_smoke_generation_and_force_behaviour() {
         }
     }
 
-    for rel in [
+    let agent_aliases = [
         "CLAUDE.md",
         "GEMINI.md",
         "frontend/CLAUDE.md",
         "frontend/GEMINI.md",
         "app/src/contracts/CLAUDE.md",
         "app/src/contracts/GEMINI.md",
-    ] {
-        let path = out_dir.join(rel);
-        assert!(
-            !path.exists(),
-            "symlink alias should not be generated: {}",
-            path.display()
-        );
+        "app/src/internal/CLAUDE.md",
+        "app/src/internal/GEMINI.md",
+        "app/src/seeds/CLAUDE.md",
+        "app/src/seeds/GEMINI.md",
+        "app/src/validation/CLAUDE.md",
+        "app/src/validation/GEMINI.md",
+    ];
+
+    #[cfg(unix)]
+    {
+        for rel in agent_aliases {
+            let path = out_dir.join(rel);
+            let file_type = fs::symlink_metadata(&path)
+                .unwrap_or_else(|e| panic!("failed to stat {}: {e}", path.display()))
+                .file_type();
+            assert!(
+                file_type.is_symlink(),
+                "expected symlink: {}",
+                path.display()
+            );
+
+            let target = fs::read_link(&path)
+                .unwrap_or_else(|e| panic!("failed to read symlink {}: {e}", path.display()));
+            assert_eq!(
+                target,
+                PathBuf::from("AGENTS.md"),
+                "unexpected symlink target for {}",
+                path.display()
+            );
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        for rel in agent_aliases {
+            let path = out_dir.join(rel);
+            assert!(path.is_file(), "expected copied file: {}", path.display());
+            let linked = fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+            let parent_agents = fs::read_to_string(path.parent().unwrap().join("AGENTS.md"))
+                .expect("failed to read source AGENTS.md");
+            assert_eq!(linked, parent_agents, "copied link file content mismatch");
+        }
     }
 
     let no_force = run_scaffold(&out_dir, false);

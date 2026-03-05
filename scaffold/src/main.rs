@@ -40,6 +40,7 @@ async fn main() -> anyhow::Result<()> {
     if cli.force {
         cleanup_module_path_conflicts(&output, files.iter().map(|file| file.path()))?;
     }
+    let agent_dirs = agent_link_dirs_from_paths(files.iter().map(|f| f.path()));
     for file in files {
         let path = output.join(file.path());
         if let Some(parent) = path.parent() {
@@ -61,6 +62,21 @@ async fn main() -> anyhow::Result<()> {
         }
 
         println!("{} {}", "Created".green(), path.display());
+    }
+
+    for dir in agent_dirs {
+        let base = if dir.as_os_str().is_empty() {
+            output.clone()
+        } else {
+            output.join(dir)
+        };
+
+        for link_name in &["CLAUDE.md", "GEMINI.md"] {
+            let link_path = base.join(link_name);
+            create_symlink(Path::new("AGENTS.md"), &link_path)
+                .with_context(|| format!("failed to create symlink {}", link_path.display()))?;
+            println!("{} {} -> AGENTS.md", "Linked".green(), link_path.display());
+        }
     }
 
     println!("\n{}", "Starter scaffold generated.".bold().green());
@@ -102,6 +118,31 @@ fn render_template(content: &str, replacements: &[(&str, &str)]) -> String {
 
 fn is_shebang_script(bytes: &[u8]) -> bool {
     bytes.starts_with(b"#!")
+}
+
+fn agent_link_dirs_from_paths<I, P>(paths: I) -> Vec<PathBuf>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<Path>,
+{
+    let mut dirs = BTreeSet::new();
+
+    for path in paths {
+        let path = path.as_ref();
+        if path.file_name().and_then(|name| name.to_str()) != Some("AGENTS.md") {
+            continue;
+        }
+
+        let dir = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+
+        dirs.insert(dir);
+    }
+
+    dirs.into_iter().collect()
 }
 
 fn generate_app_key() -> String {
@@ -210,6 +251,32 @@ fn make_executable(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn create_symlink(target: &Path, link: &Path) -> anyhow::Result<()> {
+    // Remove existing file/symlink at link path to allow --force re-runs
+    if link.exists() || link.symlink_metadata().is_ok() {
+        fs::remove_file(link)
+            .with_context(|| format!("failed to remove existing {}", link.display()))?;
+    }
+    std::os::unix::fs::symlink(target, link).with_context(|| {
+        format!(
+            "failed to symlink {} -> {}",
+            link.display(),
+            target.display()
+        )
+    })?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn create_symlink(target: &Path, link: &Path) -> anyhow::Result<()> {
+    // On non-Unix, fall back to copying the file
+    let content = fs::read_to_string(link.parent().unwrap().join(target))
+        .with_context(|| format!("failed to read {}", target.display()))?;
+    fs::write(link, content).with_context(|| format!("failed to write {}", link.display()))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,6 +288,26 @@ mod tests {
             &[("APP_KEY", "abc")],
         );
         assert_eq!(rendered, "APP_KEY=abc\nMISSING={{MISSING}}\n");
+    }
+
+    #[test]
+    fn agent_link_dirs_are_deduped_and_sorted() {
+        let dirs = agent_link_dirs_from_paths([
+            "AGENTS.md",
+            "frontend/AGENTS.md",
+            "app/src/contracts/AGENTS.md",
+            "frontend/AGENTS.md",
+            "README.md",
+        ]);
+
+        assert_eq!(
+            dirs,
+            vec![
+                PathBuf::new(),
+                PathBuf::from("app/src/contracts"),
+                PathBuf::from("frontend"),
+            ]
+        );
     }
 
     #[test]
