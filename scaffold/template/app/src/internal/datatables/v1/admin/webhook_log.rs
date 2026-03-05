@@ -8,13 +8,18 @@ use generated::models::{WebhookLogDataTable, WebhookLogDataTableHooks};
 use crate::contracts::datatable::admin::webhook_log::{
     AdminWebhookLogDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
 };
+use crate::internal::datatables::v1::admin::authorize_with_optional_export;
 
 #[derive(Default, Clone)]
 pub struct WebhookLogDataTableAppHooks;
 
 impl WebhookLogDataTableHooks for WebhookLogDataTableAppHooks {
-    fn authorize(&self, _input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {
-        Ok(is_developer_actor(ctx))
+    fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {
+        Ok(authorize_with_optional_export(
+            is_developer_actor(ctx),
+            input,
+            ctx,
+        ))
     }
 }
 

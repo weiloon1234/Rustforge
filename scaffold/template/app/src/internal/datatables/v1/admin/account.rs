@@ -14,6 +14,7 @@ use generated::{
 use crate::contracts::datatable::admin::account::{
     AdminAdminDataTableContract, AdminDatatableSummaryOutput, ROUTE_PREFIX, SCOPED_KEY,
 };
+use crate::internal::datatables::v1::admin::authorize_with_optional_export;
 
 #[derive(Default, Clone)]
 pub struct AdminDataTableAppHooks;
@@ -28,18 +29,20 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
         apply_actor_scope(query, ctx)
     }
 
-    fn authorize(&self, _input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {
+    fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {
         let Some(actor) = ctx.actor.as_ref() else {
             return Ok(false);
         };
-        Ok(has_required_permissions(
+        let base_authorized = has_required_permissions(
             &actor.permissions,
             &[
                 Permission::AdminRead.as_str(),
                 Permission::AdminManage.as_str(),
             ],
             PermissionMode::Any,
-        ))
+        );
+
+        Ok(authorize_with_optional_export(base_authorized, input, ctx))
     }
 
     fn filter_query<'db>(

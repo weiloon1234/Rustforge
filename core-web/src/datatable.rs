@@ -904,6 +904,7 @@ where
 
 async fn export_status_scoped<S, C>(
     State(state): State<ScopedDataTableState<S, C>>,
+    headers: RequestHeaders,
     Query(params): Query<DataTableExportStatusQueryDto>,
 ) -> Result<ApiResponse<DataTableExportStatusResponseDto>, AppError>
 where
@@ -917,12 +918,31 @@ where
         .filter(|s| !s.is_empty())
         .ok_or_else(|| AppError::BadRequest("Missing export job id".to_string()))?;
 
+    let mut auth_input = DataTableInput::default();
+    auth_input = bind_scoped_key(auth_input, state.scoped_key.as_str());
+    auth_input.export = DataTableExportMode::Csv;
+
+    let ctx = state.inner.datatable_context(&headers).await;
+    let is_authorized = state
+        .inner
+        .datatable_registry()
+        .authorize(&auth_input, &ctx)
+        .map_err(map_datatable_error)?;
+    if !is_authorized {
+        return Err(AppError::Forbidden(
+            "You are not allowed to access this export status".to_string(),
+        ));
+    }
+
     let csv_status = state
         .inner
         .datatable_async_exports()
         .status(&job_id)
         .await
         .ok_or_else(|| AppError::NotFound(format!("Unknown export job '{}'", job_id)))?;
+    if csv_status.model != state.scoped_key {
+        return Err(AppError::NotFound(format!("Unknown export job '{}'", job_id)));
+    }
 
     let email = state.inner.datatable_email_exports().status(&job_id).await;
 

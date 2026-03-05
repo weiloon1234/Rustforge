@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Download,
   RefreshCw,
   ChevronsLeft,
   ChevronLeft,
@@ -24,6 +25,8 @@ import type { AxiosInstance } from "axios";
 import { TextInput } from "@shared/components/TextInput";
 import { Select } from "@shared/components/Select";
 import { Button } from "@shared/components/Button";
+import { alertError } from "@shared/helpers";
+import { hasPermission } from "@shared/permissions";
 import {
   DatePickerInput,
   DateTimePickerInput,
@@ -35,36 +38,55 @@ import type {
   DataTableMetaDto,
   DataTableColumnMetaDto,
   DataTableFilterFieldDto,
+  DataTableQueryRequestBase,
 } from "@shared/types";
+import { PERMISSION } from "@shared/types";
 
 const PER_PAGE_OPTIONS = [30, 50, 100, 300, 1000, 3000];
 const AUTO_REFRESH_SECONDS = 60;
 const AUTO_REFRESH_STORAGE_KEY = "rf-datatable-auto-refresh-enabled";
 
-const DataTableApiContext = createContext<AxiosInstance | null>(null);
+interface DataTableApiContextValue {
+  api: AxiosInstance;
+  scopes: string[];
+}
+
+const DataTableApiContext = createContext<DataTableApiContextValue | null>(null);
 
 export function DataTableApiProvider({
   api,
+  scopes = [],
   children,
 }: {
   api: AxiosInstance;
+  scopes?: string[];
   children: ReactNode;
 }) {
   return (
-    <DataTableApiContext.Provider value={api}>
+    <DataTableApiContext.Provider value={{ api, scopes }}>
       {children}
     </DataTableApiContext.Provider>
   );
 }
 
 export function useDataTableApi(): AxiosInstance {
-  const api = useContext(DataTableApiContext);
-  if (!api) {
+  const value = useContext(DataTableApiContext);
+  if (!value) {
     throw new Error(
       "DataTableApiProvider is missing. Wrap your portal app with <DataTableApiProvider api={...}>.",
     );
   }
-  return api;
+  return value.api;
+}
+
+export function useDataTableScopes(): string[] {
+  const value = useContext(DataTableApiContext);
+  if (!value) {
+    throw new Error(
+      "DataTableApiProvider is missing. Wrap your portal app with <DataTableApiProvider api={...}>.",
+    );
+  }
+  return value.scopes;
 }
 
 export interface DataTableFilterSnapshot {
@@ -241,6 +263,69 @@ function writeAutoRefreshEnabled(enabled: boolean): void {
   }
 }
 
+function buildDatatablePayload(args: {
+  page: number;
+  perPage: number;
+  sortingColumn: string;
+  sortingDirection: "asc" | "desc";
+  includeMeta: boolean;
+  filters: Record<string, string>;
+  extraBody?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const base: DataTableQueryRequestBase = {
+    page: args.page,
+    per_page: args.perPage,
+    include_meta: args.includeMeta,
+  };
+
+  if (args.sortingColumn) {
+    base.sorting_column = args.sortingColumn;
+    base.sorting = args.sortingDirection;
+  }
+
+  const filterParams = Object.fromEntries(
+    Object.entries(args.filters).filter(([, value]) => value !== ""),
+  );
+
+  return {
+    base,
+    ...(args.extraBody ?? {}),
+    ...filterParams,
+  };
+}
+
+function deriveExportCsvUrl(queryUrl: string): string | null {
+  const trimmed = queryUrl.trim();
+  if (!trimmed.endsWith("/query")) return null;
+  return `${trimmed.slice(0, -"/query".length)}/export/csv`;
+}
+
+function fileNameFromContentDisposition(headerValue: string | null | undefined): string | null {
+  if (!headerValue) return null;
+  const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]).replace(/^"(.*)"$/, "$1");
+    } catch {
+      return utf8Match[1].replace(/^"(.*)"$/, "$1");
+    }
+  }
+  const basicMatch = headerValue.match(/filename="?([^\";]+)"?/i);
+  return basicMatch?.[1] ?? null;
+}
+
+function triggerBlobDownload(blob: Blob, fileName: string): void {
+  if (typeof window === "undefined") return;
+  const objectUrl = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(objectUrl);
+}
+
 function FilterField({
   field,
   value,
@@ -368,10 +453,12 @@ export function DataTable<T>({
   footer,
 }: DataTableProps<T>) {
   const api = useDataTableApi();
+  const scopes = useDataTableScopes();
   const { t } = useTranslation();
   const [data, setData] = useState<DataTableQueryResponse<T> | null>(null);
   const [meta, setMeta] = useState<DataTableMetaDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(defaultPerPage);
   const [jumpValue, setJumpValue] = useState("");
@@ -393,6 +480,8 @@ export function DataTable<T>({
   const autoRefreshRequestInFlightRef = useRef(false);
   const autoRefreshEnabledRef = useRef(autoRefreshEnabled);
   const enableAutoRefreshRef = useRef(enableAutoRefresh);
+  const exportCsvUrl = deriveExportCsvUrl(url);
+  const canExport = Boolean(exportCsvUrl) && hasPermission(scopes, PERMISSION.EXPORT);
 
   useEffect(() => {
     onPreCallRef.current = onPreCall;
@@ -479,23 +568,15 @@ export function DataTable<T>({
     ) => {
       setLoading(true);
       const includeMeta = !metaLoaded.current;
-      const base: Record<string, unknown> = {
+      const payload = buildDatatablePayload({
         page: p,
-        per_page: pp,
-        include_meta: includeMeta,
-      };
-      if (sc) {
-        base.sorting_column = sc;
-        base.sorting = sd;
-      }
-      const filterParams = Object.fromEntries(
-        Object.entries(filters).filter(([, v]) => v !== ""),
-      );
-      const payload: Record<string, unknown> = {
-        base,
-        ...extraBody,
-        ...filterParams,
-      };
+        perPage: pp,
+        sortingColumn: sc,
+        sortingDirection: (sd || "desc") as "asc" | "desc",
+        includeMeta,
+        filters,
+        extraBody,
+      });
       const filterSnapshot = buildFilterSnapshot(filterRowsRef.current, filters);
       const callEvent: DataTablePreCallEvent = {
         url,
@@ -563,6 +644,56 @@ export function DataTable<T>({
     () => fetchData(page, perPage, sortColumn, sortDirection, appliedFiltersRef.current),
     [fetchData, page, perPage, sortColumn, sortDirection],
   );
+
+  const handleExport = useCallback(async () => {
+    if (!canExport || !exportCsvUrl || exporting) return;
+
+    setExporting(true);
+    const payload = buildDatatablePayload({
+      page,
+      perPage,
+      sortingColumn: sortColumn,
+      sortingDirection: sortDirection,
+      includeMeta: false,
+      filters: appliedFiltersRef.current,
+      extraBody,
+    });
+
+    try {
+      const response = await api.post<Blob>(exportCsvUrl, payload, {
+        responseType: "blob",
+      });
+      const disposition = response.headers["content-disposition"] as
+        | string
+        | undefined;
+      const fileName =
+        fileNameFromContentDisposition(disposition) ??
+        `datatable-export-${Date.now()}.csv`;
+      const blob =
+        response.data instanceof Blob
+          ? response.data
+          : new Blob([response.data], { type: "text/csv; charset=utf-8" });
+      triggerBlobDownload(blob, fileName);
+    } catch {
+      alertError({
+        title: t("Error"),
+        message: t("Failed to export data."),
+      });
+    } finally {
+      setExporting(false);
+    }
+  }, [
+    api,
+    canExport,
+    exportCsvUrl,
+    exporting,
+    extraBody,
+    page,
+    perPage,
+    sortColumn,
+    sortDirection,
+    t,
+  ]);
 
   useEffect(() => {
     if (!enableAutoRefresh || !autoRefreshEnabled || loading || countdownSeconds <= 0) {
@@ -684,6 +815,7 @@ export function DataTable<T>({
     Boolean(subtitle?.trim()) ||
     Boolean(resolvedHeaderActions) ||
     Boolean(enableAutoRefresh) ||
+    canExport ||
     showRefresh;
 
   return (
@@ -712,6 +844,17 @@ export function DataTable<T>({
                       })}
                     </span>
                   </label>
+                )}
+                {canExport && exportCsvUrl && (
+                  <Button
+                    onClick={() => void handleExport()}
+                    busy={exporting}
+                    variant="secondary"
+                    size="sm"
+                  >
+                    <Download size={16} />
+                    {exporting ? t("Exporting...") : t("Export")}
+                  </Button>
                 )}
                 {showRefresh && (
                   <Button

@@ -12,6 +12,8 @@ pub trait DynDataTable: Send + Sync {
 
     fn describe(&self, ctx: &DataTableContext) -> DataTableDescribe;
 
+    fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> Result<bool>;
+
     async fn execute(
         &self,
         input: &DataTableInput,
@@ -34,6 +36,10 @@ where
 
     fn describe(&self, ctx: &DataTableContext) -> DataTableDescribe {
         self.table.describe(ctx)
+    }
+
+    fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> Result<bool> {
+        self.table.authorize(input, ctx)
     }
 
     async fn execute(
@@ -98,6 +104,17 @@ impl DataTableRegistry {
             anyhow::anyhow!("Unknown datatable model '{}': not registered", model)
         })?;
         Ok(table.describe(ctx))
+    }
+
+    pub fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> Result<bool> {
+        let model = input
+            .model
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("Missing datatable model key"))?;
+        let table = self.get(model).ok_or_else(|| {
+            anyhow::anyhow!("Unknown datatable model '{}': not registered", model)
+        })?;
+        table.authorize(input, ctx)
     }
 
     pub async fn execute(

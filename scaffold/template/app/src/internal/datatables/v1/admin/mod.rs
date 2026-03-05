@@ -5,8 +5,10 @@ pub mod webhook_log;
 
 use std::collections::HashSet;
 
-use core_datatable::DataTableRegistry;
+use core_datatable::{DataTableContext, DataTableExportMode, DataTableInput, DataTableRegistry};
+use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::openapi::ApiRouter;
+use generated::permissions::Permission;
 
 use crate::contracts::datatable::admin::{
     account::{ROUTE_PREFIX as ACCOUNT_ROUTE_PREFIX, SCOPED_KEY as ACCOUNT_SCOPED_KEY},
@@ -24,6 +26,30 @@ pub use account::{build_admin_summary_output, AdminDataTableAppHooks};
 pub use content_page::ContentPageDataTableAppHooks;
 pub use http_client_log::HttpClientLogDataTableAppHooks;
 pub use webhook_log::WebhookLogDataTableAppHooks;
+
+pub fn authorize_with_optional_export(
+    base_authorized: bool,
+    input: &DataTableInput,
+    ctx: &DataTableContext,
+) -> bool {
+    if !base_authorized {
+        return false;
+    }
+
+    if matches!(input.export, DataTableExportMode::None) {
+        return true;
+    }
+
+    let Some(actor) = ctx.actor.as_ref() else {
+        return false;
+    };
+
+    has_required_permissions(
+        &actor.permissions,
+        &[Permission::Export.as_str()],
+        PermissionMode::All,
+    )
+}
 
 pub struct ScopedDatatableSpec {
     pub scoped_key: &'static str,

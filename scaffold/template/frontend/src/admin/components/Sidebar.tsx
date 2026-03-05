@@ -2,42 +2,15 @@ import { useLocation, Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { navigation, type NavItem, type NavChild } from "@admin/nav";
+import { navigation, type NavItem } from "@admin/nav";
 import type { AdminType, Permission } from "@admin/types";
+import { hasAnyPermission } from "@shared/permissions";
 import { useAuthStore } from "@admin/stores/auth";
 import { useNotificationStore } from "@admin/stores/notifications";
 import { Button } from "@shared/components";
 
-function matchPattern(pattern: string, value: string): boolean {
-  if (!pattern.endsWith(".*")) return false;
-  const prefix = pattern.slice(0, -2);
-  if (!prefix) return false;
-  return value === prefix || value.startsWith(prefix + ".");
-}
-
-function manageImpliesRead(granted: string, required: string): boolean {
-  const gi = granted.lastIndexOf(".");
-  const ri = required.lastIndexOf(".");
-  if (gi === -1 || ri === -1) return false;
-  return (
-    granted.slice(0, gi) === required.slice(0, ri) &&
-    granted.slice(gi + 1) === "manage" &&
-    required.slice(ri + 1) === "read"
-  );
-}
-
-function permissionMatches(granted: string, required: string): boolean {
-  const g = granted.trim();
-  const r = required.trim();
-  if (!g || !r) return false;
-  if (g === "*" || r === "*" || g === r) return true;
-  if (manageImpliesRead(g, r)) return true;
-  return matchPattern(g, r) || matchPattern(r, g);
-}
-
 function hasAccess(scopes: readonly string[], required?: readonly Permission[]): boolean {
-  if (!required || required.length === 0) return true;
-  return required.some((r) => scopes.some((g) => permissionMatches(g, r)));
+  return hasAnyPermission(scopes, required ?? []);
 }
 
 function hasAdminTypeAccess(

@@ -22,6 +22,8 @@ pub enum Permission {
     ContentPageRead,
     #[serde(rename = "content_page.manage")]
     ContentPageManage,
+    #[serde(rename = "export")]
+    Export,
 }
 
 impl ts_rs::TS for Permission {
@@ -29,7 +31,7 @@ impl ts_rs::TS for Permission {
     fn name() -> String { "Permission".to_string() }
     fn inline() -> String { Self::name() }
     fn inline_flattened() -> String { panic!("Permission cannot be flattened") }
-    fn decl() -> String { "type Permission = \"admin.read\" | \"admin.manage\" | \"content_page.read\" | \"content_page.manage\";".to_string() }
+    fn decl() -> String { "type Permission = \"admin.read\" | \"admin.manage\" | \"content_page.read\" | \"content_page.manage\" | \"export\";".to_string() }
     fn decl_concrete() -> String { Self::decl() }
 }
 
@@ -38,6 +40,7 @@ pub const PERMISSION_META: &[PermissionMeta] = &[
     PermissionMeta { key: "admin.manage", guard: "admin", label: "Manage Admins", group: "admin", description: "Create/update/delete admin records and perform management actions." },
     PermissionMeta { key: "content_page.read", guard: "admin", label: "Read Content Pages", group: "content_page", description: "View policy pages and content-page datatable records." },
     PermissionMeta { key: "content_page.manage", guard: "admin", label: "Manage Content Pages", group: "content_page", description: "Update and delete non-system pages." },
+    PermissionMeta { key: "export", guard: "admin", label: "Export Data", group: "datatable", description: "Export datatable records as CSV." },
 ];
 
 impl Permission {
@@ -47,6 +50,7 @@ impl Permission {
             Self::AdminManage => "admin.manage",
             Self::ContentPageRead => "content_page.read",
             Self::ContentPageManage => "content_page.manage",
+            Self::Export => "export",
         }
     }
 
@@ -56,6 +60,7 @@ impl Permission {
             "admin.manage" => Some(Self::AdminManage),
             "content_page.read" => Some(Self::ContentPageRead),
             "content_page.manage" => Some(Self::ContentPageManage),
+            "export" => Some(Self::Export),
             _ => None,
         }
     }
@@ -66,6 +71,7 @@ impl Permission {
             Self::AdminManage,
             Self::ContentPageRead,
             Self::ContentPageManage,
+            Self::Export,
         ]
     }
 
@@ -75,6 +81,7 @@ impl Permission {
             Self::AdminManage => "admin",
             Self::ContentPageRead => "admin",
             Self::ContentPageManage => "admin",
+            Self::Export => "admin",
         }
     }
 
@@ -84,6 +91,7 @@ impl Permission {
             Self::AdminManage => &PERMISSION_META[1],
             Self::ContentPageRead => &PERMISSION_META[2],
             Self::ContentPageManage => &PERMISSION_META[3],
+            Self::Export => &PERMISSION_META[4],
         }
     }
 
