@@ -1,6 +1,6 @@
 # Rustforge Project
 
-Rust backend built on **Rustforge** (Axum + SQLx + Redis + S3). Each subfolder has its own `AGENTS.md` with domain-specific rules — read those when working in that folder.
+Rust backend built on **Rustforge** (Axum + SQLx + Redis + S3). Instruction files are centralized by major layer (for example `app/src/internal/AGENTS.md`) to avoid noisy per-folder instruction files beside code.
 
 ## Tooling
 
@@ -25,12 +25,13 @@ app/
 └── src/
     ├── contracts/            # Request/response DTOs  ← has AGENTS.md
     ├── internal/
-    │   ├── api/              # Route handlers + state ← has AGENTS.md
-    │   ├── workflows/        # Business logic         ← has AGENTS.md
-    │   ├── jobs/             # Background jobs        ← has AGENTS.md
-    │   ├── middleware/       # Custom middleware      ← has AGENTS.md
-    │   ├── datatables/       # Datatable executors    ← has AGENTS.md
-    │   └── realtime/         # WebSocket policies     ← has AGENTS.md
+    │   ├── AGENTS.md         # Internal layer rules (api/workflows/jobs/etc)
+    │   ├── api/              # Route handlers + state
+    │   ├── workflows/        # Business logic
+    │   ├── jobs/             # Background jobs
+    │   ├── middleware/       # Custom middleware
+    │   ├── datatables/       # Datatable executors
+    │   └── realtime/         # WebSocket policies
     ├── validation/           # Validation rules       ← has AGENTS.md
     └── seeds/                # Database seeders       ← has AGENTS.md
 frontend/                     # Multi-portal React + Vite + Tailwind 4 ← has AGENTS.md
