@@ -24,6 +24,7 @@ import TableCell from "@tiptap/extension-table-cell";
 import CharacterCount from "@tiptap/extension-character-count";
 import { useTranslation } from "react-i18next";
 import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
+import { Button } from "@shared/components/Button";
 import { alertError } from "@shared/helpers";
 import {
   resolveTiptapPreset,
@@ -489,9 +490,12 @@ export function TiptapInput({
             }
             const labelText = actionLabel(item);
             return (
-              <button
+              <Button
                 key={item}
                 type="button"
+                variant="plain"
+                size="xs"
+                iconOnly
                 className={btnClass(isActionActive(item))}
                 onClick={() => {
                   void runAction(item);
@@ -501,7 +505,7 @@ export function TiptapInput({
                 aria-label={labelText}
               >
                 {actionContent(item)}
-              </button>
+              </Button>
             );
           })}
         </div>

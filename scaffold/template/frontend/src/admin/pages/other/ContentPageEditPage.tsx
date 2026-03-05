@@ -8,6 +8,7 @@ import { api } from "@admin/api";
 import { uploadAdminTiptapImage } from "@admin/tiptapUpload";
 import type { ApiResponse, LocaleCode } from "@shared/types";
 import {
+  Button,
   FileInput,
   TextInput,
   TiptapInput,
@@ -230,14 +231,15 @@ export default function ContentPageEditPage() {
           ))}
 
           <div className="sticky bottom-0 z-10 flex justify-end rounded-lg border border-border bg-background/95 px-4 py-3 backdrop-blur">
-            <button
+            <Button
               type="submit"
-              disabled={saving}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              busy={saving}
+              variant="primary"
+              size="sm"
             >
               <Save size={16} />
               {saving ? t("Saving…") : t("Save")}
-            </button>
+            </Button>
           </div>
         </form>
       )}

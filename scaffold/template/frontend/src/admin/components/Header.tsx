@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 import type { AdminMeOutput, AdminProfileUpdateOutput } from "@admin/types";
 import {
+  Button,
   useAutoForm,
   useLocaleStore,
   useModalStore,
@@ -196,16 +197,16 @@ export default function Header({
       ),
       footer: (
         <>
-          <button
+          <Button
             type="button"
             onClick={() => useModalStore.getState().close()}
-            className="rf-modal-btn-secondary"
+            variant="secondary"
           >
             {t("Cancel")}
-          </button>
-          <button type="submit" form={formId} className="rf-modal-btn-primary">
+          </Button>
+          <Button type="submit" form={formId} variant="primary">
             {t("Save")}
-          </button>
+          </Button>
         </>
       ),
     });
@@ -220,16 +221,16 @@ export default function Header({
       content: <SecurityModal formId={formId} />,
       footer: (
         <>
-          <button
+          <Button
             type="button"
             onClick={() => useModalStore.getState().close()}
-            className="rf-modal-btn-secondary"
+            variant="secondary"
           >
             {t("Cancel")}
-          </button>
-          <button type="submit" form={formId} className="rf-modal-btn-primary">
+          </Button>
+          <Button type="submit" form={formId} variant="primary">
             {t("Save")}
-          </button>
+          </Button>
         </>
       ),
     });
@@ -262,27 +263,32 @@ export default function Header({
 
   return (
     <header className="rf-header">
-      <button
+      <Button
         onClick={onToggle}
+        variant="plain"
+        size="sm"
+        iconOnly
         className="rounded-lg p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
         aria-label={collapsed ? t("Expand sidebar") : t("Collapse sidebar")}
       >
         <Menu size={20} />
-      </button>
+      </Button>
 
       <div className="flex-1" />
 
       <div ref={dropdownRef} className="relative">
-        <button
+        <Button
           type="button"
           onClick={() => setMenuOpen((open) => !open)}
+          variant="plain"
+          size="sm"
           className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
           aria-label={t("Open account menu")}
           aria-expanded={menuOpen}
         >
           <span>{accountName}</span>
           {menuOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-        </button>
+        </Button>
 
         {menuOpen && (
           <div className="absolute right-0 z-40 mt-2 w-72 rounded-xl border border-border bg-surface p-2 shadow-xl">
@@ -291,46 +297,54 @@ export default function Header({
             </p>
             <div className="mb-2 space-y-1">
               {localeOptions.map((code) => (
-                <button
+                <Button
                   key={code}
                   type="button"
                   onClick={() => void handleLocaleChange(code)}
+                  variant="plain"
+                  size="sm"
                   className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm text-foreground transition-colors hover:bg-surface-hover"
                 >
                   <span>{t(`Locale ${code.toUpperCase()}`)}</span>
                   {locale === code && (
                     <Check size={16} className="text-primary" />
                   )}
-                </button>
+                </Button>
               ))}
             </div>
 
             <div className="my-2 border-t border-border" />
 
-            <button
+            <Button
               type="button"
               onClick={openProfileModal}
+              variant="plain"
+              size="sm"
               className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm text-foreground transition-colors hover:bg-surface-hover"
             >
               <User size={16} />
               {t("Edit Profile")}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={openSecurityModal}
+              variant="plain"
+              size="sm"
               className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm text-foreground transition-colors hover:bg-surface-hover"
             >
               <Shield size={16} />
               {t("Account Security")}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => void handleLogout()}
+              variant="plain"
+              size="sm"
               className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm text-foreground transition-colors hover:bg-surface-hover"
             >
               <LogOut size={16} />
               {t("Logout")}
-            </button>
+            </Button>
           </div>
         )}
       </div>

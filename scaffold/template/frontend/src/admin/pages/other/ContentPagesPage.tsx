@@ -6,6 +6,7 @@ import { CONTENT_PAGE_SYSTEM_FLAG } from "@admin/types";
 import { api } from "@admin/api";
 import type { ApiResponse } from "@shared/types";
 import {
+  Button,
   DataTable,
   alertConfirm,
   alertError,
@@ -74,23 +75,28 @@ export default function ContentPagesPage() {
           cellClassName: "text-foreground",
           render: (row, ctx) => (
             <div className="flex gap-1">
-              <button
+              <Button
                 type="button"
                 onClick={() => navigate(`/other/content-pages/${row.id}/edit`)}
-                className="rounded-lg p-1.5 text-muted transition hover:bg-surface-hover hover:text-foreground"
+                variant="plain"
+                size="sm"
+                iconOnly
                 title={t("Edit")}
               >
                 <Pencil size={16} />
-              </button>
+              </Button>
               {row.is_system !== CONTENT_PAGE_SYSTEM_YES && (
-                <button
+                <Button
                   type="button"
                   onClick={() => handleDelete(row, ctx.refresh)}
-                  className="rounded-lg p-1.5 text-muted transition hover:bg-red-50 hover:text-red-600"
+                  variant="plain"
+                  size="sm"
+                  iconOnly
+                  className="hover:bg-red-50 hover:text-red-600"
                   title={t("Delete")}
                 >
                   <Trash2 size={16} />
-                </button>
+                </Button>
               )}
             </div>
           ),

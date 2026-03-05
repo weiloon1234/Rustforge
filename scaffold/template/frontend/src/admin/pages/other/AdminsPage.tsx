@@ -11,6 +11,7 @@ import type {
 import { ADMIN_TYPE, PERMISSIONS, PERMISSION_META } from "@admin/types";
 import type { ApiResponse } from "@shared/types";
 import {
+  Button,
   Checkbox,
   DataTable,
   useAutoForm,
@@ -291,16 +292,16 @@ export default function AdminsPage() {
       content: <CreateAdminForm onCreated={refresh} formId={formId} />,
       footer: (
         <>
-          <button
+          <Button
             type="button"
             onClick={() => useModalStore.getState().close()}
-            className="rf-modal-btn-secondary"
+            variant="secondary"
           >
             {t("Cancel")}
-          </button>
-          <button type="submit" form={formId} className="rf-modal-btn-primary">
+          </Button>
+          <Button type="submit" form={formId} variant="primary">
             {t("Create")}
-          </button>
+          </Button>
         </>
       ),
     });
@@ -316,16 +317,16 @@ export default function AdminsPage() {
       ),
       footer: (
         <>
-          <button
+          <Button
             type="button"
             onClick={() => useModalStore.getState().close()}
-            className="rf-modal-btn-secondary"
+            variant="secondary"
           >
             {t("Cancel")}
-          </button>
-          <button type="submit" form={formId} className="rf-modal-btn-primary">
+          </Button>
+          <Button type="submit" form={formId} variant="primary">
             {t("Save")}
-          </button>
+          </Button>
         </>
       ),
     });
@@ -363,13 +364,14 @@ export default function AdminsPage() {
       title={t("Admins")}
       subtitle={t("Manage administrator accounts")}
       headerActions={(refresh) => (
-        <button
+        <Button
           onClick={() => handleCreate(refresh)}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary/90"
+          variant="primary"
+          size="sm"
         >
           <Plus size={16} />
           {t("Create Admin")}
-        </button>
+        </Button>
       )}
       headerContent={
         ENABLE_SUMMARY_CARDS && summary ? (
@@ -409,21 +411,26 @@ export default function AdminsPage() {
           cellClassName: "text-foreground",
           render: (admin, ctx) => (
             <div className="flex gap-1">
-              <button
+              <Button
                 onClick={() => handleEdit(admin, ctx.refresh)}
-                className="rounded-lg p-1.5 text-muted transition hover:bg-surface-hover hover:text-foreground"
+                variant="plain"
+                size="sm"
+                iconOnly
                 title={t("Edit")}
               >
                 <Pencil size={16} />
-              </button>
+              </Button>
               {admin.admin_type === ADMIN_TYPE.ADMIN && (
-                <button
+                <Button
                   onClick={() => handleDelete(admin, ctx.refresh)}
-                  className="rounded-lg p-1.5 text-muted transition hover:bg-red-50 hover:text-red-600"
+                  variant="plain"
+                  size="sm"
+                  iconOnly
+                  className="hover:bg-red-50 hover:text-red-600"
                   title={t("Delete")}
                 >
                   <Trash2 size={16} />
-                </button>
+                </Button>
               )}
             </div>
           ),

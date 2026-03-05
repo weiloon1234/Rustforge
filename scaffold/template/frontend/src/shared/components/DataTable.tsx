@@ -23,6 +23,7 @@ import {
 import type { AxiosInstance } from "axios";
 import { TextInput } from "@shared/components/TextInput";
 import { Select } from "@shared/components/Select";
+import { Button } from "@shared/components/Button";
 import {
   DatePickerInput,
   DateTimePickerInput,
@@ -37,6 +38,8 @@ import type {
 } from "@shared/types";
 
 const PER_PAGE_OPTIONS = [30, 50, 100, 300, 1000, 3000];
+const AUTO_REFRESH_SECONDS = 60;
+const AUTO_REFRESH_STORAGE_KEY = "rf-datatable-auto-refresh-enabled";
 
 const DataTableApiContext = createContext<AxiosInstance | null>(null);
 
@@ -120,6 +123,7 @@ export interface DataTableProps<T> {
   title?: string;
   subtitle?: string;
   showRefresh?: boolean;
+  enableAutoRefresh?: boolean;
   headerActions?: RefreshSlot;
   headerContent?: RefreshSlot;
   renderTableFooter?: (ctx: DataTableFooterContext<T>) => ReactNode;
@@ -217,6 +221,24 @@ function defaultRecordKey(record: unknown): string | number | null {
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "string" || typeof value === "number") return value;
   return null;
+}
+
+function readAutoRefreshEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(AUTO_REFRESH_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeAutoRefreshEnabled(enabled: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(AUTO_REFRESH_STORAGE_KEY, String(enabled));
+  } catch {
+    // Ignore storage errors (private mode/quota).
+  }
 }
 
 function FilterField({
@@ -337,6 +359,7 @@ export function DataTable<T>({
   title,
   subtitle,
   showRefresh = true,
+  enableAutoRefresh = false,
   headerActions,
   headerContent,
   renderTableFooter,
@@ -363,6 +386,13 @@ export function DataTable<T>({
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const appliedFiltersRef = useRef<Record<string, string>>({});
   const [filterVersion, setFilterVersion] = useState(0);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState<boolean>(() =>
+    enableAutoRefresh ? readAutoRefreshEnabled() : false,
+  );
+  const [countdownSeconds, setCountdownSeconds] = useState(AUTO_REFRESH_SECONDS);
+  const autoRefreshRequestInFlightRef = useRef(false);
+  const autoRefreshEnabledRef = useRef(autoRefreshEnabled);
+  const enableAutoRefreshRef = useRef(enableAutoRefresh);
 
   useEffect(() => {
     onPreCallRef.current = onPreCall;
@@ -375,6 +405,33 @@ export function DataTable<T>({
   useEffect(() => {
     filterRowsRef.current = meta?.filter_rows;
   }, [meta?.filter_rows]);
+
+  useEffect(() => {
+    autoRefreshEnabledRef.current = autoRefreshEnabled;
+  }, [autoRefreshEnabled]);
+
+  useEffect(() => {
+    enableAutoRefreshRef.current = enableAutoRefresh;
+    if (!enableAutoRefresh) {
+      setAutoRefreshEnabled(false);
+      setCountdownSeconds(AUTO_REFRESH_SECONDS);
+      autoRefreshRequestInFlightRef.current = false;
+      return;
+    }
+    setAutoRefreshEnabled(readAutoRefreshEnabled());
+    setCountdownSeconds(AUTO_REFRESH_SECONDS);
+  }, [enableAutoRefresh]);
+
+  useEffect(() => {
+    if (!enableAutoRefresh) return;
+    writeAutoRefreshEnabled(autoRefreshEnabled);
+  }, [autoRefreshEnabled, enableAutoRefresh]);
+
+  useEffect(() => {
+    if (enableAutoRefresh && autoRefreshEnabled) return;
+    setCountdownSeconds(AUTO_REFRESH_SECONDS);
+    autoRefreshRequestInFlightRef.current = false;
+  }, [autoRefreshEnabled, enableAutoRefresh]);
 
   const metaColumns: DataTableColumnMetaDto[] = meta?.columns ?? [];
   const displaySortCol = sortColumn || meta?.defaults?.sorting_column || "";
@@ -469,14 +526,21 @@ export function DataTable<T>({
           filters: postFilterSnapshot,
           response: res.data.data,
         });
+        if (enableAutoRefreshRef.current && autoRefreshEnabledRef.current) {
+          setCountdownSeconds(AUTO_REFRESH_SECONDS);
+        }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         onPostCallRef.current?.({
           ...callEvent,
           error: err,
         });
+        if (enableAutoRefreshRef.current && autoRefreshEnabledRef.current) {
+          setCountdownSeconds(AUTO_REFRESH_SECONDS);
+        }
       } finally {
         setLoading(false);
+        autoRefreshRequestInFlightRef.current = false;
       }
     },
     [api, extraBody, url],
@@ -499,6 +563,26 @@ export function DataTable<T>({
     () => fetchData(page, perPage, sortColumn, sortDirection, appliedFiltersRef.current),
     [fetchData, page, perPage, sortColumn, sortDirection],
   );
+
+  useEffect(() => {
+    if (!enableAutoRefresh || !autoRefreshEnabled || loading || countdownSeconds <= 0) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setCountdownSeconds((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [autoRefreshEnabled, countdownSeconds, enableAutoRefresh, loading]);
+
+  useEffect(() => {
+    if (!enableAutoRefresh || !autoRefreshEnabled || loading) return;
+    if (countdownSeconds !== 0) return;
+    if (autoRefreshRequestInFlightRef.current) return;
+    autoRefreshRequestInFlightRef.current = true;
+    void refresh();
+  }, [autoRefreshEnabled, countdownSeconds, enableAutoRefresh, loading, refresh]);
 
   const sumColumn = useCallback(
     (column: string, decimals = 2) => {
@@ -590,11 +674,6 @@ export function DataTable<T>({
     return `rf-row-${page}-${index}`;
   };
 
-  const pgBtn =
-    "inline-flex items-center justify-center h-8 min-w-8 rounded-lg border border-border bg-surface text-sm font-medium text-foreground transition hover:bg-surface-hover disabled:opacity-40 disabled:pointer-events-none";
-  const pgBtnActive =
-    "inline-flex items-center justify-center h-8 min-w-8 rounded-lg bg-primary text-sm font-medium text-primary-foreground";
-
   const filterRows = meta?.filter_rows;
   const hasFilters = filterRows && filterRows.length > 0;
 
@@ -604,6 +683,7 @@ export function DataTable<T>({
     Boolean(title?.trim()) ||
     Boolean(subtitle?.trim()) ||
     Boolean(resolvedHeaderActions) ||
+    Boolean(enableAutoRefresh) ||
     showRefresh;
 
   return (
@@ -618,15 +698,31 @@ export function DataTable<T>({
               </div>
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                 {resolvedHeaderActions}
+                {enableAutoRefresh && (
+                  <label className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={autoRefreshEnabled}
+                      onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-ring/40"
+                    />
+                    <span className="whitespace-nowrap">
+                      {t("Auto refresh in :seconds seconds", {
+                        seconds: countdownSeconds,
+                      })}
+                    </span>
+                  </label>
+                )}
                 {showRefresh && (
-                  <button
+                  <Button
                     onClick={refresh}
                     disabled={loading}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-surface-hover"
+                    variant="secondary"
+                    size="sm"
                   >
                     <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
                     {t("Refresh")}
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
@@ -678,20 +774,22 @@ export function DataTable<T>({
             );
           })}
           <div className="flex gap-2 pt-1">
-            <button
+            <Button
               onClick={applyFilters}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary/90"
+              variant="primary"
+              size="sm"
             >
               <Search size={14} />
               {t("Search")}
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={resetFilters}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-surface-hover"
+              variant="secondary"
+              size="sm"
             >
               <X size={14} />
               {t("Reset")}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -837,41 +935,58 @@ export function DataTable<T>({
 
           {data.total_pages > 1 && (
             <div className="flex items-center gap-1">
-              <button className={pgBtn} disabled={page <= 1} onClick={() => goTo(1)}>
+              <Button
+                variant="secondary"
+                size="xs"
+                iconOnly
+                disabled={page <= 1}
+                onClick={() => goTo(1)}
+              >
                 <ChevronsLeft size={14} />
-              </button>
-              <button className={pgBtn} disabled={page <= 1} onClick={() => goTo(page - 1)}>
+              </Button>
+              <Button
+                variant="secondary"
+                size="xs"
+                iconOnly
+                disabled={page <= 1}
+                onClick={() => goTo(page - 1)}
+              >
                 <ChevronLeft size={14} />
-              </button>
+              </Button>
               {buildPageNumbers(page, data.total_pages).map((p, i) =>
                 p === "…" ? (
                   <span key={`e${i}`} className="px-1 text-sm text-muted select-none">
                     …
                   </span>
                 ) : (
-                  <button
+                  <Button
                     key={p}
-                    className={p === page ? pgBtnActive : pgBtn}
+                    variant={p === page ? "primary" : "secondary"}
+                    size="xs"
                     onClick={() => goTo(p)}
                   >
                     {p}
-                  </button>
+                  </Button>
                 ),
               )}
-              <button
-                className={pgBtn}
+              <Button
+                variant="secondary"
+                size="xs"
+                iconOnly
                 disabled={page >= data.total_pages}
                 onClick={() => goTo(page + 1)}
               >
                 <ChevronRight size={14} />
-              </button>
-              <button
-                className={pgBtn}
+              </Button>
+              <Button
+                variant="secondary"
+                size="xs"
+                iconOnly
                 disabled={page >= data.total_pages}
                 onClick={() => goTo(data.total_pages)}
               >
                 <ChevronsRight size={14} />
-              </button>
+              </Button>
               <div className="ml-2 flex items-center gap-1">
                 <TextInput
                   containerClassName="mb-0"

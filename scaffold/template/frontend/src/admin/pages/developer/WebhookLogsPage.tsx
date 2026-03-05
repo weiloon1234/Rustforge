@@ -1,7 +1,7 @@
 import { Eye } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { WebhookLogDatatableRow } from "@admin/types";
-import { DataTable, formatDateTime, useModalStore } from "@shared/components";
+import { Button, DataTable, formatDateTime, useModalStore } from "@shared/components";
 
 function statusBadgeClass(status: number | null): string {
   if (status === null) return "bg-gray-100 text-gray-700";
@@ -109,13 +109,13 @@ export default function WebhookLogsPage() {
         </div>
       ),
       footer: (
-        <button
+        <Button
           type="button"
           onClick={() => useModalStore.getState().close()}
-          className="rf-modal-btn-secondary"
+          variant="secondary"
         >
           {t("Close")}
-        </button>
+        </Button>
       ),
     });
   };
@@ -125,6 +125,7 @@ export default function WebhookLogsPage() {
       url="datatable/webhook-log/query"
       title={t("Webhook Logs")}
       subtitle={t("Inspect inbound webhook requests and responses")}
+      enableAutoRefresh
       columns={[
         {
           key: "actions",
@@ -132,14 +133,16 @@ export default function WebhookLogsPage() {
           sortable: false,
           cellClassName: "text-foreground",
           render: (log) => (
-            <button
+            <Button
               type="button"
               onClick={() => openDetailModal(log)}
-              className="rounded-lg p-1.5 text-muted transition hover:bg-surface-hover hover:text-foreground"
+              variant="plain"
+              size="sm"
+              iconOnly
               title={t("View Detail")}
             >
               <Eye size={16} />
-            </button>
+            </Button>
           ),
         },
         {

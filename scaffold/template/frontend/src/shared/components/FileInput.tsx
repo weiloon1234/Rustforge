@@ -11,6 +11,7 @@ import {
 import { FileText } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
+import { Button } from "@shared/components/Button";
 
 export interface FilePreviewItem {
   name: string;
@@ -117,14 +118,15 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
         <div
           className={`rf-input flex items-center gap-2 ${hasFieldError(error, errors) ? "rf-input-error" : ""} ${className ?? ""}`}
         >
-          <button
-            type="button"
-            className="rounded-md border border-border bg-surface px-2.5 py-1 text-xs font-medium text-foreground transition hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+          <Button
+            variant="secondary"
+            size="xs"
+            className="rounded-md"
             onClick={() => inputRef.current?.click()}
             disabled={disabled}
           >
             {selectLabel}
-          </button>
+          </Button>
           <p className="min-w-0 flex-1 truncate text-sm text-muted">{selectedSummary}</p>
         </div>
         <input

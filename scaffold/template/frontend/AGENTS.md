@@ -487,12 +487,12 @@ useModalStore.getState().open({
   content: <ProfileModal formId={formId} account={account} onUpdated={setAccount} />,
   footer: (
     <>
-      <button type="button" onClick={() => useModalStore.getState().close()} className="rf-modal-btn-secondary">
+      <Button type="button" variant="secondary" onClick={() => useModalStore.getState().close()}>
         {t("Cancel")}
-      </button>
-      <button type="submit" form={formId} className="rf-modal-btn-primary">
+      </Button>
+      <Button type="submit" form={formId} variant="primary">
         {t("Save")}
-      </button>
+      </Button>
     </>
   ),
 });

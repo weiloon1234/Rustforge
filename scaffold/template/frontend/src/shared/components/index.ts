@@ -13,6 +13,9 @@ export type { SelectProps, SelectOption } from "@shared/components/Select";
 export { Checkbox } from "@shared/components/Checkbox";
 export type { CheckboxProps } from "@shared/components/Checkbox";
 
+export { Button } from "@shared/components/Button";
+export type { ButtonProps, ButtonVariant, ButtonSize } from "@shared/components/Button";
+
 export { Radio } from "@shared/components/Radio";
 export type { RadioProps, RadioOption } from "@shared/components/Radio";
 

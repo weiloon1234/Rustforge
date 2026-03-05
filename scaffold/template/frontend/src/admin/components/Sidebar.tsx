@@ -6,6 +6,7 @@ import { navigation, type NavItem, type NavChild } from "@admin/nav";
 import type { AdminType, Permission } from "@admin/types";
 import { useAuthStore } from "@admin/stores/auth";
 import { useNotificationStore } from "@admin/stores/notifications";
+import { Button } from "@shared/components";
 
 function matchPattern(pattern: string, value: string): boolean {
   if (!pattern.endsWith(".*")) return false;
@@ -127,7 +128,9 @@ function ParentNav({
   if (collapsed) {
     return (
       <div className="relative" title={t(item.label)}>
-        <button
+        <Button
+          variant="plain"
+          size="sm"
           className={`rf-sidebar-link w-full ${isChildActive ? "rf-sidebar-link-active" : ""}`}
           onClick={() => setOpen(!open)}
         >
@@ -135,14 +138,16 @@ function ParentNav({
           {totalCount > 0 && (
             <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />
           )}
-        </button>
+        </Button>
       </div>
     );
   }
 
   return (
     <div>
-      <button
+      <Button
+        variant="plain"
+        size="sm"
         className={`rf-sidebar-link w-full ${isChildActive ? "rf-sidebar-link-active" : ""}`}
         onClick={() => setOpen(!open)}
       >
@@ -153,7 +158,7 @@ function ParentNav({
           size={16}
           className={`shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
         />
-      </button>
+      </Button>
       {open && (
         <div className="ml-7 mt-0.5 space-y-0.5">
           {visibleChildren.map((child) => (

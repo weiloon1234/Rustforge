@@ -1,7 +1,7 @@
 import { Eye } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { HttpClientLogDatatableRow } from "@admin/types";
-import { DataTable, formatDateTime, useModalStore } from "@shared/components";
+import { Button, DataTable, formatDateTime, useModalStore } from "@shared/components";
 
 function statusBadgeClass(status: number | null): string {
   if (status === null) return "bg-gray-100 text-gray-700";
@@ -110,13 +110,13 @@ export default function HttpClientLogsPage() {
         </div>
       ),
       footer: (
-        <button
+        <Button
           type="button"
           onClick={() => useModalStore.getState().close()}
-          className="rf-modal-btn-secondary"
+          variant="secondary"
         >
           {t("Close")}
-        </button>
+        </Button>
       ),
     });
   };
@@ -126,6 +126,7 @@ export default function HttpClientLogsPage() {
       url="datatable/http-client-log/query"
       title={t("HTTP Client Logs")}
       subtitle={t("Inspect outbound HTTP requests and responses")}
+      enableAutoRefresh
       columns={[
         {
           key: "actions",
@@ -133,14 +134,16 @@ export default function HttpClientLogsPage() {
           sortable: false,
           cellClassName: "text-foreground",
           render: (log) => (
-            <button
+            <Button
               type="button"
               onClick={() => openDetailModal(log)}
-              className="rounded-lg p-1.5 text-muted transition hover:bg-surface-hover hover:text-foreground"
+              variant="plain"
+              size="sm"
+              iconOnly
               title={t("View Detail")}
             >
               <Eye size={16} />
-            </button>
+            </Button>
           ),
         },
         {

@@ -54,6 +54,7 @@
   "Super Admins": "超级管理员",
   "Manage administrator accounts": "管理管理员账号",
   "Refresh": "刷新",
+  "Auto refresh in :seconds seconds": ":seconds 秒后自动刷新",
   "Create Admin": "创建管理员",
   "Edit Admin": "编辑管理员",
   "Delete Admin": "删除管理员",

@@ -303,6 +303,51 @@
   .rf-note { @apply mt-1 text-xs text-muted; }
   .rf-form-grid { @apply grid grid-cols-2 gap-x-4; }
 
+  /* ── Button ─────────────────────────────────────── */
+  .rf-btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-transparent font-medium
+      whitespace-nowrap transition-colors duration-150 select-none cursor-pointer;
+  }
+  .rf-btn:focus-visible {
+    @apply outline-none ring-2 ring-ring/40;
+  }
+  .rf-btn-size-xs { @apply h-8 min-w-8 px-2 text-xs; }
+  .rf-btn-size-sm { @apply h-8 px-3 text-sm; }
+  .rf-btn-size-md { @apply h-10 px-4 text-sm; }
+  .rf-btn-size-lg { @apply h-11 px-5 text-base; }
+  .rf-btn-icon { @apply aspect-square px-0; }
+  .rf-btn-spinner { @apply h-4 w-4 animate-spin; }
+  .rf-btn[disabled]:not([aria-busy="true"]) {
+    @apply cursor-not-allowed opacity-50;
+  }
+  .rf-btn[aria-busy="true"] {
+    @apply cursor-progress opacity-80;
+  }
+  .rf-btn-variant-primary {
+    @apply border-primary bg-primary text-primary-foreground hover:bg-primary-hover;
+  }
+  .rf-btn-variant-secondary {
+    @apply border-border bg-surface text-foreground hover:bg-surface-hover;
+  }
+  .rf-btn-variant-danger {
+    @apply border-error bg-error text-white hover:bg-error/90;
+  }
+  .rf-btn-variant-warning {
+    @apply border-warning/50 bg-warning-muted text-warning hover:bg-warning-muted/80;
+  }
+  .rf-btn-variant-error {
+    @apply border-error/50 bg-error-muted text-error hover:bg-error-muted/80;
+  }
+  .rf-btn-variant-success {
+    @apply border-success bg-success text-white hover:bg-success/90;
+  }
+  .rf-btn-variant-info {
+    @apply border-info bg-info text-white hover:bg-info/90;
+  }
+  .rf-btn-variant-plain {
+    @apply border-transparent bg-transparent text-muted hover:bg-surface-hover hover:text-foreground;
+  }
+
   /* ── DataTable ─────────────────────────────────── */
   .rf-dt-shell {
     @apply overflow-hidden rounded-xl border border-border bg-surface;

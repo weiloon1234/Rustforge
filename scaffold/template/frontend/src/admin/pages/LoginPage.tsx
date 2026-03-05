@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAutoForm } from "@shared/useAutoForm";
+import { Button } from "@shared/components";
 import { useAuthStore } from "@admin/stores/auth";
 import { api } from "@admin/api";
 import type { AdminAuthOutput } from "@admin/types";
@@ -60,15 +61,14 @@ export default function LoginPage() {
 
           {form}
 
-          <button
+          <Button
             onClick={submit}
-            disabled={busy}
-            className="mt-2 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium
-              text-primary-foreground transition-colors hover:bg-primary-hover
-              disabled:opacity-50 disabled:cursor-not-allowed"
+            busy={busy}
+            variant="primary"
+            className="mt-2 w-full"
           >
             {busy ? t("Signing in...") : t("Sign in")}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
