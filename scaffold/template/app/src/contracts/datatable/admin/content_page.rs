@@ -1,6 +1,6 @@
 use core_web::datatable::{
-    DataTableFilterFieldDto, DataTableFilterFieldType, DataTableGenericEmailExportRequest,
-    DataTableGenericQueryRequest, DataTableScopedContract,
+    DataTableFilterFieldDto, DataTableFilterFieldType, DataTableFilterOptionDto,
+    DataTableGenericEmailExportRequest, DataTableGenericQueryRequest, DataTableScopedContract,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -53,8 +53,25 @@ impl DataTableScopedContract for AdminContentPageDataTableContract {
                 label: "System".to_string(),
                 placeholder: Some("All".to_string()),
                 description: None,
-                options: Some(generated::models::ContentPageSystemFlag::datatable_filter_options()),
+                options: Some(system_filter_options()),
             },
         ]]
     }
+}
+
+fn system_filter_options() -> Vec<DataTableFilterOptionDto> {
+    vec![
+        DataTableFilterOptionDto {
+            label: "No".to_string(),
+            value: generated::models::ContentPageSystemFlag::No
+                .as_str()
+                .to_string(),
+        },
+        DataTableFilterOptionDto {
+            label: "Yes".to_string(),
+            value: generated::models::ContentPageSystemFlag::Yes
+                .as_str()
+                .to_string(),
+        },
+    ]
 }
