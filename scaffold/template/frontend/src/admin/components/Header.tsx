@@ -303,7 +303,7 @@ export default function Header({
                   onClick={() => void handleLocaleChange(code)}
                   variant="plain"
                   size="sm"
-                  className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm text-foreground transition-colors hover:bg-surface-hover"
+                  className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm transition-colors hover:bg-surface-hover"
                 >
                   <span>{t(`Locale ${code.toUpperCase()}`)}</span>
                   {locale === code && (
@@ -320,7 +320,7 @@ export default function Header({
               onClick={openProfileModal}
               variant="plain"
               size="sm"
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm text-foreground transition-colors hover:bg-surface-hover"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-surface-hover"
             >
               <User size={16} />
               {t("Edit Profile")}
@@ -330,7 +330,7 @@ export default function Header({
               onClick={openSecurityModal}
               variant="plain"
               size="sm"
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm text-foreground transition-colors hover:bg-surface-hover"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-surface-hover"
             >
               <Shield size={16} />
               {t("Account Security")}
@@ -340,7 +340,7 @@ export default function Header({
               onClick={() => void handleLogout()}
               variant="plain"
               size="sm"
-              className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm text-foreground transition-colors hover:bg-surface-hover"
+              className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-surface-hover"
             >
               <LogOut size={16} />
               {t("Logout")}

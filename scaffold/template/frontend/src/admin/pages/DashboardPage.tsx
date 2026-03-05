@@ -9,7 +9,7 @@ export default function DashboardPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">
+        <h1 className="text-2xl font-bold">
           {t("Welcome back, :name", { name: account?.name ?? t("Admin") })}
         </h1>
         <p className="mt-1 text-sm text-muted">

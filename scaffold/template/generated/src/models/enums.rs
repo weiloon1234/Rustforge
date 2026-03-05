@@ -50,6 +50,14 @@ impl AdminType {
         }
     }
 
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Developer => "Developer",
+            Self::SuperAdmin => "SuperAdmin",
+            Self::Admin => "Admin",
+        }
+    }
+
     pub const fn variants() -> &'static [Self] {
         &[Self::Developer, Self::SuperAdmin, Self::Admin]
     }
@@ -58,10 +66,11 @@ impl AdminType {
         Self::variants()
             .iter()
             .map(|v| {
-                let s = (*v).as_str();
+                let label = (*v).as_label();
+                let value = (*v).as_str();
                 core_web::datatable::DataTableFilterOptionDto {
-                    label: s.to_string(),
-                    value: s.to_string(),
+                    label: label.to_string(),
+                    value: value.to_string(),
                 }
             })
             .collect()
@@ -158,6 +167,13 @@ impl ContentPageSystemFlag {
         }
     }
 
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::No => "No",
+            Self::Yes => "Yes",
+        }
+    }
+
     pub const fn variants() -> &'static [Self] {
         &[Self::No, Self::Yes]
     }
@@ -166,10 +182,11 @@ impl ContentPageSystemFlag {
         Self::variants()
             .iter()
             .map(|v| {
-                let s = (*v).as_str();
+                let label = (*v).as_label();
+                let value = (*v).as_str();
                 core_web::datatable::DataTableFilterOptionDto {
-                    label: s.to_string(),
-                    value: s.to_string(),
+                    label: label.to_string(),
+                    value: value.to_string(),
                 }
             })
             .collect()
@@ -206,5 +223,4 @@ impl From<ContentPageSystemFlag> for core_db::common::sql::BindValue {
         core_db::common::sql::BindValue::I64(v as i64)
     }
 }
-
 

@@ -54,7 +54,7 @@ function JsonPanel({ title, value }: { title: string; value: unknown }) {
       <p className="text-xs font-semibold uppercase tracking-wide text-muted">
         {title}
       </p>
-      <pre className="max-h-64 overflow-auto rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground">
+      <pre className="max-h-64 overflow-auto rounded-lg border border-border bg-surface px-3 py-2 text-xs">
         {prettyPayload(value)}
       </pre>
     </section>
@@ -75,31 +75,31 @@ export default function HttpClientLogsPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">
                 {t("URL")}
               </p>
-              <p className="break-all text-foreground">{log.request_url}</p>
+              <p className="break-all">{log.request_url}</p>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">
                 {t("Method")}
               </p>
-              <p className="text-foreground">{log.request_method}</p>
+              <p>{log.request_method}</p>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">
                 {t("Status Code")}
               </p>
-              <p className="text-foreground">{log.response_status ?? "—"}</p>
+              <p>{log.response_status ?? "—"}</p>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">
                 {t("Duration (ms)")}
               </p>
-              <p className="text-foreground">{log.duration_ms ?? "—"}</p>
+              <p>{log.duration_ms ?? "—"}</p>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">
                 {t("Created At")}
               </p>
-              <p className="text-foreground">{formatDateTime(log.created_at)}</p>
+              <p>{formatDateTime(log.created_at)}</p>
             </div>
           </div>
 
@@ -132,7 +132,6 @@ export default function HttpClientLogsPage() {
           key: "actions",
           label: t("Actions"),
           sortable: false,
-          cellClassName: "text-foreground",
           render: (log) => (
             <Button
               type="button"
@@ -149,7 +148,6 @@ export default function HttpClientLogsPage() {
         {
           key: "request_url",
           label: t("URL"),
-          cellClassName: "text-foreground",
           render: (log) => log.request_url,
         },
         {
@@ -188,7 +186,7 @@ export default function HttpClientLogsPage() {
         {
           key: "duration_ms",
           label: t("Duration (ms)"),
-          cellClassName: "tabular-nums text-foreground",
+          cellClassName: "tabular-nums",
           render: (log) =>
             log.duration_ms === null || log.duration_ms === undefined
               ? "—"

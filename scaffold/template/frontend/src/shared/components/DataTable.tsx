@@ -863,7 +863,7 @@ export function DataTable<T>({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0 flex-1">
                 {title && (
-                  <h1 className="text-2xl font-bold text-foreground">
+                  <h1 className="text-2xl font-bold">
                     {title}
                   </h1>
                 )}
@@ -874,7 +874,7 @@ export function DataTable<T>({
               <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
                 {resolvedHeaderActions}
                 {enableAutoRefresh && (
-                  <div className="w-full max-w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground sm:w-auto">
+                  <div className="w-full max-w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm sm:w-auto">
                     <Checkbox
                       containerClassName="mb-0"
                       wrapperClassName="w-full min-w-0 gap-2"

@@ -76,6 +76,17 @@ fn generate_string_enum(name: &str, spec: &EnumSpec) -> String {
     let decode_arms_str = decode_arms.join("\n");
     let encode_arms_str_qualified = encode_arms_qualified.join("\n");
     let as_str_arms_str = encode_arms.join("\n");
+    let as_label_arms_str = value_map
+        .iter()
+        .map(|(variant, _)| {
+            format!(
+                "            Self::{} => \"{}\",",
+                variant,
+                escape_rust_string(variant)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let ts_union = value_map
         .iter()
         .map(|(_, value)| format!("\"{}\"", escape_rust_string(value)))
@@ -126,6 +137,12 @@ impl {name} {{
         }}
     }}
 
+    pub const fn as_label(self) -> &'static str {{
+        match self {{
+{as_label_arms_str}
+        }}
+    }}
+
     pub const fn variants() -> &'static [Self] {{
         &[{variant_self_list}]
     }}
@@ -134,10 +151,11 @@ impl {name} {{
         Self::variants()
             .iter()
             .map(|v| {{
-                let s = (*v).as_str();
+                let label = (*v).as_label();
+                let value = (*v).as_str();
                 core_web::datatable::DataTableFilterOptionDto {{
-                    label: s.to_string(),
-                    value: s.to_string(),
+                    label: label.to_string(),
+                    value: value.to_string(),
                 }}
             }})
             .collect()
@@ -220,6 +238,17 @@ fn generate_integer_enum(name: &str, spec: &EnumSpec) -> String {
         .map(|(variant, value)| format!("            Self::{} => \"{}\",", variant, value))
         .collect::<Vec<_>>()
         .join("\n");
+    let as_label_arms = value_map
+        .iter()
+        .map(|(variant, _)| {
+            format!(
+                "            Self::{} => \"{}\",",
+                variant,
+                escape_rust_string(variant)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let variant_self_list = value_map
         .iter()
         .map(|(variant, _)| format!("Self::{}", variant))
@@ -276,6 +305,12 @@ impl {name} {{
         }}
     }}
 
+    pub const fn as_label(self) -> &'static str {{
+        match self {{
+{as_label_arms}
+        }}
+    }}
+
     pub const fn variants() -> &'static [Self] {{
         &[{variant_self_list}]
     }}
@@ -284,10 +319,11 @@ impl {name} {{
         Self::variants()
             .iter()
             .map(|v| {{
-                let s = (*v).as_str();
+                let label = (*v).as_label();
+                let value = (*v).as_str();
                 core_web::datatable::DataTableFilterOptionDto {{
-                    label: s.to_string(),
-                    value: s.to_string(),
+                    label: label.to_string(),
+                    value: value.to_string(),
                 }}
             }})
             .collect()

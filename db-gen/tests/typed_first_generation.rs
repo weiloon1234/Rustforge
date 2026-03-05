@@ -21,6 +21,67 @@ fn temp_dir(prefix: &str) -> PathBuf {
 }
 
 #[test]
+fn generated_enum_filter_options_use_variant_labels_and_storage_values() {
+    let root = temp_dir("enum_filter_options");
+    let schema_dir = root.join("schemas");
+    let out_dir = root.join("out");
+    fs::create_dir_all(&schema_dir).expect("failed to create schemas dir");
+    fs::create_dir_all(&out_dir).expect("failed to create out dir");
+
+    fs::write(
+        schema_dir.join("enums.toml"),
+        r#"
+[AdminType]
+type = "enum"
+storage = "string"
+variants = ["Developer", "SuperAdmin", "Admin"]
+
+[ContentPageSystemFlag]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "No", value = 0 },
+  { name = "Yes", value = 1 },
+]
+
+[model.example]
+table = "examples"
+fields = [
+  "id:i64",
+  "admin_type:AdminType",
+  "is_system:ContentPageSystemFlag"
+]
+"#,
+    )
+    .expect("failed to write schema");
+
+    let parsed_schema = schema::load(
+        schema_dir
+            .to_str()
+            .expect("schema path should be valid utf-8"),
+    )
+    .expect("failed to load schema");
+
+    generate_enums(&parsed_schema, &out_dir).expect("enum generation should succeed");
+    let enums_rs = fs::read_to_string(out_dir.join("enums.rs")).expect("enums.rs should exist");
+
+    assert!(enums_rs.contains("pub enum AdminType"));
+    assert!(enums_rs.contains("pub enum ContentPageSystemFlag"));
+    assert!(enums_rs.contains("let label = (*v).as_label();"));
+    assert!(enums_rs.contains("let value = (*v).as_str();"));
+
+    // String enum: label is variant name, value is storage value.
+    assert!(enums_rs.contains("Self::Developer => \"Developer\","));
+    assert!(enums_rs.contains("Self::Developer => \"developer\","));
+
+    // Integer enum: label is variant name, value is numeric storage string.
+    assert!(enums_rs.contains("Self::No => \"No\","));
+    assert!(enums_rs.contains("Self::No => \"0\","));
+
+    fs::remove_dir_all(root).expect("failed to remove temp dir");
+}
+
+#[test]
 fn generated_models_use_typed_first_api_with_explicit_unsafe_escape_hatch() {
     let root = temp_dir("typed_first");
     let schema_dir = root.join("schemas");

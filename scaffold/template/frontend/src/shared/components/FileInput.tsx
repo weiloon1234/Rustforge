@@ -213,7 +213,7 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
                         </span>
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-foreground">{item.name}</p>
+                        <p className="truncate text-sm font-medium">{item.name}</p>
                         {typeof item.size === "number" && (
                           <p className="text-xs text-muted">{item.size.toLocaleString()} bytes</p>
                         )}

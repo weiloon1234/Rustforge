@@ -83,7 +83,7 @@ function PermissionCheckboxes({
   const { t } = useTranslation();
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-medium text-foreground">
+      <legend className="text-sm font-medium">
         {t("Permissions")}
       </legend>
       <div className="flex flex-wrap gap-x-6 gap-y-1">
@@ -378,25 +378,25 @@ export default function AdminsPage() {
           <div className="grid gap-2 sm:grid-cols-4">
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Filtered Total")}</p>
-              <p className="font-semibold text-foreground">
+              <p className="font-semibold">
                 {summary.total_admin_counts ?? summary.total_filtered}
               </p>
             </div>
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Developers")}</p>
-              <p className="font-semibold text-foreground">
+              <p className="font-semibold">
                 {summary.developer_count}
               </p>
             </div>
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Super Admins")}</p>
-              <p className="font-semibold text-foreground">
+              <p className="font-semibold">
                 {summary.superadmin_count}
               </p>
             </div>
             <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               <p className="text-xs text-muted">{t("Admins")}</p>
-              <p className="font-semibold text-foreground">
+              <p className="font-semibold">
                 {summary.admin_count}
               </p>
             </div>
@@ -408,7 +408,6 @@ export default function AdminsPage() {
           key: "actions",
           label: t("Actions"),
           sortable: false,
-          cellClassName: "text-foreground",
           render: (admin, ctx) => (
             <div className="flex gap-1">
               <Button
@@ -438,7 +437,7 @@ export default function AdminsPage() {
         {
           key: "username",
           label: t("Username"),
-          cellClassName: "font-medium text-foreground",
+          cellClassName: "font-medium",
           render: (admin) => admin.username,
         },
         {
@@ -450,20 +449,17 @@ export default function AdminsPage() {
         {
           key: "name",
           label: t("Name"),
-          cellClassName: "text-foreground",
           render: (admin) => admin.name,
         },
         {
           key: "admin_type",
           label: t("Admin Type"),
-          cellClassName: "text-foreground",
           render: (admin) => <TypeBadge type={admin.admin_type} />,
         },
         {
           key: "abilities",
           label: t("Permissions"),
           sortable: false,
-          cellClassName: "text-foreground",
           render: (admin) => <PermissionBadges abilities={admin.abilities} />,
         },
         {

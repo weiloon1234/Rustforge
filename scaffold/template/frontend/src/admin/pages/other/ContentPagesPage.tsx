@@ -72,7 +72,6 @@ export default function ContentPagesPage() {
           key: "actions",
           label: t("Actions"),
           sortable: false,
-          cellClassName: "text-foreground",
           render: (row, ctx) => (
             <div className="flex gap-1">
               <Button
@@ -104,19 +103,17 @@ export default function ContentPagesPage() {
         {
           key: "tag",
           label: t("Tag"),
-          cellClassName: "font-medium text-foreground",
+          cellClassName: "font-medium",
           render: (row) => row.tag,
         },
         {
           key: "title",
           label: t("Title"),
-          cellClassName: "text-foreground",
           render: (row) => row.title ?? "—",
         },
         {
           key: "is_system",
           label: t("System"),
-          cellClassName: "text-foreground",
           render: (row) => (
             <span
               className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${toSystemBadgeClass(row.is_system)}`}

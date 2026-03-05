@@ -145,12 +145,12 @@ export default function ContentPageEditPage() {
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">{t("Edit Page")}</h1>
+          <h1 className="text-2xl font-semibold">{t("Edit Page")}</h1>
           <p className="text-sm text-muted">{t("Update localized content and cover")}</p>
         </div>
         <Link
           to="/other/content-pages"
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground transition hover:bg-surface-hover"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium transition hover:bg-surface-hover"
         >
           <ArrowLeft size={16} />
           {t("Back to Pages")}
