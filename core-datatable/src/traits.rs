@@ -200,7 +200,7 @@ pub trait AutoDataTable: Send + Sync + 'static {
     }
 
     fn default_export_ignore_columns(&self) -> &'static [&'static str] {
-        &["actions", "action"]
+        &["action", "actions", "operation", "operations", "#"]
     }
 
     fn default_timestamp_columns(&self) -> &'static [&'static str] {

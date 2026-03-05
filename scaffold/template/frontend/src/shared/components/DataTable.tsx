@@ -46,6 +46,13 @@ import { PERMISSION } from "@shared/types";
 const PER_PAGE_OPTIONS = [30, 50, 100, 300, 1000, 3000];
 const AUTO_REFRESH_SECONDS = 60;
 const AUTO_REFRESH_STORAGE_KEY = "rf-datatable-auto-refresh-enabled";
+const DEFAULT_EXPORT_IGNORE_COLUMNS = new Set([
+  "action",
+  "actions",
+  "operation",
+  "operations",
+  "#",
+]);
 
 interface DataTableApiContextValue {
   api: AxiosInstance;
@@ -133,6 +140,8 @@ export interface DataTableColumn<T> {
   sortable?: boolean;
   headerClassName?: string;
   cellClassName?: string;
+  exportColumn?: string;
+  exportIgnore?: boolean;
   render?: (record: T, ctx: DataTableCellContext<T>) => ReactNode;
 }
 
@@ -143,6 +152,7 @@ export interface DataTableProps<T> {
   extraBody?: Record<string, unknown>;
   perPage?: number;
   columns?: DataTableColumn<T>[];
+  exportIgnoreColumns?: string[];
   rowKey?: (record: T) => string | number | bigint;
   showIndexColumn?: boolean;
   title?: string;
@@ -183,6 +193,66 @@ function toColumnLabel(col: DataTableColumnMetaDto): string {
     .split("_")
     .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
     .join(" ");
+}
+
+function resolveColumnDisplayLabel(label: string, t: (key: string) => string): string {
+  const translatedLabel = t(label);
+  return translatedLabel.trim() ? translatedLabel : label;
+}
+
+function normalizeColumnKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+type DataTableExportHeader = {
+  label: string;
+  column: string;
+  export_column: string;
+  export_ignore: boolean;
+};
+
+function buildExportHeaders<T>(args: {
+  columns: DataTableColumn<T>[];
+  t: (key: string) => string;
+  defaultIgnoreColumns?: string[];
+  exportIgnoreColumns?: string[];
+}): DataTableExportHeader[] {
+  const defaultIgnoreColumns = new Set(
+    [...DEFAULT_EXPORT_IGNORE_COLUMNS, ...(args.defaultIgnoreColumns ?? [])]
+      .map(normalizeColumnKey)
+      .filter((key) => key.length > 0),
+  );
+  const exportIgnoreColumns = new Set(
+    (args.exportIgnoreColumns ?? [])
+      .map(normalizeColumnKey)
+      .filter((key) => key.length > 0),
+  );
+  const headers: DataTableExportHeader[] = [];
+
+  for (const col of args.columns) {
+    const column = col.key.trim();
+    if (!column) continue;
+
+    const normalized = normalizeColumnKey(column);
+    const ignoreByDefaults = defaultIgnoreColumns.has(normalized);
+    const ignoreByProps = exportIgnoreColumns.has(normalized);
+    const exportIgnore =
+      col.exportIgnore === true
+        ? true
+        : col.exportIgnore === false
+          ? false
+          : ignoreByDefaults || ignoreByProps;
+    const exportColumn = (col.exportColumn?.trim() || column);
+
+    headers.push({
+      label: resolveColumnDisplayLabel(col.label, args.t),
+      column,
+      export_column: exportColumn,
+      export_ignore: exportIgnore,
+    });
+  }
+
+  return headers;
 }
 
 function flattenFilterKeys(
@@ -449,6 +519,7 @@ export function DataTable<T>({
   extraBody,
   perPage: defaultPerPage = 30,
   columns,
+  exportIgnoreColumns,
   rowKey,
   showIndexColumn = true,
   title,
@@ -494,6 +565,7 @@ export function DataTable<T>({
   const exportCsvUrl = deriveExportCsvUrl(url);
   const canExport =
     Boolean(exportCsvUrl) && hasPermission(scopes, PERMISSION.EXPORT);
+  const defaultExportIgnoreColumns = meta?.defaults?.export_ignore_columns;
 
   useEffect(() => {
     onPreCallRef.current = onPreCall;
@@ -684,6 +756,13 @@ export function DataTable<T>({
       filters: appliedFiltersRef.current,
       extraBody,
     });
+    const headers = buildExportHeaders({
+      columns: renderColumns,
+      t,
+      defaultIgnoreColumns: defaultExportIgnoreColumns,
+      exportIgnoreColumns,
+    });
+    payload.headers = headers;
 
     try {
       const response = await api.post<Blob>(exportCsvUrl, payload, {
@@ -718,6 +797,9 @@ export function DataTable<T>({
     perPage,
     sortColumn,
     sortDirection,
+    renderColumns,
+    defaultExportIgnoreColumns,
+    exportIgnoreColumns,
     t,
   ]);
 
@@ -1002,10 +1084,7 @@ export function DataTable<T>({
                 )}
                 {renderColumns.map((col) => {
                   const sortable = isColumnSortable(col);
-                  const translatedLabel = t(col.label);
-                  const displayLabel = translatedLabel.trim()
-                    ? translatedLabel
-                    : col.label;
+                  const displayLabel = resolveColumnDisplayLabel(col.label, t);
                   return (
                     <th
                       key={col.key}

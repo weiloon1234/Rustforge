@@ -114,6 +114,7 @@ export default function ContentPagesPage() {
         {
           key: "is_system",
           label: t("System"),
+          exportColumn: "is_system_explained",
           render: (row) => (
             <span
               className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${toSystemBadgeClass(row.is_system)}`}

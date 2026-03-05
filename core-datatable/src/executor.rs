@@ -334,7 +334,10 @@ fn parse_export_headers(
         return Ok(None);
     };
     if raw.trim().is_empty() {
-        return Ok(None);
+        return Ok(Some(ExportHeaderSpec {
+            labels: Vec::new(),
+            columns: Vec::new(),
+        }));
     }
 
     let items: Vec<HeaderInput> = serde_json::from_str(raw)?;
@@ -360,16 +363,15 @@ fn parse_export_headers(
         columns.push(column);
     }
 
-    if columns.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(ExportHeaderSpec { labels, columns }))
-    }
+    Ok(Some(ExportHeaderSpec { labels, columns }))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_sort_column;
+    use std::collections::HashSet;
+
+    use super::{parse_export_headers, resolve_sort_column};
+    use crate::DataTableInput;
 
     #[test]
     fn sort_column_falls_back_when_invalid() {
@@ -388,5 +390,43 @@ mod tests {
             resolve_sort_column(Some("NAME"), "id", &[], &sortable),
             "name"
         );
+    }
+
+    #[test]
+    fn export_headers_missing_uses_legacy_default_behavior() {
+        let input = DataTableInput::default();
+        let ignore_defaults = HashSet::new();
+
+        let spec = parse_export_headers(&input, &ignore_defaults).expect("parse should succeed");
+        assert!(spec.is_none());
+    }
+
+    #[test]
+    fn export_headers_present_do_not_fallback_to_legacy_even_when_empty() {
+        let mut input = DataTableInput::default();
+        input.params.insert("headers".to_string(), "[]".to_string());
+        let ignore_defaults = HashSet::new();
+
+        let spec = parse_export_headers(&input, &ignore_defaults)
+            .expect("parse should succeed")
+            .expect("headers should be authoritative when provided");
+        assert!(spec.labels.is_empty());
+        assert!(spec.columns.is_empty());
+    }
+
+    #[test]
+    fn export_headers_present_do_not_fallback_when_all_items_ignored() {
+        let mut input = DataTableInput::default();
+        input.params.insert(
+            "headers".to_string(),
+            r#"[{"label":"Actions","column":"actions","export_ignore":true}]"#.to_string(),
+        );
+        let ignore_defaults = HashSet::from([String::from("actions")]);
+
+        let spec = parse_export_headers(&input, &ignore_defaults)
+            .expect("parse should succeed")
+            .expect("headers should be authoritative when provided");
+        assert!(spec.labels.is_empty());
+        assert!(spec.columns.is_empty());
     }
 }
