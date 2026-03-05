@@ -6,17 +6,34 @@ export interface CheckboxProps extends Omit<InputHTMLAttributes<HTMLInputElement
   error?: string;
   errors?: string[];
   notes?: string;
+  containerClassName?: string;
+  wrapperClassName?: string;
+  labelClassName?: string;
 }
 
 export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
-  ({ label, error, errors, notes, className, id: externalId, ...rest }, ref) => {
+  (
+    {
+      label,
+      error,
+      errors,
+      notes,
+      className,
+      id: externalId,
+      containerClassName,
+      wrapperClassName,
+      labelClassName,
+      ...rest
+    },
+    ref,
+  ) => {
     const autoId = useId();
     const id = externalId ?? autoId;
     const hasError = hasFieldError(error, errors);
 
     return (
-      <div className="rf-field">
-        <label htmlFor={id} className="rf-checkbox-wrapper">
+      <div className={`rf-field ${containerClassName ?? ""}`}>
+        <label htmlFor={id} className={`rf-checkbox-wrapper ${wrapperClassName ?? ""}`}>
           <input
             ref={ref}
             id={id}
@@ -29,7 +46,11 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
               <path d="M2.5 6L5 8.5L9.5 3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
-          {label && <span className="rf-checkbox-label">{label}</span>}
+          {label && (
+            <span className={`rf-checkbox-label ${labelClassName ?? ""}`}>
+              {label}
+            </span>
+          )}
         </label>
         <FieldErrors error={error} errors={errors} />
         {notes && !hasError && <p className="rf-note">{notes}</p>}

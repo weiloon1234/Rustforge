@@ -148,6 +148,8 @@
   "No file selected": "未选择文件",
   "Choose file": "选择文件",
   "Choose files": "选择文件",
+  "Preview": "预览",
+  "Download": "下载",
   ":count files selected": "已选择 :count 个文件",
   "Maximum :count files allowed": "最多允许 :count 个文件",
   "Bold": "加粗",

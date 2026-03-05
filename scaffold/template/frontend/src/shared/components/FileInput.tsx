@@ -8,10 +8,11 @@ import {
   type ChangeEvent,
   type InputHTMLAttributes,
 } from "react";
-import { FileText } from "lucide-react";
+import { Download, Eye, FileText } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
 import { Button } from "@shared/components/Button";
+import { attachmentUrl } from "@shared/helpers";
 
 export interface FilePreviewItem {
   name: string;
@@ -31,6 +32,25 @@ export interface FileInputProps
   defaultFiles?: FilePreviewItem[];
   accepts?: string;
   maxFiles?: number;
+}
+
+interface FilePreviewDisplayItem extends FilePreviewItem {
+  source: "selected" | "default";
+}
+
+const IMAGE_FILE_NAME_PATTERN = /\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|webp)$/i;
+
+function isImageFile(item: FilePreviewItem): boolean {
+  if (item.mimeType?.startsWith("image/")) return true;
+  if (IMAGE_FILE_NAME_PATTERN.test(item.name)) return true;
+  if (item.url && IMAGE_FILE_NAME_PATTERN.test(item.url)) return true;
+  return false;
+}
+
+function resolveDefaultPreviewUrl(item: FilePreviewItem): string | undefined {
+  if (item.url?.trim()) return item.url.trim();
+  if (!item.name.trim()) return undefined;
+  return attachmentUrl(item.name);
 }
 
 export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
@@ -68,11 +88,15 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
           name: file.name,
           mimeType: file.type || undefined,
           size: file.size,
-          url: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+          url: URL.createObjectURL(file),
           source: "selected" as const,
         }));
       }
-      return defaultFiles.map((item) => ({ ...item, source: "default" as const }));
+      return defaultFiles.map((item) => ({
+        ...item,
+        url: resolveDefaultPreviewUrl(item),
+        source: "default" as const,
+      }));
     }, [files, defaultFiles]);
 
     useEffect(() => {
@@ -86,10 +110,24 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
     }, [previewItems]);
 
     const hasPreview = previewItems.length > 0;
-    const preview = previewItems[0];
-    const isImagePreview =
-      !!preview?.url &&
-      (preview.mimeType?.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg|bmp|heic|heif)$/i.test(preview.url));
+    const hasFieldErrors = hasFieldError(error, errors);
+
+    const handlePreview = (item: FilePreviewDisplayItem) => {
+      if (!item.url || typeof window === "undefined") return;
+      window.open(item.url, "_blank", "noopener,noreferrer");
+    };
+
+    const handleDownload = (item: FilePreviewDisplayItem) => {
+      if (!item.url || typeof document === "undefined") return;
+      const anchor = document.createElement("a");
+      anchor.href = item.url;
+      anchor.download = item.name;
+      anchor.rel = "noopener noreferrer";
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+    };
 
     const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
       const selectedCount = event.target.files?.length ?? 0;
@@ -116,7 +154,7 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
           </label>
         )}
         <div
-          className={`rf-input flex items-center gap-2 ${hasFieldError(error, errors) ? "rf-input-error" : ""} ${className ?? ""}`}
+          className={`rf-input flex items-center gap-2 ${hasFieldErrors ? "rf-input-error" : ""} ${className ?? ""}`}
         >
           <Button
             variant="secondary"
@@ -148,32 +186,75 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
           className="sr-only"
           {...rest}
         />
-        {!hasFieldError(error, errors) && (
+        {!hasFieldErrors && (
           <>
-            {hasPreview && previewItems.length === 1 && preview && (
-              <div className="mt-2 flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2">
-                {isImagePreview ? (
-                  <img src={preview.url} alt={preview.name} className="h-12 w-12 rounded object-cover" />
-                ) : (
-                  <span className="inline-flex h-12 w-12 items-center justify-center rounded bg-surface-hover text-muted">
-                    <FileText size={18} />
-                  </span>
-                )}
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">{preview.name}</p>
-                  {typeof preview.size === "number" && (
-                    <p className="text-xs text-muted">{preview.size.toLocaleString()} bytes</p>
-                  )}
-                </div>
+            {hasPreview && (
+              <div className="mt-2 space-y-2">
+                {previewItems.map((item, index) => {
+                  const imagePreview = isImageFile(item) && !!item.url;
+                  const canDownload = !!item.url;
+                  const key = `${item.source}-${item.name}-${index}`;
+
+                  return (
+                    <div key={key} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2">
+                      {imagePreview ? (
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="overflow-hidden rounded border border-border"
+                          aria-label={t("Preview")}
+                        >
+                          <img src={item.url} alt={item.name} className="h-12 w-12 object-cover" />
+                        </a>
+                      ) : (
+                        <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded bg-surface-hover text-muted">
+                          <FileText size={18} />
+                        </span>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-foreground">{item.name}</p>
+                        {typeof item.size === "number" && (
+                          <p className="text-xs text-muted">{item.size.toLocaleString()} bytes</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {imagePreview && (
+                          <Button
+                            type="button"
+                            variant="plain"
+                            size="xs"
+                            className="px-2 text-xs"
+                            onClick={() => handlePreview(item)}
+                          >
+                            <Eye size={14} />
+                            {t("Preview")}
+                          </Button>
+                        )}
+                        <Button
+                          type="button"
+                          variant="plain"
+                          size="xs"
+                          className="px-2 text-xs"
+                          onClick={() => handleDownload(item)}
+                          disabled={!canDownload}
+                        >
+                          <Download size={14} />
+                          {t("Download")}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </>
         )}
         <FieldErrors error={error} errors={errors} />
-        {maxFilesWarning && !hasFieldError(error, errors) && (
+        {maxFilesWarning && !hasFieldErrors && (
           <p className="text-xs text-amber-500">{maxFilesWarning}</p>
         )}
-        {notes && !hasFieldError(error, errors) && <p className="rf-note">{notes}</p>}
+        {notes && !hasFieldErrors && <p className="rf-note">{notes}</p>}
       </div>
     );
   },

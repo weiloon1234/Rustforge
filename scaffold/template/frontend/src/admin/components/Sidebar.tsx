@@ -27,6 +27,18 @@ function Badge({ count }: { count: number }) {
   return <span className="rf-badge">{count > 99 ? "99+" : count}</span>;
 }
 
+function normalizePath(path: string): string {
+  if (path === "/") return "/";
+  return path.replace(/\/+$/, "") || "/";
+}
+
+function isPathActive(basePath: string, pathname: string): boolean {
+  const base = normalizePath(basePath);
+  const current = normalizePath(pathname);
+  if (base === "/") return current === "/";
+  return current === base || current.startsWith(`${base}/`);
+}
+
 function NavLink({
   item,
   active,
@@ -87,7 +99,7 @@ function ParentNav({
   );
 
   const isChildActive = visibleChildren.some(
-    (c) => location.pathname === c.path,
+    (c) => isPathActive(c.path, location.pathname),
   );
 
   useEffect(() => {
@@ -138,7 +150,7 @@ function ParentNav({
             <NavLink
               key={child.path}
               item={child}
-              active={location.pathname === child.path}
+              active={isPathActive(child.path, location.pathname)}
               collapsed={false}
             />
           ))}
@@ -186,7 +198,7 @@ export default function Sidebar({ collapsed }: { collapsed: boolean }) {
             <NavLink
               key={item.path!}
               item={{ ...item, path: item.path!, icon: item.icon }}
-              active={location.pathname === item.path}
+              active={isPathActive(item.path!, location.pathname)}
               collapsed={collapsed}
             />
           );
