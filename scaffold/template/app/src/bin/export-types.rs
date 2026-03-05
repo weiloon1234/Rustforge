@@ -866,6 +866,7 @@ export type DataTableFilterFieldType =
   | \"number\"
   | \"date\"
   | \"datetime\"
+  | \"time\"
   | \"boolean\";
 
 export interface DataTableFilterOptionDto {
