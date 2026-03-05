@@ -9,6 +9,8 @@ import { useAuthStore } from "@admin/stores/auth";
 import { useNotificationStore } from "@admin/stores/notifications";
 import { Button } from "@shared/components";
 
+const EMPTY_SCOPES: string[] = [];
+
 function hasAccess(scopes: readonly string[], required?: readonly Permission[]): boolean {
   return hasAnyPermission(scopes, required ?? []);
 }
@@ -162,7 +164,7 @@ function ParentNav({
 
 export default function Sidebar({ collapsed }: { collapsed: boolean }) {
   const location = useLocation();
-  const scopes = useAuthStore((s) => s.account?.scopes ?? []);
+  const scopes = useAuthStore((s) => s.account?.scopes ?? EMPTY_SCOPES);
   const adminType = useAuthStore((s) => s.account?.admin_type ?? null);
 
   const visibleItems = navigation.filter((item) => {

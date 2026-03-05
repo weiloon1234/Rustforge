@@ -8,8 +8,10 @@ import { api } from "@admin/api";
 import { useAuthStore } from "@admin/stores/auth";
 import "./app.css";
 
+const EMPTY_SCOPES: string[] = [];
+
 function Root() {
-  const scopes = useAuthStore((state) => state.account?.scopes ?? []);
+  const scopes = useAuthStore((state) => state.account?.scopes ?? EMPTY_SCOPES);
 
   return (
     <DataTableApiProvider api={api} scopes={scopes}>

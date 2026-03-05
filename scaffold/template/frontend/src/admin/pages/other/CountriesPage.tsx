@@ -18,6 +18,7 @@ import {
 
 const COUNTRY_STATUS_ENABLED = "enabled";
 const COUNTRY_STATUS_DISABLED = "disabled";
+const EMPTY_SCOPES: string[] = [];
 
 function statusBadgeClass(status: string): string {
   if (status === COUNTRY_STATUS_ENABLED) {
@@ -102,7 +103,7 @@ function EditCountryStatusForm({
 
 export default function CountriesPage() {
   const { t } = useTranslation();
-  const scopes = useAuthStore((state) => state.account?.scopes ?? []);
+  const scopes = useAuthStore((state) => state.account?.scopes ?? EMPTY_SCOPES);
   const canManage = hasPermission(scopes, PERMISSION.COUNTRY_MANAGE);
 
   const openEditModal = (row: CountryDatatableRow, refresh: () => void) => {
