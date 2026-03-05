@@ -199,11 +199,9 @@ For contract types used by frontend:
 
 1. Add `#[derive(TS)]`.
 2. Add `#[ts(export, export_to = "{portal}/types/")]`.
-3. Shared TS types are framework-owned SSOT:
-   - `core_web::ts_exports::ts_export_files()`
-   - `core_db::ts_exports::ts_export_files()`
-   - `generated::ts_exports::ts_export_files()`
-4. `app/src/bin/export-types.rs` orchestrates only (merge app contracts + framework registries, then emit files).
+3. Shared TS types are framework-owned SSOT through `generated::ts_exports::ts_export_files()`.
+   - This registry is the compatibility bridge for scaffold template consumers and includes framework shapes (API/datatable/platform) plus generated enums/locales.
+4. `app/src/bin/export-types.rs` orchestrates only (merge app contracts + generated shared registry, then emit files).
 5. Run:
 
 ```bash
@@ -216,6 +214,9 @@ All user-facing strings must go through translation keys.
 
 - Rust side: use `core_i18n::t()` / `t_args()`.
 - Add keys in `../i18n/*.json`.
+- Permission translations must use permission keys from `permissions.toml` as i18n keys (for example `admin.read`, `country.manage`).
+- When adding/updating permissions, add/update those permission-key translations in both `../i18n/en.json` and `../i18n/zh.json` in the same change.
+- Keep permission-key entries grouped together in a dedicated nearby block in each locale file (do not scatter or append randomly).
 
 ## Seeder Recipe
 

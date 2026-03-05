@@ -52,6 +52,7 @@ pub struct ContentPageView {
     pub updated_at: time::OffsetDateTime,
     #[schemars(with = "String")]
     pub deleted_at: Option<time::OffsetDateTime>,
+    pub is_system_explained: String,
     pub title: Option<String>,
     pub title_translations: Option<localized::LocalizedText>,
     pub content: Option<String>,
@@ -75,6 +76,7 @@ impl ContentPageView {
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
             deleted_at: self.deleted_at.clone(),
+            is_system_explained: self.is_system_explained.clone(),
             title: self.title.clone(),
             title_translations: self.title_translations.clone(),
             content: self.content.clone(),
@@ -111,6 +113,7 @@ pub struct ContentPageJson {
     pub updated_at: time::OffsetDateTime,
     #[schemars(with = "String")]
     pub deleted_at: Option<time::OffsetDateTime>,
+    pub is_system_explained: String,
     pub title: Option<String>,
     pub title_translations: Option<localized::LocalizedText>,
     pub content: Option<String>,
@@ -128,6 +131,7 @@ fn hydrate_view(row: ContentPageRow, loc: &LocalizedMap, base_url: Option<&str>)
         created_at: row.created_at,
         updated_at: row.updated_at,
         deleted_at: row.deleted_at,
+        is_system_explained: row.is_system.explained_label(),
         title: None,
         title_translations: None,
         content: None,
@@ -1837,7 +1841,23 @@ pub trait ContentPageDataTableHooks: Send + Sync + 'static {
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
     fn filter_query<'db>(&'db self, _query: ContentPageQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<ContentPageQuery<'db>>> { Ok(None) }
     fn filters<'db>(&'db self, query: ContentPageQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<ContentPageQuery<'db>> { Ok(query) }
-    fn mappings(&self, _record: &mut serde_json::Map<String, serde_json::Value>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn map_row(&self, _row: &mut ContentPageView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: ContentPageView) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(row)?;
+        let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
+        if let Some(id_value) = record.get("id").cloned() {
+            let id_text = match id_value {
+                serde_json::Value::Number(number) => number.to_string(),
+                serde_json::Value::String(text) => text,
+                other => other.to_string(),
+            };
+            record.insert("id".to_string(), serde_json::Value::String(id_text));
+        }
+        Ok(record)
+    }
+    fn row_to_record(&self, row: ContentPageView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        self.default_row_to_record(row)
+    }
     fn summary<'db>(&'db self, _query: ContentPageQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
@@ -1882,7 +1902,8 @@ impl<H: ContentPageDataTableHooks> AutoDataTable for ContentPageDataTable<H> {
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
     fn filter_query<'db>(&'db self, query: ContentPageQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<ContentPageQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
     fn filters<'db>(&'db self, query: ContentPageQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<ContentPageQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn mappings(&self, record: &mut serde_json::Map<String, serde_json::Value>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.mappings(record, input, ctx) }
+    fn map_row(&self, row: &mut ContentPageView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: ContentPageView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
     fn summary<'db>(&'db self, query: ContentPageQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }

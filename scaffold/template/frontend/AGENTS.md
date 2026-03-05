@@ -208,6 +208,12 @@ function Greeting({ name }: { name: string }) {
 
 The key is the English text itself — if no translation is found, the key is the fallback.
 
+Permission labels are an explicit exception and must use permission keys from `app/permissions.toml` as i18n keys (for example `admin.read`, `country.manage`) instead of English label text keys.
+
+When permissions are added/updated:
+1. Add/update permission-key translations in both `i18n/en.json` and `i18n/zh.json` in the same change.
+2. Keep all permission-key translation entries grouped together in a nearby dedicated block in each locale file (do not scatter/append randomly).
+
 ## TypeScript Types (Generated)
 
 Type definitions in `*/types/` directories are **auto-generated** from Rust contract structs using `ts-rs`. Do not edit them manually — run `make gen-types` to regenerate after changing Rust contracts.
@@ -234,11 +240,8 @@ make gen          # Code generation + type generation
 
 1. Rust contract structs derive `ts_rs::TS` with `#[ts(export, export_to = "{portal}/types/")]`
 2. `app/build.rs` auto-discovers contract/datatable TS types from `app/src/contracts/api/v1/**` and `app/src/contracts/datatable/**`
-3. Shared TS schema is owned by framework/generated registries:
-   - `core_web::ts_exports::ts_export_files()`
-   - `core_db::ts_exports::ts_export_files()`
-   - `generated::ts_exports::ts_export_files()`
-4. `app/src/bin/export-types.rs` orchestrates output only: merges discovered app contracts + framework registries, then writes `frontend/src/**`
+3. Shared TS schema is owned by `generated::ts_exports::ts_export_files()` (compatibility bridge that includes framework API/datatable/platform shapes plus generated enums/locales)
+4. `app/src/bin/export-types.rs` orchestrates output only: merges discovered app contracts + generated shared registry, then writes `frontend/src/**`
 5. Per-portal `types/index.ts` and shared `types/index.ts` barrels are emitted automatically
 
 ### Adding types for a new domain

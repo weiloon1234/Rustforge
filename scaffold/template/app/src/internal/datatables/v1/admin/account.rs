@@ -59,12 +59,14 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
         }
     }
 
-    fn mappings(
+    fn row_to_record(
         &self,
-        record: &mut serde_json::Map<String, serde_json::Value>,
+        row: generated::models::AdminView,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let mut record = self.default_row_to_record(row)?;
+
         if let Some(abilities_val) = record.get("abilities").cloned() {
             let strings: Vec<String> = match abilities_val {
                 serde_json::Value::Array(items) => items
@@ -101,7 +103,7 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
         record.insert("identity".to_string(), serde_json::Value::String(identity));
         record.remove("password");
         record.remove("deleted_at");
-        Ok(())
+        Ok(record)
     }
 }
 

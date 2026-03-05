@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use ts_rs::TS;
 
 // ── Generated types (ts-rs) ──────────────────────────────────
@@ -41,7 +41,7 @@ struct FrameworkTsFile {
 include!(concat!(env!("OUT_DIR"), "/export_types_registry.rs"));
 
 fn main() {
-    let base = Path::new("frontend/src");
+    let base = frontend_src_dir();
 
     // ── 1. Contract types via ts-rs ─────────────────────────
     let mut files = load_discovered_ts_files();
@@ -96,7 +96,7 @@ fn main() {
     let shared_index = assemble_shared_index(&files, &framework_files);
     write_file(&base.join("shared/types/index.ts"), &shared_index);
 
-    println!("\nTypeScript types regenerated in frontend/src/");
+    println!("\nTypeScript types regenerated in {}", base.display());
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -125,6 +125,10 @@ fn load_discovered_ts_files() -> Vec<TsFile> {
     files
 }
 
+fn frontend_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../frontend/src")
+}
+
 fn framework_ts_files() -> Vec<FrameworkTsFile> {
     let mut files = Vec::new();
 
@@ -142,15 +146,15 @@ fn framework_ts_files() -> Vec<FrameworkTsFile> {
             .then(a.rust_path.cmp(&b.rust_path))
     });
 
-    let mut deduped = Vec::new();
     let mut seen = BTreeSet::new();
-    for file in files {
+    for file in &files {
         let key = format!("{}::{}", file.rel_path, file.rust_path);
-        if seen.insert(key) {
-            deduped.push(file);
+        if !seen.insert(key.clone()) {
+            panic!("duplicate framework TS exporter entry: `{key}`");
         }
     }
-    deduped
+
+    files
 }
 
 fn group_framework_ts_files(framework_files: &[FrameworkTsFile]) -> BTreeMap<String, Vec<String>> {
@@ -165,12 +169,28 @@ fn group_framework_ts_files(framework_files: &[FrameworkTsFile]) -> BTreeMap<Str
     let mut out = BTreeMap::new();
     for (rel_path, mut defs) in grouped {
         defs.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_no_framework_symbol_collisions(&rel_path, &defs);
         out.insert(
             rel_path,
             defs.into_iter().map(|(_, definition)| definition).collect(),
         );
     }
     out
+}
+
+fn assert_no_framework_symbol_collisions(rel_path: &str, defs: &[(String, String)]) {
+    let mut seen_by_name: BTreeMap<String, String> = BTreeMap::new();
+    for (rust_path, definition) in defs {
+        let mut declared = BTreeSet::new();
+        collect_declared_types(definition, &mut declared);
+        for name in declared {
+            if let Some(previous) = seen_by_name.insert(name.clone(), rust_path.clone()) {
+                panic!(
+                    "duplicate framework TS declaration `{name}` in `{rel_path}` from `{previous}` and `{rust_path}`"
+                );
+            }
+        }
+    }
 }
 
 fn assemble_framework_file(definitions: &[String]) -> String {

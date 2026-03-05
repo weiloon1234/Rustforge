@@ -366,6 +366,8 @@ fn ensure_unique_schema_enum(name: &str, variants: &[&str]) {
 }
 
 fn render_permission_enum() -> String {
+    ensure_unique_permission_entries();
+
     let mut out = enum_to_ts_type("Permission", Permission::all());
     out.push_str(
         "\n\nexport interface PermissionMeta {\n  key: Permission;\n  guard: string;\n  label: string;\n  group: string;\n  description: string;\n}",
@@ -423,6 +425,24 @@ fn render_permission_enum() -> String {
     out
 }
 
+fn ensure_unique_permission_entries() {
+    use std::collections::BTreeSet;
+
+    let mut values = BTreeSet::new();
+    let mut const_keys = BTreeSet::new();
+    for permission in Permission::all() {
+        let value = permission.as_str();
+        if !values.insert(value) {
+            panic!("duplicate permission value `{value}`");
+        }
+
+        let key = ts_const_key(value);
+        if !const_keys.insert(key.clone()) {
+            panic!("duplicate permission const key `{key}`");
+        }
+    }
+}
+
 fn render_auth_client_type_enum() -> String {
     enum_to_ts_type(
         "AuthClientType",
@@ -433,7 +453,7 @@ fn render_auth_client_type_enum() -> String {
 fn enum_to_ts_type<T: Serialize>(name: &str, variants: &[T]) -> String {
     let parts: Vec<String> = variants
         .iter()
-        .map(|v| serde_json::to_string(v).unwrap())
+        .map(|v| serde_json::to_string(v).expect("enum variant serialization"))
         .collect();
     format!("export type {} = {};", name, parts.join(" | "))
 }

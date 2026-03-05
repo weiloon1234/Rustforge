@@ -36,6 +36,21 @@ const ADMIN_PERMISSION_META = PERMISSION_META.filter(
 
 const ENABLE_SUMMARY_CARDS = true;
 
+function resolvePermissionLabel(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  permissionKey: string,
+  fallbackLabel?: string,
+): string {
+  const translatedByKey = t(permissionKey);
+  if (translatedByKey !== permissionKey) return translatedByKey;
+
+  if (!fallbackLabel) return permissionKey;
+
+  const translatedByLabel = t(fallbackLabel);
+  if (translatedByLabel !== fallbackLabel) return translatedByLabel;
+  return fallbackLabel;
+}
+
 function TypeBadge({ type }: { type: AdminType }) {
   return (
     <span
@@ -77,12 +92,17 @@ function PermissionSummary({ admin }: { admin: AdminDatatableRow }) {
                 const meta = ADMIN_PERMISSION_META.find(
                   (item) => item.key === ability,
                 );
+                const displayLabel = resolvePermissionLabel(
+                  t,
+                  ability,
+                  meta?.label,
+                );
                 return (
                   <div
                     key={ability}
                     className="rounded-lg border border-border bg-surface px-3 py-2"
                   >
-                    <p className="text-sm font-medium">{t(meta?.label ?? ability)}</p>
+                    <p className="text-sm font-medium">{displayLabel}</p>
                     <p className="text-xs text-muted">{ability}</p>
                   </div>
                 );
@@ -128,21 +148,24 @@ function PermissionCheckboxes({
     <fieldset className="space-y-2">
       <legend className="text-sm font-medium">{t("Permissions")}</legend>
       <div className="flex flex-wrap gap-x-6 gap-y-1">
-        {ADMIN_PERMISSION_META.map((meta) => (
-          <Checkbox
-            key={meta.key}
-            label={t(meta.label)}
-            checked={abilities.includes(meta.key as Permission)}
-            onChange={(e) => {
-              const permission = meta.key as Permission;
-              if (e.target.checked) {
-                onChange([...abilities, permission]);
-              } else {
-                onChange(abilities.filter((value) => value !== permission));
-              }
-            }}
-          />
-        ))}
+        {ADMIN_PERMISSION_META.map((meta) => {
+          const label = resolvePermissionLabel(t, meta.key, meta.label);
+          return (
+            <Checkbox
+              key={meta.key}
+              label={label}
+              checked={abilities.includes(meta.key as Permission)}
+              onChange={(e) => {
+                const permission = meta.key as Permission;
+                if (e.target.checked) {
+                  onChange([...abilities, permission]);
+                } else {
+                  onChange(abilities.filter((value) => value !== permission));
+                }
+              }}
+            />
+          );
+        })}
       </div>
     </fieldset>
   );
