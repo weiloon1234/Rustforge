@@ -199,11 +199,12 @@ CREATE TABLE IF NOT EXISTS countries (
     flag_emoji TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CHECK (char_length(iso2) = 2),
-    CHECK (char_length(iso3) = 3),
-    CHECK (iso_numeric IS NULL OR char_length(iso_numeric) = 3),
+    CHECK (iso2 ~ '^[A-Z]{2}$'),
+    CHECK (iso3 ~ '^[A-Z]{3}$'),
+    CHECK (iso_numeric IS NULL OR iso_numeric ~ '^[0-9]{3}$'),
     CHECK (status IN ('enabled', 'disabled'))
 );
+-- PK already guarantees unique + indexed lookup on iso2.
 CREATE INDEX IF NOT EXISTS idx_countries_name ON countries(name);
 CREATE INDEX IF NOT EXISTS idx_countries_status ON countries(status);
 CREATE INDEX IF NOT EXISTS idx_countries_region ON countries(region);

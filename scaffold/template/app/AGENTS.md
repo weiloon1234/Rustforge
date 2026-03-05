@@ -102,6 +102,37 @@ Validation input wrappers:
 
 Register new validation modules in `src/validation/mod.rs`.
 
+## Country Linkage Standard (`country_iso2`)
+
+Country is framework-level reference data keyed by `countries.iso2` (string key, no numeric country ID).
+
+For any new table that links to country:
+1. Use column name `country_iso2` (not `country_id`).
+2. Use type `TEXT`.
+3. Add index on `country_iso2`.
+4. Add DB foreign key to `countries(iso2)` by default.
+
+SQL pattern:
+
+```sql
+country_iso2 TEXT NOT NULL,
+CONSTRAINT fk_<table>_country_iso2
+  FOREIGN KEY (country_iso2) REFERENCES countries(iso2),
+CREATE INDEX IF NOT EXISTS idx_<table>_country_iso2 ON <table>(country_iso2);
+```
+
+Validation pattern in contracts:
+1. Normalize to uppercase ISO2 (`MY`, `US`, ...).
+2. Validate format is 2-letter ISO2.
+3. Validate existence in `countries.iso2` (async exists check).
+4. For business rules that require active countries, add `status = enabled` condition.
+
+Frontend SSOT:
+- Shared contact input uses `country_iso2: string` value shape (`frontend/src/shared/components/ContactInput.tsx`).
+
+See also:
+- `../docs/country-iso2-linkage.md` for migration-ready SQL and legacy conversion steps.
+
 ## Async Domain Actions: Jobs vs Events/Notifications
 
 Canonical async runtime primitive is `jobs`.

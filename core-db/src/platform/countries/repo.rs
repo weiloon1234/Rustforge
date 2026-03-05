@@ -5,12 +5,12 @@ use anyhow::{Context, Result};
 use crate::common::sql::DbConn;
 use crate::platform::countries::model::CountryRow;
 use crate::platform::countries::types::{
-    Country, CountryCurrency, CountrySeed, normalize_country_status,
+    normalize_country_iso2, normalize_country_status, Country, CountryCurrency, CountrySeed,
 };
 
 const BUILTIN_COUNTRIES_JSON: &str = include_str!("seed/countries.seed.json");
 pub use crate::platform::countries::types::{
-    COUNTRY_STATUS_DISABLED, COUNTRY_STATUS_ENABLED, CountryStatus,
+    CountryStatus, COUNTRY_STATUS_DISABLED, COUNTRY_STATUS_ENABLED,
 };
 
 pub struct CountryRepo<'a> {
@@ -208,10 +208,9 @@ impl<'a> CountryRepo<'a> {
     }
 
     pub async fn update_status(&self, iso2: &str, status: &str) -> Result<Option<Country>> {
-        let iso2 = iso2.trim().to_ascii_uppercase();
-        if iso2.is_empty() {
+        let Some(iso2) = normalize_country_iso2(iso2) else {
             return Ok(None);
-        }
+        };
 
         let normalized_status = normalize_country_status(status)
             .ok_or_else(|| anyhow::anyhow!("invalid country status: {status}"))?;
@@ -256,7 +255,9 @@ impl<'a> CountryRepo<'a> {
     }
 
     pub async fn find_by_iso2(&self, iso2: &str) -> Result<Option<Country>> {
-        let iso2 = iso2.trim().to_ascii_uppercase();
+        let Some(iso2) = normalize_country_iso2(iso2) else {
+            return Ok(None);
+        };
         let q = sqlx::query_as::<_, CountryRow>(
             r#"
             SELECT

@@ -63,9 +63,21 @@ impl CountryStatus {
 
 pub const COUNTRY_STATUS_ENABLED: &str = CountryStatus::Enabled.as_str();
 pub const COUNTRY_STATUS_DISABLED: &str = CountryStatus::Disabled.as_str();
+pub const COUNTRY_ISO2_LEN: usize = 2;
 
 pub fn normalize_country_status(value: &str) -> Option<&'static str> {
     CountryStatus::from_str(value).map(CountryStatus::as_str)
+}
+
+pub fn normalize_country_iso2(value: &str) -> Option<String> {
+    let normalized = value.trim().to_ascii_uppercase();
+    if normalized.len() != COUNTRY_ISO2_LEN {
+        return None;
+    }
+    if !normalized.chars().all(|ch| ch.is_ascii_uppercase()) {
+        return None;
+    }
+    Some(normalized)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -249,5 +261,25 @@ impl Country {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_country_iso2;
+
+    #[test]
+    fn normalize_country_iso2_accepts_valid_value() {
+        assert_eq!(normalize_country_iso2("my"), Some("MY".to_string()));
+        assert_eq!(normalize_country_iso2(" US "), Some("US".to_string()));
+    }
+
+    #[test]
+    fn normalize_country_iso2_rejects_invalid_values() {
+        assert_eq!(normalize_country_iso2(""), None);
+        assert_eq!(normalize_country_iso2("M"), None);
+        assert_eq!(normalize_country_iso2("MY1"), None);
+        assert_eq!(normalize_country_iso2("1Y"), None);
+        assert_eq!(normalize_country_iso2("🇲🇾"), None);
     }
 }

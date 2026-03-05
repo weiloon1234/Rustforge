@@ -2,7 +2,10 @@ use std::borrow::Cow;
 pub mod meta;
 
 use anyhow::Result;
-use core_db::{common::sql::DbConn, platform::countries::repo::CountryRepo};
+use core_db::{
+    common::sql::DbConn,
+    platform::countries::{normalize_country_iso2, repo::CountryRepo},
+};
 use sqlx::Row;
 use validator::{ValidateEmail, ValidationError};
 
@@ -390,8 +393,12 @@ pub async fn normalize_phone_by_country_iso2(
     phone_number: &str,
     enabled_only: bool,
 ) -> Result<Option<String>> {
+    let Some(country_iso2) = normalize_country_iso2(country_iso2) else {
+        return Ok(None);
+    };
+
     let repo = CountryRepo::new(DbConn::pool(db));
-    let Some(country) = repo.find_by_iso2(country_iso2).await? else {
+    let Some(country) = repo.find_by_iso2(&country_iso2).await? else {
         return Ok(None);
     };
 
