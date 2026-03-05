@@ -51,7 +51,9 @@ interface DataTableApiContextValue {
   scopes: string[];
 }
 
-const DataTableApiContext = createContext<DataTableApiContextValue | null>(null);
+const DataTableApiContext = createContext<DataTableApiContextValue | null>(
+  null,
+);
 
 export function DataTableApiProvider({
   api,
@@ -200,7 +202,9 @@ function flattenFilterKeys(
 }
 
 function buildFilterSnapshot(
-  filterRows: (DataTableFilterFieldDto | DataTableFilterFieldDto[])[] | undefined,
+  filterRows:
+    | (DataTableFilterFieldDto | DataTableFilterFieldDto[])[]
+    | undefined,
   filters: Record<string, string>,
 ): DataTableFilterSnapshot {
   const keys = new Set<string>(flattenFilterKeys(filterRows));
@@ -229,7 +233,10 @@ function parseNumericCell(value: unknown): number | null {
   return null;
 }
 
-function resolveRefreshSlot(slot: RefreshSlot | undefined, refresh: () => void): ReactNode {
+function resolveRefreshSlot(
+  slot: RefreshSlot | undefined,
+  refresh: () => void,
+): ReactNode {
   if (!slot) return null;
   if (typeof slot === "function") {
     return (slot as (refresh: () => void) => ReactNode)(refresh);
@@ -300,7 +307,9 @@ function deriveExportCsvUrl(queryUrl: string): string | null {
   return `${trimmed.slice(0, -"/query".length)}/export/csv`;
 }
 
-function fileNameFromContentDisposition(headerValue: string | null | undefined): string | null {
+function fileNameFromContentDisposition(
+  headerValue: string | null | undefined,
+): string | null {
   if (!headerValue) return null;
   const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
   if (utf8Match?.[1]) {
@@ -350,13 +359,13 @@ function FilterField({
           containerClassName="mb-0"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="!py-1.5 !text-sm"
+          className="py-1.5! text-sm!"
           options={[
             { value: "", label: translatedPlaceholder || t("All") },
-            ...((field.options ?? []).map((o) => ({
+            ...(field.options ?? []).map((o) => ({
               value: o.value,
               label: t(o.label),
-            }))),
+            })),
           ]}
         />
       );
@@ -366,7 +375,7 @@ function FilterField({
           containerClassName="mb-0"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="!py-1.5 !text-sm"
+          className="py-1.5! text-sm!"
           options={[
             { value: "", label: translatedPlaceholder || t("All") },
             { value: "true", label: t("Yes") },
@@ -382,7 +391,7 @@ function FilterField({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={translatedPlaceholder}
-          className="!py-1.5 !text-sm"
+          className="py-1.5! text-sm!"
         />
       );
     case "date":
@@ -393,7 +402,7 @@ function FilterField({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={translatedPlaceholder}
-          className="!py-1.5 !text-sm"
+          className="py-1.5! text-sm!"
         />
       );
     case "time":
@@ -404,7 +413,7 @@ function FilterField({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={translatedPlaceholder}
-          className="!py-1.5 !text-sm"
+          className="py-1.5! text-sm!"
         />
       );
     case "number":
@@ -416,7 +425,7 @@ function FilterField({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={translatedPlaceholder}
-          className="!py-1.5 !text-sm"
+          className="py-1.5! text-sm!"
         />
       );
     default:
@@ -428,7 +437,7 @@ function FilterField({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={translatedPlaceholder}
-          className="!py-1.5 !text-sm"
+          className="py-1.5! text-sm!"
         />
       );
   }
@@ -476,12 +485,14 @@ export function DataTable<T>({
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState<boolean>(() =>
     enableAutoRefresh ? readAutoRefreshEnabled() : false,
   );
-  const [countdownSeconds, setCountdownSeconds] = useState(AUTO_REFRESH_SECONDS);
+  const [countdownSeconds, setCountdownSeconds] =
+    useState(AUTO_REFRESH_SECONDS);
   const autoRefreshRequestInFlightRef = useRef(false);
   const autoRefreshEnabledRef = useRef(autoRefreshEnabled);
   const enableAutoRefreshRef = useRef(enableAutoRefresh);
   const exportCsvUrl = deriveExportCsvUrl(url);
-  const canExport = Boolean(exportCsvUrl) && hasPermission(scopes, PERMISSION.EXPORT);
+  const canExport =
+    Boolean(exportCsvUrl) && hasPermission(scopes, PERMISSION.EXPORT);
 
   useEffect(() => {
     onPreCallRef.current = onPreCall;
@@ -577,7 +588,10 @@ export function DataTable<T>({
         filters,
         extraBody,
       });
-      const filterSnapshot = buildFilterSnapshot(filterRowsRef.current, filters);
+      const filterSnapshot = buildFilterSnapshot(
+        filterRowsRef.current,
+        filters,
+      );
       const callEvent: DataTablePreCallEvent = {
         url,
         payload,
@@ -590,9 +604,13 @@ export function DataTable<T>({
       };
       onPreCallRef.current?.(callEvent);
       try {
-        const res = await api.post<ApiResponse<DataTableQueryResponse<T>>>(url, payload, {
-          signal,
-        });
+        const res = await api.post<ApiResponse<DataTableQueryResponse<T>>>(
+          url,
+          payload,
+          {
+            signal,
+          },
+        );
         setData(res.data.data);
         if (includeMeta && res.data.data.meta) {
           setMeta(res.data.data.meta);
@@ -641,7 +659,14 @@ export function DataTable<T>({
   }, [page, perPage, sortColumn, sortDirection, filterVersion, fetchData]);
 
   const refresh = useCallback(
-    () => fetchData(page, perPage, sortColumn, sortDirection, appliedFiltersRef.current),
+    () =>
+      fetchData(
+        page,
+        perPage,
+        sortColumn,
+        sortDirection,
+        appliedFiltersRef.current,
+      ),
     [fetchData, page, perPage, sortColumn, sortDirection],
   );
 
@@ -696,7 +721,12 @@ export function DataTable<T>({
   ]);
 
   useEffect(() => {
-    if (!enableAutoRefresh || !autoRefreshEnabled || loading || countdownSeconds <= 0) {
+    if (
+      !enableAutoRefresh ||
+      !autoRefreshEnabled ||
+      loading ||
+      countdownSeconds <= 0
+    ) {
       return;
     }
 
@@ -713,7 +743,13 @@ export function DataTable<T>({
     if (autoRefreshRequestInFlightRef.current) return;
     autoRefreshRequestInFlightRef.current = true;
     void refresh();
-  }, [autoRefreshEnabled, countdownSeconds, enableAutoRefresh, loading, refresh]);
+  }, [
+    autoRefreshEnabled,
+    countdownSeconds,
+    enableAutoRefresh,
+    loading,
+    refresh,
+  ]);
 
   const sumColumn = useCallback(
     (column: string, decimals = 2) => {
@@ -825,8 +861,14 @@ export function DataTable<T>({
           {showTopHeader && (
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                {title && <h1 className="text-2xl font-bold text-foreground">{title}</h1>}
-                {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
+                {title && (
+                  <h1 className="text-2xl font-bold text-foreground">
+                    {title}
+                  </h1>
+                )}
+                {subtitle && (
+                  <p className="mt-1 text-sm text-muted">{subtitle}</p>
+                )}
               </div>
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                 {resolvedHeaderActions}
@@ -863,7 +905,10 @@ export function DataTable<T>({
                     variant="secondary"
                     size="sm"
                   >
-                    <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+                    <RefreshCw
+                      size={16}
+                      className={loading ? "animate-spin" : ""}
+                    />
                     {t("Refresh")}
                   </Button>
                 )}
@@ -882,7 +927,9 @@ export function DataTable<T>({
                 <div
                   key={ri}
                   className="grid gap-3"
-                  style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))` }}
+                  style={{
+                    gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))`,
+                  }}
                 >
                   {row.map((field) => (
                     <div key={field.filter_key}>
@@ -917,19 +964,11 @@ export function DataTable<T>({
             );
           })}
           <div className="flex gap-2 pt-1">
-            <Button
-              onClick={applyFilters}
-              variant="primary"
-              size="sm"
-            >
+            <Button onClick={applyFilters} variant="primary" size="sm">
               <Search size={14} />
               {t("Search")}
             </Button>
-            <Button
-              onClick={resetFilters}
-              variant="secondary"
-              size="sm"
-            >
+            <Button onClick={resetFilters} variant="secondary" size="sm">
               <X size={14} />
               {t("Reset")}
             </Button>
@@ -940,116 +979,122 @@ export function DataTable<T>({
       <div className="rf-dt-shell">
         <div className="rf-dt-scroll">
           <table className="rf-dt-table">
-          <thead>
-            <tr className="rf-dt-head-row">
-              {showIndexColumn && (
-                <th
-                  className={`rf-dt-th rf-dt-th-index ${indexSortable ? "rf-dt-th-sortable" : ""}`}
-                  onClick={handleIndexSort}
-                >
-                  <span className="inline-flex items-center gap-1">
-                    {t("#")}
-                    {indexSortable &&
-                      indexSortColumn === displaySortCol &&
-                      displaySortDir === "asc" && <ArrowUp size={14} />}
-                    {indexSortable &&
-                      indexSortColumn === displaySortCol &&
-                      displaySortDir === "desc" && <ArrowDown size={14} />}
-                    {indexSortable && indexSortColumn !== displaySortCol && (
-                      <ArrowUpDown size={14} className="opacity-30" />
-                    )}
-                  </span>
-                </th>
-              )}
-              {renderColumns.map((col) => {
-                const sortable = isColumnSortable(col);
-                const translatedLabel = t(col.label);
-                const displayLabel = translatedLabel.trim() ? translatedLabel : col.label;
-                return (
+            <thead>
+              <tr className="rf-dt-head-row">
+                {showIndexColumn && (
                   <th
-                    key={col.key}
-                    className={`rf-dt-th ${
-                      sortable ? "rf-dt-th-sortable" : ""
-                    } ${col.headerClassName ?? ""}`}
-                    onClick={() => handleSort(col)}
+                    className={`rf-dt-th rf-dt-th-index ${indexSortable ? "rf-dt-th-sortable" : ""}`}
+                    onClick={handleIndexSort}
                   >
                     <span className="inline-flex items-center gap-1">
-                      {displayLabel}
-                      {sortable &&
-                        col.key === displaySortCol &&
+                      {t("#")}
+                      {indexSortable &&
+                        indexSortColumn === displaySortCol &&
                         displaySortDir === "asc" && <ArrowUp size={14} />}
-                      {sortable &&
-                        col.key === displaySortCol &&
+                      {indexSortable &&
+                        indexSortColumn === displaySortCol &&
                         displaySortDir === "desc" && <ArrowDown size={14} />}
-                      {sortable && col.key !== displaySortCol && (
+                      {indexSortable && indexSortColumn !== displaySortCol && (
                         <ArrowUpDown size={14} className="opacity-30" />
                       )}
                     </span>
                   </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {loading && !data && (
-              <tr>
-                <td colSpan={99} className="rf-dt-empty-cell">
-                  {t("Loading…")}
-                </td>
+                )}
+                {renderColumns.map((col) => {
+                  const sortable = isColumnSortable(col);
+                  const translatedLabel = t(col.label);
+                  const displayLabel = translatedLabel.trim()
+                    ? translatedLabel
+                    : col.label;
+                  return (
+                    <th
+                      key={col.key}
+                      className={`rf-dt-th ${
+                        sortable ? "rf-dt-th-sortable" : ""
+                      } ${col.headerClassName ?? ""}`}
+                      onClick={() => handleSort(col)}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {displayLabel}
+                        {sortable &&
+                          col.key === displaySortCol &&
+                          displaySortDir === "asc" && <ArrowUp size={14} />}
+                        {sortable &&
+                          col.key === displaySortCol &&
+                          displaySortDir === "desc" && <ArrowDown size={14} />}
+                        {sortable && col.key !== displaySortCol && (
+                          <ArrowUpDown size={14} className="opacity-30" />
+                        )}
+                      </span>
+                    </th>
+                  );
+                })}
               </tr>
-            )}
-            {data && data.records.length === 0 && (
-              <tr>
-                <td colSpan={99} className="rf-dt-empty-cell">
-                  {t("No records found.")}
-                </td>
-              </tr>
-            )}
-            {data &&
-              data.records.length > 0 &&
-              data.records.map((record, index) => {
-                const absoluteIndex = (data.page - 1) * data.per_page + index;
-                return (
-                  <tr
-                    key={resolveRowKey(record, index)}
-                    className="rf-dt-row"
-                  >
-                    {showIndexColumn && (
-                      <td className="rf-dt-td rf-dt-td-index">{absoluteIndex + 1}</td>
-                    )}
-                    {renderColumns.map((col) => {
-                      const content = col.render
-                        ? col.render(record, {
-                            index,
-                            absoluteIndex,
-                            refresh,
-                            record,
-                          })
-                        : formatCellValue((record as Record<string, unknown>)[col.key]);
-
-                      return (
-                        <td
-                          key={col.key}
-                          className={`rf-dt-td ${col.cellClassName ?? ""}`}
-                        >
-                          {content}
+            </thead>
+            <tbody>
+              {loading && !data && (
+                <tr>
+                  <td colSpan={99} className="rf-dt-empty-cell">
+                    {t("Loading…")}
+                  </td>
+                </tr>
+              )}
+              {data && data.records.length === 0 && (
+                <tr>
+                  <td colSpan={99} className="rf-dt-empty-cell">
+                    {t("No records found.")}
+                  </td>
+                </tr>
+              )}
+              {data &&
+                data.records.length > 0 &&
+                data.records.map((record, index) => {
+                  const absoluteIndex = (data.page - 1) * data.per_page + index;
+                  return (
+                    <tr
+                      key={resolveRowKey(record, index)}
+                      className="rf-dt-row"
+                    >
+                      {showIndexColumn && (
+                        <td className="rf-dt-td rf-dt-td-index">
+                          {absoluteIndex + 1}
                         </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-          </tbody>
-          {data && renderTableFooter && (
-            <tfoot className="rf-dt-foot">
-              {renderTableFooter({
-                records: data.records,
-                visibleColumns: metaColumns,
-                sumColumn,
-                refresh,
-              })}
-            </tfoot>
-          )}
+                      )}
+                      {renderColumns.map((col) => {
+                        const content = col.render
+                          ? col.render(record, {
+                              index,
+                              absoluteIndex,
+                              refresh,
+                              record,
+                            })
+                          : formatCellValue(
+                              (record as Record<string, unknown>)[col.key],
+                            );
+
+                        return (
+                          <td
+                            key={col.key}
+                            className={`rf-dt-td ${col.cellClassName ?? ""}`}
+                          >
+                            {content}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+            </tbody>
+            {data && renderTableFooter && (
+              <tfoot className="rf-dt-foot">
+                {renderTableFooter({
+                  records: data.records,
+                  visibleColumns: metaColumns,
+                  sumColumn,
+                  refresh,
+                })}
+              </tfoot>
+            )}
           </table>
         </div>
       </div>
@@ -1061,7 +1106,7 @@ export function DataTable<T>({
               containerClassName="mb-0"
               value={String(perPage)}
               onChange={(e) => handlePerPageChange(Number(e.target.value))}
-              className="!w-auto !py-1 !pr-8 !text-xs"
+              className="w-auto! py-1! pr-8! text-xs!"
               options={PER_PAGE_OPTIONS.map((n) => ({
                 value: String(n),
                 label: String(n),
@@ -1098,7 +1143,10 @@ export function DataTable<T>({
               </Button>
               {buildPageNumbers(page, data.total_pages).map((p, i) =>
                 p === "…" ? (
-                  <span key={`e${i}`} className="px-1 text-sm text-muted select-none">
+                  <span
+                    key={`e${i}`}
+                    className="px-1 text-sm text-muted select-none"
+                  >
                     …
                   </span>
                 ) : (
@@ -1136,10 +1184,12 @@ export function DataTable<T>({
                   type="text"
                   inputMode="numeric"
                   value={jumpValue}
-                  onChange={(e) => setJumpValue(e.target.value.replace(/\D/g, ""))}
+                  onChange={(e) =>
+                    setJumpValue(e.target.value.replace(/\D/g, ""))
+                  }
                   onKeyDown={(e) => e.key === "Enter" && handleJump()}
                   placeholder={t("Go to")}
-                  className="!w-16 !py-1 !text-xs text-center"
+                  className="w-16! py-1! text-xs! text-center"
                 />
               </div>
             </div>

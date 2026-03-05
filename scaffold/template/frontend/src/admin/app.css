@@ -40,6 +40,7 @@
 
     /* Firefox */
     input[type="number"] {
+        appearance: textfield;
         -moz-appearance: textfield;
     }
 
@@ -289,7 +290,7 @@
         @apply sr-only;
     }
     .rf-checkbox-box {
-        @apply flex items-center justify-center h-[18px] w-[18px] shrink-0 rounded border-2 border-input-border bg-input
+        @apply flex items-center justify-center w-4.5 h-4.5 shrink-0 rounded border-2 border-input-border bg-input
       transition-all duration-150;
     }
     .rf-checkbox-icon {
@@ -330,7 +331,7 @@
         @apply sr-only;
     }
     .rf-radio-circle {
-        @apply flex items-center justify-center h-[18px] w-[18px] shrink-0 rounded-full border-2 border-input-border bg-input
+        @apply flex items-center justify-center w-4.5 h-4.5 shrink-0 rounded-full border-2 border-input-border bg-input
       transition-all duration-150;
     }
     .rf-radio-dot {
