@@ -4,11 +4,14 @@ use anyhow::{Context, Result};
 
 use crate::common::sql::DbConn;
 use crate::platform::countries::model::CountryRow;
-use crate::platform::countries::types::{Country, CountryCurrency, CountrySeed};
+use crate::platform::countries::types::{
+    Country, CountryCurrency, CountrySeed, normalize_country_status,
+};
 
 const BUILTIN_COUNTRIES_JSON: &str = include_str!("seed/countries.seed.json");
-pub const COUNTRY_STATUS_ENABLED: &str = "enabled";
-pub const COUNTRY_STATUS_DISABLED: &str = "disabled";
+pub use crate::platform::countries::types::{
+    COUNTRY_STATUS_DISABLED, COUNTRY_STATUS_ENABLED, CountryStatus,
+};
 
 pub struct CountryRepo<'a> {
     db: DbConn<'a>,
@@ -458,14 +461,6 @@ fn default_status_for_iso2(iso2: &str) -> &'static str {
         COUNTRY_STATUS_ENABLED
     } else {
         COUNTRY_STATUS_DISABLED
-    }
-}
-
-pub fn normalize_country_status(value: &str) -> Option<&'static str> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        COUNTRY_STATUS_ENABLED => Some(COUNTRY_STATUS_ENABLED),
-        COUNTRY_STATUS_DISABLED => Some(COUNTRY_STATUS_DISABLED),
-        _ => None,
     }
 }
 

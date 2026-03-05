@@ -12,6 +12,62 @@ pub enum PhoneNumberOutputFormat {
     Rfc3966,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum CountryStatus {
+    Enabled,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CountryStatusFilterOption {
+    pub label: &'static str,
+    pub value: &'static str,
+}
+
+impl CountryStatus {
+    pub const ALL: [Self; 2] = [Self::Enabled, Self::Disabled];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Enabled => "enabled",
+            Self::Disabled => "disabled",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Enabled => "Enabled",
+            Self::Disabled => "Disabled",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "enabled" => Some(Self::Enabled),
+            "disabled" => Some(Self::Disabled),
+            _ => None,
+        }
+    }
+
+    pub fn datatable_filter_options() -> Vec<CountryStatusFilterOption> {
+        Self::ALL
+            .iter()
+            .map(|status| CountryStatusFilterOption {
+                label: status.label(),
+                value: status.as_str(),
+            })
+            .collect()
+    }
+}
+
+pub const COUNTRY_STATUS_ENABLED: &str = CountryStatus::Enabled.as_str();
+pub const COUNTRY_STATUS_DISABLED: &str = CountryStatus::Disabled.as_str();
+
+pub fn normalize_country_status(value: &str) -> Option<&'static str> {
+    CountryStatus::from_str(value).map(CountryStatus::as_str)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PhoneNumberFormatError {
     #[error("invalid phone number country: {iso2}")]
