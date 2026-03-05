@@ -169,10 +169,7 @@ pub fn load(path_str: &str) -> Result<Schema, Box<dyn Error>> {
     }
 }
 
-fn reject_legacy_multilang_key(
-    raw: &str,
-    source: &std::path::Path,
-) -> Result<(), Box<dyn Error>> {
+fn reject_legacy_multilang_key(raw: &str, source: &std::path::Path) -> Result<(), Box<dyn Error>> {
     let parsed: toml::Value = toml::from_str(raw)?;
     let Some(root) = parsed.as_table() else {
         return Ok(());

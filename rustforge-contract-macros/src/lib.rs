@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote, ToTokens};
-use rustforge_contract_meta::{builtin_rule_meta, render_template, BuiltinRuleArgs, BuiltinRuleKind};
+use rustforge_contract_meta::{
+    builtin_rule_meta, render_template, BuiltinRuleArgs, BuiltinRuleKind,
+};
 use syn::{
     parse::Parser, parse_macro_input, punctuated::Punctuated, Attribute, Expr, Field, Fields,
     Ident, ItemStruct, Lit, LitBool, LitFloat, LitStr, Meta, MetaList, MetaNameValue, Path, Token,
@@ -49,8 +51,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
             continue;
         }
         if attr.path().is_ident("derive") {
-            let metas =
-                attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+            let metas = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
             for m in metas {
                 if let Meta::Path(p) = &m {
                     let ident = p
@@ -203,7 +204,8 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
         if let Some(pattern) = &rf_cfg.does_not_contain_pattern {
             ensure_string_like(field_kind, &field_ident, "does_not_contain")?;
             let (msg, code) = rf_cfg.message_code_for("does_not_contain");
-            generated_validate_attrs.push(build_validate_does_not_contain_attr(pattern, &msg, &code)?);
+            generated_validate_attrs
+                .push(build_validate_does_not_contain_attr(pattern, &msg, &code)?);
             field_rule_extensions.push(RuleExtensionSpec::does_not_contain(pattern));
             field_desc_parts.push(format!("Must not contain `{pattern}`."));
         }
@@ -253,11 +255,8 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
                     ensure_string_like(field_kind, &field_ident, &builtin.key)?;
                     let path: Path = syn::parse_str(path_str)?;
                     let (msg, code) = rf_cfg.message_code_for(&builtin.key);
-                    generated_validate_attrs.push(build_validate_custom_path_attr(
-                        &path,
-                        &msg,
-                        &code,
-                    )?);
+                    generated_validate_attrs
+                        .push(build_validate_custom_path_attr(&path, &msg, &code)?);
                 }
                 BuiltinRuleKind::PhoneNumberByIso2Field => {
                     let field_name = builtin.field.as_ref().ok_or_else(|| {
@@ -332,10 +331,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
                     let format = builtin.format.clone().ok_or_else(|| {
                         syn::Error::new_spanned(
                             &field_ident,
-                            format!(
-                                "#[rf({}(format = \"...\"))] requires format",
-                                builtin.key
-                            ),
+                            format!("#[rf({}(format = \"...\"))] requires format", builtin.key),
                         )
                     })?;
                     let helper_ident = format_ident!(
@@ -375,8 +371,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
             if let Some(code) = &custom.code {
                 nested.push(quote! { code = #code });
             }
-            generated_validate_attrs
-                .push(mk_attr(quote! { #[validate(custom(#(#nested),*))] })?);
+            generated_validate_attrs.push(mk_attr(quote! { #[validate(custom(#(#nested),*))] })?);
 
             let mut params = BTreeMap::new();
             params.insert(
@@ -399,7 +394,11 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
         }
 
         for async_rule in &rf_cfg.async_rules {
-            field_desc_parts.push(async_rule.kind.default_desc(&async_rule.table, &async_rule.column));
+            field_desc_parts.push(
+                async_rule
+                    .kind
+                    .default_desc(&async_rule.table, &async_rule.column),
+            );
             field_rule_extensions.push(RuleExtensionSpec::async_db(async_rule));
             async_validate_blocks.push(generate_async_db_rule_block(
                 &field_ident,
@@ -458,10 +457,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
             } else {
                 Some(quote! { #summary })
             };
-            let example_expr = rf_cfg
-                .openapi_example
-                .as_ref()
-                .map(|ex| quote! { #ex });
+            let example_expr = rf_cfg.openapi_example.as_ref().map(|ex| quote! { #ex });
             let format_expr = rf_cfg
                 .openapi_format
                 .clone()
@@ -963,9 +959,15 @@ fn generate_async_db_rule_block(
     let table = rule.table.clone();
     let column = rule.column.clone();
     let mut builder_expr = match rule.kind {
-        AsyncDbRuleKind::Unique => quote! { ::core_web::rules::Unique::new(#table, #column, value) },
-        AsyncDbRuleKind::Exists => quote! { ::core_web::rules::Exists::new(#table, #column, value) },
-        AsyncDbRuleKind::NotExists => quote! { ::core_web::rules::NotExists::new(#table, #column, value) },
+        AsyncDbRuleKind::Unique => {
+            quote! { ::core_web::rules::Unique::new(#table, #column, value) }
+        }
+        AsyncDbRuleKind::Exists => {
+            quote! { ::core_web::rules::Exists::new(#table, #column, value) }
+        }
+        AsyncDbRuleKind::NotExists => {
+            quote! { ::core_web::rules::NotExists::new(#table, #column, value) }
+        }
     };
     for modifier in &rule.modifiers {
         builder_expr = apply_async_db_modifier(builder_expr, modifier);
@@ -1176,10 +1178,7 @@ fn parse_rf_field(
                     local_rule_keys.push("async_exists".to_string());
                 }
                 Meta::List(ref list) if list.path.is_ident("async_not_exists") => {
-                    local_async_rules.push(parse_async_db_rule(
-                        list,
-                        AsyncDbRuleKind::NotExists,
-                    )?);
+                    local_async_rules.push(parse_async_db_rule(list, AsyncDbRuleKind::NotExists)?);
                     local_rule_keys.push("async_not_exists".to_string());
                 }
                 // --- custom() rule ---
@@ -1217,7 +1216,11 @@ fn parse_rf_field(
                 }
                 // --- Parameterized builtins from registry ---
                 Meta::List(ref list) => {
-                    let name = list.path.get_ident().map(|i| i.to_string()).unwrap_or_default();
+                    let name = list
+                        .path
+                        .get_ident()
+                        .map(|i| i.to_string())
+                        .unwrap_or_default();
                     if let Some(meta_entry) = builtin_rule_meta(&name) {
                         let (builtin, blt_msg, blt_code) =
                             parse_builtin_from_list(list, meta_entry)?;
@@ -1452,7 +1455,10 @@ fn parse_custom_rule(list: &MetaList) -> syn::Result<CustomRuleUse> {
                 custom_message = Some(lit_str_from_expr(&nv.value, "message")?.value());
             }
             other => {
-                return Err(syn::Error::new_spanned(other, "unsupported custom(...) arg"))
+                return Err(syn::Error::new_spanned(
+                    other,
+                    "unsupported custom(...) arg",
+                ))
             }
         }
     }
@@ -1519,7 +1525,9 @@ fn parse_message_code_from_list(list: &MetaList) -> syn::Result<(Option<String>,
     Ok((message, code))
 }
 
-fn parse_rf_container_attrs(attrs: &[Attribute]) -> syn::Result<(ContainerRfConfig, Vec<Attribute>)> {
+fn parse_rf_container_attrs(
+    attrs: &[Attribute],
+) -> syn::Result<(ContainerRfConfig, Vec<Attribute>)> {
     let mut cfg = ContainerRfConfig::default();
     let mut keep = Vec::new();
 
@@ -1560,8 +1568,7 @@ fn parse_container_schema_rule(list: &MetaList) -> syn::Result<SchemaRuleRf> {
                 out.use_context = Some(bool_from_expr(&nv.value, "use_context")?);
             }
             Meta::NameValue(nv) if nv.path.is_ident("skip_on_field_errors") => {
-                out.skip_on_field_errors =
-                    Some(bool_from_expr(&nv.value, "skip_on_field_errors")?);
+                out.skip_on_field_errors = Some(bool_from_expr(&nv.value, "skip_on_field_errors")?);
             }
             Meta::NameValue(nv) if nv.path.is_ident("message") => {
                 out.message = Some(lit_str_from_expr(&nv.value, "message")?.value());
@@ -1633,7 +1640,8 @@ fn parse_async_db_rule(list: &MetaList, kind: AsyncDbRuleKind) -> syn::Result<As
     Ok(AsyncDbRuleUse {
         kind,
         table: table.ok_or_else(|| syn::Error::new_spanned(list, "async rule requires table"))?,
-        column: column.ok_or_else(|| syn::Error::new_spanned(list, "async rule requires column"))?,
+        column: column
+            .ok_or_else(|| syn::Error::new_spanned(list, "async rule requires column"))?,
         modifiers,
     })
 }
@@ -1872,9 +1880,8 @@ fn path_from_expr(expr: &Expr, name: &str) -> syn::Result<Path> {
     match expr {
         Expr::Path(p) => Ok(p.path.clone()),
         Expr::Lit(expr_lit) => match &expr_lit.lit {
-            Lit::Str(s) => syn::parse_str::<Path>(&s.value()).map_err(|_| {
-                syn::Error::new_spanned(expr, format!("{name} must be a valid path"))
-            }),
+            Lit::Str(s) => syn::parse_str::<Path>(&s.value())
+                .map_err(|_| syn::Error::new_spanned(expr, format!("{name} must be a valid path"))),
             _ => Err(syn::Error::new_spanned(
                 expr,
                 format!("{name} must be a path or string path"),

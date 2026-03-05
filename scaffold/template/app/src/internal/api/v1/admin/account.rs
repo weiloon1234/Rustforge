@@ -118,7 +118,7 @@ async fn validate_update_input(
     id: i64,
     req: UpdateAdminInput,
 ) -> Result<UpdateAdminInput, AppError> {
-    let req = req.with_target_id(id);
+    let req = req.with_target_id(id).normalize();
     if let Err(e) = req.validate_async(&state.db).await {
         return Err(AppError::Validation {
             message: t("Validation failed"),

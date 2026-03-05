@@ -76,6 +76,11 @@ pub async fn update(
         touched = true;
     }
 
+    if let Some(password) = req.password {
+        update = update.set_password(&password).map_err(AppError::from)?;
+        touched = true;
+    }
+
     if let Some(email) = normalize_optional_email(req.email) {
         update = update.set_email(Some(email));
         touched = true;

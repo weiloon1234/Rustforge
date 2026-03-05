@@ -7,8 +7,8 @@ use crate::types::{
     DataTableContext, DataTableExecution, DataTableExportMode, DataTableInput,
     DataTablePaginationMode, DataTableUnknownFilterMode, SortDirection,
 };
-use serde_json::json;
 use serde::Serialize;
+use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -179,7 +179,10 @@ impl AutoDataTable for MockTable {
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         let mut record = self.adapter().row_to_map(row)?;
-        record.insert("hook".to_string(), serde_json::Value::String("typed".to_string()));
+        record.insert(
+            "hook".to_string(),
+            serde_json::Value::String("typed".to_string()),
+        );
         Ok(record)
     }
 
@@ -426,7 +429,13 @@ async fn async_export_manager_completes_csv_job() {
     let csv = status.csv.expect("csv metadata should exist");
     assert!(Path::new(&csv.file_path).exists());
     let csv_raw = std::fs::read_to_string(&csv.file_path).expect("read csv output");
-    assert!(csv_raw.contains("hook"), "csv should include typed hook column");
-    assert!(csv_raw.contains("typed"), "csv should include typed hook value");
+    assert!(
+        csv_raw.contains("hook"),
+        "csv should include typed hook column"
+    );
+    assert!(
+        csv_raw.contains("typed"),
+        "csv should include typed hook value"
+    );
     let _ = std::fs::remove_file(&csv.file_path);
 }

@@ -228,7 +228,8 @@ meta = ["flags:bool", "extra:json"]
     assert!(article_rs.contains("matches!(c, ArticleCol::Id)"));
     assert!(article_rs.contains("pub status_explained: String,"));
     assert!(article_rs.contains("status_explained: row.status.explained_label(),"));
-    assert!(article_rs.contains("record.insert(\"id\".to_string(), serde_json::Value::String(id_text));"));
+    assert!(article_rs
+        .contains("record.insert(\"id\".to_string(), serde_json::Value::String(id_text));"));
 
     fs::remove_dir_all(root).expect("failed to remove temp dir");
 }

@@ -1,8 +1,8 @@
 use crate::config::ConfigsFile;
 use crate::schema::{
     parse_attachments, parse_computed, parse_fields, parse_meta, parse_relations, to_snake,
-    to_title_case, AttachmentFieldSpec, EnumOrOther, FieldSpec, MetaType, ModelSpec,
-    RelationKind, Schema, SpecialType,
+    to_title_case, AttachmentFieldSpec, EnumOrOther, FieldSpec, MetaType, ModelSpec, RelationKind,
+    Schema, SpecialType,
 };
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -486,7 +486,10 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     }
     for enum_field in &enum_explained_fields {
         if enum_field.optional {
-            view_fields.push(format!("    pub {}: Option<String>,", enum_field.explained_name));
+            view_fields.push(format!(
+                "    pub {}: Option<String>,",
+                enum_field.explained_name
+            ));
         } else {
             view_fields.push(format!("    pub {}: String,", enum_field.explained_name));
         }
@@ -741,7 +744,12 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
     for enum_field in &enum_explained_fields {
         if !hidden_fields.contains(&enum_field.name) {
             if enum_field.optional {
-                writeln!(out, "    pub {}: Option<String>,", enum_field.explained_name).unwrap();
+                writeln!(
+                    out,
+                    "    pub {}: Option<String>,",
+                    enum_field.explained_name
+                )
+                .unwrap();
             } else {
                 writeln!(out, "    pub {}: String,", enum_field.explained_name).unwrap();
             }
@@ -5992,7 +6000,11 @@ fn render_model(name: &str, cfg: &ModelSpec, schema: &Schema, cfgs: &ConfigsFile
             "                serde_json::Value::Number(number) => number.to_string(),"
         )
         .unwrap();
-        writeln!(out, "                serde_json::Value::String(text) => text,").unwrap();
+        writeln!(
+            out,
+            "                serde_json::Value::String(text) => text,"
+        )
+        .unwrap();
         writeln!(out, "                other => other.to_string(),").unwrap();
         writeln!(out, "            }};").unwrap();
         writeln!(

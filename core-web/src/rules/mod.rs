@@ -88,26 +88,26 @@ impl Unique {
 impl AsyncRule for Unique {
     async fn check(&self, db: &sqlx::PgPool) -> Result<bool> {
         let mut sql = format!(
-            "SELECT count(*) FROM {} WHERE {} = $1",
+            "SELECT count(*) FROM {} WHERE CAST({} AS TEXT) = $1",
             self.table, self.column
         );
         let mut binds = vec![self.value.clone()];
 
         if let Some((col, val)) = &self.ignore_id {
             let idx = binds.len() + 1;
-            sql.push_str(&format!(" AND {} != ${}", col, idx));
+            sql.push_str(&format!(" AND CAST({} AS TEXT) != ${}", col, idx));
             binds.push(val.clone());
         }
 
         for (col, val) in &self.where_eq {
             let idx = binds.len() + 1;
-            sql.push_str(&format!(" AND {} = ${}", col, idx));
+            sql.push_str(&format!(" AND CAST({} AS TEXT) = ${}", col, idx));
             binds.push(val.clone());
         }
 
         for (col, val) in &self.where_not_eq {
             let idx = binds.len() + 1;
-            sql.push_str(&format!(" AND {} != ${}", col, idx));
+            sql.push_str(&format!(" AND CAST({} AS TEXT) != ${}", col, idx));
             binds.push(val.clone());
         }
 
@@ -194,20 +194,20 @@ impl Exists {
 impl AsyncRule for Exists {
     async fn check(&self, db: &sqlx::PgPool) -> Result<bool> {
         let mut sql = format!(
-            "SELECT count(*) FROM {} WHERE {} = $1",
+            "SELECT count(*) FROM {} WHERE CAST({} AS TEXT) = $1",
             self.table, self.column
         );
         let mut binds = vec![self.value.clone()];
 
         for (col, val) in &self.where_eq {
             let idx = binds.len() + 1;
-            sql.push_str(&format!(" AND {} = ${}", col, idx));
+            sql.push_str(&format!(" AND CAST({} AS TEXT) = ${}", col, idx));
             binds.push(val.clone());
         }
 
         for (col, val) in &self.where_not_eq {
             let idx = binds.len() + 1;
-            sql.push_str(&format!(" AND {} != ${}", col, idx));
+            sql.push_str(&format!(" AND CAST({} AS TEXT) != ${}", col, idx));
             binds.push(val.clone());
         }
 
@@ -294,20 +294,20 @@ impl NotExists {
 impl AsyncRule for NotExists {
     async fn check(&self, db: &sqlx::PgPool) -> Result<bool> {
         let mut sql = format!(
-            "SELECT count(*) FROM {} WHERE {} = $1",
+            "SELECT count(*) FROM {} WHERE CAST({} AS TEXT) = $1",
             self.table, self.column
         );
         let mut binds = vec![self.value.clone()];
 
         for (col, val) in &self.where_eq {
             let idx = binds.len() + 1;
-            sql.push_str(&format!(" AND {} = ${}", col, idx));
+            sql.push_str(&format!(" AND CAST({} AS TEXT) = ${}", col, idx));
             binds.push(val.clone());
         }
 
         for (col, val) in &self.where_not_eq {
             let idx = binds.len() + 1;
-            sql.push_str(&format!(" AND {} != ${}", col, idx));
+            sql.push_str(&format!(" AND CAST({} AS TEXT) != ${}", col, idx));
             binds.push(val.clone());
         }
 

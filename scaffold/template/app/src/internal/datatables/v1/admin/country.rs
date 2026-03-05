@@ -296,7 +296,6 @@ impl CountryDataTableAppHooks {
             _ => None,
         }
     }
-
 }
 
 pub struct CountryDataTable {

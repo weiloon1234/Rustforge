@@ -230,7 +230,9 @@ fn rustforge_string_rule_type_wrapper_works() {
     let bad = WrapperDemoInput {
         username: UsernameString::from("Bad Name".to_string()),
     };
-    let err = bad.validate().expect_err("expected username validation failure");
+    let err = bad
+        .validate()
+        .expect_err("expected username validation failure");
     let text = format!("{err:?}");
     assert!(text.contains("username"));
 
@@ -255,7 +257,9 @@ fn rustforge_contract_contains_and_does_not_contain_work() {
         email_like: "hello.example.com".to_string(),
         username: "admin user".to_string(),
     };
-    let err = bad.validate().expect_err("contains/does_not_contain should fail");
+    let err = bad
+        .validate()
+        .expect_err("contains/does_not_contain should fail");
     let text = format!("{err:?}");
     assert!(text.contains("email_like"));
     assert!(text.contains("username"));
@@ -309,11 +313,7 @@ fn rustforge_contract_non_string_openapi_examples_work() {
         schemars::schema::Schema::Object(obj) => obj,
         _ => panic!("count should be object schema"),
     };
-    let count_examples = &count
-        .metadata
-        .as_ref()
-        .expect("count metadata")
-        .examples;
+    let count_examples = &count.metadata.as_ref().expect("count metadata").examples;
     assert_eq!(count_examples.first(), Some(&serde_json::json!(42)));
 
     let enabled = match props.get("enabled").expect("enabled property") {
@@ -333,7 +333,9 @@ fn rustforge_contract_per_rule_override_message_works() {
     let bad = OverrideMessageInput {
         username: "!".to_string(),
     };
-    let err = bad.validate().expect_err("expected both length and alpha_dash errors");
+    let err = bad
+        .validate()
+        .expect_err("expected both length and alpha_dash errors");
     let field_errors = err.field_errors();
     let username_errors = field_errors
         .get("username")
@@ -394,7 +396,10 @@ fn rustforge_contract_async_rule_modifiers_compile_and_schema_exists() {
         .as_ref()
         .expect("object schema")
         .properties;
-    let field = match props.get("scoped_username").expect("scoped_username property") {
+    let field = match props
+        .get("scoped_username")
+        .expect("scoped_username property")
+    {
         schemars::schema::Schema::Object(obj) => obj,
         _ => panic!("scoped_username should be object schema"),
     };

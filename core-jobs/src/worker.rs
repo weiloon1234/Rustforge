@@ -32,12 +32,7 @@ trait JobHandler: Send + Sync {
         attempts: u32,
     ) -> anyhow::Result<JobResult>;
 
-    async fn on_failed(
-        &self,
-        json: Value,
-        ctx: &JobContext,
-        error: &str,
-    ) -> anyhow::Result<()>;
+    async fn on_failed(&self, json: Value, ctx: &JobContext, error: &str) -> anyhow::Result<()>;
 }
 
 struct JobShim<J>(std::marker::PhantomData<J>);
@@ -61,12 +56,7 @@ impl<J: Job> JobHandler for JobShim<J> {
         }
     }
 
-    async fn on_failed(
-        &self,
-        json: Value,
-        ctx: &JobContext,
-        error: &str,
-    ) -> anyhow::Result<()> {
+    async fn on_failed(&self, json: Value, ctx: &JobContext, error: &str) -> anyhow::Result<()> {
         let job: J = serde_json::from_value(json)?;
         job.failed(ctx, error).await
     }
@@ -291,9 +281,21 @@ impl Worker {
                                                 group_id
                                             );
                                             // Call job's failed() callback
-                                            if let Some(handler) = self.registry.get(wrapper.job.as_str()) {
-                                                if let Err(e) = handler.on_failed(wrapper.data.clone(), &self.context, &err).await {
-                                                    tracing::error!("Job failed() callback error: {}", e);
+                                            if let Some(handler) =
+                                                self.registry.get(wrapper.job.as_str())
+                                            {
+                                                if let Err(e) = handler
+                                                    .on_failed(
+                                                        wrapper.data.clone(),
+                                                        &self.context,
+                                                        &err,
+                                                    )
+                                                    .await
+                                                {
+                                                    tracing::error!(
+                                                        "Job failed() callback error: {}",
+                                                        e
+                                                    );
                                                 }
                                             }
                                             // Permanently Failed
@@ -352,7 +354,10 @@ impl Worker {
                             } else {
                                 // Call job's failed() callback
                                 if let Some(handler) = self.registry.get(wrapper.job.as_str()) {
-                                    if let Err(e) = handler.on_failed(wrapper.data.clone(), &self.context, &err).await {
+                                    if let Err(e) = handler
+                                        .on_failed(wrapper.data.clone(), &self.context, &err)
+                                        .await
+                                    {
                                         tracing::error!("Job failed() callback error: {}", e);
                                     }
                                 }

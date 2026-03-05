@@ -72,12 +72,8 @@ fn validation_message(error: &ValidationError) -> String {
                 (Some(lo), Some(hi)) => {
                     core_i18n::t(&format!("Must be between {lo} and {hi} characters."))
                 }
-                (Some(lo), None) => {
-                    core_i18n::t(&format!("Must be at least {lo} characters."))
-                }
-                (None, Some(hi)) => {
-                    core_i18n::t(&format!("Must be at most {hi} characters."))
-                }
+                (Some(lo), None) => core_i18n::t(&format!("Must be at least {lo} characters.")),
+                (None, Some(hi)) => core_i18n::t(&format!("Must be at most {hi} characters.")),
                 _ => core_i18n::t("Invalid length."),
             }
         }
@@ -85,9 +81,7 @@ fn validation_message(error: &ValidationError) -> String {
             let min = p.get("min").and_then(|v| v.as_f64());
             let max = p.get("max").and_then(|v| v.as_f64());
             match (min, max) {
-                (Some(lo), Some(hi)) => {
-                    core_i18n::t(&format!("Must be between {lo} and {hi}."))
-                }
+                (Some(lo), Some(hi)) => core_i18n::t(&format!("Must be between {lo} and {hi}.")),
                 (Some(lo), None) => core_i18n::t(&format!("Must be at least {lo}.")),
                 (None, Some(hi)) => core_i18n::t(&format!("Must be at most {hi}.")),
                 _ => core_i18n::t("Out of range."),

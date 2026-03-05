@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::common::sql::DbConn;
 use crate::platform::attachments::model::AttachmentRow;
 use crate::platform::attachments::types::{
-    Attachment, AttachmentMap, AttachmentUploadDto, attachment_url,
+    attachment_url, Attachment, AttachmentMap, AttachmentUploadDto,
 };
 
 pub struct AttachmentRepo<'a> {

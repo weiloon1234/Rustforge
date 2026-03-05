@@ -23,6 +23,7 @@ export interface ModalEntry extends Required<Pick<ModalOptions, "id" | "title" |
 interface ModalState {
   stack: ModalEntry[];
   open: (options: ModalOptions) => string;
+  update: (id: string, patch: Partial<ModalEntry>) => void;
   close: (id?: string) => void;
   closeAll: () => void;
 }
@@ -47,6 +48,15 @@ export const useModalStore = create<ModalState>()((set, get) => ({
     set((state) => ({ stack: [...state.stack, entry] }));
     document.body.style.overflow = "hidden";
     return id;
+  },
+
+  update: (id, patch) => {
+    set((state) => ({
+      stack: state.stack.map((entry) => {
+        if (entry.id !== id) return entry;
+        return { ...entry, ...patch, id: entry.id };
+      }),
+    }));
   },
 
   close: (id) => {

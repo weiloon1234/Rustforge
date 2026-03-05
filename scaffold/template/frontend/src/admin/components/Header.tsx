@@ -27,14 +27,16 @@ function ProfileModal({
   account,
   onUpdated,
   formId,
+  onBusyChange,
 }: {
   account: AdminMeOutput;
   onUpdated: (next: AdminProfileUpdateOutput) => void;
   formId: string;
+  onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
-  const { submit, form, errors } = useAutoForm(api, {
+  const { submit, busy, form, errors } = useAutoForm(api, {
     url: "auth/profile_update",
     method: "patch",
     fields: [
@@ -67,6 +69,10 @@ function ProfileModal({
     },
   });
 
+  useEffect(() => {
+    onBusyChange(busy);
+  }, [busy, onBusyChange]);
+
   return (
     <form id={formId} onSubmit={submit} className="space-y-4">
       {errors.general && (
@@ -79,10 +85,16 @@ function ProfileModal({
   );
 }
 
-function SecurityModal({ formId }: { formId: string }) {
+function SecurityModal({
+  formId,
+  onBusyChange,
+}: {
+  formId: string;
+  onBusyChange: (busy: boolean) => void;
+}) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
-  const { submit, form, errors } = useAutoForm(api, {
+  const { submit, busy, form, errors } = useAutoForm(api, {
     url: "auth/password_update",
     method: "patch",
     fields: [
@@ -117,6 +129,10 @@ function SecurityModal({ formId }: { formId: string }) {
     },
   });
 
+  useEffect(() => {
+    onBusyChange(busy);
+  }, [busy, onBusyChange]);
+
   return (
     <form id={formId} onSubmit={submit} className="space-y-4">
       {errors.general && (
@@ -144,6 +160,8 @@ export default function Header({
   const defaultLocale = useLocaleStore((s) => s.defaultLocale);
   const availableLocales = useLocaleStore((s) => s.availableLocales);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [localeBusy, setLocaleBusy] = useState<LocaleCode | null>(null);
+  const [logoutBusy, setLogoutBusy] = useState(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
   const localeOptions = useMemo<LocaleCode[]>(() => {
@@ -179,13 +197,33 @@ export default function Header({
     if (!account) return;
     setMenuOpen(false);
     const formId = `admin-profile-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    useModalStore.getState().open({
+    let modalId = "";
+    const renderFooter = (busy: boolean) => (
+      <>
+        <Button
+          type="button"
+          onClick={() => useModalStore.getState().close()}
+          variant="secondary"
+          disabled={busy}
+        >
+          {t("Cancel")}
+        </Button>
+        <Button type="submit" form={formId} variant="primary" busy={busy}>
+          {busy ? t("Saving…") : t("Save")}
+        </Button>
+      </>
+    );
+    modalId = useModalStore.getState().open({
       title: t("Edit Profile"),
       size: "lg",
       content: (
         <ProfileModal
           formId={formId}
           account={account}
+          onBusyChange={(busy) => {
+            if (!modalId) return;
+            useModalStore.getState().update(modalId, { footer: renderFooter(busy) });
+          }}
           onUpdated={(next) =>
             setAccount({
               ...account,
@@ -195,60 +233,65 @@ export default function Header({
           }
         />
       ),
-      footer: (
-        <>
-          <Button
-            type="button"
-            onClick={() => useModalStore.getState().close()}
-            variant="secondary"
-          >
-            {t("Cancel")}
-          </Button>
-          <Button type="submit" form={formId} variant="primary">
-            {t("Save")}
-          </Button>
-        </>
-      ),
+      footer: renderFooter(false),
     });
   };
 
   const openSecurityModal = () => {
     setMenuOpen(false);
     const formId = `admin-security-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    useModalStore.getState().open({
+    let modalId = "";
+    const renderFooter = (busy: boolean) => (
+      <>
+        <Button
+          type="button"
+          onClick={() => useModalStore.getState().close()}
+          variant="secondary"
+          disabled={busy}
+        >
+          {t("Cancel")}
+        </Button>
+        <Button type="submit" form={formId} variant="primary" busy={busy}>
+          {busy ? t("Saving…") : t("Save")}
+        </Button>
+      </>
+    );
+    modalId = useModalStore.getState().open({
       title: t("Account Security"),
       size: "lg",
-      content: <SecurityModal formId={formId} />,
-      footer: (
-        <>
-          <Button
-            type="button"
-            onClick={() => useModalStore.getState().close()}
-            variant="secondary"
-          >
-            {t("Cancel")}
-          </Button>
-          <Button type="submit" form={formId} variant="primary">
-            {t("Save")}
-          </Button>
-        </>
+      content: (
+        <SecurityModal
+          formId={formId}
+          onBusyChange={(busy) => {
+            if (!modalId) return;
+            useModalStore.getState().update(modalId, { footer: renderFooter(busy) });
+          }}
+        />
       ),
+      footer: renderFooter(false),
     });
   };
 
   const handleLocaleChange = async (nextLocale: LocaleCode) => {
-    const result = await adminLocalePersistence.changeAndPersist(nextLocale);
-    if (!result.ok) {
-      void alertError({
-        title: t("Error"),
-        message: t("Failed to update locale."),
-      });
+    if (localeBusy || logoutBusy) return;
+    setLocaleBusy(nextLocale);
+    try {
+      const result = await adminLocalePersistence.changeAndPersist(nextLocale);
+      if (!result.ok) {
+        void alertError({
+          title: t("Error"),
+          message: t("Failed to update locale."),
+        });
+      }
+    } finally {
+      setLocaleBusy(null);
+      setMenuOpen(false);
     }
-    setMenuOpen(false);
   };
 
   const handleLogout = async () => {
-    setMenuOpen(false);
+    if (logoutBusy || localeBusy) return;
+    setLogoutBusy(true);
     try {
       await api.post("auth/logout", { client_type: "web" });
     } catch {
@@ -301,6 +344,8 @@ export default function Header({
                   key={code}
                   type="button"
                   onClick={() => void handleLocaleChange(code)}
+                  busy={localeBusy === code}
+                  disabled={Boolean(localeBusy) || logoutBusy}
                   variant="plain"
                   size="sm"
                   className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm transition-colors hover:bg-surface-hover"
@@ -318,6 +363,7 @@ export default function Header({
             <Button
               type="button"
               onClick={openProfileModal}
+              disabled={Boolean(localeBusy) || logoutBusy}
               variant="plain"
               size="sm"
               className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-surface-hover"
@@ -328,6 +374,7 @@ export default function Header({
             <Button
               type="button"
               onClick={openSecurityModal}
+              disabled={Boolean(localeBusy) || logoutBusy}
               variant="plain"
               size="sm"
               className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-surface-hover"
@@ -338,6 +385,8 @@ export default function Header({
             <Button
               type="button"
               onClick={() => void handleLogout()}
+              busy={logoutBusy}
+              disabled={Boolean(localeBusy) || logoutBusy}
               variant="plain"
               size="sm"
               className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-surface-hover"

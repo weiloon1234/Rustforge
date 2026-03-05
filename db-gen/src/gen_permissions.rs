@@ -59,7 +59,9 @@ pub fn generate_permissions(
     out.push_str("    type WithoutGenerics = Self;\n");
     out.push_str("    fn name() -> String { \"Permission\".to_string() }\n");
     out.push_str("    fn inline() -> String { Self::name() }\n");
-    out.push_str("    fn inline_flattened() -> String { panic!(\"Permission cannot be flattened\") }\n");
+    out.push_str(
+        "    fn inline_flattened() -> String { panic!(\"Permission cannot be flattened\") }\n",
+    );
     writeln!(
         out,
         "    fn decl() -> String {{ \"type Permission = {ts_union_literal};\".to_string() }}"

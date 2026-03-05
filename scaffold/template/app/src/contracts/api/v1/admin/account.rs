@@ -48,12 +48,35 @@ pub struct UpdateAdminInput {
     #[rf(length(min = 1, max = 120))]
     pub name: Option<String>,
     #[serde(default)]
+    #[rf(length(min = 8, max = 128))]
+    pub password: Option<String>,
+    #[serde(default)]
     pub abilities: Option<Vec<Permission>>,
 }
 
 impl UpdateAdminInput {
     pub fn with_target_id(mut self, id: i64) -> Self {
         self.__target_id = id;
+        self
+    }
+
+    pub fn normalize(mut self) -> Self {
+        self.email = self.email.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        self.password = self.password.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
         self
     }
 }

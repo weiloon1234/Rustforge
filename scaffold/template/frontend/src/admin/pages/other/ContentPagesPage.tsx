@@ -1,4 +1,5 @@
 import { Pencil, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { AdminContentPageDeleteOutput, ContentPageDatatableRow, ContentPageSystemFlag } from "@admin/types";
@@ -34,6 +35,7 @@ function toSystemBadgeClass(value: ContentPageSystemFlag): string {
 export default function ContentPagesPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [deletingPageId, setDeletingPageId] = useState<string | null>(null);
 
   const handleDelete = async (row: ContentPageDatatableRow, refresh: () => void) => {
     if (row.is_system === CONTENT_PAGE_SYSTEM_YES) {
@@ -46,6 +48,8 @@ export default function ContentPagesPage() {
       confirmText: t("Delete"),
       callback: async (result) => {
         if (!result.isConfirmed) return;
+        if (deletingPageId === row.id) return;
+        setDeletingPageId(row.id);
         try {
           await api.delete<ApiResponse<AdminContentPageDeleteOutput>>(
             `content_page/${row.id}`,
@@ -57,6 +61,8 @@ export default function ContentPagesPage() {
             title: t("Error"),
             message: normalizeErrorMessage(err, t("Failed to delete page.")),
           });
+        } finally {
+          setDeletingPageId(null);
         }
       },
     });
@@ -72,33 +78,39 @@ export default function ContentPagesPage() {
           key: "actions",
           label: t("Actions"),
           sortable: false,
-          render: (row, ctx) => (
-            <div className="flex gap-1">
-              <Button
-                type="button"
-                onClick={() => navigate(`/other/content-pages/${row.id}/edit`)}
-                variant="plain"
-                size="sm"
-                iconOnly
-                title={t("Edit")}
-              >
-                <Pencil size={16} />
-              </Button>
-              {row.is_system !== CONTENT_PAGE_SYSTEM_YES && (
+          render: (row, ctx) => {
+            const deleting = deletingPageId === row.id;
+            return (
+              <div className="flex gap-1">
                 <Button
                   type="button"
-                  onClick={() => handleDelete(row, ctx.refresh)}
+                  onClick={() => navigate(`/other/content-pages/${row.id}/edit`)}
                   variant="plain"
                   size="sm"
                   iconOnly
-                  className="hover:bg-red-50 hover:text-red-600"
-                  title={t("Delete")}
+                  disabled={deleting}
+                  title={t("Edit")}
                 >
-                  <Trash2 size={16} />
+                  <Pencil size={16} />
                 </Button>
-              )}
-            </div>
-          ),
+                {row.is_system !== CONTENT_PAGE_SYSTEM_YES && (
+                  <Button
+                    type="button"
+                    onClick={() => handleDelete(row, ctx.refresh)}
+                    variant="plain"
+                    size="sm"
+                    iconOnly
+                    busy={deleting}
+                    disabled={deleting}
+                    className="hover:bg-red-50 hover:text-red-600"
+                    title={t("Delete")}
+                  >
+                    <Trash2 size={16} />
+                  </Button>
+                )}
+              </div>
+            );
+          },
         },
         {
           key: "tag",

@@ -941,7 +941,10 @@ where
         .await
         .ok_or_else(|| AppError::NotFound(format!("Unknown export job '{}'", job_id)))?;
     if csv_status.model != state.scoped_key {
-        return Err(AppError::NotFound(format!("Unknown export job '{}'", job_id)));
+        return Err(AppError::NotFound(format!(
+            "Unknown export job '{}'",
+            job_id
+        )));
     }
 
     let email = state.inner.datatable_email_exports().status(&job_id).await;

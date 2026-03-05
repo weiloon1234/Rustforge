@@ -53,7 +53,8 @@ impl Cache {
 
     pub async fn set_ex(&self, key: &str, value: &str, ttl_secs: u64) -> Result<()> {
         let mut conn = self.conn.lock().await;
-        conn.set_ex::<_, _, ()>(self.key(key), value, ttl_secs).await?;
+        conn.set_ex::<_, _, ()>(self.key(key), value, ttl_secs)
+            .await?;
         Ok(())
     }
 
@@ -86,7 +87,12 @@ impl Cache {
         self.set(key, &raw).await
     }
 
-    pub async fn set_json_ex<T: Serialize>(&self, key: &str, value: &T, ttl_secs: u64) -> Result<()> {
+    pub async fn set_json_ex<T: Serialize>(
+        &self,
+        key: &str,
+        value: &T,
+        ttl_secs: u64,
+    ) -> Result<()> {
         let raw = serde_json::to_string(value)?;
         self.set_ex(key, &raw, ttl_secs).await
     }

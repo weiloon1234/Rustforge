@@ -540,6 +540,9 @@ export function DataTable<T>({
   const [meta, setMeta] = useState<DataTableMetaDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [filterActionBusy, setFilterActionBusy] = useState<
+    "search" | "reset" | null
+  >(null);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(defaultPerPage);
   const [jumpValue, setJumpValue] = useState("");
@@ -713,6 +716,7 @@ export function DataTable<T>({
       } finally {
         setLoading(false);
         autoRefreshRequestInFlightRef.current = false;
+        setFilterActionBusy(null);
       }
     },
     [api, extraBody, url],
@@ -892,12 +896,16 @@ export function DataTable<T>({
   };
 
   const applyFilters = () => {
+    if (loading) return;
+    setFilterActionBusy("search");
     appliedFiltersRef.current = { ...filterValues };
     setFilterVersion((v) => v + 1);
     setPage(1);
   };
 
   const resetFilters = () => {
+    if (loading) return;
+    setFilterActionBusy("reset");
     setFilterValues({});
     appliedFiltersRef.current = {};
     setFilterVersion((v) => v + 1);
@@ -983,14 +991,11 @@ export function DataTable<T>({
                 {showRefresh && (
                   <Button
                     onClick={refresh}
-                    disabled={loading}
+                    busy={loading}
                     variant="secondary"
                     size="sm"
                   >
-                    <RefreshCw
-                      size={16}
-                      className={loading ? "animate-spin" : ""}
-                    />
+                    <RefreshCw size={16} />
                     {t("Refresh")}
                   </Button>
                 )}
@@ -1046,11 +1051,23 @@ export function DataTable<T>({
             );
           })}
           <div className="flex gap-2 pt-1">
-            <Button onClick={applyFilters} variant="primary" size="sm">
+            <Button
+              onClick={applyFilters}
+              variant="primary"
+              size="sm"
+              busy={filterActionBusy === "search"}
+              disabled={loading}
+            >
               <Search size={14} />
               {t("Search")}
             </Button>
-            <Button onClick={resetFilters} variant="secondary" size="sm">
+            <Button
+              onClick={resetFilters}
+              variant="secondary"
+              size="sm"
+              busy={filterActionBusy === "reset"}
+              disabled={loading}
+            >
               <X size={14} />
               {t("Reset")}
             </Button>
