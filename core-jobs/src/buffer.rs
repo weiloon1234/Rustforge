@@ -1,15 +1,18 @@
 use crate::{queue::RedisQueue, Job, JobPayload};
-use sqlx::{Postgres, Row, Transaction};
+use core_db::{
+    common::sql::{DbConn, Op, OrderDir},
+    generated::models::{OutboxJob, OutboxJobCol},
+};
 
 /// Transactional Job Buffer (Outbox Pattern).
-/// Jobs are inserted into `outbox_jobs` table within the provided transaction.
+/// Jobs are inserted into `outbox_jobs` table within the provided DbConn scope.
 pub struct JobBuffer<'a> {
-    tx: &'a mut Transaction<'a, Postgres>,
+    db: DbConn<'a>,
 }
 
 impl<'a> JobBuffer<'a> {
-    pub fn new(tx: &'a mut Transaction<'a, Postgres>) -> Self {
-        Self { tx }
+    pub fn new(db: impl Into<DbConn<'a>>) -> Self {
+        Self { db: db.into() }
     }
 
     /// Push a job to the outbox (Postgres).
@@ -20,20 +23,13 @@ impl<'a> JobBuffer<'a> {
             queue: J::QUEUE.to_string(),
             attempts: 0,
         };
-        // Just serialize to Value directly for JSONB? Or string.
-        // sqlx maps serde_json::Value to JSONB.
         let payload_json = serde_json::to_value(payload)?;
 
-        // We use full queue name "queue:default" or just "default"?
-        // RedisQueue uses `prefix:queue`.
-        // Let's store just the suffix "default" or "scanners".
-        // The flushing logic will reconstruct the full key.
-        let queue_suffix = J::QUEUE;
-
-        sqlx::query("INSERT INTO outbox_jobs (queue, payload) VALUES ($1, $2)")
-            .bind(queue_suffix)
-            .bind(payload_json)
-            .execute(&mut **self.tx)
+        OutboxJob::new(self.db.clone(), None)
+            .insert()
+            .set_queue(J::QUEUE.to_string())
+            .set_payload(payload_json)
+            .save()
             .await?;
 
         Ok(())
@@ -46,54 +42,49 @@ pub struct OutboxFlusher;
 
 impl OutboxFlusher {
     pub async fn flush(db: &sqlx::PgPool, queue: &RedisQueue) -> anyhow::Result<usize> {
-        // 1. Lock a batch first. We only delete after Redis push succeeds.
-        let mut tx = db.begin().await?;
-        let rows = sqlx::query(
-            "SELECT id, queue, payload
-             FROM outbox_jobs
-             ORDER BY created_at ASC
-             LIMIT 100
-             FOR UPDATE SKIP LOCKED",
-        )
-        .fetch_all(&mut *tx)
-        .await?;
+        let pool_conn = DbConn::pool(db);
+        let scope = pool_conn.begin_scope().await?;
 
-        if rows.is_empty() {
-            return Ok(0);
-        }
+        let count = {
+            let conn = scope.conn();
+            let rows = OutboxJob::new(conn.clone(), None)
+                .query()
+                .order_by(OutboxJobCol::CreatedAt, OrderDir::Asc)
+                .for_update_skip_locked()
+                .limit(100)
+                .get()
+                .await?;
 
-        let mut count = 0;
-        let mut pipe = redis::pipe();
-        // We need a connection *outside* the loop or pipe assumes it
-        let mut conn = queue.client.get_multiplexed_async_connection().await?;
+            if rows.is_empty() {
+                0usize
+            } else {
+                let mut count = 0usize;
+                let mut pipe = redis::pipe();
+                let mut redis_conn = queue.client.get_multiplexed_async_connection().await?;
+                let mut ids = Vec::with_capacity(rows.len());
 
-        let mut ids = Vec::new();
-        for row in rows {
-            let id: uuid::Uuid = row.get("id");
-            let q_suffix: String = row.get("queue");
-            let payload: serde_json::Value = row.get("payload");
+                for row in rows {
+                    let payload_str = serde_json::to_string(&row.payload)?;
+                    let target_queue = format!("{}:{}", queue.prefix, row.queue);
+                    pipe.rpush(target_queue, payload_str);
+                    ids.push(row.id);
+                    count += 1;
+                }
 
-            // Reconstruct payload string for Redis
-            let payload_str = serde_json::to_string(&payload)?;
+                let _: () = pipe.query_async(&mut redis_conn).await?;
 
-            // Reconstruct full redis key
-            let target_queue = format!("{}:{}", queue.prefix, q_suffix);
+                for id in ids {
+                    OutboxJob::new(conn.clone(), None)
+                        .query()
+                        .where_id(Op::Eq, id)
+                        .delete()
+                        .await?;
+                }
+                count
+            }
+        };
 
-            pipe.rpush(target_queue, payload_str);
-            count += 1;
-            ids.push(id);
-        }
-
-        // 2. Push batch to Redis.
-        let _: () = pipe.query_async(&mut conn).await?;
-
-        // 3. Remove rows only after Redis push succeeded.
-        sqlx::query("DELETE FROM outbox_jobs WHERE id = ANY($1)")
-            .bind(ids)
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
-
+        scope.commit().await?;
         Ok(count)
     }
 }

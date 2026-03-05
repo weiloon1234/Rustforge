@@ -5,6 +5,10 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use core_db::{
+    common::sql::{DbConn, Op, OrderDir},
+    generated::models::{FailedJob, FailedJobCol},
+};
 use redis::AsyncCommands;
 use serde::Serialize;
 use sqlx::FromRow;
@@ -52,9 +56,24 @@ async fn list_failed_jobs(State(state): State<ApiState>) -> impl IntoResponse {
         None => return (StatusCode::SERVICE_UNAVAILABLE, "DB not configured").into_response(),
     };
 
-    let sql = "SELECT id, job_name, queue, error, attempts, failed_at FROM failed_jobs ORDER BY failed_at DESC LIMIT 50";
-    let jobs: Vec<FailedJobRow> = match sqlx::query_as(sql).fetch_all(&db).await {
-        Ok(rows) => rows,
+    let jobs = match FailedJob::new(DbConn::pool(&db), None)
+        .query()
+        .order_by(FailedJobCol::FailedAt, OrderDir::Desc)
+        .limit(50)
+        .get()
+        .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| FailedJobRow {
+                id: row.id,
+                job_name: row.job_name,
+                queue: row.queue,
+                error: row.error,
+                attempts: row.attempts,
+                failed_at: row.failed_at,
+            })
+            .collect::<Vec<_>>(),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
 
@@ -70,19 +89,18 @@ async fn retry_failed_job(
         None => return (StatusCode::SERVICE_UNAVAILABLE, "DB not configured").into_response(),
     };
 
-    // 1. Fetch the failed job
-    let row: Option<(String, serde_json::Value)> =
-        match sqlx::query_as("SELECT queue, payload FROM failed_jobs WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&db)
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-        };
+    let row = match FailedJob::new(DbConn::pool(&db), None)
+        .query()
+        .where_id(Op::Eq, id)
+        .first()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
 
     let (queue_name, payload) = match row {
-        Some(r) => r,
+        Some(r) => (r.queue, r.payload),
         None => return (StatusCode::NOT_FOUND, "Job not found").into_response(),
     };
 
@@ -108,11 +126,13 @@ async fn retry_failed_job(
     }
 
     // 3. Delete from failed_jobs
-    match sqlx::query("DELETE FROM failed_jobs WHERE id = $1")
-        .bind(id)
-        .execute(&db)
-        .await
-    {
+    let delete_result = FailedJob::new(DbConn::pool(&db), None)
+        .query()
+        .where_id(Op::Eq, id)
+        .delete()
+        .await;
+
+    match delete_result {
         Ok(_) => (StatusCode::OK, "Retried").into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }

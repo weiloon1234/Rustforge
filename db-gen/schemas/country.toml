@@ -1,0 +1,38 @@
+[CountryStatus]
+type = "enum"
+storage = "string"
+variants = ["Enabled", "Disabled"]
+
+[model.country]
+table = "countries"
+pk = "iso2"
+pk_type = "String"
+id_strategy = "manual"
+fields = [
+  "iso2:String",
+  "iso3:String",
+  "iso_numeric:Option<String>",
+  "name:String",
+  "official_name:Option<String>",
+  "capital:Option<String>",
+  "capitals:Vec<String>",
+  "region:Option<String>",
+  "subregion:Option<String>",
+  "currencies:serde_json::Value",
+  "primary_currency_code:Option<String>",
+  "calling_code:Option<String>",
+  "calling_root:Option<String>",
+  "calling_suffixes:Vec<String>",
+  "tlds:Vec<String>",
+  "timezones:Vec<String>",
+  "latitude:Option<f64>",
+  "longitude:Option<f64>",
+  "independent:Option<bool>",
+  "status:CountryStatus",
+  "assignment_status:Option<String>",
+  "un_member:Option<bool>",
+  "flag_emoji:Option<String>",
+  "created_at:datetime",
+  "updated_at:datetime"
+]
+disable_timestamps = true

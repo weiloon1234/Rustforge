@@ -22,7 +22,12 @@ pub use models::{HttpClientLog, WebhookLog};
 pub use webhook_middleware::WebhookLogLayer;
 
 use anyhow::Result;
+use core_db::{
+    common::sql::{DbConn, Op},
+    generated::models::{HttpClientLog as HttpClientLogModel, WebhookLog as WebhookLogModel},
+};
 use sqlx::PgPool;
+use time::OffsetDateTime;
 
 /// Cleanup old logs based on retention days
 pub async fn cleanup_logs(db: &PgPool, retention_days: u64) -> Result<()> {
@@ -30,19 +35,18 @@ pub async fn cleanup_logs(db: &PgPool, retention_days: u64) -> Result<()> {
         return Ok(());
     }
 
-    let interval = format!("{} days", retention_days);
+    let cutoff = OffsetDateTime::now_utc() - time::Duration::days(retention_days as i64);
 
-    // Clean webhook logs (if table exists - assuming migrations are run)
-    // using query (not query!) to avoid compile-time DB checks for library
-    sqlx::query("DELETE FROM webhook_logs WHERE created_at < NOW() - $1::INTERVAL")
-        .bind(&interval)
-        .execute(db)
+    WebhookLogModel::new(DbConn::pool(db), None)
+        .query()
+        .where_created_at(Op::Lt, cutoff)
+        .delete()
         .await?;
 
-    // Clean client logs
-    sqlx::query("DELETE FROM http_client_logs WHERE created_at < NOW() - $1::INTERVAL")
-        .bind(&interval)
-        .execute(db)
+    HttpClientLogModel::new(DbConn::pool(db), None)
+        .query()
+        .where_created_at(Op::Lt, cutoff)
+        .delete()
         .await?;
 
     Ok(())

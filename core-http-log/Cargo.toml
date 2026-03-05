@@ -19,6 +19,7 @@ reqwest = { workspace = true, features = ["json"] }
 # Web Framework
 axum = { workspace = true }
 core-jobs = { workspace = true }
+core-db = { path = "../core-db" }
 tower = { workspace = true }
 http-body-util = "0.1"
 bytes = { workspace = true }

@@ -3,8 +3,9 @@ pub mod meta;
 
 use anyhow::Result;
 use core_db::{
-    common::sql::DbConn,
-    platform::countries::{normalize_country_iso2, repo::CountryRepo},
+    common::sql::{DbConn, Op},
+    generated::models::{Country as CountryModel, CountryStatus as GeneratedCountryStatus},
+    platform::countries::{normalize_country_iso2, Country as CountryRuntime, CountryCurrency},
 };
 use sqlx::Row;
 use validator::{ValidateEmail, ValidationError};
@@ -397,18 +398,56 @@ pub async fn normalize_phone_by_country_iso2(
         return Ok(None);
     };
 
-    let repo = CountryRepo::new(DbConn::pool(db));
-    let Some(country) = repo.find_by_iso2(&country_iso2).await? else {
+    let Some(country) = CountryModel::new(DbConn::pool(db), None)
+        .query()
+        .where_iso2(Op::Eq, country_iso2)
+        .first()
+        .await?
+    else {
         return Ok(None);
     };
 
-    if enabled_only && country.status != "enabled" {
+    if enabled_only && country.status != GeneratedCountryStatus::Enabled {
         return Ok(None);
     }
 
-    country
+    let country_runtime = to_runtime_country(country);
+    country_runtime
         .format_phone_number(phone_number, false)
-        .map_err(anyhow::Error::from)
+        .map_err(Into::into)
+}
+
+fn to_runtime_country(country: core_db::generated::models::CountryView) -> CountryRuntime {
+    let currencies =
+        serde_json::from_value::<Vec<CountryCurrency>>(country.currencies).unwrap_or_default();
+
+    CountryRuntime {
+        iso2: country.iso2,
+        iso3: country.iso3,
+        iso_numeric: country.iso_numeric,
+        name: country.name,
+        official_name: country.official_name,
+        capital: country.capital,
+        capitals: country.capitals,
+        region: country.region,
+        subregion: country.subregion,
+        currencies,
+        primary_currency_code: country.primary_currency_code,
+        calling_code: country.calling_code,
+        calling_root: country.calling_root,
+        calling_suffixes: country.calling_suffixes,
+        tlds: country.tlds,
+        timezones: country.timezones,
+        latitude: country.latitude,
+        longitude: country.longitude,
+        independent: country.independent,
+        status: country.status.as_str().to_string(),
+        assignment_status: country.assignment_status,
+        un_member: country.un_member,
+        flag_emoji: country.flag_emoji,
+        created_at: country.created_at,
+        updated_at: country.updated_at,
+    }
 }
 
 pub fn required_trimmed(value: &str) -> Result<(), ValidationError> {

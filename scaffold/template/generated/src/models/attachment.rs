@@ -5,13 +5,12 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, bind, bind_query, bind_scalar, generate_snowflake_i64, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, bind, bind_query, bind_scalar, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{Page, renumber_placeholders};
 use core_db::common::collection::TypedCollectionExt;
-use super::enums::*;
 
 const HAS_CREATED_AT: bool = true;
 const HAS_UPDATED_AT: bool = true;
@@ -19,15 +18,16 @@ const HAS_SOFT_DELETE: bool = true;
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
-pub struct AdminRow {
-    pub id: i64,
-    pub username: String,
-    pub email: Option<String>,
-    pub locale: Option<String>,
-    pub password: String,
-    pub name: String,
-    pub admin_type: AdminType,
-    pub abilities: serde_json::Value,
+pub struct AttachmentRow {
+    pub id: uuid::Uuid,
+    pub owner_type: String,
+    pub owner_id: i64,
+    pub field: String,
+    pub path: String,
+    pub content_type: String,
+    pub size: i64,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
     #[serde(with = "time::serde::rfc3339")]
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
@@ -40,162 +40,164 @@ pub struct AdminRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AdminView {
-    pub id: i64,
-    pub username: String,
-    pub email: Option<String>,
-    pub locale: Option<String>,
-    pub password: String,
-    pub name: String,
-    pub admin_type: AdminType,
-    pub abilities: serde_json::Value,
+pub struct AttachmentView {
+    pub id: uuid::Uuid,
+    pub owner_type: String,
+    pub owner_id: i64,
+    pub field: String,
+    pub path: String,
+    pub content_type: String,
+    pub size: i64,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
     #[schemars(with = "String")]
     pub updated_at: time::OffsetDateTime,
     #[schemars(with = "String")]
     pub deleted_at: Option<time::OffsetDateTime>,
-    pub admin_type_explained: String,
 }
 
-impl AdminView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> AdminUpdate<'db> {
-        Admin::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
+impl AttachmentView {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> AttachmentUpdate<'db> {
+        Attachment::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
     }
-    pub fn update_with<'db>(&self, model: &Admin<'db>) -> AdminUpdate<'db> {
+    pub fn update_with<'db>(&self, model: &Attachment<'db>) -> AttachmentUpdate<'db> {
         model.update().where_id(Op::Eq, self.id.clone())
     }
-    pub fn to_json(&self) -> AdminJson {
-        AdminJson {
+    pub fn to_json(&self) -> AttachmentJson {
+        AttachmentJson {
             id: self.id.clone(),
-            username: self.username.clone(),
-            email: self.email.clone(),
-            locale: self.locale.clone(),
-            password: self.password.clone(),
-            name: self.name.clone(),
-            admin_type: self.admin_type.clone(),
-            abilities: self.abilities.clone(),
+            owner_type: self.owner_type.clone(),
+            owner_id: self.owner_id.clone(),
+            field: self.field.clone(),
+            path: self.path.clone(),
+            content_type: self.content_type.clone(),
+            size: self.size.clone(),
+            width: self.width.clone(),
+            height: self.height.clone(),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
             deleted_at: self.deleted_at.clone(),
-            admin_type_explained: self.admin_type_explained.clone(),
         }
     }
 }
 
-pub trait AdminViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&AdminView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, AdminView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, Vec<AdminView>> where K: Eq + std::hash::Hash;
+pub trait AttachmentViewsExt {
+    fn ids(&self) -> Vec<uuid::Uuid>;
+    fn pluck<R>(&self, f: impl Fn(&AttachmentView) -> R) -> Vec<R>;
+    fn key_by<K>(&self, f: impl Fn(&AttachmentView) -> K) -> std::collections::HashMap<K, AttachmentView> where K: Eq + std::hash::Hash;
+    fn group_by<K>(&self, f: impl Fn(&AttachmentView) -> K) -> std::collections::HashMap<K, Vec<AttachmentView>> where K: Eq + std::hash::Hash;
 }
 
-impl AdminViewsExt for Vec<AdminView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&AdminView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, AdminView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, Vec<AdminView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
+impl AttachmentViewsExt for Vec<AttachmentView> {
+    fn ids(&self) -> Vec<uuid::Uuid> { self.as_slice().pluck_typed(|v| v.id.clone()) }
+    fn pluck<R>(&self, f: impl Fn(&AttachmentView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
+    fn key_by<K>(&self, f: impl Fn(&AttachmentView) -> K) -> std::collections::HashMap<K, AttachmentView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
+    fn group_by<K>(&self, f: impl Fn(&AttachmentView) -> K) -> std::collections::HashMap<K, Vec<AttachmentView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
-pub struct AdminJson {
-    pub id: i64,
-    pub username: String,
-    pub email: Option<String>,
-    pub locale: Option<String>,
-    pub password: String,
-    pub name: String,
-    pub admin_type: AdminType,
-    pub abilities: serde_json::Value,
+pub struct AttachmentJson {
+    pub id: uuid::Uuid,
+    pub owner_type: String,
+    pub owner_id: i64,
+    pub field: String,
+    pub path: String,
+    pub content_type: String,
+    pub size: i64,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
     #[schemars(with = "String")]
     pub updated_at: time::OffsetDateTime,
     #[schemars(with = "String")]
     pub deleted_at: Option<time::OffsetDateTime>,
-    pub admin_type_explained: String,
 }
 
-fn hydrate_view(row: AdminRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> AdminView {
-    let view = AdminView {
+fn hydrate_view(row: AttachmentRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> AttachmentView {
+    let view = AttachmentView {
         id: row.id,
-        username: row.username,
-        email: row.email,
-        locale: row.locale,
-        password: row.password,
-        name: row.name,
-        admin_type: row.admin_type,
-        abilities: row.abilities,
+        owner_type: row.owner_type,
+        owner_id: row.owner_id,
+        field: row.field,
+        path: row.path,
+        content_type: row.content_type,
+        size: row.size,
+        width: row.width,
+        height: row.height,
         created_at: row.created_at,
         updated_at: row.updated_at,
         deleted_at: row.deleted_at,
-        admin_type_explained: row.admin_type.explained_label(),
     };
     view
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum AdminCol {
+pub enum AttachmentCol {
     Id,
-    Username,
-    Email,
-    Locale,
-    Password,
-    Name,
-    AdminType,
-    Abilities,
+    OwnerType,
+    OwnerId,
+    Field,
+    Path,
+    ContentType,
+    Size,
+    Width,
+    Height,
     CreatedAt,
     UpdatedAt,
     DeletedAt,
 }
 
-impl AdminCol {
-    pub const fn all() -> &'static [AdminCol] {
-        &[AdminCol::Id, AdminCol::Username, AdminCol::Email, AdminCol::Locale, AdminCol::Password, AdminCol::Name, AdminCol::AdminType, AdminCol::Abilities, AdminCol::CreatedAt, AdminCol::UpdatedAt, AdminCol::DeletedAt]
+impl AttachmentCol {
+    pub const fn all() -> &'static [AttachmentCol] {
+        &[AttachmentCol::Id, AttachmentCol::OwnerType, AttachmentCol::OwnerId, AttachmentCol::Field, AttachmentCol::Path, AttachmentCol::ContentType, AttachmentCol::Size, AttachmentCol::Width, AttachmentCol::Height, AttachmentCol::CreatedAt, AttachmentCol::UpdatedAt, AttachmentCol::DeletedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            AdminCol::Id => "id",
-            AdminCol::Username => "username",
-            AdminCol::Email => "email",
-            AdminCol::Locale => "locale",
-            AdminCol::Password => "password",
-            AdminCol::Name => "name",
-            AdminCol::AdminType => "admin_type",
-            AdminCol::Abilities => "abilities",
-            AdminCol::CreatedAt => "created_at",
-            AdminCol::UpdatedAt => "updated_at",
-            AdminCol::DeletedAt => "deleted_at",
+            AttachmentCol::Id => "id",
+            AttachmentCol::OwnerType => "owner_type",
+            AttachmentCol::OwnerId => "owner_id",
+            AttachmentCol::Field => "field",
+            AttachmentCol::Path => "path",
+            AttachmentCol::ContentType => "content_type",
+            AttachmentCol::Size => "size",
+            AttachmentCol::Width => "width",
+            AttachmentCol::Height => "height",
+            AttachmentCol::CreatedAt => "created_at",
+            AttachmentCol::UpdatedAt => "updated_at",
+            AttachmentCol::DeletedAt => "deleted_at",
         }
     }
 }
 
-pub struct Admin<'db> {
+pub struct Attachment<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
 }
 
-impl<'db> Admin<'db> {
-    pub const TABLE: &'static str = "admin";
+impl<'db> Attachment<'db> {
+    pub const TABLE: &'static str = "attachments";
     pub const PK: &'static str = "id";
     pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> AdminQuery<'db> { AdminQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> AdminInsert<'db> { AdminInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> AdminUpdate<'db> { AdminUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<AdminView>> {
+    pub fn query(&self) -> AttachmentQuery<'db> { AttachmentQuery::new(self.db.clone(), self.base_url.clone()) }
+    pub fn insert(&self) -> AttachmentInsert<'db> { AttachmentInsert::new(self.db.clone(), self.base_url.clone()) }
+    pub fn update(&self) -> AttachmentUpdate<'db> { AttachmentUpdate::new(self.db.clone(), self.base_url.clone()) }
+    pub async fn find(&self, id: uuid::Uuid) -> Result<Option<AttachmentView>> {
         self.query().find(id).await
     }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
+    pub async fn delete(&self, id: uuid::Uuid) -> Result<u64> {
         self.query().where_id(Op::Eq, id).delete().await
     }
-    pub async fn restore(&self, id: i64) -> Result<u64> {
+    pub async fn restore(&self, id: uuid::Uuid) -> Result<u64> {
         self.query().where_id(Op::Eq, id).restore().await
     }
 }
 
 #[derive(Clone)]
-pub struct AdminQuery<'db> {
+pub struct AttachmentQuery<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -218,146 +220,158 @@ pub struct AdminQuery<'db> {
     only_deleted: bool,
 }
 
-impl<'db> AdminQuery<'db> {
+impl<'db> AttachmentQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![], with_deleted: false, only_deleted: false }
+        Self { db, base_url, select_sql: Some("id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![], with_deleted: false, only_deleted: false }
     }
-    pub fn unsafe_sql(self) -> AdminUnsafeQuery<'db> { AdminUnsafeQuery::new(self) }
-    pub fn where_id(mut self, op: Op, val: i64) -> Self {
+    pub fn unsafe_sql(self) -> AttachmentUnsafeQuery<'db> { AttachmentUnsafeQuery::new(self) }
+    pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_username(mut self, op: Op, val: String) -> Self {
+    pub fn where_owner_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_username_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_owner_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_email(mut self, op: Op, val: Option<String>) -> Self {
+    pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_email_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_owner_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_locale(mut self, op: Op, val: Option<String>) -> Self {
+    pub fn where_field(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Field.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_locale_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_field_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Field.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_password(mut self, op: Op, val: String) -> Self {
+    pub fn where_path(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Password.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Path.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_password_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_path_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Password.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Path.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_name(mut self, op: Op, val: String) -> Self {
+    pub fn where_content_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::ContentType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_name_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_content_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::ContentType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_admin_type(mut self, op: Op, val: AdminType) -> Self {
+    pub fn where_size(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::AdminType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Size.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_admin_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_size_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::AdminType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Size.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_abilities(mut self, op: Op, val: serde_json::Value) -> Self {
+    pub fn where_width(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Width.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_abilities_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_width_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Width.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_height(mut self, op: Op, val: Option<i32>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Height.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_height_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Height.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(AdminCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AdminCol, op: Op, val: T) -> Self {
+    pub fn where_key(self, id: uuid::Uuid) -> Self { self.where_id(Op::Eq, id) }
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(AttachmentCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: AttachmentCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -376,7 +390,7 @@ impl<'db> AdminQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: AdminCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: AttachmentCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -391,7 +405,7 @@ impl<'db> AdminQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: AdminCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: AttachmentCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -403,7 +417,7 @@ impl<'db> AdminQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: AdminCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: AttachmentCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -411,15 +425,15 @@ impl<'db> AdminQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: AdminCol) -> Self {
+    pub fn where_null(mut self, col: AttachmentCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: AdminCol) -> Self {
+    pub fn where_not_null(mut self, col: AttachmentCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: AdminCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: AttachmentCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -473,23 +487,23 @@ impl<'db> AdminQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[AdminCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[AttachmentCol]) -> Self {
         if cols.is_empty() {
-            self.select_sql = Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
+            self.select_sql = Some("id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".to_string());
         } else {
             let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect();
+            let mut list: Vec<String> = "id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect();
             for s in &list { seen.insert(s.clone()); }
             for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
             self.select_sql = Some(list.join(", "));
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[AdminCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[AttachmentCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect(),
+            _ => "id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect(),
         };
         for s in &list { seen.insert(s.clone()); }
         for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
@@ -499,16 +513,16 @@ impl<'db> AdminQuery<'db> {
     fn select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() {
-            self.select_sql = Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
+            self.select_sql = Some("id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".to_string());
         } else {
-            self.select_sql = Some(format!("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at, {}", s));
+            self.select_sql = Some(format!("id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at, {}", s));
         }
         self
     }
     fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
+        let mut base = self.select_sql.take().unwrap_or_else(|| "id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".to_string());
         if !base.is_empty() { base.push_str(", "); }
         base.push_str(&s);
         self.select_sql = Some(base);
@@ -566,26 +580,26 @@ impl<'db> AdminQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: AdminCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: AttachmentCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: AdminCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: AttachmentCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: AdminCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: AttachmentCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[AdminCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[AttachmentCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[AdminCol]) -> Self {
+    pub fn select(mut self, cols: &[AttachmentCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -634,7 +648,7 @@ impl<'db> AdminQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[AdminCol]) -> Self {
+    pub fn group_by(mut self, cols: &[AttachmentCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -674,7 +688,7 @@ impl<'db> AdminQuery<'db> {
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
         let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
         if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
         if !where_sql.is_empty() {
@@ -709,14 +723,14 @@ impl<'db> AdminQuery<'db> {
         Ok(db.fetch_all(q).await?)
     }
 
-    pub async fn get(self) -> Result<Vec<AdminView>> {
+    pub async fn get(self) -> Result<Vec<AttachmentView>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , with_deleted, only_deleted, .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
             }
         }
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -724,7 +738,7 @@ impl<'db> AdminQuery<'db> {
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
         let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
         if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
         if !where_sql.is_empty() {
@@ -752,14 +766,14 @@ impl<'db> AdminQuery<'db> {
             sql.push_str(&l.to_string());
         }
         if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut q = sqlx::query_as::<_, AdminRow>(&sql);
+        let mut q = sqlx::query_as::<_, AttachmentRow>(&sql);
         for b in binds {
             q = bind(q, b);
         }
         for b in join_binds { q = bind(q, b); }
         for b in having_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
-        let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
+        let ids: Vec<uuid::Uuid> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
@@ -768,68 +782,68 @@ impl<'db> AdminQuery<'db> {
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<AdminView>> {
+    pub async fn first(self) -> Result<Option<AttachmentView>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<AdminView> {
-        self.first().await?.ok_or_else(|| anyhow::anyhow!("admin: record not found"))
+    pub async fn first_or_fail(self) -> Result<AttachmentView> {
+        self.first().await?.ok_or_else(|| anyhow::anyhow!("attachments: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<AdminView>> {
+    pub async fn find(self, id: uuid::Uuid) -> Result<Option<AttachmentView>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<AdminView> {
-        self.find(id).await?.ok_or_else(|| anyhow::anyhow!("admin: record not found"))
+    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<AttachmentView> {
+        self.find(id).await?.ok_or_else(|| anyhow::anyhow!("attachments: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(AdminInsert<'db>) -> AdminInsert<'db>) -> Result<AdminView> {
+    pub async fn first_or_create(self, create: impl FnOnce(AttachmentInsert<'db>) -> AttachmentInsert<'db>) -> Result<AttachmentView> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(AdminInsert::new(db, base_url));
+        let insert_builder = create(AttachmentInsert::new(db, base_url));
         insert_builder.save().await
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(AdminUpdate<'db>) -> AdminUpdate<'db>,
-        on_create: impl FnOnce(AdminInsert<'db>) -> AdminInsert<'db>,
-    ) -> Result<AdminView> {
+        on_update: impl FnOnce(AttachmentUpdate<'db>) -> AttachmentUpdate<'db>,
+        on_create: impl FnOnce(AttachmentInsert<'db>) -> AttachmentInsert<'db>,
+    ) -> Result<AttachmentView> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = AdminUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = AttachmentUpdate::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Admin::new(db, base_url.clone()).query().find(existing.id).await.map(|r| r.unwrap());
+            return Attachment::new(db, base_url.clone()).query().find(existing.id).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(AdminInsert::new(db, base_url));
+        let insert_builder = on_create(AttachmentInsert::new(db, base_url));
         insert_builder.save().await
     }
 
-    pub async fn increment(self, col: AdminCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: AttachmentCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
         if HAS_SOFT_DELETE && !self.with_deleted {
-            where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+            where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
         }
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("UPDATE admin SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
+        let sql = format!("UPDATE attachments SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
         let mut q = sqlx::query(&sql);
         for b in binds { q = bind_query(q, b); }
         let res = db.execute(q).await?;
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: AdminCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: AttachmentCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -838,12 +852,12 @@ impl<'db> AdminQuery<'db> {
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
             }
         }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -863,24 +877,24 @@ impl<'db> AdminQuery<'db> {
         Ok(self.count().await? > 0)
     }
 
-    pub async fn pluck_ids(self) -> Result<Vec<i64>> {
+    pub async fn pluck_ids(self) -> Result<Vec<uuid::Uuid>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds, order_sql, limit, offset , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
             }
         }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
         let from_clause = if join_sql.is_empty() { format!("FROM {}", table_name) } else { format!("FROM {} {}", table_name, join_sql.join(" ")) };
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let order_clause = if order_sql.is_empty() { String::new() } else { format!(" ORDER BY {}", order_sql.join(", ")) };
         let limit_clause = limit.map(|n| format!(" LIMIT {}", n)).unwrap_or_default();
         let offset_clause = offset.map(|n| format!(" OFFSET {}", n)).unwrap_or_default();
         let sql = format!("SELECT id {}{}{}{}{}", from_clause, where_clause, order_clause, limit_clause, offset_clause);
-        let mut q = sqlx::query_scalar::<_, i64>(&sql);
+        let mut q = sqlx::query_scalar::<_, uuid::Uuid>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let ids = db.fetch_all_scalar(q).await?;
@@ -889,13 +903,13 @@ impl<'db> AdminQuery<'db> {
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<AdminView>) -> Fut,
+        F: FnMut(Vec<AttachmentView>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = AdminQuery::new(db.clone(), self.base_url.clone());
+            let mut query = AttachmentQuery::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -909,11 +923,11 @@ impl<'db> AdminQuery<'db> {
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(AdminCol::CreatedAt, OrderDir::Desc)
+        self.order_by(AttachmentCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(AdminCol::CreatedAt, OrderDir::Asc)
+        self.order_by(AttachmentCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -924,7 +938,7 @@ impl<'db> AdminQuery<'db> {
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<AdminView> {
+    pub async fn sole(self) -> Result<AttachmentView> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -943,7 +957,7 @@ impl<'db> AdminQuery<'db> {
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&AdminView) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&AttachmentView) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -951,17 +965,17 @@ impl<'db> AdminQuery<'db> {
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: AdminCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: AttachmentCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
             }
         }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -976,17 +990,17 @@ impl<'db> AdminQuery<'db> {
         Ok(result)
     }
 
-    pub async fn avg(self, col: AdminCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: AttachmentCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
             }
         }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1001,17 +1015,17 @@ impl<'db> AdminQuery<'db> {
         Ok(result)
     }
 
-    pub async fn min_val(self, col: AdminCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: AttachmentCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
             }
         }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1026,17 +1040,17 @@ impl<'db> AdminQuery<'db> {
         Ok(result)
     }
 
-    pub async fn max_val(self, col: AdminCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: AttachmentCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
             }
         }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1051,16 +1065,16 @@ impl<'db> AdminQuery<'db> {
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<AdminView>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<AttachmentView>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , with_deleted, only_deleted, .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
             }
         }
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -1068,7 +1082,7 @@ impl<'db> AdminQuery<'db> {
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1096,11 +1110,11 @@ impl<'db> AdminQuery<'db> {
         sql.push_str(&format!(" OFFSET {}", offset_val));
         sql.push_str(&format!(" LIMIT {}", per_page));
         if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut q = sqlx::query_as::<_, AdminRow>(&sql);
+        let mut q = sqlx::query_as::<_, AttachmentRow>(&sql);
         for b in binds.iter().cloned() { q = bind(q, b); }
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
-        let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
+        let ids: Vec<uuid::Uuid> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
@@ -1113,9 +1127,9 @@ impl<'db> AdminQuery<'db> {
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
             }
         }
         (where_sql, binds)
@@ -1129,12 +1143,12 @@ impl<'db> AdminQuery<'db> {
         if HAS_SOFT_DELETE {
             let mut where_sql = where_sql;
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
             }
             let idx = binds.len() + 1;
-            let mut sql = format!("UPDATE admin SET {} = ${}", AdminCol::DeletedAt.as_sql(), idx);
+            let mut sql = format!("UPDATE attachments SET {} = ${}", AttachmentCol::DeletedAt.as_sql(), idx);
             if !where_sql.is_empty() {
                 sql.push_str(" WHERE ");
                 sql.push_str(&where_sql.join(" AND "));
@@ -1145,7 +1159,7 @@ impl<'db> AdminQuery<'db> {
             let res = db.execute(q).await?;
             return Ok(res.rows_affected());
         }
-        let mut sql = String::from("DELETE FROM admin");
+        let mut sql = String::from("DELETE FROM attachments");
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&where_sql.join(" AND "));
@@ -1164,9 +1178,9 @@ impl<'db> AdminQuery<'db> {
         if where_sql.is_empty() { anyhow::bail!("restore(): no conditions set"); }
         let mut where_sql = where_sql;
         if !with_deleted && !only_deleted {
-            where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+            where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
         }
-        let mut sql = format!("UPDATE admin SET {} = NULL", AdminCol::DeletedAt.as_sql());
+        let mut sql = format!("UPDATE attachments SET {} = NULL", AttachmentCol::DeletedAt.as_sql());
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&where_sql.join(" AND "));
@@ -1179,12 +1193,12 @@ impl<'db> AdminQuery<'db> {
 }
 
 #[doc(hidden)]
-pub struct AdminUnsafeQuery<'db> {
-    inner: AdminQuery<'db>,
+pub struct AttachmentUnsafeQuery<'db> {
+    inner: AttachmentQuery<'db>,
 }
 
-impl<'db> AdminUnsafeQuery<'db> {
-    fn new(inner: AdminQuery<'db>) -> Self { Self { inner } }
+impl<'db> AttachmentUnsafeQuery<'db> {
+    fn new(inner: AttachmentQuery<'db>) -> Self { Self { inner } }
     pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
     pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
     pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
@@ -1196,19 +1210,19 @@ impl<'db> AdminUnsafeQuery<'db> {
     pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
     pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
     pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> AdminQuery<'db> { self.inner }
+    pub fn done(self) -> AttachmentQuery<'db> { self.inner }
 }
 
-pub struct AdminInsert<'db> {
+pub struct AttachmentInsert<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<AdminCol>,
+    cols: Vec<AttachmentCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<AdminCol>,
+    conflict_cols: Vec<AttachmentCol>,
 }
 
-impl<'db> AdminInsert<'db> {
+impl<'db> AttachmentInsert<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1219,78 +1233,77 @@ impl<'db> AdminInsert<'db> {
             conflict_cols: vec![],
         }
     }
-    pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(AdminCol::Id);
+    pub fn set_id(mut self, val: uuid::Uuid) -> Self {
+        self.cols.push(AttachmentCol::Id);
         self.binds.push(val.into());
         self
     }
-    pub fn set_username(mut self, val: String) -> Self {
-        self.cols.push(AdminCol::Username);
+    pub fn set_owner_type(mut self, val: String) -> Self {
+        self.cols.push(AttachmentCol::OwnerType);
         self.binds.push(val.into());
         self
     }
-    pub fn set_email(mut self, val: Option<String>) -> Self {
-        self.cols.push(AdminCol::Email);
+    pub fn set_owner_id(mut self, val: i64) -> Self {
+        self.cols.push(AttachmentCol::OwnerId);
         self.binds.push(val.into());
         self
     }
-    pub fn set_locale(mut self, val: Option<String>) -> Self {
-        self.cols.push(AdminCol::Locale);
+    pub fn set_field(mut self, val: String) -> Self {
+        self.cols.push(AttachmentCol::Field);
         self.binds.push(val.into());
         self
     }
-    pub fn set_password(mut self, val: &str) -> anyhow::Result<Self> {
-        let hashed = core_db::common::auth::hash::hash_password(val)?;
-        self.cols.push(AdminCol::Password);
-        self.binds.push(hashed.into());
-        Ok(self)
-    }
-    pub fn set_password_raw(mut self, val: String) -> Self {
-        self.cols.push(AdminCol::Password);
+    pub fn set_path(mut self, val: String) -> Self {
+        self.cols.push(AttachmentCol::Path);
         self.binds.push(val.into());
         self
     }
-    pub fn set_name(mut self, val: String) -> Self {
-        self.cols.push(AdminCol::Name);
+    pub fn set_content_type(mut self, val: String) -> Self {
+        self.cols.push(AttachmentCol::ContentType);
         self.binds.push(val.into());
         self
     }
-    pub fn set_admin_type(mut self, val: AdminType) -> Self {
-        self.cols.push(AdminCol::AdminType);
+    pub fn set_size(mut self, val: i64) -> Self {
+        self.cols.push(AttachmentCol::Size);
         self.binds.push(val.into());
         self
     }
-    pub fn set_abilities(mut self, val: serde_json::Value) -> Self {
-        self.cols.push(AdminCol::Abilities);
+    pub fn set_width(mut self, val: Option<i32>) -> Self {
+        self.cols.push(AttachmentCol::Width);
+        self.binds.push(val.into());
+        self
+    }
+    pub fn set_height(mut self, val: Option<i32>) -> Self {
+        self.cols.push(AttachmentCol::Height);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AdminCol::CreatedAt);
+        self.cols.push(AttachmentCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AdminCol::UpdatedAt);
+        self.cols.push(AttachmentCol::UpdatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.cols.push(AdminCol::DeletedAt);
+        self.cols.push(AttachmentCol::DeletedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[AdminCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[AttachmentCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[AdminCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[AttachmentCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub async fn save(self) -> Result<AdminView> {
+    pub async fn save(self) -> Result<AttachmentView> {
         let db_conn = self.db.clone();
         match db_conn {
             DbConn::Pool(pool) => {
@@ -1310,21 +1323,17 @@ impl<'db> AdminInsert<'db> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<AdminView> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<AttachmentView> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, AdminCol::Id)) {
-            cols.push(AdminCol::Id);
-            binds.push(generate_snowflake_i64().into());
-        }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, AttachmentCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AdminCol::CreatedAt);
+            cols.push(AttachmentCol::CreatedAt);
             binds.push(now.into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AttachmentCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AdminCol::UpdatedAt);
+            cols.push(AttachmentCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1332,7 +1341,7 @@ impl<'db> AdminInsert<'db> {
         }
         let col_sql: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         let placeholders: Vec<String> = (1..=binds.len()).map(|i| format!("${}", i)).collect();
-        let mut sql = format!("INSERT INTO {} ({}) VALUES ({})", "admin", col_sql.join(", "), placeholders.join(", "));
+        let mut sql = format!("INSERT INTO {} ({}) VALUES ({})", "attachments", col_sql.join(", "), placeholders.join(", "));
         if let Some(action) = self.conflict_action {
             if !self.conflict_cols.is_empty() {
                 let conflict_col_sql: Vec<&'static str> = self.conflict_cols.iter().map(|c| c.as_sql()).collect();
@@ -1349,7 +1358,7 @@ impl<'db> AdminInsert<'db> {
             }
         }
         sql.push_str(" RETURNING *");
-        let mut q = sqlx::query_as::<_, AdminRow>(&sql);
+        let mut q = sqlx::query_as::<_, AttachmentRow>(&sql);
         for b in binds {
             q = bind(q, b);
         }
@@ -1358,15 +1367,15 @@ impl<'db> AdminInsert<'db> {
         Ok(hydrate_view(row, &LocalizedMap::default(), self.base_url.as_deref()))
     }
 }
-pub struct AdminUpdate<'db> {
+pub struct AttachmentUpdate<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(AdminCol, BindValue)>,
+    sets: Vec<(AttachmentCol, BindValue)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> AdminUpdate<'db> {
+impl<'db> AttachmentUpdate<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1376,123 +1385,128 @@ impl<'db> AdminUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> AdminUnsafeUpdate<'db> { AdminUnsafeUpdate::new(self) }
-    pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((AdminCol::Id , val.into()));
+    pub fn unsafe_sql(self) -> AttachmentUnsafeUpdate<'db> { AttachmentUnsafeUpdate::new(self) }
+    pub fn set_id(mut self, val: uuid::Uuid) -> Self {
+        self.sets.push((AttachmentCol::Id , val.into()));
         self
     }
-    pub fn set_username(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Username , val.into()));
+    pub fn set_owner_type(mut self, val: String) -> Self {
+        self.sets.push((AttachmentCol::OwnerType , val.into()));
         self
     }
-    pub fn set_email(mut self, val: Option<String>) -> Self {
-        self.sets.push((AdminCol::Email , val.into()));
+    pub fn set_owner_id(mut self, val: i64) -> Self {
+        self.sets.push((AttachmentCol::OwnerId , val.into()));
         self
     }
-    pub fn set_locale(mut self, val: Option<String>) -> Self {
-        self.sets.push((AdminCol::Locale , val.into()));
+    pub fn set_field(mut self, val: String) -> Self {
+        self.sets.push((AttachmentCol::Field , val.into()));
         self
     }
-    pub fn set_password(mut self, val: &str) -> anyhow::Result<Self> {
-        let hashed = core_db::common::auth::hash::hash_password(val)?;
-        self.sets.push((AdminCol::Password , hashed.into()));
-        Ok(self)
-    }
-    pub fn set_password_raw(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Password , val.into()));
+    pub fn set_path(mut self, val: String) -> Self {
+        self.sets.push((AttachmentCol::Path , val.into()));
         self
     }
-    pub fn set_name(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Name , val.into()));
+    pub fn set_content_type(mut self, val: String) -> Self {
+        self.sets.push((AttachmentCol::ContentType , val.into()));
         self
     }
-    pub fn set_admin_type(mut self, val: AdminType) -> Self {
-        self.sets.push((AdminCol::AdminType , val.into()));
+    pub fn set_size(mut self, val: i64) -> Self {
+        self.sets.push((AttachmentCol::Size , val.into()));
         self
     }
-    pub fn set_abilities(mut self, val: serde_json::Value) -> Self {
-        self.sets.push((AdminCol::Abilities , val.into()));
+    pub fn set_width(mut self, val: Option<i32>) -> Self {
+        self.sets.push((AttachmentCol::Width , val.into()));
+        self
+    }
+    pub fn set_height(mut self, val: Option<i32>) -> Self {
+        self.sets.push((AttachmentCol::Height , val.into()));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AdminCol::CreatedAt , val.into()));
+        self.sets.push((AttachmentCol::CreatedAt , val.into()));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AdminCol::UpdatedAt , val.into()));
+        self.sets.push((AttachmentCol::UpdatedAt , val.into()));
         self
     }
     pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((AdminCol::DeletedAt , val.into()));
+        self.sets.push((AttachmentCol::DeletedAt , val.into()));
         self
     }
-    pub fn where_id(mut self, op: Op, val: i64) -> Self {
+    pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_username(mut self, op: Op, val: String) -> Self {
+    pub fn where_owner_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_email(mut self, op: Op, val: Option<String>) -> Self {
+    pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_locale(mut self, op: Op, val: Option<String>) -> Self {
+    pub fn where_field(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Field.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_password(mut self, op: Op, val: String) -> Self {
+    pub fn where_path(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Password.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Path.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_name(mut self, op: Op, val: String) -> Self {
+    pub fn where_content_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::ContentType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_admin_type(mut self, op: Op, val: AdminType) -> Self {
+    pub fn where_size(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::AdminType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Size.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_abilities(mut self, op: Op, val: serde_json::Value) -> Self {
+    pub fn where_width(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Width.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_height(mut self, op: Op, val: Option<i32>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Height.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AdminCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: AttachmentCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1535,13 +1549,13 @@ impl<'db> AdminUpdate<'db> {
 
     async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<u64> {
         let (mut cols, mut set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AttachmentCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AdminCol::UpdatedAt);
+            cols.push(AttachmentCol::UpdatedAt);
             set_binds.push(now.into());
         }
         // find target ids for localized updates
-        let select_sql = format!("SELECT id FROM admin WHERE {}", self.where_sql.join(" AND "));
+        let select_sql = format!("SELECT id FROM attachments WHERE {}", self.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
         for b in &self.binds { select_q = bind_scalar(select_q, b.clone()); }
         let target_ids = db.fetch_all_scalar(select_q).await?;
@@ -1557,7 +1571,7 @@ impl<'db> AdminUpdate<'db> {
             renumbered.push(renumber_placeholders(&clause, offset + 1));
         }
         where_sql = renumbered;
-        let mut sql = String::from("UPDATE admin SET ");
+        let mut sql = String::from("UPDATE attachments SET ");
         sql.push_str(&parts.join(", "));
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
@@ -1571,30 +1585,31 @@ impl<'db> AdminUpdate<'db> {
     }
 }
 #[doc(hidden)]
-pub struct AdminUnsafeUpdate<'db> {
-    inner: AdminUpdate<'db>,
+pub struct AttachmentUnsafeUpdate<'db> {
+    inner: AttachmentUpdate<'db>,
 }
 
-impl<'db> AdminUnsafeUpdate<'db> {
-    fn new(inner: AdminUpdate<'db>) -> Self { Self { inner } }
+impl<'db> AttachmentUnsafeUpdate<'db> {
+    fn new(inner: AttachmentUpdate<'db>) -> Self { Self { inner } }
     pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> AdminUpdate<'db> { self.inner }
+    pub fn done(self) -> AttachmentUpdate<'db> { self.inner }
 }
-pub struct AdminTableAdapter;
-impl AdminTableAdapter {
-    fn parse_col(name: &str) -> Option<AdminCol> {
+pub struct AttachmentTableAdapter;
+impl AttachmentTableAdapter {
+    fn parse_col(name: &str) -> Option<AttachmentCol> {
         match name {
-            "id" => Some(AdminCol::Id),
-            "username" => Some(AdminCol::Username),
-            "email" => Some(AdminCol::Email),
-            "locale" => Some(AdminCol::Locale),
-            "password" => Some(AdminCol::Password),
-            "name" => Some(AdminCol::Name),
-            "admin_type" => Some(AdminCol::AdminType),
-            "abilities" => Some(AdminCol::Abilities),
-            "created_at" => Some(AdminCol::CreatedAt),
-            "updated_at" => Some(AdminCol::UpdatedAt),
-            "deleted_at" => Some(AdminCol::DeletedAt),
+            "id" => Some(AttachmentCol::Id),
+            "owner_type" => Some(AttachmentCol::OwnerType),
+            "owner_id" => Some(AttachmentCol::OwnerId),
+            "field" => Some(AttachmentCol::Field),
+            "path" => Some(AttachmentCol::Path),
+            "content_type" => Some(AttachmentCol::ContentType),
+            "size" => Some(AttachmentCol::Size),
+            "width" => Some(AttachmentCol::Width),
+            "height" => Some(AttachmentCol::Height),
+            "created_at" => Some(AttachmentCol::CreatedAt),
+            "updated_at" => Some(AttachmentCol::UpdatedAt),
+            "deleted_at" => Some(AttachmentCol::DeletedAt),
             _ => None,
         }
     }
@@ -1608,26 +1623,26 @@ impl AdminTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<AdminCol> {
+    fn parse_like_col(name: &str) -> Option<AttachmentCol> {
         match name {
-            "username" => Some(AdminCol::Username),
-            "email" => Some(AdminCol::Email),
-            "locale" => Some(AdminCol::Locale),
-            "password" => Some(AdminCol::Password),
-            "name" => Some(AdminCol::Name),
+            "owner_type" => Some(AttachmentCol::OwnerType),
+            "field" => Some(AttachmentCol::Field),
+            "path" => Some(AttachmentCol::Path),
+            "content_type" => Some(AttachmentCol::ContentType),
             _ => None,
         }
     }
     fn parse_bind_for_col(name: &str, raw: &str) -> Option<BindValue> {
         match name {
-            "id" => raw.trim().parse::<i64>().ok().map(Into::into),
-            "username" => Some(raw.trim().to_string().into()),
-            "email" => Some(Self::parse_bind(raw.trim())),
-            "locale" => Some(Self::parse_bind(raw.trim())),
-            "password" => Some(raw.trim().to_string().into()),
-            "name" => Some(raw.trim().to_string().into()),
-            "admin_type" => Some(Self::parse_bind(raw.trim())),
-            "abilities" => Some(Self::parse_bind(raw.trim())),
+            "id" => uuid::Uuid::parse_str(raw.trim()).ok().map(Into::into),
+            "owner_type" => Some(raw.trim().to_string().into()),
+            "owner_id" => raw.trim().parse::<i64>().ok().map(Into::into),
+            "field" => Some(raw.trim().to_string().into()),
+            "path" => Some(raw.trim().to_string().into()),
+            "content_type" => Some(raw.trim().to_string().into()),
+            "size" => raw.trim().parse::<i64>().ok().map(Into::into),
+            "width" => Some(Self::parse_bind(raw.trim())),
+            "height" => Some(Self::parse_bind(raw.trim())),
             "created_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             "updated_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             "deleted_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
@@ -1659,22 +1674,23 @@ impl AdminTableAdapter {
         None
     }
 }
-impl GeneratedTableAdapter for AdminTableAdapter {
-    type Query<'db> = AdminQuery<'db>;
-    type Row = AdminView;
-    fn model_key(&self) -> &'static str { "Admin" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "username", "email", "locale", "password", "name", "admin_type", "created_at", "updated_at", "deleted_at"] }
+impl GeneratedTableAdapter for AttachmentTableAdapter {
+    type Query<'db> = AttachmentQuery<'db>;
+    type Row = AttachmentView;
+    fn model_key(&self) -> &'static str { "Attachment" }
+    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "owner_type", "owner_id", "field", "path", "content_type", "size", "width", "height", "created_at", "updated_at", "deleted_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at", "deleted_at"] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
         &[
-            DataTableColumnDescriptor { name: "id", label: "ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "username", label: "Username", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "email", label: "Email", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "locale", label: "Locale", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "password", label: "Password", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "name", label: "Name", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "admin_type", label: "Admin Type", data_type: "AdminType", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "abilities", label: "Abilities", data_type: "serde_json::Value", sortable: false, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "id", label: "ID", data_type: "uuid::Uuid", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "owner_type", label: "Owner Type", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "owner_id", label: "Owner ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "field", label: "Field", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "path", label: "Path", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "content_type", label: "Content Type", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "size", label: "Size", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "width", label: "Width", data_type: "Option<i32>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "height", label: "Height", data_type: "Option<i32>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "created_at", label: "Created At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
             DataTableColumnDescriptor { name: "updated_at", label: "Updated At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
             DataTableColumnDescriptor { name: "deleted_at", label: "Deleted At", data_type: "Option<time::OffsetDateTime>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
@@ -1698,7 +1714,7 @@ impl GeneratedTableAdapter for AdminTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: AdminQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<AdminQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: AttachmentQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<AttachmentQuery<'db>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -1792,53 +1808,57 @@ impl GeneratedTableAdapter for AdminTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: AdminQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<AdminQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: AttachmentQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<AttachmentQuery<'db>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(AdminCol::Id, dir),
-            "username" => query.order_by(AdminCol::Username, dir),
-            "email" => query.order_by(AdminCol::Email, dir),
-            "locale" => query.order_by(AdminCol::Locale, dir),
-            "password" => query.order_by(AdminCol::Password, dir),
-            "name" => query.order_by(AdminCol::Name, dir),
-            "admin_type" => query.order_by(AdminCol::AdminType, dir),
-            "abilities" => query.order_by(AdminCol::Abilities, dir),
-            "created_at" => query.order_by(AdminCol::CreatedAt, dir),
-            "updated_at" => query.order_by(AdminCol::UpdatedAt, dir),
-            "deleted_at" => query.order_by(AdminCol::DeletedAt, dir),
+            "id" => query.order_by(AttachmentCol::Id, dir),
+            "owner_type" => query.order_by(AttachmentCol::OwnerType, dir),
+            "owner_id" => query.order_by(AttachmentCol::OwnerId, dir),
+            "field" => query.order_by(AttachmentCol::Field, dir),
+            "path" => query.order_by(AttachmentCol::Path, dir),
+            "content_type" => query.order_by(AttachmentCol::ContentType, dir),
+            "size" => query.order_by(AttachmentCol::Size, dir),
+            "width" => query.order_by(AttachmentCol::Width, dir),
+            "height" => query.order_by(AttachmentCol::Height, dir),
+            "created_at" => query.order_by(AttachmentCol::CreatedAt, dir),
+            "updated_at" => query.order_by(AttachmentCol::UpdatedAt, dir),
+            "deleted_at" => query.order_by(AttachmentCol::DeletedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: AdminQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<AdminQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: AttachmentQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<AttachmentQuery<'db>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &AdminView, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &AttachmentView, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
-            "username" => Some(row.username.clone()),
-            "email" => row.email.as_ref().map(|v| v.to_string()),
-            "locale" => row.locale.as_ref().map(|v| v.to_string()),
-            "password" => Some(row.password.clone()),
-            "name" => Some(row.name.clone()),
+            "owner_type" => Some(row.owner_type.clone()),
+            "owner_id" => Some(row.owner_id.to_string()),
+            "field" => Some(row.field.clone()),
+            "path" => Some(row.path.clone()),
+            "content_type" => Some(row.content_type.clone()),
+            "size" => Some(row.size.to_string()),
+            "width" => row.width.as_ref().map(|v| v.to_string()),
+            "height" => row.height.as_ref().map(|v| v.to_string()),
             "created_at" => row.created_at.format(&time::format_description::well_known::Rfc3339).ok(),
             "updated_at" => row.updated_at.format(&time::format_description::well_known::Rfc3339).ok(),
             "deleted_at" => row.deleted_at.as_ref().and_then(|v| v.format(&time::format_description::well_known::Rfc3339).ok()),
             _ => None,
         }
     }
-    fn count<'db>(&self, query: AdminQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: AttachmentQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: AdminQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<AdminView>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: AttachmentQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<AttachmentView>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
 #[derive(Debug, Clone, Copy)]
-pub struct AdminDataTableConfig {
+pub struct AttachmentDataTableConfig {
     pub default_sorting_column: &'static str,
     pub default_sorted: SortDirection,
     pub default_export_ignore_columns: &'static [&'static str],
@@ -1846,7 +1866,7 @@ pub struct AdminDataTableConfig {
     pub default_unsortable: &'static [&'static str],
     pub default_row_per_page: Option<i64>,
 }
-impl Default for AdminDataTableConfig {
+impl Default for AttachmentDataTableConfig {
     fn default() -> Self {
         Self {
             default_sorting_column: "id",
@@ -1858,75 +1878,67 @@ impl Default for AdminDataTableConfig {
         }
     }
 }
-pub trait AdminDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> AdminQuery<'db> { query }
+pub trait AttachmentDataTableHooks: Send + Sync + 'static {
+    fn scope<'db>(&'db self, query: AttachmentQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> AttachmentQuery<'db> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: AdminQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<AdminQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<AdminQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut AdminView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: AdminView) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn filter_query<'db>(&'db self, _query: AttachmentQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<AttachmentQuery<'db>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: AttachmentQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<AttachmentQuery<'db>> { Ok(query) }
+    fn map_row(&self, _row: &mut AttachmentView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: AttachmentView) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         let value = serde_json::to_value(row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
-        if let Some(id_value) = record.get("id").cloned() {
-            let id_text = match id_value {
-                serde_json::Value::Number(number) => number.to_string(),
-                serde_json::Value::String(text) => text,
-                other => other.to_string(),
-            };
-            record.insert("id".to_string(), serde_json::Value::String(id_text));
-        }
         Ok(record)
     }
-    fn row_to_record(&self, row: AdminView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: AttachmentView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: AttachmentQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
-pub struct AdminDefaultDataTableHooks;
-impl AdminDataTableHooks for AdminDefaultDataTableHooks {}
-pub struct AdminDataTable<H = AdminDefaultDataTableHooks> where H: AdminDataTableHooks {
+pub struct AttachmentDefaultDataTableHooks;
+impl AttachmentDataTableHooks for AttachmentDefaultDataTableHooks {}
+pub struct AttachmentDataTable<H = AttachmentDefaultDataTableHooks> where H: AttachmentDataTableHooks {
     pub db: sqlx::PgPool,
     pub hooks: H,
-    pub config: AdminDataTableConfig,
-    adapter: AdminTableAdapter,
+    pub config: AttachmentDataTableConfig,
+    adapter: AttachmentTableAdapter,
 }
-impl AdminDataTable<AdminDefaultDataTableHooks> {
+impl AttachmentDataTable<AttachmentDefaultDataTableHooks> {
     pub fn new(db: sqlx::PgPool) -> Self {
         Self {
             db,
-            hooks: AdminDefaultDataTableHooks,
-            config: AdminDataTableConfig::default(),
-            adapter: AdminTableAdapter,
+            hooks: AttachmentDefaultDataTableHooks,
+            config: AttachmentDataTableConfig::default(),
+            adapter: AttachmentTableAdapter,
         }
     }
 }
-impl<H: AdminDataTableHooks> AdminDataTable<H> {
-    pub fn with_hooks<NH: AdminDataTableHooks>(self, hooks: NH) -> AdminDataTable<NH> {
-        AdminDataTable {
+impl<H: AttachmentDataTableHooks> AttachmentDataTable<H> {
+    pub fn with_hooks<NH: AttachmentDataTableHooks>(self, hooks: NH) -> AttachmentDataTable<NH> {
+        AttachmentDataTable {
             db: self.db,
             hooks,
             config: self.config,
-            adapter: AdminTableAdapter,
+            adapter: AttachmentTableAdapter,
         }
     }
-    pub fn with_config(mut self, config: AdminDataTableConfig) -> Self {
+    pub fn with_config(mut self, config: AttachmentDataTableConfig) -> Self {
         self.config = config;
         self
     }
 }
-impl<H: AdminDataTableHooks> AutoDataTable for AdminDataTable<H> {
-    type Adapter = AdminTableAdapter;
+impl<H: AttachmentDataTableHooks> AutoDataTable for AttachmentDataTable<H> {
+    type Adapter = AttachmentTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> AdminQuery<'db> {
-        self.hooks.scope(Admin::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> AttachmentQuery<'db> {
+        self.hooks.scope(Attachment::new(&self.db, None).query(), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: AdminQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<AdminQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: AdminQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<AdminQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut AdminView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: AdminView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: AdminQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: AttachmentQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<AttachmentQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: AttachmentQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<AttachmentQuery<'db>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut AttachmentView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: AttachmentView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: AttachmentQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -1937,9 +1949,9 @@ impl<H: AdminDataTableHooks> AutoDataTable for AdminDataTable<H> {
 
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for AdminView {
-    type Id = i64;
+impl ActiveRecord for AttachmentView {
+    type Id = uuid::Uuid;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Admin::new(db, None).find(id).await.map_err(|e| e.into())
+        Attachment::new(db, None).find(id).await.map_err(|e| e.into())
     }
 }

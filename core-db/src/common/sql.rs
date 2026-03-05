@@ -52,16 +52,25 @@ impl OrderDir {
 #[derive(Debug, Clone)]
 pub enum BindValue {
     I16(i16),
+    I16Opt(Option<i16>),
     I32(i32),
+    I32Opt(Option<i32>),
     I64(i64),
+    I64Opt(Option<i64>),
     F64(f64),
+    F64Opt(Option<f64>),
     Bool(bool),
+    BoolOpt(Option<bool>),
     String(String),
     StringOpt(Option<String>),
+    StringArray(Vec<String>),
+    StringArrayOpt(Option<Vec<String>>),
     Time(OffsetDateTime),
     TimeOpt(Option<OffsetDateTime>),
     Uuid(Uuid),
+    UuidOpt(Option<Uuid>),
     Json(Value),
+    JsonOpt(Option<Value>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,9 +228,21 @@ impl From<i16> for BindValue {
     }
 }
 
+impl From<Option<i16>> for BindValue {
+    fn from(v: Option<i16>) -> Self {
+        BindValue::I16Opt(v)
+    }
+}
+
 impl From<i32> for BindValue {
     fn from(v: i32) -> Self {
         BindValue::I32(v)
+    }
+}
+
+impl From<Option<i32>> for BindValue {
+    fn from(v: Option<i32>) -> Self {
+        BindValue::I32Opt(v)
     }
 }
 
@@ -231,15 +252,33 @@ impl From<i64> for BindValue {
     }
 }
 
+impl From<Option<i64>> for BindValue {
+    fn from(v: Option<i64>) -> Self {
+        BindValue::I64Opt(v)
+    }
+}
+
 impl From<f64> for BindValue {
     fn from(v: f64) -> Self {
         BindValue::F64(v)
     }
 }
 
+impl From<Option<f64>> for BindValue {
+    fn from(v: Option<f64>) -> Self {
+        BindValue::F64Opt(v)
+    }
+}
+
 impl From<bool> for BindValue {
     fn from(v: bool) -> Self {
         BindValue::Bool(v)
+    }
+}
+
+impl From<Option<bool>> for BindValue {
+    fn from(v: Option<bool>) -> Self {
+        BindValue::BoolOpt(v)
     }
 }
 
@@ -261,6 +300,18 @@ impl From<&str> for BindValue {
     }
 }
 
+impl From<Vec<String>> for BindValue {
+    fn from(v: Vec<String>) -> Self {
+        BindValue::StringArray(v)
+    }
+}
+
+impl From<Option<Vec<String>>> for BindValue {
+    fn from(v: Option<Vec<String>>) -> Self {
+        BindValue::StringArrayOpt(v)
+    }
+}
+
 impl From<OffsetDateTime> for BindValue {
     fn from(v: OffsetDateTime) -> Self {
         BindValue::Time(v)
@@ -276,6 +327,12 @@ impl From<Option<OffsetDateTime>> for BindValue {
 impl From<Value> for BindValue {
     fn from(v: Value) -> Self {
         BindValue::Json(v)
+    }
+}
+
+impl From<Option<Value>> for BindValue {
+    fn from(v: Option<Value>) -> Self {
+        BindValue::JsonOpt(v)
     }
 }
 
@@ -386,6 +443,12 @@ impl From<Uuid> for BindValue {
     }
 }
 
+impl From<Option<Uuid>> for BindValue {
+    fn from(v: Option<Uuid>) -> Self {
+        BindValue::UuidOpt(v)
+    }
+}
+
 pub type PgQueryAs<'q, T> =
     sqlx::query::QueryAs<'q, sqlx::Postgres, T, sqlx::postgres::PgArguments>;
 pub type PgQuery<'q> = sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>;
@@ -420,7 +483,7 @@ impl<'a> DbConn<'a> {
         DbConn::Tx(tx)
     }
 
-    pub async fn begin_scope(&'a self) -> Result<DbTxnScope<'a>, sqlx::Error> {
+    pub async fn begin_scope(&self) -> Result<DbTxnScope<'a>, sqlx::Error> {
         match self {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
@@ -524,7 +587,7 @@ impl<'a> DbConn<'a> {
 }
 
 impl<'a> DbTxnScope<'a> {
-    pub fn conn(&'a self) -> DbConn<'a> {
+    pub fn conn(&self) -> DbConn<'a> {
         match self {
             DbTxnScope::Reused(conn) => conn.clone(),
             DbTxnScope::Owned(tx) => DbConn::tx(tx.clone()),
@@ -561,48 +624,75 @@ impl<'a> DbTxnScope<'a> {
 pub fn bind<'q, T>(q: PgQueryAs<'q, T>, value: BindValue) -> PgQueryAs<'q, T> {
     match value {
         BindValue::I16(v) => q.bind(v),
+        BindValue::I16Opt(v) => q.bind(v),
         BindValue::I32(v) => q.bind(v),
+        BindValue::I32Opt(v) => q.bind(v),
         BindValue::I64(v) => q.bind(v),
+        BindValue::I64Opt(v) => q.bind(v),
         BindValue::F64(v) => q.bind(v),
+        BindValue::F64Opt(v) => q.bind(v),
         BindValue::Bool(v) => q.bind(v),
+        BindValue::BoolOpt(v) => q.bind(v),
         BindValue::String(v) => q.bind(v),
         BindValue::StringOpt(v) => q.bind(v),
+        BindValue::StringArray(v) => q.bind(v),
+        BindValue::StringArrayOpt(v) => q.bind(v),
         BindValue::Time(v) => q.bind(v),
         BindValue::TimeOpt(v) => q.bind(v),
         BindValue::Uuid(v) => q.bind(v),
+        BindValue::UuidOpt(v) => q.bind(v),
         BindValue::Json(v) => q.bind(sqlx::types::Json(v)),
+        BindValue::JsonOpt(v) => q.bind(v.map(sqlx::types::Json)),
     }
 }
 
 pub fn bind_query<'q>(q: PgQuery<'q>, value: BindValue) -> PgQuery<'q> {
     match value {
         BindValue::I16(v) => q.bind(v),
+        BindValue::I16Opt(v) => q.bind(v),
         BindValue::I32(v) => q.bind(v),
+        BindValue::I32Opt(v) => q.bind(v),
         BindValue::I64(v) => q.bind(v),
+        BindValue::I64Opt(v) => q.bind(v),
         BindValue::F64(v) => q.bind(v),
+        BindValue::F64Opt(v) => q.bind(v),
         BindValue::Bool(v) => q.bind(v),
+        BindValue::BoolOpt(v) => q.bind(v),
         BindValue::String(v) => q.bind(v),
         BindValue::StringOpt(v) => q.bind(v),
+        BindValue::StringArray(v) => q.bind(v),
+        BindValue::StringArrayOpt(v) => q.bind(v),
         BindValue::Time(v) => q.bind(v),
         BindValue::TimeOpt(v) => q.bind(v),
         BindValue::Uuid(v) => q.bind(v),
+        BindValue::UuidOpt(v) => q.bind(v),
         BindValue::Json(v) => q.bind(sqlx::types::Json(v)),
+        BindValue::JsonOpt(v) => q.bind(v.map(sqlx::types::Json)),
     }
 }
 
 pub fn bind_scalar<'q, T>(q: PgQueryScalar<'q, T>, value: BindValue) -> PgQueryScalar<'q, T> {
     match value {
         BindValue::I16(v) => q.bind(v),
+        BindValue::I16Opt(v) => q.bind(v),
         BindValue::I32(v) => q.bind(v),
+        BindValue::I32Opt(v) => q.bind(v),
         BindValue::I64(v) => q.bind(v),
+        BindValue::I64Opt(v) => q.bind(v),
         BindValue::F64(v) => q.bind(v),
+        BindValue::F64Opt(v) => q.bind(v),
         BindValue::Bool(v) => q.bind(v),
+        BindValue::BoolOpt(v) => q.bind(v),
         BindValue::String(v) => q.bind(v),
         BindValue::StringOpt(v) => q.bind(v),
+        BindValue::StringArray(v) => q.bind(v),
+        BindValue::StringArrayOpt(v) => q.bind(v),
         BindValue::Time(v) => q.bind(v),
         BindValue::TimeOpt(v) => q.bind(v),
         BindValue::Uuid(v) => q.bind(v),
+        BindValue::UuidOpt(v) => q.bind(v),
         BindValue::Json(v) => q.bind(sqlx::types::Json(v)),
+        BindValue::JsonOpt(v) => q.bind(v.map(sqlx::types::Json)),
     }
 }
 

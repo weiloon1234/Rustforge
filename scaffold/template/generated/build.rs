@@ -13,8 +13,8 @@ fn main() {
     let (cfgs, _) =
         db_gen::config::load(configs_path.to_str().unwrap()).expect("Failed to load configs");
 
-    let schema =
-        db_gen::schema::load(schemas_dir.to_str().unwrap()).expect("Failed to load schemas");
+    let schema = db_gen::load_with_framework(schemas_dir.to_str().unwrap())
+        .expect("Failed to load layered schemas");
     let permissions = db_gen::load_permissions(permissions_path.to_str().unwrap())
         .expect("Failed to load permissions");
 
@@ -23,8 +23,6 @@ fn main() {
         std::fs::create_dir_all(&models_out).expect("Failed to create models out");
     }
     db_gen::generate_enums(&schema, &models_out).expect("Failed to gen enums");
-    ensure_schema_enum_ts_meta(&schema, &models_out.join("enums.rs"))
-        .expect("Failed to ensure schema enum ts meta");
     db_gen::generate_models(&schema, &cfgs, &models_out).expect("Failed to gen models");
     apply_updated_at_save_hotfix(&models_out).expect("Failed to patch generated model save hotfix");
 
@@ -54,105 +52,6 @@ fn main() {
     writeln!(f, "pub mod generated {{ pub use crate::*; }}").unwrap();
 }
 
-fn ensure_schema_enum_ts_meta(
-    schema: &db_gen::schema::Schema,
-    enums_file: &std::path::Path,
-) -> std::io::Result<()> {
-    let source = std::fs::read_to_string(enums_file)?;
-    if source.contains("SCHEMA_ENUM_TS_META") {
-        return Ok(());
-    }
-
-    use db_gen::schema::{EnumOrOther, EnumVariants};
-    use std::fmt::Write as _;
-
-    let mut out = source;
-    out.push('\n');
-    out.push_str("#[derive(Debug, Clone, Copy)]\n");
-    out.push_str("pub struct SchemaEnumTsMeta {\n");
-    out.push_str("    pub name: &'static str,\n");
-    out.push_str("    pub variants: &'static [&'static str],\n");
-    out.push_str("}\n\n");
-    out.push_str("pub const SCHEMA_ENUM_TS_META: &[SchemaEnumTsMeta] = &[\n");
-
-    for (name, section) in &schema.extra_sections {
-        let EnumOrOther::Enum(spec) = section else {
-            continue;
-        };
-        if spec.type_name != "enum" {
-            continue;
-        }
-
-        let variants: Vec<String> = match spec.storage.as_str() {
-            "string" | "text" => match &spec.variants {
-                EnumVariants::Simple(names) => {
-                    names.iter().map(|variant| variant.to_lowercase()).collect()
-                }
-                EnumVariants::Explicit(vars) => vars
-                    .iter()
-                    .map(|variant| {
-                        variant
-                            .value
-                            .as_str()
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "String enum '{}' variant '{}' must have string value",
-                                    name, variant.name
-                                )
-                            })
-                            .to_string()
-                    })
-                    .collect(),
-            },
-            "i16" | "i32" | "i64" => match &spec.variants {
-                EnumVariants::Explicit(vars) => vars
-                    .iter()
-                    .map(|variant| {
-                        variant
-                            .value
-                            .as_i64()
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "Integer enum '{}' variant '{}' must have integer value",
-                                    name, variant.name
-                                )
-                            })
-                            .to_string()
-                    })
-                    .collect(),
-                EnumVariants::Simple(_) => panic!(
-                    "Integer enum '{}' requires explicit values: variants = [{{name = \"Name\", value = 0}}]",
-                    name
-                ),
-            },
-            _ => panic!(
-                "Unsupported enum storage type for '{}': {}",
-                name, spec.storage
-            ),
-        };
-
-        let variants_literal = variants
-            .iter()
-            .map(|value| format!("\"{}\"", escape_rust_string(value)))
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        let _ = writeln!(
-            out,
-            "    SchemaEnumTsMeta {{ name: \"{}\", variants: &[{}] }},",
-            escape_rust_string(name),
-            variants_literal
-        );
-    }
-
-    out.push_str("];\n");
-    std::fs::write(enums_file, out)
-}
-
-fn escape_rust_string(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('\"', "\\\"")
-}
-
 fn apply_updated_at_save_hotfix(models_out: &std::path::Path) -> std::io::Result<()> {
     for entry in std::fs::read_dir(models_out)? {
         let entry = entry?;
@@ -170,27 +69,12 @@ fn apply_updated_at_save_hotfix(models_out: &std::path::Path) -> std::io::Result
             changed = true;
         }
 
-        if let Some(next) = patch_localized_repo_db_clone(&patched) {
-            patched = next;
-            changed = true;
-        }
-
         if changed {
             std::fs::write(&path, patched)?;
         }
     }
 
     Ok(())
-}
-
-fn patch_localized_repo_db_clone(source: &str) -> Option<String> {
-    const FROM: &str = "LocalizedRepo::new(db);";
-    const TO: &str = "LocalizedRepo::new(db.clone());";
-
-    if !source.contains(FROM) {
-        return None;
-    }
-    Some(source.replace(FROM, TO))
 }
 
 fn patch_model_updated_at_save(source: &str) -> Option<String> {

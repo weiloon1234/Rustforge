@@ -2,13 +2,16 @@ use core_datatable::{
     AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput,
     DataTableRegistry, GeneratedTableAdapter, SortDirection,
 };
+use core_db::{
+    common::sql::{DbConn, Op, OrderDir},
+    generated::models::{Country as CountryModel, CountryCol, CountryQuery, CountryStatus},
+};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
 use generated::permissions::Permission;
-use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use crate::contracts::datatable::admin::country::{
     AdminCountryDataTableContract, CountryDatatableRow, ROUTE_PREFIX, SCOPED_KEY,
@@ -95,9 +98,9 @@ const COUNTRY_COLUMN_DESCRIPTORS: [DataTableColumnDescriptor; 8] = [
 #[derive(Debug, Clone)]
 pub struct CountryQueryState {
     keyword: Option<String>,
-    status: Option<String>,
+    status: Option<CountryStatus>,
     region: Option<String>,
-    sorting_column: &'static str,
+    sorting_column: CountryCol,
     sorting: SortDirection,
 }
 
@@ -107,7 +110,7 @@ impl Default for CountryQueryState {
             keyword: None,
             status: None,
             region: None,
-            sorting_column: "name",
+            sorting_column: CountryCol::Name,
             sorting: SortDirection::Asc,
         }
     }
@@ -116,17 +119,6 @@ impl Default for CountryQueryState {
 #[derive(Debug, Clone)]
 pub struct CountryTableAdapter {
     db: sqlx::PgPool,
-}
-
-#[derive(Debug, Clone, FromRow)]
-struct CountryTableRow {
-    iso2: String,
-    iso3: String,
-    name: String,
-    region: Option<String>,
-    calling_code: Option<String>,
-    status: String,
-    updated_at: time::OffsetDateTime,
 }
 
 impl GeneratedTableAdapter for CountryTableAdapter {
@@ -179,10 +171,9 @@ impl GeneratedTableAdapter for CountryTableAdapter {
     {
         let db = self.db.clone();
         Box::pin(async move {
-            let mut builder = QueryBuilder::<Postgres>::new("SELECT COUNT(*) FROM countries");
-            push_where_clauses(&mut builder, &query);
-            let count = builder.build_query_scalar::<i64>().fetch_one(&db).await?;
-            Ok(count)
+            let base_query = CountryModel::new(DbConn::pool(&db), None).query();
+            let filtered_query = apply_country_filters(base_query, &query);
+            Ok(filtered_query.count().await?)
         })
     }
 
@@ -201,37 +192,14 @@ impl GeneratedTableAdapter for CountryTableAdapter {
             let safe_per_page = per_page.max(1);
             let offset = (safe_page - 1) * safe_per_page;
 
-            let mut builder = QueryBuilder::<Postgres>::new(
-                r#"
-                SELECT
-                    iso2,
-                    iso3,
-                    name,
-                    region,
-                    calling_code,
-                    status,
-                    updated_at
-                FROM countries
-                "#,
-            );
-            push_where_clauses(&mut builder, &query);
-            builder.push(" ORDER BY ");
-            builder.push(query.sorting_column);
-            builder.push(match query.sorting {
-                SortDirection::Asc => " ASC",
-                SortDirection::Desc => " DESC",
-            });
-            builder.push(", iso2 ASC");
-            builder.push(" LIMIT ");
-            builder.push_bind(safe_per_page);
-            builder.push(" OFFSET ");
-            builder.push_bind(offset);
+            let base_query = CountryModel::new(DbConn::pool(&db), None).query();
+            let filtered_query = apply_country_filters(base_query, &query)
+                .order_by(query.sorting_column, to_order_direction(query.sorting))
+                .order_by(CountryCol::Iso2, OrderDir::Asc)
+                .offset(offset)
+                .limit(safe_per_page);
 
-            let rows = builder
-                .build_query_as::<CountryTableRow>()
-                .fetch_all(&db)
-                .await?;
-
+            let rows = filtered_query.get().await?;
             let out = rows
                 .into_iter()
                 .map(|row| CountryDatatableRow {
@@ -241,7 +209,7 @@ impl GeneratedTableAdapter for CountryTableAdapter {
                     name: row.name,
                     region: row.region,
                     calling_code: row.calling_code,
-                    status: row.status,
+                    status: row.status.as_str().to_string(),
                     updated_at: format_rfc3339(row.updated_at),
                 })
                 .collect();
@@ -284,9 +252,7 @@ impl CountryDataTableAppHooks {
                 Some(query)
             }
             "status" => {
-                query.status = to_non_empty(value)
-                    .and_then(normalize_country_status)
-                    .map(ToString::to_string);
+                query.status = to_non_empty(value).and_then(normalize_country_status);
                 Some(query)
             }
             "region" => {
@@ -307,7 +273,7 @@ impl CountryDataTable {
     fn new(db: sqlx::PgPool) -> Self {
         Self {
             adapter: CountryTableAdapter { db },
-            hooks: CountryDataTableAppHooks::default(),
+            hooks: CountryDataTableAppHooks,
         }
     }
 }
@@ -379,6 +345,37 @@ where
     )
 }
 
+fn apply_country_filters<'db>(
+    mut query: CountryQuery<'db>,
+    filters: &CountryQueryState,
+) -> CountryQuery<'db> {
+    if let Some(keyword) = filters.keyword.as_deref().and_then(to_non_empty) {
+        let pattern = format!("%{}%", keyword.trim());
+        query = query
+            .where_col(CountryCol::Iso2, Op::ILike, pattern.clone())
+            .or_where_col(CountryCol::Iso3, Op::ILike, pattern.clone())
+            .or_where_col(CountryCol::Name, Op::ILike, pattern.clone())
+            .or_where_col(CountryCol::CallingCode, Op::ILike, pattern);
+    }
+
+    if let Some(status) = filters.status {
+        query = query.where_status(Op::Eq, status);
+    }
+
+    if let Some(region) = filters.region.as_deref().and_then(to_non_empty) {
+        query = query.where_col(CountryCol::Region, Op::ILike, format!("%{}%", region.trim()));
+    }
+
+    query
+}
+
+fn to_order_direction(direction: SortDirection) -> OrderDir {
+    match direction {
+        SortDirection::Asc => OrderDir::Asc,
+        SortDirection::Desc => OrderDir::Desc,
+    }
+}
+
 fn to_non_empty(value: &str) -> Option<&str> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -388,72 +385,16 @@ fn to_non_empty(value: &str) -> Option<&str> {
     }
 }
 
-fn normalize_sort_column(value: &str) -> Option<&'static str> {
+fn normalize_sort_column(value: &str) -> Option<CountryCol> {
     match value.trim().to_ascii_lowercase().as_str() {
-        "iso2" => Some("iso2"),
-        "iso3" => Some("iso3"),
-        "name" => Some("name"),
-        "status" => Some("status"),
-        "region" => Some("region"),
-        "calling_code" => Some("calling_code"),
-        "updated_at" => Some("updated_at"),
+        "iso2" => Some(CountryCol::Iso2),
+        "iso3" => Some(CountryCol::Iso3),
+        "name" => Some(CountryCol::Name),
+        "status" => Some(CountryCol::Status),
+        "region" => Some(CountryCol::Region),
+        "calling_code" => Some(CountryCol::CallingCode),
+        "updated_at" => Some(CountryCol::UpdatedAt),
         _ => None,
-    }
-}
-
-fn push_where_clauses(builder: &mut QueryBuilder<'_, Postgres>, query: &CountryQueryState) {
-    let mut has_where = false;
-
-    if let Some(keyword) = query
-        .keyword
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        let pattern = format!("%{keyword}%");
-        push_where_prefix(builder, &mut has_where);
-        builder.push("(");
-        builder.push("name ILIKE ");
-        builder.push_bind(pattern.clone());
-        builder.push(" OR iso2 ILIKE ");
-        builder.push_bind(pattern.clone());
-        builder.push(" OR iso3 ILIKE ");
-        builder.push_bind(pattern.clone());
-        builder.push(" OR COALESCE(calling_code, '') ILIKE ");
-        builder.push_bind(pattern);
-        builder.push(")");
-    }
-
-    if let Some(status) = query
-        .status
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        push_where_prefix(builder, &mut has_where);
-        builder.push("status = ");
-        builder.push_bind(status.to_string());
-    }
-
-    if let Some(region) = query
-        .region
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        let pattern = format!("%{region}%");
-        push_where_prefix(builder, &mut has_where);
-        builder.push("COALESCE(region, '') ILIKE ");
-        builder.push_bind(pattern);
-    }
-}
-
-fn push_where_prefix(builder: &mut QueryBuilder<'_, Postgres>, has_where: &mut bool) {
-    if *has_where {
-        builder.push(" AND ");
-    } else {
-        builder.push(" WHERE ");
-        *has_where = true;
     }
 }
 
@@ -463,10 +404,6 @@ fn format_rfc3339(value: time::OffsetDateTime) -> String {
         .unwrap_or_else(|_| value.unix_timestamp().to_string())
 }
 
-fn normalize_country_status(value: &str) -> Option<&'static str> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "enabled" => Some("enabled"),
-        "disabled" => Some("disabled"),
-        _ => None,
-    }
+fn normalize_country_status(value: &str) -> Option<CountryStatus> {
+    CountryStatus::from_storage(value)
 }

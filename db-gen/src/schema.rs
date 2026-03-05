@@ -138,8 +138,10 @@ pub fn load(path_str: &str) -> Result<Schema, Box<dyn Error>> {
             models: BTreeMap::new(),
             extra_sections: BTreeMap::new(),
         };
-        for entry in fs::read_dir(path)? {
-            let entry = entry?;
+        let mut entries = fs::read_dir(path)?
+            .collect::<Result<Vec<_>, std::io::Error>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
             let p = entry.path();
             if p.is_file() && p.extension().map_or(false, |e| e == "toml") {
                 let raw = fs::read_to_string(&p)?;
@@ -167,6 +169,113 @@ pub fn load(path_str: &str) -> Result<Schema, Box<dyn Error>> {
         let schema: Schema = toml::from_str(&raw)?;
         Ok(schema)
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FrameworkSchemaFile {
+    name: &'static str,
+    content: &'static str,
+}
+
+const FRAMEWORK_SCHEMA_FILES: &[FrameworkSchemaFile] = &[
+    FrameworkSchemaFile {
+        name: "attachments.toml",
+        content: include_str!("../schemas/attachments.toml"),
+    },
+    FrameworkSchemaFile {
+        name: "auth_tokens.toml",
+        content: include_str!("../schemas/auth_tokens.toml"),
+    },
+    FrameworkSchemaFile {
+        name: "country.toml",
+        content: include_str!("../schemas/country.toml"),
+    },
+    FrameworkSchemaFile {
+        name: "http_logs.toml",
+        content: include_str!("../schemas/http_logs.toml"),
+    },
+    FrameworkSchemaFile {
+        name: "jobs.toml",
+        content: include_str!("../schemas/jobs.toml"),
+    },
+    FrameworkSchemaFile {
+        name: "localized.toml",
+        content: include_str!("../schemas/localized.toml"),
+    },
+    FrameworkSchemaFile {
+        name: "meta.toml",
+        content: include_str!("../schemas/meta.toml"),
+    },
+];
+
+fn load_framework_embedded() -> Result<Schema, Box<dyn Error>> {
+    let mut master = Schema {
+        models: BTreeMap::new(),
+        extra_sections: BTreeMap::new(),
+    };
+
+    for file in FRAMEWORK_SCHEMA_FILES {
+        reject_legacy_multilang_key(file.content, std::path::Path::new(file.name))?;
+        let partial: Schema = toml::from_str(file.content)?;
+
+        for (model_name, model) in partial.models {
+            if master.models.contains_key(&model_name) {
+                panic!(
+                    "Duplicate framework model definition '{}' from embedded schema '{}'",
+                    model_name, file.name
+                );
+            }
+            master.models.insert(model_name, model);
+        }
+
+        for (enum_name, enum_spec) in partial.extra_sections {
+            if master.extra_sections.contains_key(&enum_name) {
+                panic!(
+                    "Duplicate framework enum definition '{}' from embedded schema '{}'",
+                    enum_name, file.name
+                );
+            }
+            master.extra_sections.insert(enum_name, enum_spec);
+        }
+    }
+
+    Ok(master)
+}
+
+pub fn load_framework() -> Result<Schema, Box<dyn Error>> {
+    load_framework_embedded()
+}
+
+fn merge_schema_layers(base: Schema, overlay: Schema, overlay_source: &str) -> Schema {
+    let mut merged = base;
+
+    for (model_name, model) in overlay.models {
+        if merged.models.contains_key(&model_name) {
+            panic!(
+                "Duplicate model definition '{}' found in layer '{}'",
+                model_name, overlay_source
+            );
+        }
+        merged.models.insert(model_name, model);
+    }
+
+    for (enum_name, enum_spec) in overlay.extra_sections {
+        if merged.extra_sections.contains_key(&enum_name) {
+            panic!(
+                "Duplicate enum definition '{}' found in layer '{}'",
+                enum_name, overlay_source
+            );
+        }
+        merged.extra_sections.insert(enum_name, enum_spec);
+    }
+
+    merged
+}
+
+pub fn load_with_framework(app_schema_path: &str) -> Result<Schema, Box<dyn Error>> {
+    let framework = load_framework_embedded()?;
+    let app = load(app_schema_path)?;
+    Ok(merge_schema_layers(framework, app, app_schema_path))
 }
 
 fn reject_legacy_multilang_key(raw: &str, source: &std::path::Path) -> Result<(), Box<dyn Error>> {

@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use anyhow::Context;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -65,6 +66,7 @@ impl CountryStatus {
 pub const COUNTRY_STATUS_ENABLED: &str = CountryStatus::Enabled.as_str();
 pub const COUNTRY_STATUS_DISABLED: &str = CountryStatus::Disabled.as_str();
 pub const COUNTRY_ISO2_LEN: usize = 2;
+const BUILTIN_COUNTRIES_JSON: &str = include_str!("seed/countries.seed.json");
 
 pub fn normalize_country_status(value: &str) -> Option<&'static str> {
     CountryStatus::from_str(value).map(CountryStatus::as_str)
@@ -79,6 +81,68 @@ pub fn normalize_country_iso2(value: &str) -> Option<String> {
         return None;
     }
     Some(normalized)
+}
+
+pub fn load_builtin_country_seed() -> anyhow::Result<Vec<CountrySeed>> {
+    serde_json::from_str(BUILTIN_COUNTRIES_JSON).context("failed to parse built-in countries seed")
+}
+
+pub fn normalize_country_seed(mut seed: CountrySeed) -> CountrySeed {
+    seed.iso2 = seed.iso2.trim().to_ascii_uppercase();
+    seed.iso3 = seed.iso3.trim().to_ascii_uppercase();
+    seed.iso_numeric = seed.iso_numeric.and_then(trim_opt);
+    seed.name = seed.name.trim().to_string();
+    seed.official_name = seed.official_name.and_then(trim_opt);
+    seed.capital = seed.capital.and_then(trim_opt);
+    seed.capitals = normalize_vec(seed.capitals);
+    seed.region = seed.region.and_then(trim_opt);
+    seed.subregion = seed.subregion.and_then(trim_opt);
+    seed.primary_currency_code = seed
+        .primary_currency_code
+        .and_then(trim_opt)
+        .map(|v| v.to_ascii_uppercase());
+    seed.calling_code = seed.calling_code.and_then(trim_opt);
+    seed.calling_root = seed.calling_root.and_then(trim_opt);
+    seed.calling_suffixes = normalize_vec(seed.calling_suffixes);
+    seed.tlds = normalize_vec(seed.tlds);
+    seed.timezones = normalize_vec(seed.timezones);
+    seed.assignment_status = seed.assignment_status.and_then(trim_opt);
+    seed.flag_emoji = seed.flag_emoji.and_then(trim_opt);
+
+    seed.currencies = seed
+        .currencies
+        .into_iter()
+        .map(|mut c| {
+            c.code = c.code.trim().to_ascii_uppercase();
+            c.name = c.name.and_then(trim_opt);
+            c.symbol = c.symbol.and_then(trim_opt);
+            c
+        })
+        .filter(|c| !c.code.is_empty())
+        .collect();
+
+    seed
+}
+
+pub fn default_country_status_for_iso2(iso2: &str) -> &'static str {
+    if iso2.eq_ignore_ascii_case("MY") {
+        COUNTRY_STATUS_ENABLED
+    } else {
+        COUNTRY_STATUS_DISABLED
+    }
+}
+
+fn trim_opt(input: String) -> Option<String> {
+    let value = input.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn normalize_vec(input: Vec<String>) -> Vec<String> {
+    input.into_iter().filter_map(trim_opt).collect::<Vec<_>>()
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -1,12 +1,33 @@
 use crate::schema::{to_snake, EnumSpec, EnumVariants};
 
+#[derive(Debug, Clone, Copy)]
+pub struct GenerateEnumsOptions {
+    pub include_datatable_filter_options: bool,
+}
+
+impl Default for GenerateEnumsOptions {
+    fn default() -> Self {
+        Self {
+            include_datatable_filter_options: true,
+        }
+    }
+}
+
 /// Generate Rust enum code from EnumSpec
 pub fn generate_enum(name: &str, spec: &EnumSpec) -> String {
+    generate_enum_with_options(name, spec, GenerateEnumsOptions::default())
+}
+
+pub fn generate_enum_with_options(
+    name: &str,
+    spec: &EnumSpec,
+    options: GenerateEnumsOptions,
+) -> String {
     match spec.storage.as_str() {
-        "string" | "text" => generate_string_enum(name, spec),
+        "string" | "text" => generate_string_enum(name, spec, options),
         // PostgreSQL only has SMALLINT (i16), INTEGER (i32), and BIGINT (i64)
         // No TINYINT (i8) or unsigned types
-        "i16" | "i32" | "i64" => generate_integer_enum(name, spec),
+        "i16" | "i32" | "i64" => generate_integer_enum(name, spec, options),
         _ => panic!(
             "Unsupported enum storage type: {}. Supported: string, i16, i32, i64",
             spec.storage
@@ -15,7 +36,7 @@ pub fn generate_enum(name: &str, spec: &EnumSpec) -> String {
 }
 
 /// Generate string-based enum (stored as TEXT in database)
-fn generate_string_enum(name: &str, spec: &EnumSpec) -> String {
+fn generate_string_enum(name: &str, spec: &EnumSpec, options: GenerateEnumsOptions) -> String {
     let variants = extract_variant_names(&spec.variants);
     let variant_self_list = variants
         .iter()
@@ -111,6 +132,24 @@ fn generate_string_enum(name: &str, spec: &EnumSpec) -> String {
         .collect::<Vec<_>>()
         .join(" | ");
     let ts_union_literal = escape_rust_string(&ts_union);
+    let datatable_filter_options_impl = if options.include_datatable_filter_options {
+        r#"
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }"#
+    } else {
+        ""
+    };
 
     format!(
         r#"#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -191,20 +230,7 @@ impl {name} {{
     pub const fn variants() -> &'static [Self] {{
         &[{variant_self_list}]
     }}
-
-    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {{
-        Self::variants()
-            .iter()
-            .map(|v| {{
-                let label = (*v).explained_label();
-                let value = (*v).as_str();
-                core_web::datatable::DataTableFilterOptionDto {{
-                    label,
-                    value: value.to_string(),
-                }}
-            }})
-            .collect()
-    }}
+{datatable_filter_options_impl}
 }}
 
 // sqlx support for TEXT storage
@@ -243,11 +269,13 @@ impl From<{name}> for core_db::common::sql::BindValue {{
     }}
 }}
 "#
+    ,
+        datatable_filter_options_impl = datatable_filter_options_impl
     )
 }
 
 /// Generate integer-based enum (stored as SMALLINT/INTEGER in database)
-fn generate_integer_enum(name: &str, spec: &EnumSpec) -> String {
+fn generate_integer_enum(name: &str, spec: &EnumSpec, options: GenerateEnumsOptions) -> String {
     let rust_type = &spec.storage; // e.g., "i16", "i32"
 
     let (variant_decls, value_map) = match &spec.variants {
@@ -323,6 +351,24 @@ fn generate_integer_enum(name: &str, spec: &EnumSpec) -> String {
         .collect::<Vec<_>>()
         .join(" | ");
     let ts_union_literal = escape_rust_string(&ts_union);
+    let datatable_filter_options_impl = if options.include_datatable_filter_options {
+        r#"
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }"#
+    } else {
+        ""
+    };
 
     format!(
         r#"#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -405,20 +451,7 @@ impl {name} {{
     pub const fn variants() -> &'static [Self] {{
         &[{variant_self_list}]
     }}
-
-    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {{
-        Self::variants()
-            .iter()
-            .map(|v| {{
-                let label = (*v).explained_label();
-                let value = (*v).as_str();
-                core_web::datatable::DataTableFilterOptionDto {{
-                    label,
-                    value: value.to_string(),
-                }}
-            }})
-            .collect()
-    }}
+{datatable_filter_options_impl}
 }}
 
 // sqlx support for integer storage
@@ -448,6 +481,8 @@ impl From<{name}> for core_db::common::sql::BindValue {{
     }}
 }}
 "#
+    ,
+        datatable_filter_options_impl = datatable_filter_options_impl
     )
 }
 
@@ -530,6 +565,14 @@ pub fn generate_enums(
     schema: &crate::schema::Schema,
     out_dir: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    generate_enums_with_options(schema, out_dir, GenerateEnumsOptions::default())
+}
+
+pub fn generate_enums_with_options(
+    schema: &crate::schema::Schema,
+    out_dir: &std::path::Path,
+    options: GenerateEnumsOptions,
+) -> Result<(), Box<dyn std::error::Error>> {
     use crate::schema::EnumOrOther;
     use std::io::Write;
 
@@ -558,7 +601,7 @@ pub fn generate_enums(
     writeln!(f, "}}\n")?;
 
     for (name, spec) in &enum_specs {
-        let code = generate_enum(name, spec);
+        let code = generate_enum_with_options(name, spec, options);
         writeln!(f, "{}\n", code)?;
     }
 

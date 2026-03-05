@@ -24,12 +24,14 @@ pub mod migrations {
         // 1. Meta
         let meta_sql = r#"
 CREATE TABLE IF NOT EXISTS meta (
+    id BIGINT PRIMARY KEY,
     owner_type TEXT NOT NULL,
     owner_id BIGINT NOT NULL,
     field TEXT NOT NULL,
     value JSONB NOT NULL DEFAULT '{}',
-    PRIMARY KEY (owner_type, owner_id, field)
+    UNIQUE (owner_type, owner_id, field)
 );
+CREATE INDEX IF NOT EXISTS idx_meta_owner ON meta(owner_type, owner_id);
 "#;
         let meta_path = migrations_dir.join("0000000000001_meta.sql");
         fs::write(&meta_path, meta_sql).await?;
@@ -60,13 +62,15 @@ CREATE INDEX IF NOT EXISTS idx_attachments_owner ON attachments(owner_type, owne
         // 3. Localized
         let loc_sql = r#"
 CREATE TABLE IF NOT EXISTS localized (
+    id BIGINT PRIMARY KEY,
     owner_type TEXT NOT NULL,
     owner_id BIGINT NOT NULL,
     field TEXT NOT NULL,
     locale TEXT NOT NULL,
     value TEXT NOT NULL,
-    PRIMARY KEY (owner_type, owner_id, field, locale)
+    UNIQUE (owner_type, owner_id, field, locale)
 );
+CREATE INDEX IF NOT EXISTS idx_localized_owner ON localized(owner_type, owner_id);
 "#;
         let loc_path = migrations_dir.join("0000000000003_localized.sql");
         fs::write(&loc_path, loc_sql).await?;

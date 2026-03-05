@@ -5,197 +5,142 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, bind, bind_query, bind_scalar, generate_snowflake_i64, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, bind, bind_query, bind_scalar, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{Page, renumber_placeholders};
 use core_db::common::collection::TypedCollectionExt;
-use super::enums::*;
 
-const HAS_CREATED_AT: bool = true;
-const HAS_UPDATED_AT: bool = true;
-const HAS_SOFT_DELETE: bool = true;
+const HAS_CREATED_AT: bool = false;
+const HAS_UPDATED_AT: bool = false;
+const HAS_SOFT_DELETE: bool = false;
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
-pub struct AdminRow {
+pub struct LocalizedRow {
     pub id: i64,
-    pub username: String,
-    pub email: Option<String>,
-    pub locale: Option<String>,
-    pub password: String,
-    pub name: String,
-    pub admin_type: AdminType,
-    pub abilities: serde_json::Value,
-    #[serde(with = "time::serde::rfc3339")]
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339")]
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339::option")]
-    #[schemars(with = "String")]
-    pub deleted_at: Option<time::OffsetDateTime>,
+    pub owner_type: String,
+    pub owner_id: i64,
+    pub field: String,
+    pub locale: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AdminView {
+pub struct LocalizedView {
     pub id: i64,
-    pub username: String,
-    pub email: Option<String>,
-    pub locale: Option<String>,
-    pub password: String,
-    pub name: String,
-    pub admin_type: AdminType,
-    pub abilities: serde_json::Value,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub deleted_at: Option<time::OffsetDateTime>,
-    pub admin_type_explained: String,
+    pub owner_type: String,
+    pub owner_id: i64,
+    pub field: String,
+    pub locale: String,
+    pub value: String,
 }
 
-impl AdminView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> AdminUpdate<'db> {
-        Admin::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
+impl LocalizedView {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> LocalizedUpdate<'db> {
+        Localized::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
     }
-    pub fn update_with<'db>(&self, model: &Admin<'db>) -> AdminUpdate<'db> {
+    pub fn update_with<'db>(&self, model: &Localized<'db>) -> LocalizedUpdate<'db> {
         model.update().where_id(Op::Eq, self.id.clone())
     }
-    pub fn to_json(&self) -> AdminJson {
-        AdminJson {
+    pub fn to_json(&self) -> LocalizedJson {
+        LocalizedJson {
             id: self.id.clone(),
-            username: self.username.clone(),
-            email: self.email.clone(),
+            owner_type: self.owner_type.clone(),
+            owner_id: self.owner_id.clone(),
+            field: self.field.clone(),
             locale: self.locale.clone(),
-            password: self.password.clone(),
-            name: self.name.clone(),
-            admin_type: self.admin_type.clone(),
-            abilities: self.abilities.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            deleted_at: self.deleted_at.clone(),
-            admin_type_explained: self.admin_type_explained.clone(),
+            value: self.value.clone(),
         }
     }
 }
 
-pub trait AdminViewsExt {
+pub trait LocalizedViewsExt {
     fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&AdminView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, AdminView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, Vec<AdminView>> where K: Eq + std::hash::Hash;
+    fn pluck<R>(&self, f: impl Fn(&LocalizedView) -> R) -> Vec<R>;
+    fn key_by<K>(&self, f: impl Fn(&LocalizedView) -> K) -> std::collections::HashMap<K, LocalizedView> where K: Eq + std::hash::Hash;
+    fn group_by<K>(&self, f: impl Fn(&LocalizedView) -> K) -> std::collections::HashMap<K, Vec<LocalizedView>> where K: Eq + std::hash::Hash;
 }
 
-impl AdminViewsExt for Vec<AdminView> {
+impl LocalizedViewsExt for Vec<LocalizedView> {
     fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&AdminView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, AdminView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, Vec<AdminView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
+    fn pluck<R>(&self, f: impl Fn(&LocalizedView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
+    fn key_by<K>(&self, f: impl Fn(&LocalizedView) -> K) -> std::collections::HashMap<K, LocalizedView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
+    fn group_by<K>(&self, f: impl Fn(&LocalizedView) -> K) -> std::collections::HashMap<K, Vec<LocalizedView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
-pub struct AdminJson {
+pub struct LocalizedJson {
     pub id: i64,
-    pub username: String,
-    pub email: Option<String>,
-    pub locale: Option<String>,
-    pub password: String,
-    pub name: String,
-    pub admin_type: AdminType,
-    pub abilities: serde_json::Value,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub deleted_at: Option<time::OffsetDateTime>,
-    pub admin_type_explained: String,
+    pub owner_type: String,
+    pub owner_id: i64,
+    pub field: String,
+    pub locale: String,
+    pub value: String,
 }
 
-fn hydrate_view(row: AdminRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> AdminView {
-    let view = AdminView {
+fn hydrate_view(row: LocalizedRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> LocalizedView {
+    let view = LocalizedView {
         id: row.id,
-        username: row.username,
-        email: row.email,
+        owner_type: row.owner_type,
+        owner_id: row.owner_id,
+        field: row.field,
         locale: row.locale,
-        password: row.password,
-        name: row.name,
-        admin_type: row.admin_type,
-        abilities: row.abilities,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        deleted_at: row.deleted_at,
-        admin_type_explained: row.admin_type.explained_label(),
+        value: row.value,
     };
     view
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum AdminCol {
+pub enum LocalizedCol {
     Id,
-    Username,
-    Email,
+    OwnerType,
+    OwnerId,
+    Field,
     Locale,
-    Password,
-    Name,
-    AdminType,
-    Abilities,
-    CreatedAt,
-    UpdatedAt,
-    DeletedAt,
+    Value,
 }
 
-impl AdminCol {
-    pub const fn all() -> &'static [AdminCol] {
-        &[AdminCol::Id, AdminCol::Username, AdminCol::Email, AdminCol::Locale, AdminCol::Password, AdminCol::Name, AdminCol::AdminType, AdminCol::Abilities, AdminCol::CreatedAt, AdminCol::UpdatedAt, AdminCol::DeletedAt]
+impl LocalizedCol {
+    pub const fn all() -> &'static [LocalizedCol] {
+        &[LocalizedCol::Id, LocalizedCol::OwnerType, LocalizedCol::OwnerId, LocalizedCol::Field, LocalizedCol::Locale, LocalizedCol::Value]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            AdminCol::Id => "id",
-            AdminCol::Username => "username",
-            AdminCol::Email => "email",
-            AdminCol::Locale => "locale",
-            AdminCol::Password => "password",
-            AdminCol::Name => "name",
-            AdminCol::AdminType => "admin_type",
-            AdminCol::Abilities => "abilities",
-            AdminCol::CreatedAt => "created_at",
-            AdminCol::UpdatedAt => "updated_at",
-            AdminCol::DeletedAt => "deleted_at",
+            LocalizedCol::Id => "id",
+            LocalizedCol::OwnerType => "owner_type",
+            LocalizedCol::OwnerId => "owner_id",
+            LocalizedCol::Field => "field",
+            LocalizedCol::Locale => "locale",
+            LocalizedCol::Value => "value",
         }
     }
 }
 
-pub struct Admin<'db> {
+pub struct Localized<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
 }
 
-impl<'db> Admin<'db> {
-    pub const TABLE: &'static str = "admin";
+impl<'db> Localized<'db> {
+    pub const TABLE: &'static str = "localized";
     pub const PK: &'static str = "id";
     pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> AdminQuery<'db> { AdminQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> AdminInsert<'db> { AdminInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> AdminUpdate<'db> { AdminUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<AdminView>> {
+    pub fn query(&self) -> LocalizedQuery<'db> { LocalizedQuery::new(self.db.clone(), self.base_url.clone()) }
+    pub fn insert(&self) -> LocalizedInsert<'db> { LocalizedInsert::new(self.db.clone(), self.base_url.clone()) }
+    pub fn update(&self) -> LocalizedUpdate<'db> { LocalizedUpdate::new(self.db.clone(), self.base_url.clone()) }
+    pub async fn find(&self, id: i64) -> Result<Option<LocalizedView>> {
         self.query().find(id).await
     }
     pub async fn delete(&self, id: i64) -> Result<u64> {
         self.query().where_id(Op::Eq, id).delete().await
     }
-    pub async fn restore(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).restore().await
-    }
 }
 
 #[derive(Clone)]
-pub struct AdminQuery<'db> {
+pub struct LocalizedQuery<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -214,150 +159,88 @@ pub struct AdminQuery<'db> {
     offset: Option<i64>,
     limit: Option<i64>,
     binds: Vec<BindValue>,
-    with_deleted: bool,
-    only_deleted: bool,
 }
 
-impl<'db> AdminQuery<'db> {
+impl<'db> LocalizedQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![], with_deleted: false, only_deleted: false }
+        Self { db, base_url, select_sql: Some("id, owner_type, owner_id, field, locale, value".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> AdminUnsafeQuery<'db> { AdminUnsafeQuery::new(self) }
+    pub fn unsafe_sql(self) -> LocalizedUnsafeQuery<'db> { LocalizedUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_username(mut self, op: Op, val: String) -> Self {
+    pub fn where_owner_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_username_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_owner_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_email(mut self, op: Op, val: Option<String>) -> Self {
+    pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_email_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_owner_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_locale(mut self, op: Op, val: Option<String>) -> Self {
+    pub fn where_field(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::Field.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_field_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::Field.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_locale(mut self, op: Op, val: String) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::Locale.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_locale_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::Locale.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_password(mut self, op: Op, val: String) -> Self {
+    pub fn where_value(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Password.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::Value.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_password_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_value_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Password.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_name(mut self, op: Op, val: String) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Name.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_name_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Name.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_admin_type(mut self, op: Op, val: AdminType) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::AdminType.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_admin_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::AdminType.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_abilities(mut self, op: Op, val: serde_json::Value) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Abilities.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_abilities_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Abilities.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::DeletedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_deleted_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::Value.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(AdminCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AdminCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(LocalizedCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: LocalizedCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -376,7 +259,7 @@ impl<'db> AdminQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: AdminCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: LocalizedCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -391,7 +274,7 @@ impl<'db> AdminQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: AdminCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: LocalizedCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -403,7 +286,7 @@ impl<'db> AdminQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: AdminCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: LocalizedCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -411,15 +294,15 @@ impl<'db> AdminQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: AdminCol) -> Self {
+    pub fn where_null(mut self, col: LocalizedCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: AdminCol) -> Self {
+    pub fn where_not_null(mut self, col: LocalizedCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: AdminCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: LocalizedCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -473,23 +356,23 @@ impl<'db> AdminQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[AdminCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[LocalizedCol]) -> Self {
         if cols.is_empty() {
-            self.select_sql = Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
+            self.select_sql = Some("id, owner_type, owner_id, field, locale, value".to_string());
         } else {
             let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect();
+            let mut list: Vec<String> = "id, owner_type, owner_id, field, locale, value".split(',').map(|s| s.trim().to_string()).collect();
             for s in &list { seen.insert(s.clone()); }
             for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
             self.select_sql = Some(list.join(", "));
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[AdminCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[LocalizedCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect(),
+            _ => "id, owner_type, owner_id, field, locale, value".split(',').map(|s| s.trim().to_string()).collect(),
         };
         for s in &list { seen.insert(s.clone()); }
         for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
@@ -499,16 +382,16 @@ impl<'db> AdminQuery<'db> {
     fn select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() {
-            self.select_sql = Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
+            self.select_sql = Some("id, owner_type, owner_id, field, locale, value".to_string());
         } else {
-            self.select_sql = Some(format!("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at, {}", s));
+            self.select_sql = Some(format!("id, owner_type, owner_id, field, locale, value, {}", s));
         }
         self
     }
     fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
+        let mut base = self.select_sql.take().unwrap_or_else(|| "id, owner_type, owner_id, field, locale, value".to_string());
         if !base.is_empty() { base.push_str(", "); }
         base.push_str(&s);
         self.select_sql = Some(base);
@@ -566,26 +449,26 @@ impl<'db> AdminQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: AdminCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: LocalizedCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: AdminCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: LocalizedCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: AdminCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: LocalizedCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[AdminCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[LocalizedCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[AdminCol]) -> Self {
+    pub fn select(mut self, cols: &[LocalizedCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -634,7 +517,7 @@ impl<'db> AdminQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[AdminCol]) -> Self {
+    pub fn group_by(mut self, cols: &[LocalizedCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -661,8 +544,6 @@ impl<'db> AdminQuery<'db> {
         self.offset = Some(n);
         self
     }
-    pub fn with_deleted(mut self) -> Self { self.with_deleted = true; self }
-    pub fn only_deleted(mut self) -> Self { self.only_deleted = true; self }
     pub async fn get_as<T>(self) -> Result<Vec<T>>
     where
         T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Unpin + 'static,
@@ -674,7 +555,7 @@ impl<'db> AdminQuery<'db> {
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "localized".to_string());
         let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
         if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
         if !where_sql.is_empty() {
@@ -709,22 +590,15 @@ impl<'db> AdminQuery<'db> {
         Ok(db.fetch_all(q).await?)
     }
 
-    pub async fn get(self) -> Result<Vec<AdminView>> {
-        let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , with_deleted, only_deleted, .. } = self;
+    pub async fn get(self) -> Result<Vec<LocalizedView>> {
+        let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
         let select_clause = match (distinct, distinct_on.as_ref()) {
             (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "localized".to_string());
         let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
         if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
         if !where_sql.is_empty() {
@@ -752,7 +626,7 @@ impl<'db> AdminQuery<'db> {
             sql.push_str(&l.to_string());
         }
         if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut q = sqlx::query_as::<_, AdminRow>(&sql);
+        let mut q = sqlx::query_as::<_, LocalizedRow>(&sql);
         for b in binds {
             q = bind(q, b);
         }
@@ -768,82 +642,72 @@ impl<'db> AdminQuery<'db> {
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<AdminView>> {
+    pub async fn first(self) -> Result<Option<LocalizedView>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<AdminView> {
-        self.first().await?.ok_or_else(|| anyhow::anyhow!("admin: record not found"))
+    pub async fn first_or_fail(self) -> Result<LocalizedView> {
+        self.first().await?.ok_or_else(|| anyhow::anyhow!("localized: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<AdminView>> {
+    pub async fn find(self, id: i64) -> Result<Option<LocalizedView>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<AdminView> {
-        self.find(id).await?.ok_or_else(|| anyhow::anyhow!("admin: record not found"))
+    pub async fn find_or_fail(self, id: i64) -> Result<LocalizedView> {
+        self.find(id).await?.ok_or_else(|| anyhow::anyhow!("localized: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(AdminInsert<'db>) -> AdminInsert<'db>) -> Result<AdminView> {
+    pub async fn first_or_create(self, create: impl FnOnce(LocalizedInsert<'db>) -> LocalizedInsert<'db>) -> Result<LocalizedView> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(AdminInsert::new(db, base_url));
+        let insert_builder = create(LocalizedInsert::new(db, base_url));
         insert_builder.save().await
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(AdminUpdate<'db>) -> AdminUpdate<'db>,
-        on_create: impl FnOnce(AdminInsert<'db>) -> AdminInsert<'db>,
-    ) -> Result<AdminView> {
+        on_update: impl FnOnce(LocalizedUpdate<'db>) -> LocalizedUpdate<'db>,
+        on_create: impl FnOnce(LocalizedInsert<'db>) -> LocalizedInsert<'db>,
+    ) -> Result<LocalizedView> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = AdminUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = LocalizedUpdate::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Admin::new(db, base_url.clone()).query().find(existing.id).await.map(|r| r.unwrap());
+            return Localized::new(db, base_url.clone()).query().find(existing.id).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(AdminInsert::new(db, base_url));
+        let insert_builder = on_create(LocalizedInsert::new(db, base_url));
         insert_builder.save().await
     }
 
-    pub async fn increment(self, col: AdminCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: LocalizedCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
-        if HAS_SOFT_DELETE && !self.with_deleted {
-            where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-        }
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("UPDATE admin SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
+        let sql = format!("UPDATE localized SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
         let mut q = sqlx::query(&sql);
         for b in binds { q = bind_query(q, b); }
         let res = db.execute(q).await?;
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: AdminCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: LocalizedCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
     pub async fn count(self) -> Result<i64> {
-        let Self { db, from_sql, count_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+        let Self { db, from_sql, count_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "localized".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -864,16 +728,9 @@ impl<'db> AdminQuery<'db> {
     }
 
     pub async fn pluck_ids(self) -> Result<Vec<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds, order_sql, limit, offset , with_deleted, only_deleted , .. } = self;
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds, order_sql, limit, offset  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "localized".to_string());
         let from_clause = if join_sql.is_empty() { format!("FROM {}", table_name) } else { format!("FROM {} {}", table_name, join_sql.join(" ")) };
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let order_clause = if order_sql.is_empty() { String::new() } else { format!(" ORDER BY {}", order_sql.join(", ")) };
@@ -889,13 +746,13 @@ impl<'db> AdminQuery<'db> {
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<AdminView>) -> Fut,
+        F: FnMut(Vec<LocalizedView>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = AdminQuery::new(db.clone(), self.base_url.clone());
+            let mut query = LocalizedQuery::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -909,11 +766,11 @@ impl<'db> AdminQuery<'db> {
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(AdminCol::CreatedAt, OrderDir::Desc)
+        self.order_by(LocalizedCol::Id, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(AdminCol::CreatedAt, OrderDir::Asc)
+        self.order_by(LocalizedCol::Id, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -924,7 +781,7 @@ impl<'db> AdminQuery<'db> {
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<AdminView> {
+    pub async fn sole(self) -> Result<LocalizedView> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -943,7 +800,7 @@ impl<'db> AdminQuery<'db> {
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&AdminView) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&LocalizedView) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -951,17 +808,10 @@ impl<'db> AdminQuery<'db> {
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: AdminCol) -> Result<Option<f64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+    pub async fn sum(self, col: LocalizedCol) -> Result<Option<f64>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "localized".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -976,17 +826,10 @@ impl<'db> AdminQuery<'db> {
         Ok(result)
     }
 
-    pub async fn avg(self, col: AdminCol) -> Result<Option<f64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+    pub async fn avg(self, col: LocalizedCol) -> Result<Option<f64>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "localized".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1001,17 +844,10 @@ impl<'db> AdminQuery<'db> {
         Ok(result)
     }
 
-    pub async fn min_val(self, col: AdminCol) -> Result<Option<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+    pub async fn min_val(self, col: LocalizedCol) -> Result<Option<i64>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "localized".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1026,17 +862,10 @@ impl<'db> AdminQuery<'db> {
         Ok(result)
     }
 
-    pub async fn max_val(self, col: AdminCol) -> Result<Option<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+    pub async fn max_val(self, col: LocalizedCol) -> Result<Option<i64>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "localized".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1051,24 +880,17 @@ impl<'db> AdminQuery<'db> {
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<AdminView>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<LocalizedView>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
-        let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , with_deleted, only_deleted, .. } = self;
+        let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
         let select_clause = match (distinct, distinct_on.as_ref()) {
             (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "localized".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1096,7 +918,7 @@ impl<'db> AdminQuery<'db> {
         sql.push_str(&format!(" OFFSET {}", offset_val));
         sql.push_str(&format!(" LIMIT {}", per_page));
         if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut q = sqlx::query_as::<_, AdminRow>(&sql);
+        let mut q = sqlx::query_as::<_, LocalizedRow>(&sql);
         for b in binds.iter().cloned() { q = bind(q, b); }
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
@@ -1109,64 +931,17 @@ impl<'db> AdminQuery<'db> {
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn into_where_parts(self) -> (Vec<String>, Vec<BindValue>) {
-        let Self { where_sql, binds, with_deleted, only_deleted, .. } = self;
+        let Self { where_sql, binds, .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
         (where_sql, binds)
     }
     pub async fn delete(self) -> Result<u64> {
         if self.limit.is_some() {
             anyhow::bail!("delete() does not support limit; add where clauses");
         }
-        let Self { db, where_sql, binds, with_deleted, only_deleted, .. } = self;
+        let Self { db, where_sql, binds, .. } = self;
         if where_sql.is_empty() { anyhow::bail!("delete(): no conditions set"); }
-        if HAS_SOFT_DELETE {
-            let mut where_sql = where_sql;
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-            let idx = binds.len() + 1;
-            let mut sql = format!("UPDATE admin SET {} = ${}", AdminCol::DeletedAt.as_sql(), idx);
-            if !where_sql.is_empty() {
-                sql.push_str(" WHERE ");
-                sql.push_str(&where_sql.join(" AND "));
-            }
-            let mut q = sqlx::query(&sql);
-            for b in binds { q = bind_query(q, b); }
-            q = bind_query(q, time::OffsetDateTime::now_utc().into());
-            let res = db.execute(q).await?;
-            return Ok(res.rows_affected());
-        }
-        let mut sql = String::from("DELETE FROM admin");
-        if !where_sql.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&where_sql.join(" AND "));
-        }
-        let mut q = sqlx::query(&sql);
-        for b in binds { q = bind_query(q, b); }
-        let res = db.execute(q).await?;
-        Ok(res.rows_affected())
-    }
-    pub async fn restore(self) -> Result<u64> {
-        if !HAS_SOFT_DELETE { anyhow::bail!("restore() not supported"); }
-        if self.limit.is_some() {
-            anyhow::bail!("restore() does not support limit; add where clauses");
-        }
-        let Self { db, where_sql, binds, with_deleted, only_deleted, .. } = self;
-        if where_sql.is_empty() { anyhow::bail!("restore(): no conditions set"); }
-        let mut where_sql = where_sql;
-        if !with_deleted && !only_deleted {
-            where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-        }
-        let mut sql = format!("UPDATE admin SET {} = NULL", AdminCol::DeletedAt.as_sql());
+        let mut sql = String::from("DELETE FROM localized");
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&where_sql.join(" AND "));
@@ -1179,12 +954,12 @@ impl<'db> AdminQuery<'db> {
 }
 
 #[doc(hidden)]
-pub struct AdminUnsafeQuery<'db> {
-    inner: AdminQuery<'db>,
+pub struct LocalizedUnsafeQuery<'db> {
+    inner: LocalizedQuery<'db>,
 }
 
-impl<'db> AdminUnsafeQuery<'db> {
-    fn new(inner: AdminQuery<'db>) -> Self { Self { inner } }
+impl<'db> LocalizedUnsafeQuery<'db> {
+    fn new(inner: LocalizedQuery<'db>) -> Self { Self { inner } }
     pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
     pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
     pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
@@ -1196,19 +971,19 @@ impl<'db> AdminUnsafeQuery<'db> {
     pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
     pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
     pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> AdminQuery<'db> { self.inner }
+    pub fn done(self) -> LocalizedQuery<'db> { self.inner }
 }
 
-pub struct AdminInsert<'db> {
+pub struct LocalizedInsert<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<AdminCol>,
+    cols: Vec<LocalizedCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<AdminCol>,
+    conflict_cols: Vec<LocalizedCol>,
 }
 
-impl<'db> AdminInsert<'db> {
+impl<'db> LocalizedInsert<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1220,77 +995,46 @@ impl<'db> AdminInsert<'db> {
         }
     }
     pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(AdminCol::Id);
+        self.cols.push(LocalizedCol::Id);
         self.binds.push(val.into());
         self
     }
-    pub fn set_username(mut self, val: String) -> Self {
-        self.cols.push(AdminCol::Username);
+    pub fn set_owner_type(mut self, val: String) -> Self {
+        self.cols.push(LocalizedCol::OwnerType);
         self.binds.push(val.into());
         self
     }
-    pub fn set_email(mut self, val: Option<String>) -> Self {
-        self.cols.push(AdminCol::Email);
+    pub fn set_owner_id(mut self, val: i64) -> Self {
+        self.cols.push(LocalizedCol::OwnerId);
         self.binds.push(val.into());
         self
     }
-    pub fn set_locale(mut self, val: Option<String>) -> Self {
-        self.cols.push(AdminCol::Locale);
+    pub fn set_field(mut self, val: String) -> Self {
+        self.cols.push(LocalizedCol::Field);
         self.binds.push(val.into());
         self
     }
-    pub fn set_password(mut self, val: &str) -> anyhow::Result<Self> {
-        let hashed = core_db::common::auth::hash::hash_password(val)?;
-        self.cols.push(AdminCol::Password);
-        self.binds.push(hashed.into());
-        Ok(self)
-    }
-    pub fn set_password_raw(mut self, val: String) -> Self {
-        self.cols.push(AdminCol::Password);
+    pub fn set_locale(mut self, val: String) -> Self {
+        self.cols.push(LocalizedCol::Locale);
         self.binds.push(val.into());
         self
     }
-    pub fn set_name(mut self, val: String) -> Self {
-        self.cols.push(AdminCol::Name);
+    pub fn set_value(mut self, val: String) -> Self {
+        self.cols.push(LocalizedCol::Value);
         self.binds.push(val.into());
         self
     }
-    pub fn set_admin_type(mut self, val: AdminType) -> Self {
-        self.cols.push(AdminCol::AdminType);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn set_abilities(mut self, val: serde_json::Value) -> Self {
-        self.cols.push(AdminCol::Abilities);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AdminCol::CreatedAt);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AdminCol::UpdatedAt);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.cols.push(AdminCol::DeletedAt);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[AdminCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[LocalizedCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[AdminCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[LocalizedCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub async fn save(self) -> Result<AdminView> {
+    pub async fn save(self) -> Result<LocalizedView> {
         let db_conn = self.db.clone();
         match db_conn {
             DbConn::Pool(pool) => {
@@ -1310,29 +1054,15 @@ impl<'db> AdminInsert<'db> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<AdminView> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<LocalizedView> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, AdminCol::Id)) {
-            cols.push(AdminCol::Id);
-            binds.push(generate_snowflake_i64().into());
-        }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::CreatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(AdminCol::CreatedAt);
-            binds.push(now.into());
-        }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(AdminCol::UpdatedAt);
-            binds.push(now.into());
-        }
         if cols.is_empty() {
             anyhow::bail!("insert: no columns set");
         }
         let col_sql: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         let placeholders: Vec<String> = (1..=binds.len()).map(|i| format!("${}", i)).collect();
-        let mut sql = format!("INSERT INTO {} ({}) VALUES ({})", "admin", col_sql.join(", "), placeholders.join(", "));
+        let mut sql = format!("INSERT INTO {} ({}) VALUES ({})", "localized", col_sql.join(", "), placeholders.join(", "));
         if let Some(action) = self.conflict_action {
             if !self.conflict_cols.is_empty() {
                 let conflict_col_sql: Vec<&'static str> = self.conflict_cols.iter().map(|c| c.as_sql()).collect();
@@ -1349,7 +1079,7 @@ impl<'db> AdminInsert<'db> {
             }
         }
         sql.push_str(" RETURNING *");
-        let mut q = sqlx::query_as::<_, AdminRow>(&sql);
+        let mut q = sqlx::query_as::<_, LocalizedRow>(&sql);
         for b in binds {
             q = bind(q, b);
         }
@@ -1358,15 +1088,15 @@ impl<'db> AdminInsert<'db> {
         Ok(hydrate_view(row, &LocalizedMap::default(), self.base_url.as_deref()))
     }
 }
-pub struct AdminUpdate<'db> {
+pub struct LocalizedUpdate<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(AdminCol, BindValue)>,
+    sets: Vec<(LocalizedCol, BindValue)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> AdminUpdate<'db> {
+impl<'db> LocalizedUpdate<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1376,123 +1106,68 @@ impl<'db> AdminUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> AdminUnsafeUpdate<'db> { AdminUnsafeUpdate::new(self) }
+    pub fn unsafe_sql(self) -> LocalizedUnsafeUpdate<'db> { LocalizedUnsafeUpdate::new(self) }
     pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((AdminCol::Id , val.into()));
+        self.sets.push((LocalizedCol::Id , val.into()));
         self
     }
-    pub fn set_username(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Username , val.into()));
+    pub fn set_owner_type(mut self, val: String) -> Self {
+        self.sets.push((LocalizedCol::OwnerType , val.into()));
         self
     }
-    pub fn set_email(mut self, val: Option<String>) -> Self {
-        self.sets.push((AdminCol::Email , val.into()));
+    pub fn set_owner_id(mut self, val: i64) -> Self {
+        self.sets.push((LocalizedCol::OwnerId , val.into()));
         self
     }
-    pub fn set_locale(mut self, val: Option<String>) -> Self {
-        self.sets.push((AdminCol::Locale , val.into()));
+    pub fn set_field(mut self, val: String) -> Self {
+        self.sets.push((LocalizedCol::Field , val.into()));
         self
     }
-    pub fn set_password(mut self, val: &str) -> anyhow::Result<Self> {
-        let hashed = core_db::common::auth::hash::hash_password(val)?;
-        self.sets.push((AdminCol::Password , hashed.into()));
-        Ok(self)
-    }
-    pub fn set_password_raw(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Password , val.into()));
+    pub fn set_locale(mut self, val: String) -> Self {
+        self.sets.push((LocalizedCol::Locale , val.into()));
         self
     }
-    pub fn set_name(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Name , val.into()));
-        self
-    }
-    pub fn set_admin_type(mut self, val: AdminType) -> Self {
-        self.sets.push((AdminCol::AdminType , val.into()));
-        self
-    }
-    pub fn set_abilities(mut self, val: serde_json::Value) -> Self {
-        self.sets.push((AdminCol::Abilities , val.into()));
-        self
-    }
-    pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AdminCol::CreatedAt , val.into()));
-        self
-    }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AdminCol::UpdatedAt , val.into()));
-        self
-    }
-    pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((AdminCol::DeletedAt , val.into()));
+    pub fn set_value(mut self, val: String) -> Self {
+        self.sets.push((LocalizedCol::Value , val.into()));
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_username(mut self, op: Op, val: String) -> Self {
+    pub fn where_owner_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_email(mut self, op: Op, val: Option<String>) -> Self {
+    pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_locale(mut self, op: Op, val: Option<String>) -> Self {
+    pub fn where_field(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::Field.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_password(mut self, op: Op, val: String) -> Self {
+    pub fn where_locale(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Password.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::Locale.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_name(mut self, op: Op, val: String) -> Self {
+    pub fn where_value(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", LocalizedCol::Value.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_admin_type(mut self, op: Op, val: AdminType) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::AdminType.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_abilities(mut self, op: Op, val: serde_json::Value) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Abilities.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::DeletedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AdminCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: LocalizedCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1535,13 +1210,8 @@ impl<'db> AdminUpdate<'db> {
 
     async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<u64> {
         let (mut cols, mut set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(AdminCol::UpdatedAt);
-            set_binds.push(now.into());
-        }
         // find target ids for localized updates
-        let select_sql = format!("SELECT id FROM admin WHERE {}", self.where_sql.join(" AND "));
+        let select_sql = format!("SELECT id FROM localized WHERE {}", self.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
         for b in &self.binds { select_q = bind_scalar(select_q, b.clone()); }
         let target_ids = db.fetch_all_scalar(select_q).await?;
@@ -1557,7 +1227,7 @@ impl<'db> AdminUpdate<'db> {
             renumbered.push(renumber_placeholders(&clause, offset + 1));
         }
         where_sql = renumbered;
-        let mut sql = String::from("UPDATE admin SET ");
+        let mut sql = String::from("UPDATE localized SET ");
         sql.push_str(&parts.join(", "));
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
@@ -1571,30 +1241,25 @@ impl<'db> AdminUpdate<'db> {
     }
 }
 #[doc(hidden)]
-pub struct AdminUnsafeUpdate<'db> {
-    inner: AdminUpdate<'db>,
+pub struct LocalizedUnsafeUpdate<'db> {
+    inner: LocalizedUpdate<'db>,
 }
 
-impl<'db> AdminUnsafeUpdate<'db> {
-    fn new(inner: AdminUpdate<'db>) -> Self { Self { inner } }
+impl<'db> LocalizedUnsafeUpdate<'db> {
+    fn new(inner: LocalizedUpdate<'db>) -> Self { Self { inner } }
     pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> AdminUpdate<'db> { self.inner }
+    pub fn done(self) -> LocalizedUpdate<'db> { self.inner }
 }
-pub struct AdminTableAdapter;
-impl AdminTableAdapter {
-    fn parse_col(name: &str) -> Option<AdminCol> {
+pub struct LocalizedTableAdapter;
+impl LocalizedTableAdapter {
+    fn parse_col(name: &str) -> Option<LocalizedCol> {
         match name {
-            "id" => Some(AdminCol::Id),
-            "username" => Some(AdminCol::Username),
-            "email" => Some(AdminCol::Email),
-            "locale" => Some(AdminCol::Locale),
-            "password" => Some(AdminCol::Password),
-            "name" => Some(AdminCol::Name),
-            "admin_type" => Some(AdminCol::AdminType),
-            "abilities" => Some(AdminCol::Abilities),
-            "created_at" => Some(AdminCol::CreatedAt),
-            "updated_at" => Some(AdminCol::UpdatedAt),
-            "deleted_at" => Some(AdminCol::DeletedAt),
+            "id" => Some(LocalizedCol::Id),
+            "owner_type" => Some(LocalizedCol::OwnerType),
+            "owner_id" => Some(LocalizedCol::OwnerId),
+            "field" => Some(LocalizedCol::Field),
+            "locale" => Some(LocalizedCol::Locale),
+            "value" => Some(LocalizedCol::Value),
             _ => None,
         }
     }
@@ -1608,29 +1273,23 @@ impl AdminTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<AdminCol> {
+    fn parse_like_col(name: &str) -> Option<LocalizedCol> {
         match name {
-            "username" => Some(AdminCol::Username),
-            "email" => Some(AdminCol::Email),
-            "locale" => Some(AdminCol::Locale),
-            "password" => Some(AdminCol::Password),
-            "name" => Some(AdminCol::Name),
+            "owner_type" => Some(LocalizedCol::OwnerType),
+            "field" => Some(LocalizedCol::Field),
+            "locale" => Some(LocalizedCol::Locale),
+            "value" => Some(LocalizedCol::Value),
             _ => None,
         }
     }
     fn parse_bind_for_col(name: &str, raw: &str) -> Option<BindValue> {
         match name {
             "id" => raw.trim().parse::<i64>().ok().map(Into::into),
-            "username" => Some(raw.trim().to_string().into()),
-            "email" => Some(Self::parse_bind(raw.trim())),
-            "locale" => Some(Self::parse_bind(raw.trim())),
-            "password" => Some(raw.trim().to_string().into()),
-            "name" => Some(raw.trim().to_string().into()),
-            "admin_type" => Some(Self::parse_bind(raw.trim())),
-            "abilities" => Some(Self::parse_bind(raw.trim())),
-            "created_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            "updated_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            "deleted_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
+            "owner_type" => Some(raw.trim().to_string().into()),
+            "owner_id" => raw.trim().parse::<i64>().ok().map(Into::into),
+            "field" => Some(raw.trim().to_string().into()),
+            "locale" => Some(raw.trim().to_string().into()),
+            "value" => Some(raw.trim().to_string().into()),
             _ => None,
         }
     }
@@ -1659,25 +1318,20 @@ impl AdminTableAdapter {
         None
     }
 }
-impl GeneratedTableAdapter for AdminTableAdapter {
-    type Query<'db> = AdminQuery<'db>;
-    type Row = AdminView;
-    fn model_key(&self) -> &'static str { "Admin" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "username", "email", "locale", "password", "name", "admin_type", "created_at", "updated_at", "deleted_at"] }
-    fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at", "deleted_at"] }
+impl GeneratedTableAdapter for LocalizedTableAdapter {
+    type Query<'db> = LocalizedQuery<'db>;
+    type Row = LocalizedView;
+    fn model_key(&self) -> &'static str { "Localized" }
+    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "owner_type", "owner_id", "field", "locale", "value"] }
+    fn timestamp_columns(&self) -> &'static [&'static str] { &[] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
         &[
             DataTableColumnDescriptor { name: "id", label: "ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "username", label: "Username", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "email", label: "Email", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "locale", label: "Locale", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "password", label: "Password", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "name", label: "Name", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "admin_type", label: "Admin Type", data_type: "AdminType", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "abilities", label: "Abilities", data_type: "serde_json::Value", sortable: false, localized: false, filter_ops: &["eq", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "created_at", label: "Created At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
-            DataTableColumnDescriptor { name: "updated_at", label: "Updated At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
-            DataTableColumnDescriptor { name: "deleted_at", label: "Deleted At", data_type: "Option<time::OffsetDateTime>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
+            DataTableColumnDescriptor { name: "owner_type", label: "Owner Type", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "owner_id", label: "Owner ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "field", label: "Field", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "locale", label: "Locale", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "value", label: "Value", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
         ]
     }
     fn relation_column_descriptors(&self) -> &'static [DataTableRelationColumnDescriptor] {
@@ -1698,7 +1352,7 @@ impl GeneratedTableAdapter for AdminTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: AdminQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<AdminQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: LocalizedQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<LocalizedQuery<'db>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -1792,53 +1446,45 @@ impl GeneratedTableAdapter for AdminTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: AdminQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<AdminQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: LocalizedQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<LocalizedQuery<'db>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(AdminCol::Id, dir),
-            "username" => query.order_by(AdminCol::Username, dir),
-            "email" => query.order_by(AdminCol::Email, dir),
-            "locale" => query.order_by(AdminCol::Locale, dir),
-            "password" => query.order_by(AdminCol::Password, dir),
-            "name" => query.order_by(AdminCol::Name, dir),
-            "admin_type" => query.order_by(AdminCol::AdminType, dir),
-            "abilities" => query.order_by(AdminCol::Abilities, dir),
-            "created_at" => query.order_by(AdminCol::CreatedAt, dir),
-            "updated_at" => query.order_by(AdminCol::UpdatedAt, dir),
-            "deleted_at" => query.order_by(AdminCol::DeletedAt, dir),
+            "id" => query.order_by(LocalizedCol::Id, dir),
+            "owner_type" => query.order_by(LocalizedCol::OwnerType, dir),
+            "owner_id" => query.order_by(LocalizedCol::OwnerId, dir),
+            "field" => query.order_by(LocalizedCol::Field, dir),
+            "locale" => query.order_by(LocalizedCol::Locale, dir),
+            "value" => query.order_by(LocalizedCol::Value, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: AdminQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<AdminQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: LocalizedQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<LocalizedQuery<'db>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &AdminView, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &LocalizedView, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
-            "username" => Some(row.username.clone()),
-            "email" => row.email.as_ref().map(|v| v.to_string()),
-            "locale" => row.locale.as_ref().map(|v| v.to_string()),
-            "password" => Some(row.password.clone()),
-            "name" => Some(row.name.clone()),
-            "created_at" => row.created_at.format(&time::format_description::well_known::Rfc3339).ok(),
-            "updated_at" => row.updated_at.format(&time::format_description::well_known::Rfc3339).ok(),
-            "deleted_at" => row.deleted_at.as_ref().and_then(|v| v.format(&time::format_description::well_known::Rfc3339).ok()),
+            "owner_type" => Some(row.owner_type.clone()),
+            "owner_id" => Some(row.owner_id.to_string()),
+            "field" => Some(row.field.clone()),
+            "locale" => Some(row.locale.clone()),
+            "value" => Some(row.value.clone()),
             _ => None,
         }
     }
-    fn count<'db>(&self, query: AdminQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: LocalizedQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: AdminQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<AdminView>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: LocalizedQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<LocalizedView>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
 #[derive(Debug, Clone, Copy)]
-pub struct AdminDataTableConfig {
+pub struct LocalizedDataTableConfig {
     pub default_sorting_column: &'static str,
     pub default_sorted: SortDirection,
     pub default_export_ignore_columns: &'static [&'static str],
@@ -1846,87 +1492,79 @@ pub struct AdminDataTableConfig {
     pub default_unsortable: &'static [&'static str],
     pub default_row_per_page: Option<i64>,
 }
-impl Default for AdminDataTableConfig {
+impl Default for LocalizedDataTableConfig {
     fn default() -> Self {
         Self {
             default_sorting_column: "id",
             default_sorted: SortDirection::Desc,
             default_export_ignore_columns: &["actions", "action"],
-            default_timestamp_columns: &["created_at", "updated_at", "deleted_at"],
+            default_timestamp_columns: &[],
             default_unsortable: &[],
             default_row_per_page: None,
         }
     }
 }
-pub trait AdminDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> AdminQuery<'db> { query }
+pub trait LocalizedDataTableHooks: Send + Sync + 'static {
+    fn scope<'db>(&'db self, query: LocalizedQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> LocalizedQuery<'db> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: AdminQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<AdminQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<AdminQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut AdminView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: AdminView) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn filter_query<'db>(&'db self, _query: LocalizedQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<LocalizedQuery<'db>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: LocalizedQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<LocalizedQuery<'db>> { Ok(query) }
+    fn map_row(&self, _row: &mut LocalizedView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: LocalizedView) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         let value = serde_json::to_value(row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
-        if let Some(id_value) = record.get("id").cloned() {
-            let id_text = match id_value {
-                serde_json::Value::Number(number) => number.to_string(),
-                serde_json::Value::String(text) => text,
-                other => other.to_string(),
-            };
-            record.insert("id".to_string(), serde_json::Value::String(id_text));
-        }
         Ok(record)
     }
-    fn row_to_record(&self, row: AdminView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: LocalizedView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: LocalizedQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
-pub struct AdminDefaultDataTableHooks;
-impl AdminDataTableHooks for AdminDefaultDataTableHooks {}
-pub struct AdminDataTable<H = AdminDefaultDataTableHooks> where H: AdminDataTableHooks {
+pub struct LocalizedDefaultDataTableHooks;
+impl LocalizedDataTableHooks for LocalizedDefaultDataTableHooks {}
+pub struct LocalizedDataTable<H = LocalizedDefaultDataTableHooks> where H: LocalizedDataTableHooks {
     pub db: sqlx::PgPool,
     pub hooks: H,
-    pub config: AdminDataTableConfig,
-    adapter: AdminTableAdapter,
+    pub config: LocalizedDataTableConfig,
+    adapter: LocalizedTableAdapter,
 }
-impl AdminDataTable<AdminDefaultDataTableHooks> {
+impl LocalizedDataTable<LocalizedDefaultDataTableHooks> {
     pub fn new(db: sqlx::PgPool) -> Self {
         Self {
             db,
-            hooks: AdminDefaultDataTableHooks,
-            config: AdminDataTableConfig::default(),
-            adapter: AdminTableAdapter,
+            hooks: LocalizedDefaultDataTableHooks,
+            config: LocalizedDataTableConfig::default(),
+            adapter: LocalizedTableAdapter,
         }
     }
 }
-impl<H: AdminDataTableHooks> AdminDataTable<H> {
-    pub fn with_hooks<NH: AdminDataTableHooks>(self, hooks: NH) -> AdminDataTable<NH> {
-        AdminDataTable {
+impl<H: LocalizedDataTableHooks> LocalizedDataTable<H> {
+    pub fn with_hooks<NH: LocalizedDataTableHooks>(self, hooks: NH) -> LocalizedDataTable<NH> {
+        LocalizedDataTable {
             db: self.db,
             hooks,
             config: self.config,
-            adapter: AdminTableAdapter,
+            adapter: LocalizedTableAdapter,
         }
     }
-    pub fn with_config(mut self, config: AdminDataTableConfig) -> Self {
+    pub fn with_config(mut self, config: LocalizedDataTableConfig) -> Self {
         self.config = config;
         self
     }
 }
-impl<H: AdminDataTableHooks> AutoDataTable for AdminDataTable<H> {
-    type Adapter = AdminTableAdapter;
+impl<H: LocalizedDataTableHooks> AutoDataTable for LocalizedDataTable<H> {
+    type Adapter = LocalizedTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> AdminQuery<'db> {
-        self.hooks.scope(Admin::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> LocalizedQuery<'db> {
+        self.hooks.scope(Localized::new(&self.db, None).query(), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: AdminQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<AdminQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: AdminQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<AdminQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut AdminView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: AdminView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: AdminQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: LocalizedQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<LocalizedQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: LocalizedQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<LocalizedQuery<'db>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut LocalizedView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: LocalizedView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: LocalizedQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -1937,9 +1575,9 @@ impl<H: AdminDataTableHooks> AutoDataTable for AdminDataTable<H> {
 
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for AdminView {
+impl ActiveRecord for LocalizedView {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Admin::new(db, None).find(id).await.map_err(|e| e.into())
+        Localized::new(db, None).find(id).await.map_err(|e| e.into())
     }
 }

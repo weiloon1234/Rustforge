@@ -1,5 +1,6 @@
 use crate::{Job, JobContext};
 use async_trait::async_trait;
+use core_db::{common::sql::DbConn, generated::models::FailedJob};
 use redis::AsyncCommands;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -375,22 +376,17 @@ impl Worker {
     }
 
     async fn persist_failure(&self, wrapper: &JobPayload, group_id: Option<&str>, err: &str) {
-        // Log to DB
-        // Query: INSERT INTO failed_jobs ...
-
-        let query = "INSERT INTO failed_jobs (job_name, queue, payload, error, attempts, group_id) VALUES ($1, $2, $3, $4, $5, $6)";
-
-        // Payload as JSONB
         let payload_json = serde_json::to_value(wrapper).unwrap_or(serde_json::json!({}));
 
-        if let Err(e) = sqlx::query(query)
-            .bind(&wrapper.job)
-            .bind(&wrapper.queue)
-            .bind(payload_json)
-            .bind(err)
-            .bind(wrapper.attempts as i32)
-            .bind(group_id)
-            .execute(&self.context.db)
+        if let Err(e) = FailedJob::new(DbConn::pool(&self.context.db), None)
+            .insert()
+            .set_job_name(wrapper.job.clone())
+            .set_queue(wrapper.queue.clone())
+            .set_payload(payload_json)
+            .set_error(err.to_string())
+            .set_attempts(wrapper.attempts as i32)
+            .set_group_id(group_id.map(str::to_string))
+            .save()
             .await
         {
             tracing::error!("Failed to persist job failure log: {}", e);

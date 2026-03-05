@@ -292,7 +292,291 @@ impl From<ContentPageSystemFlag> for core_db::common::sql::BindValue {
 }
 
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub enum CountryStatus {
+    #[serde(rename = "enabled")]
+    Enabled,
+    #[serde(rename = "disabled")]
+    Disabled
+}
+
+impl Default for CountryStatus {
+    fn default() -> Self {
+        Self::Enabled
+    }
+}
+
+impl ts_rs::TS for CountryStatus {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "CountryStatus".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("CountryStatus cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type CountryStatus = \"enabled\" | \"disabled\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl CountryStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Enabled => "enabled",
+            Self::Disabled => "disabled",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Enabled => "Enabled",
+            Self::Disabled => "Disabled",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "enabled" => Some(Self::Enabled),
+            "disabled" => Some(Self::Disabled),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Enabled => "enum.country_status.enabled",
+            Self::Disabled => "enum.country_status.disabled",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::Enabled, Self::Disabled]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+// sqlx support for TEXT storage
+impl sqlx::Encode<'_, sqlx::Postgres> for CountryStatus {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        let s = match self {
+            Self::Enabled => "enabled",
+            Self::Disabled => "disabled",
+        };
+        <&str as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&s, buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for CountryStatus {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let s = <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match s {
+            "enabled" => Ok(Self::Enabled),
+            "disabled" => Ok(Self::Disabled),
+            _ => Err(format!("Invalid CountryStatus: {}", s).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for CountryStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+// For ActiveRecord BindValue
+impl From<CountryStatus> for core_db::common::sql::BindValue {
+    fn from(v: CountryStatus) -> Self {
+        let s = match v {
+            CountryStatus::Enabled => "enabled",
+            CountryStatus::Disabled => "disabled",
+        };
+        core_db::common::sql::BindValue::String(s.to_string())
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub enum PersonalAccessTokenKind {
+    #[serde(rename = "access")]
+    Access,
+    #[serde(rename = "refresh")]
+    Refresh
+}
+
+impl Default for PersonalAccessTokenKind {
+    fn default() -> Self {
+        Self::Access
+    }
+}
+
+impl ts_rs::TS for PersonalAccessTokenKind {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "PersonalAccessTokenKind".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("PersonalAccessTokenKind cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type PersonalAccessTokenKind = \"access\" | \"refresh\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl PersonalAccessTokenKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Access => "access",
+            Self::Refresh => "refresh",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Access => "Access",
+            Self::Refresh => "Refresh",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "access" => Some(Self::Access),
+            "refresh" => Some(Self::Refresh),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Access => "enum.personal_access_token_kind.access",
+            Self::Refresh => "enum.personal_access_token_kind.refresh",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::Access, Self::Refresh]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+// sqlx support for TEXT storage
+impl sqlx::Encode<'_, sqlx::Postgres> for PersonalAccessTokenKind {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        let s = match self {
+            Self::Access => "access",
+            Self::Refresh => "refresh",
+        };
+        <&str as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&s, buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for PersonalAccessTokenKind {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let s = <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match s {
+            "access" => Ok(Self::Access),
+            "refresh" => Ok(Self::Refresh),
+            _ => Err(format!("Invalid PersonalAccessTokenKind: {}", s).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for PersonalAccessTokenKind {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+// For ActiveRecord BindValue
+impl From<PersonalAccessTokenKind> for core_db::common::sql::BindValue {
+    fn from(v: PersonalAccessTokenKind) -> Self {
+        let s = match v {
+            PersonalAccessTokenKind::Access => "access",
+            PersonalAccessTokenKind::Refresh => "refresh",
+        };
+        core_db::common::sql::BindValue::String(s.to_string())
+    }
+}
+
+
 pub const SCHEMA_ENUM_TS_META: &[SchemaEnumTsMeta] = &[
     SchemaEnumTsMeta { name: "AdminType", variants: &["developer", "superadmin", "admin"] },
     SchemaEnumTsMeta { name: "ContentPageSystemFlag", variants: &["0", "1"] },
+    SchemaEnumTsMeta { name: "CountryStatus", variants: &["enabled", "disabled"] },
+    SchemaEnumTsMeta { name: "PersonalAccessTokenKind", variants: &["access", "refresh"] },
 ];

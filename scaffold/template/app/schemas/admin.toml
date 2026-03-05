@@ -24,36 +24,3 @@ fields = [
   "created_at:datetime",
   "updated_at:datetime"
 ]
-
-[model.http_client_log]
-table = "http_client_logs"
-pk = "id"
-pk_type = "uuid"
-disable_timestamps = true
-fields = [
-  "request_url:string",
-  "request_method:string",
-  "response_status:i32",
-  "duration_ms:i32",
-  "request_headers:serde_json::Value",
-  "request_body:Option<String>",
-  "response_headers:serde_json::Value",
-  "response_body:Option<String>",
-  "created_at:datetime"
-]
-
-[model.webhook_log]
-table = "webhook_logs"
-pk = "id"
-pk_type = "uuid"
-disable_timestamps = true
-fields = [
-  "request_url:string",
-  "request_method:string",
-  "response_status:i32",
-  "duration_ms:i32",
-  "request_headers:serde_json::Value",
-  "request_body:Option<String>",
-  "response_body:Option<String>",
-  "created_at:datetime"
-]

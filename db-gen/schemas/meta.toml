@@ -1,0 +1,13 @@
+[model.meta]
+table = "meta"
+pk = "id"
+pk_type = "i64"
+id_strategy = "manual"
+disable_timestamps = true
+fields = [
+  "id:i64",
+  "owner_type:String",
+  "owner_id:i64",
+  "field:String",
+  "value:serde_json::Value"
+]

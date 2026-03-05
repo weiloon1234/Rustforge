@@ -5,7 +5,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, bind, bind_query, bind_scalar, generate_snowflake_i64, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, bind, bind_query, bind_scalar, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
@@ -15,187 +15,210 @@ use super::enums::*;
 
 const HAS_CREATED_AT: bool = true;
 const HAS_UPDATED_AT: bool = true;
-const HAS_SOFT_DELETE: bool = true;
+const HAS_SOFT_DELETE: bool = false;
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
-pub struct AdminRow {
-    pub id: i64,
-    pub username: String,
-    pub email: Option<String>,
-    pub locale: Option<String>,
-    pub password: String,
+pub struct PersonalAccessTokenRow {
+    pub id: uuid::Uuid,
+    pub tokenable_type: String,
+    pub tokenable_id: String,
     pub name: String,
-    pub admin_type: AdminType,
-    pub abilities: serde_json::Value,
+    pub token: String,
+    pub token_kind: PersonalAccessTokenKind,
+    pub family_id: uuid::Uuid,
+    pub parent_token_id: Option<uuid::Uuid>,
+    pub abilities: Option<serde_json::Value>,
+    #[schemars(with = "String")]
+    pub last_used_at: Option<time::OffsetDateTime>,
+    #[schemars(with = "String")]
+    pub expires_at: Option<time::OffsetDateTime>,
+    #[schemars(with = "String")]
+    pub revoked_at: Option<time::OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
     #[schemars(with = "String")]
     pub updated_at: time::OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339::option")]
-    #[schemars(with = "String")]
-    pub deleted_at: Option<time::OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AdminView {
-    pub id: i64,
-    pub username: String,
-    pub email: Option<String>,
-    pub locale: Option<String>,
-    pub password: String,
+pub struct PersonalAccessTokenView {
+    pub id: uuid::Uuid,
+    pub tokenable_type: String,
+    pub tokenable_id: String,
     pub name: String,
-    pub admin_type: AdminType,
-    pub abilities: serde_json::Value,
+    pub token: String,
+    pub token_kind: PersonalAccessTokenKind,
+    pub family_id: uuid::Uuid,
+    pub parent_token_id: Option<uuid::Uuid>,
+    pub abilities: Option<serde_json::Value>,
+    #[schemars(with = "String")]
+    pub last_used_at: Option<time::OffsetDateTime>,
+    #[schemars(with = "String")]
+    pub expires_at: Option<time::OffsetDateTime>,
+    #[schemars(with = "String")]
+    pub revoked_at: Option<time::OffsetDateTime>,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
     #[schemars(with = "String")]
     pub updated_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub deleted_at: Option<time::OffsetDateTime>,
-    pub admin_type_explained: String,
+    pub token_kind_explained: String,
 }
 
-impl AdminView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> AdminUpdate<'db> {
-        Admin::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
+impl PersonalAccessTokenView {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> PersonalAccessTokenUpdate<'db> {
+        PersonalAccessToken::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
     }
-    pub fn update_with<'db>(&self, model: &Admin<'db>) -> AdminUpdate<'db> {
+    pub fn update_with<'db>(&self, model: &PersonalAccessToken<'db>) -> PersonalAccessTokenUpdate<'db> {
         model.update().where_id(Op::Eq, self.id.clone())
     }
-    pub fn to_json(&self) -> AdminJson {
-        AdminJson {
+    pub fn to_json(&self) -> PersonalAccessTokenJson {
+        PersonalAccessTokenJson {
             id: self.id.clone(),
-            username: self.username.clone(),
-            email: self.email.clone(),
-            locale: self.locale.clone(),
-            password: self.password.clone(),
+            tokenable_type: self.tokenable_type.clone(),
+            tokenable_id: self.tokenable_id.clone(),
             name: self.name.clone(),
-            admin_type: self.admin_type.clone(),
+            token: self.token.clone(),
+            token_kind: self.token_kind.clone(),
+            family_id: self.family_id.clone(),
+            parent_token_id: self.parent_token_id.clone(),
             abilities: self.abilities.clone(),
+            last_used_at: self.last_used_at.clone(),
+            expires_at: self.expires_at.clone(),
+            revoked_at: self.revoked_at.clone(),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
-            deleted_at: self.deleted_at.clone(),
-            admin_type_explained: self.admin_type_explained.clone(),
+            token_kind_explained: self.token_kind_explained.clone(),
         }
     }
 }
 
-pub trait AdminViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&AdminView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, AdminView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, Vec<AdminView>> where K: Eq + std::hash::Hash;
+pub trait PersonalAccessTokenViewsExt {
+    fn ids(&self) -> Vec<uuid::Uuid>;
+    fn pluck<R>(&self, f: impl Fn(&PersonalAccessTokenView) -> R) -> Vec<R>;
+    fn key_by<K>(&self, f: impl Fn(&PersonalAccessTokenView) -> K) -> std::collections::HashMap<K, PersonalAccessTokenView> where K: Eq + std::hash::Hash;
+    fn group_by<K>(&self, f: impl Fn(&PersonalAccessTokenView) -> K) -> std::collections::HashMap<K, Vec<PersonalAccessTokenView>> where K: Eq + std::hash::Hash;
 }
 
-impl AdminViewsExt for Vec<AdminView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&AdminView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, AdminView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, Vec<AdminView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
+impl PersonalAccessTokenViewsExt for Vec<PersonalAccessTokenView> {
+    fn ids(&self) -> Vec<uuid::Uuid> { self.as_slice().pluck_typed(|v| v.id.clone()) }
+    fn pluck<R>(&self, f: impl Fn(&PersonalAccessTokenView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
+    fn key_by<K>(&self, f: impl Fn(&PersonalAccessTokenView) -> K) -> std::collections::HashMap<K, PersonalAccessTokenView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
+    fn group_by<K>(&self, f: impl Fn(&PersonalAccessTokenView) -> K) -> std::collections::HashMap<K, Vec<PersonalAccessTokenView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
-pub struct AdminJson {
-    pub id: i64,
-    pub username: String,
-    pub email: Option<String>,
-    pub locale: Option<String>,
-    pub password: String,
+pub struct PersonalAccessTokenJson {
+    pub id: uuid::Uuid,
+    pub tokenable_type: String,
+    pub tokenable_id: String,
     pub name: String,
-    pub admin_type: AdminType,
-    pub abilities: serde_json::Value,
+    pub token: String,
+    pub token_kind: PersonalAccessTokenKind,
+    pub family_id: uuid::Uuid,
+    pub parent_token_id: Option<uuid::Uuid>,
+    pub abilities: Option<serde_json::Value>,
+    #[schemars(with = "String")]
+    pub last_used_at: Option<time::OffsetDateTime>,
+    #[schemars(with = "String")]
+    pub expires_at: Option<time::OffsetDateTime>,
+    #[schemars(with = "String")]
+    pub revoked_at: Option<time::OffsetDateTime>,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
     #[schemars(with = "String")]
     pub updated_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub deleted_at: Option<time::OffsetDateTime>,
-    pub admin_type_explained: String,
+    pub token_kind_explained: String,
 }
 
-fn hydrate_view(row: AdminRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> AdminView {
-    let view = AdminView {
+fn hydrate_view(row: PersonalAccessTokenRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> PersonalAccessTokenView {
+    let view = PersonalAccessTokenView {
         id: row.id,
-        username: row.username,
-        email: row.email,
-        locale: row.locale,
-        password: row.password,
+        tokenable_type: row.tokenable_type,
+        tokenable_id: row.tokenable_id,
         name: row.name,
-        admin_type: row.admin_type,
+        token: row.token,
+        token_kind: row.token_kind,
+        family_id: row.family_id,
+        parent_token_id: row.parent_token_id,
         abilities: row.abilities,
+        last_used_at: row.last_used_at,
+        expires_at: row.expires_at,
+        revoked_at: row.revoked_at,
         created_at: row.created_at,
         updated_at: row.updated_at,
-        deleted_at: row.deleted_at,
-        admin_type_explained: row.admin_type.explained_label(),
+        token_kind_explained: row.token_kind.explained_label(),
     };
     view
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum AdminCol {
+pub enum PersonalAccessTokenCol {
     Id,
-    Username,
-    Email,
-    Locale,
-    Password,
+    TokenableType,
+    TokenableId,
     Name,
-    AdminType,
+    Token,
+    TokenKind,
+    FamilyId,
+    ParentTokenId,
     Abilities,
+    LastUsedAt,
+    ExpiresAt,
+    RevokedAt,
     CreatedAt,
     UpdatedAt,
-    DeletedAt,
 }
 
-impl AdminCol {
-    pub const fn all() -> &'static [AdminCol] {
-        &[AdminCol::Id, AdminCol::Username, AdminCol::Email, AdminCol::Locale, AdminCol::Password, AdminCol::Name, AdminCol::AdminType, AdminCol::Abilities, AdminCol::CreatedAt, AdminCol::UpdatedAt, AdminCol::DeletedAt]
+impl PersonalAccessTokenCol {
+    pub const fn all() -> &'static [PersonalAccessTokenCol] {
+        &[PersonalAccessTokenCol::Id, PersonalAccessTokenCol::TokenableType, PersonalAccessTokenCol::TokenableId, PersonalAccessTokenCol::Name, PersonalAccessTokenCol::Token, PersonalAccessTokenCol::TokenKind, PersonalAccessTokenCol::FamilyId, PersonalAccessTokenCol::ParentTokenId, PersonalAccessTokenCol::Abilities, PersonalAccessTokenCol::LastUsedAt, PersonalAccessTokenCol::ExpiresAt, PersonalAccessTokenCol::RevokedAt, PersonalAccessTokenCol::CreatedAt, PersonalAccessTokenCol::UpdatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            AdminCol::Id => "id",
-            AdminCol::Username => "username",
-            AdminCol::Email => "email",
-            AdminCol::Locale => "locale",
-            AdminCol::Password => "password",
-            AdminCol::Name => "name",
-            AdminCol::AdminType => "admin_type",
-            AdminCol::Abilities => "abilities",
-            AdminCol::CreatedAt => "created_at",
-            AdminCol::UpdatedAt => "updated_at",
-            AdminCol::DeletedAt => "deleted_at",
+            PersonalAccessTokenCol::Id => "id",
+            PersonalAccessTokenCol::TokenableType => "tokenable_type",
+            PersonalAccessTokenCol::TokenableId => "tokenable_id",
+            PersonalAccessTokenCol::Name => "name",
+            PersonalAccessTokenCol::Token => "token",
+            PersonalAccessTokenCol::TokenKind => "token_kind",
+            PersonalAccessTokenCol::FamilyId => "family_id",
+            PersonalAccessTokenCol::ParentTokenId => "parent_token_id",
+            PersonalAccessTokenCol::Abilities => "abilities",
+            PersonalAccessTokenCol::LastUsedAt => "last_used_at",
+            PersonalAccessTokenCol::ExpiresAt => "expires_at",
+            PersonalAccessTokenCol::RevokedAt => "revoked_at",
+            PersonalAccessTokenCol::CreatedAt => "created_at",
+            PersonalAccessTokenCol::UpdatedAt => "updated_at",
         }
     }
 }
 
-pub struct Admin<'db> {
+pub struct PersonalAccessToken<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
 }
 
-impl<'db> Admin<'db> {
-    pub const TABLE: &'static str = "admin";
+impl<'db> PersonalAccessToken<'db> {
+    pub const TABLE: &'static str = "personal_access_tokens";
     pub const PK: &'static str = "id";
     pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> AdminQuery<'db> { AdminQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> AdminInsert<'db> { AdminInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> AdminUpdate<'db> { AdminUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<AdminView>> {
+    pub fn query(&self) -> PersonalAccessTokenQuery<'db> { PersonalAccessTokenQuery::new(self.db.clone(), self.base_url.clone()) }
+    pub fn insert(&self) -> PersonalAccessTokenInsert<'db> { PersonalAccessTokenInsert::new(self.db.clone(), self.base_url.clone()) }
+    pub fn update(&self) -> PersonalAccessTokenUpdate<'db> { PersonalAccessTokenUpdate::new(self.db.clone(), self.base_url.clone()) }
+    pub async fn find(&self, id: uuid::Uuid) -> Result<Option<PersonalAccessTokenView>> {
         self.query().find(id).await
     }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
+    pub async fn delete(&self, id: uuid::Uuid) -> Result<u64> {
         self.query().where_id(Op::Eq, id).delete().await
-    }
-    pub async fn restore(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).restore().await
     }
 }
 
 #[derive(Clone)]
-pub struct AdminQuery<'db> {
+pub struct PersonalAccessTokenQuery<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -214,150 +237,184 @@ pub struct AdminQuery<'db> {
     offset: Option<i64>,
     limit: Option<i64>,
     binds: Vec<BindValue>,
-    with_deleted: bool,
-    only_deleted: bool,
 }
 
-impl<'db> AdminQuery<'db> {
+impl<'db> PersonalAccessTokenQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![], with_deleted: false, only_deleted: false }
+        Self { db, base_url, select_sql: Some("id, tokenable_type, tokenable_id, name, token, token_kind, family_id, parent_token_id, abilities, last_used_at, expires_at, revoked_at, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> AdminUnsafeQuery<'db> { AdminUnsafeQuery::new(self) }
-    pub fn where_id(mut self, op: Op, val: i64) -> Self {
+    pub fn unsafe_sql(self) -> PersonalAccessTokenUnsafeQuery<'db> { PersonalAccessTokenUnsafeQuery::new(self) }
+    pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_username(mut self, op: Op, val: String) -> Self {
+    pub fn where_tokenable_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenableType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_username_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_tokenable_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenableType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_email(mut self, op: Op, val: Option<String>) -> Self {
+    pub fn where_tokenable_id(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenableId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_email_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_tokenable_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_locale(mut self, op: Op, val: Option<String>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_locale_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_password(mut self, op: Op, val: String) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Password.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_password_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Password.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenableId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_admin_type(mut self, op: Op, val: AdminType) -> Self {
+    pub fn where_token(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::AdminType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Token.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_admin_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_token_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::AdminType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Token.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_abilities(mut self, op: Op, val: serde_json::Value) -> Self {
+    pub fn where_token_kind(mut self, op: Op, val: PersonalAccessTokenKind) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenKind.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_token_kind_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenKind.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_family_id(mut self, op: Op, val: uuid::Uuid) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::FamilyId.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_family_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::FamilyId.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_parent_token_id(mut self, op: Op, val: Option<uuid::Uuid>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::ParentTokenId.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_parent_token_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::ParentTokenId.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_abilities(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Abilities.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_abilities_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_last_used_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::LastUsedAt.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_last_used_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::LastUsedAt.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_expires_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::ExpiresAt.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_expires_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::ExpiresAt.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_revoked_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::RevokedAt.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_revoked_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::RevokedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::DeletedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_deleted_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::DeletedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(AdminCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AdminCol, op: Op, val: T) -> Self {
+    pub fn where_key(self, id: uuid::Uuid) -> Self { self.where_id(Op::Eq, id) }
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(PersonalAccessTokenCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: PersonalAccessTokenCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -376,7 +433,7 @@ impl<'db> AdminQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: AdminCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: PersonalAccessTokenCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -391,7 +448,7 @@ impl<'db> AdminQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: AdminCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: PersonalAccessTokenCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -403,7 +460,7 @@ impl<'db> AdminQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: AdminCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: PersonalAccessTokenCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -411,15 +468,15 @@ impl<'db> AdminQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: AdminCol) -> Self {
+    pub fn where_null(mut self, col: PersonalAccessTokenCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: AdminCol) -> Self {
+    pub fn where_not_null(mut self, col: PersonalAccessTokenCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: AdminCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: PersonalAccessTokenCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -473,23 +530,23 @@ impl<'db> AdminQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[AdminCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[PersonalAccessTokenCol]) -> Self {
         if cols.is_empty() {
-            self.select_sql = Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
+            self.select_sql = Some("id, tokenable_type, tokenable_id, name, token, token_kind, family_id, parent_token_id, abilities, last_used_at, expires_at, revoked_at, created_at, updated_at".to_string());
         } else {
             let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect();
+            let mut list: Vec<String> = "id, tokenable_type, tokenable_id, name, token, token_kind, family_id, parent_token_id, abilities, last_used_at, expires_at, revoked_at, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect();
             for s in &list { seen.insert(s.clone()); }
             for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
             self.select_sql = Some(list.join(", "));
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[AdminCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[PersonalAccessTokenCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect(),
+            _ => "id, tokenable_type, tokenable_id, name, token, token_kind, family_id, parent_token_id, abilities, last_used_at, expires_at, revoked_at, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect(),
         };
         for s in &list { seen.insert(s.clone()); }
         for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
@@ -499,16 +556,16 @@ impl<'db> AdminQuery<'db> {
     fn select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() {
-            self.select_sql = Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
+            self.select_sql = Some("id, tokenable_type, tokenable_id, name, token, token_kind, family_id, parent_token_id, abilities, last_used_at, expires_at, revoked_at, created_at, updated_at".to_string());
         } else {
-            self.select_sql = Some(format!("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at, {}", s));
+            self.select_sql = Some(format!("id, tokenable_type, tokenable_id, name, token, token_kind, family_id, parent_token_id, abilities, last_used_at, expires_at, revoked_at, created_at, updated_at, {}", s));
         }
         self
     }
     fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
+        let mut base = self.select_sql.take().unwrap_or_else(|| "id, tokenable_type, tokenable_id, name, token, token_kind, family_id, parent_token_id, abilities, last_used_at, expires_at, revoked_at, created_at, updated_at".to_string());
         if !base.is_empty() { base.push_str(", "); }
         base.push_str(&s);
         self.select_sql = Some(base);
@@ -566,26 +623,26 @@ impl<'db> AdminQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: AdminCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: PersonalAccessTokenCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: AdminCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: PersonalAccessTokenCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: AdminCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: PersonalAccessTokenCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[AdminCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[PersonalAccessTokenCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[AdminCol]) -> Self {
+    pub fn select(mut self, cols: &[PersonalAccessTokenCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -634,7 +691,7 @@ impl<'db> AdminQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[AdminCol]) -> Self {
+    pub fn group_by(mut self, cols: &[PersonalAccessTokenCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -661,8 +718,6 @@ impl<'db> AdminQuery<'db> {
         self.offset = Some(n);
         self
     }
-    pub fn with_deleted(mut self) -> Self { self.with_deleted = true; self }
-    pub fn only_deleted(mut self) -> Self { self.only_deleted = true; self }
     pub async fn get_as<T>(self) -> Result<Vec<T>>
     where
         T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Unpin + 'static,
@@ -674,7 +729,7 @@ impl<'db> AdminQuery<'db> {
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "personal_access_tokens".to_string());
         let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
         if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
         if !where_sql.is_empty() {
@@ -709,22 +764,15 @@ impl<'db> AdminQuery<'db> {
         Ok(db.fetch_all(q).await?)
     }
 
-    pub async fn get(self) -> Result<Vec<AdminView>> {
-        let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , with_deleted, only_deleted, .. } = self;
+    pub async fn get(self) -> Result<Vec<PersonalAccessTokenView>> {
+        let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
         let select_clause = match (distinct, distinct_on.as_ref()) {
             (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "personal_access_tokens".to_string());
         let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
         if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
         if !where_sql.is_empty() {
@@ -752,14 +800,14 @@ impl<'db> AdminQuery<'db> {
             sql.push_str(&l.to_string());
         }
         if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut q = sqlx::query_as::<_, AdminRow>(&sql);
+        let mut q = sqlx::query_as::<_, PersonalAccessTokenRow>(&sql);
         for b in binds {
             q = bind(q, b);
         }
         for b in join_binds { q = bind(q, b); }
         for b in having_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
-        let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
+        let ids: Vec<uuid::Uuid> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
@@ -768,82 +816,72 @@ impl<'db> AdminQuery<'db> {
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<AdminView>> {
+    pub async fn first(self) -> Result<Option<PersonalAccessTokenView>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<AdminView> {
-        self.first().await?.ok_or_else(|| anyhow::anyhow!("admin: record not found"))
+    pub async fn first_or_fail(self) -> Result<PersonalAccessTokenView> {
+        self.first().await?.ok_or_else(|| anyhow::anyhow!("personal_access_tokens: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<AdminView>> {
+    pub async fn find(self, id: uuid::Uuid) -> Result<Option<PersonalAccessTokenView>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<AdminView> {
-        self.find(id).await?.ok_or_else(|| anyhow::anyhow!("admin: record not found"))
+    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<PersonalAccessTokenView> {
+        self.find(id).await?.ok_or_else(|| anyhow::anyhow!("personal_access_tokens: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(AdminInsert<'db>) -> AdminInsert<'db>) -> Result<AdminView> {
+    pub async fn first_or_create(self, create: impl FnOnce(PersonalAccessTokenInsert<'db>) -> PersonalAccessTokenInsert<'db>) -> Result<PersonalAccessTokenView> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(AdminInsert::new(db, base_url));
+        let insert_builder = create(PersonalAccessTokenInsert::new(db, base_url));
         insert_builder.save().await
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(AdminUpdate<'db>) -> AdminUpdate<'db>,
-        on_create: impl FnOnce(AdminInsert<'db>) -> AdminInsert<'db>,
-    ) -> Result<AdminView> {
+        on_update: impl FnOnce(PersonalAccessTokenUpdate<'db>) -> PersonalAccessTokenUpdate<'db>,
+        on_create: impl FnOnce(PersonalAccessTokenInsert<'db>) -> PersonalAccessTokenInsert<'db>,
+    ) -> Result<PersonalAccessTokenView> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = AdminUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = PersonalAccessTokenUpdate::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Admin::new(db, base_url.clone()).query().find(existing.id).await.map(|r| r.unwrap());
+            return PersonalAccessToken::new(db, base_url.clone()).query().find(existing.id).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(AdminInsert::new(db, base_url));
+        let insert_builder = on_create(PersonalAccessTokenInsert::new(db, base_url));
         insert_builder.save().await
     }
 
-    pub async fn increment(self, col: AdminCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: PersonalAccessTokenCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
-        if HAS_SOFT_DELETE && !self.with_deleted {
-            where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-        }
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("UPDATE admin SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
+        let sql = format!("UPDATE personal_access_tokens SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
         let mut q = sqlx::query(&sql);
         for b in binds { q = bind_query(q, b); }
         let res = db.execute(q).await?;
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: AdminCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: PersonalAccessTokenCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
     pub async fn count(self) -> Result<i64> {
-        let Self { db, from_sql, count_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+        let Self { db, from_sql, count_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "personal_access_tokens".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -863,24 +901,17 @@ impl<'db> AdminQuery<'db> {
         Ok(self.count().await? > 0)
     }
 
-    pub async fn pluck_ids(self) -> Result<Vec<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds, order_sql, limit, offset , with_deleted, only_deleted , .. } = self;
+    pub async fn pluck_ids(self) -> Result<Vec<uuid::Uuid>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds, order_sql, limit, offset  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "personal_access_tokens".to_string());
         let from_clause = if join_sql.is_empty() { format!("FROM {}", table_name) } else { format!("FROM {} {}", table_name, join_sql.join(" ")) };
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let order_clause = if order_sql.is_empty() { String::new() } else { format!(" ORDER BY {}", order_sql.join(", ")) };
         let limit_clause = limit.map(|n| format!(" LIMIT {}", n)).unwrap_or_default();
         let offset_clause = offset.map(|n| format!(" OFFSET {}", n)).unwrap_or_default();
         let sql = format!("SELECT id {}{}{}{}{}", from_clause, where_clause, order_clause, limit_clause, offset_clause);
-        let mut q = sqlx::query_scalar::<_, i64>(&sql);
+        let mut q = sqlx::query_scalar::<_, uuid::Uuid>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let ids = db.fetch_all_scalar(q).await?;
@@ -889,13 +920,13 @@ impl<'db> AdminQuery<'db> {
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<AdminView>) -> Fut,
+        F: FnMut(Vec<PersonalAccessTokenView>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = AdminQuery::new(db.clone(), self.base_url.clone());
+            let mut query = PersonalAccessTokenQuery::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -909,11 +940,11 @@ impl<'db> AdminQuery<'db> {
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(AdminCol::CreatedAt, OrderDir::Desc)
+        self.order_by(PersonalAccessTokenCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(AdminCol::CreatedAt, OrderDir::Asc)
+        self.order_by(PersonalAccessTokenCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -924,7 +955,7 @@ impl<'db> AdminQuery<'db> {
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<AdminView> {
+    pub async fn sole(self) -> Result<PersonalAccessTokenView> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -943,7 +974,7 @@ impl<'db> AdminQuery<'db> {
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&AdminView) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&PersonalAccessTokenView) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -951,17 +982,10 @@ impl<'db> AdminQuery<'db> {
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: AdminCol) -> Result<Option<f64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+    pub async fn sum(self, col: PersonalAccessTokenCol) -> Result<Option<f64>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "personal_access_tokens".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -976,17 +1000,10 @@ impl<'db> AdminQuery<'db> {
         Ok(result)
     }
 
-    pub async fn avg(self, col: AdminCol) -> Result<Option<f64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+    pub async fn avg(self, col: PersonalAccessTokenCol) -> Result<Option<f64>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "personal_access_tokens".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1001,17 +1018,10 @@ impl<'db> AdminQuery<'db> {
         Ok(result)
     }
 
-    pub async fn min_val(self, col: AdminCol) -> Result<Option<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+    pub async fn min_val(self, col: PersonalAccessTokenCol) -> Result<Option<i64>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "personal_access_tokens".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1026,17 +1036,10 @@ impl<'db> AdminQuery<'db> {
         Ok(result)
     }
 
-    pub async fn max_val(self, col: AdminCol) -> Result<Option<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+    pub async fn max_val(self, col: PersonalAccessTokenCol) -> Result<Option<i64>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "personal_access_tokens".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1051,24 +1054,17 @@ impl<'db> AdminQuery<'db> {
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<AdminView>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<PersonalAccessTokenView>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
-        let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , with_deleted, only_deleted, .. } = self;
+        let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
         let select_clause = match (distinct, distinct_on.as_ref()) {
             (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "personal_access_tokens".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1096,11 +1092,11 @@ impl<'db> AdminQuery<'db> {
         sql.push_str(&format!(" OFFSET {}", offset_val));
         sql.push_str(&format!(" LIMIT {}", per_page));
         if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut q = sqlx::query_as::<_, AdminRow>(&sql);
+        let mut q = sqlx::query_as::<_, PersonalAccessTokenRow>(&sql);
         for b in binds.iter().cloned() { q = bind(q, b); }
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
-        let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
+        let ids: Vec<uuid::Uuid> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
@@ -1109,64 +1105,17 @@ impl<'db> AdminQuery<'db> {
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn into_where_parts(self) -> (Vec<String>, Vec<BindValue>) {
-        let Self { where_sql, binds, with_deleted, only_deleted, .. } = self;
+        let Self { where_sql, binds, .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-        }
         (where_sql, binds)
     }
     pub async fn delete(self) -> Result<u64> {
         if self.limit.is_some() {
             anyhow::bail!("delete() does not support limit; add where clauses");
         }
-        let Self { db, where_sql, binds, with_deleted, only_deleted, .. } = self;
+        let Self { db, where_sql, binds, .. } = self;
         if where_sql.is_empty() { anyhow::bail!("delete(): no conditions set"); }
-        if HAS_SOFT_DELETE {
-            let mut where_sql = where_sql;
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
-            }
-            let idx = binds.len() + 1;
-            let mut sql = format!("UPDATE admin SET {} = ${}", AdminCol::DeletedAt.as_sql(), idx);
-            if !where_sql.is_empty() {
-                sql.push_str(" WHERE ");
-                sql.push_str(&where_sql.join(" AND "));
-            }
-            let mut q = sqlx::query(&sql);
-            for b in binds { q = bind_query(q, b); }
-            q = bind_query(q, time::OffsetDateTime::now_utc().into());
-            let res = db.execute(q).await?;
-            return Ok(res.rows_affected());
-        }
-        let mut sql = String::from("DELETE FROM admin");
-        if !where_sql.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&where_sql.join(" AND "));
-        }
-        let mut q = sqlx::query(&sql);
-        for b in binds { q = bind_query(q, b); }
-        let res = db.execute(q).await?;
-        Ok(res.rows_affected())
-    }
-    pub async fn restore(self) -> Result<u64> {
-        if !HAS_SOFT_DELETE { anyhow::bail!("restore() not supported"); }
-        if self.limit.is_some() {
-            anyhow::bail!("restore() does not support limit; add where clauses");
-        }
-        let Self { db, where_sql, binds, with_deleted, only_deleted, .. } = self;
-        if where_sql.is_empty() { anyhow::bail!("restore(): no conditions set"); }
-        let mut where_sql = where_sql;
-        if !with_deleted && !only_deleted {
-            where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
-        }
-        let mut sql = format!("UPDATE admin SET {} = NULL", AdminCol::DeletedAt.as_sql());
+        let mut sql = String::from("DELETE FROM personal_access_tokens");
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&where_sql.join(" AND "));
@@ -1179,12 +1128,12 @@ impl<'db> AdminQuery<'db> {
 }
 
 #[doc(hidden)]
-pub struct AdminUnsafeQuery<'db> {
-    inner: AdminQuery<'db>,
+pub struct PersonalAccessTokenUnsafeQuery<'db> {
+    inner: PersonalAccessTokenQuery<'db>,
 }
 
-impl<'db> AdminUnsafeQuery<'db> {
-    fn new(inner: AdminQuery<'db>) -> Self { Self { inner } }
+impl<'db> PersonalAccessTokenUnsafeQuery<'db> {
+    fn new(inner: PersonalAccessTokenQuery<'db>) -> Self { Self { inner } }
     pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
     pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
     pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
@@ -1196,19 +1145,19 @@ impl<'db> AdminUnsafeQuery<'db> {
     pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
     pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
     pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> AdminQuery<'db> { self.inner }
+    pub fn done(self) -> PersonalAccessTokenQuery<'db> { self.inner }
 }
 
-pub struct AdminInsert<'db> {
+pub struct PersonalAccessTokenInsert<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<AdminCol>,
+    cols: Vec<PersonalAccessTokenCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<AdminCol>,
+    conflict_cols: Vec<PersonalAccessTokenCol>,
 }
 
-impl<'db> AdminInsert<'db> {
+impl<'db> PersonalAccessTokenInsert<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1219,78 +1168,87 @@ impl<'db> AdminInsert<'db> {
             conflict_cols: vec![],
         }
     }
-    pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(AdminCol::Id);
+    pub fn set_id(mut self, val: uuid::Uuid) -> Self {
+        self.cols.push(PersonalAccessTokenCol::Id);
         self.binds.push(val.into());
         self
     }
-    pub fn set_username(mut self, val: String) -> Self {
-        self.cols.push(AdminCol::Username);
+    pub fn set_tokenable_type(mut self, val: String) -> Self {
+        self.cols.push(PersonalAccessTokenCol::TokenableType);
         self.binds.push(val.into());
         self
     }
-    pub fn set_email(mut self, val: Option<String>) -> Self {
-        self.cols.push(AdminCol::Email);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn set_locale(mut self, val: Option<String>) -> Self {
-        self.cols.push(AdminCol::Locale);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn set_password(mut self, val: &str) -> anyhow::Result<Self> {
-        let hashed = core_db::common::auth::hash::hash_password(val)?;
-        self.cols.push(AdminCol::Password);
-        self.binds.push(hashed.into());
-        Ok(self)
-    }
-    pub fn set_password_raw(mut self, val: String) -> Self {
-        self.cols.push(AdminCol::Password);
+    pub fn set_tokenable_id(mut self, val: String) -> Self {
+        self.cols.push(PersonalAccessTokenCol::TokenableId);
         self.binds.push(val.into());
         self
     }
     pub fn set_name(mut self, val: String) -> Self {
-        self.cols.push(AdminCol::Name);
+        self.cols.push(PersonalAccessTokenCol::Name);
         self.binds.push(val.into());
         self
     }
-    pub fn set_admin_type(mut self, val: AdminType) -> Self {
-        self.cols.push(AdminCol::AdminType);
+    pub fn set_token(mut self, val: String) -> Self {
+        self.cols.push(PersonalAccessTokenCol::Token);
         self.binds.push(val.into());
         self
     }
-    pub fn set_abilities(mut self, val: serde_json::Value) -> Self {
-        self.cols.push(AdminCol::Abilities);
+    pub fn set_token_kind(mut self, val: PersonalAccessTokenKind) -> Self {
+        self.cols.push(PersonalAccessTokenCol::TokenKind);
+        self.binds.push(val.into());
+        self
+    }
+    pub fn set_family_id(mut self, val: uuid::Uuid) -> Self {
+        self.cols.push(PersonalAccessTokenCol::FamilyId);
+        self.binds.push(val.into());
+        self
+    }
+    pub fn set_parent_token_id(mut self, val: Option<uuid::Uuid>) -> Self {
+        self.cols.push(PersonalAccessTokenCol::ParentTokenId);
+        self.binds.push(val.into());
+        self
+    }
+    pub fn set_abilities(mut self, val: Option<serde_json::Value>) -> Self {
+        self.cols.push(PersonalAccessTokenCol::Abilities);
+        self.binds.push(val.into());
+        self
+    }
+    pub fn set_last_used_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
+        self.cols.push(PersonalAccessTokenCol::LastUsedAt);
+        self.binds.push(val.into());
+        self
+    }
+    pub fn set_expires_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
+        self.cols.push(PersonalAccessTokenCol::ExpiresAt);
+        self.binds.push(val.into());
+        self
+    }
+    pub fn set_revoked_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
+        self.cols.push(PersonalAccessTokenCol::RevokedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AdminCol::CreatedAt);
+        self.cols.push(PersonalAccessTokenCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AdminCol::UpdatedAt);
+        self.cols.push(PersonalAccessTokenCol::UpdatedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.cols.push(AdminCol::DeletedAt);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[AdminCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[PersonalAccessTokenCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[AdminCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[PersonalAccessTokenCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub async fn save(self) -> Result<AdminView> {
+    pub async fn save(self) -> Result<PersonalAccessTokenView> {
         let db_conn = self.db.clone();
         match db_conn {
             DbConn::Pool(pool) => {
@@ -1310,21 +1268,17 @@ impl<'db> AdminInsert<'db> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<AdminView> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<PersonalAccessTokenView> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, AdminCol::Id)) {
-            cols.push(AdminCol::Id);
-            binds.push(generate_snowflake_i64().into());
-        }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, PersonalAccessTokenCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AdminCol::CreatedAt);
+            cols.push(PersonalAccessTokenCol::CreatedAt);
             binds.push(now.into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, PersonalAccessTokenCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AdminCol::UpdatedAt);
+            cols.push(PersonalAccessTokenCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1332,7 +1286,7 @@ impl<'db> AdminInsert<'db> {
         }
         let col_sql: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         let placeholders: Vec<String> = (1..=binds.len()).map(|i| format!("${}", i)).collect();
-        let mut sql = format!("INSERT INTO {} ({}) VALUES ({})", "admin", col_sql.join(", "), placeholders.join(", "));
+        let mut sql = format!("INSERT INTO {} ({}) VALUES ({})", "personal_access_tokens", col_sql.join(", "), placeholders.join(", "));
         if let Some(action) = self.conflict_action {
             if !self.conflict_cols.is_empty() {
                 let conflict_col_sql: Vec<&'static str> = self.conflict_cols.iter().map(|c| c.as_sql()).collect();
@@ -1349,7 +1303,7 @@ impl<'db> AdminInsert<'db> {
             }
         }
         sql.push_str(" RETURNING *");
-        let mut q = sqlx::query_as::<_, AdminRow>(&sql);
+        let mut q = sqlx::query_as::<_, PersonalAccessTokenRow>(&sql);
         for b in binds {
             q = bind(q, b);
         }
@@ -1358,15 +1312,15 @@ impl<'db> AdminInsert<'db> {
         Ok(hydrate_view(row, &LocalizedMap::default(), self.base_url.as_deref()))
     }
 }
-pub struct AdminUpdate<'db> {
+pub struct PersonalAccessTokenUpdate<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(AdminCol, BindValue)>,
+    sets: Vec<(PersonalAccessTokenCol, BindValue)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> AdminUpdate<'db> {
+impl<'db> PersonalAccessTokenUpdate<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1376,123 +1330,148 @@ impl<'db> AdminUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> AdminUnsafeUpdate<'db> { AdminUnsafeUpdate::new(self) }
-    pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((AdminCol::Id , val.into()));
+    pub fn unsafe_sql(self) -> PersonalAccessTokenUnsafeUpdate<'db> { PersonalAccessTokenUnsafeUpdate::new(self) }
+    pub fn set_id(mut self, val: uuid::Uuid) -> Self {
+        self.sets.push((PersonalAccessTokenCol::Id , val.into()));
         self
     }
-    pub fn set_username(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Username , val.into()));
+    pub fn set_tokenable_type(mut self, val: String) -> Self {
+        self.sets.push((PersonalAccessTokenCol::TokenableType , val.into()));
         self
     }
-    pub fn set_email(mut self, val: Option<String>) -> Self {
-        self.sets.push((AdminCol::Email , val.into()));
-        self
-    }
-    pub fn set_locale(mut self, val: Option<String>) -> Self {
-        self.sets.push((AdminCol::Locale , val.into()));
-        self
-    }
-    pub fn set_password(mut self, val: &str) -> anyhow::Result<Self> {
-        let hashed = core_db::common::auth::hash::hash_password(val)?;
-        self.sets.push((AdminCol::Password , hashed.into()));
-        Ok(self)
-    }
-    pub fn set_password_raw(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Password , val.into()));
+    pub fn set_tokenable_id(mut self, val: String) -> Self {
+        self.sets.push((PersonalAccessTokenCol::TokenableId , val.into()));
         self
     }
     pub fn set_name(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Name , val.into()));
+        self.sets.push((PersonalAccessTokenCol::Name , val.into()));
         self
     }
-    pub fn set_admin_type(mut self, val: AdminType) -> Self {
-        self.sets.push((AdminCol::AdminType , val.into()));
+    pub fn set_token(mut self, val: String) -> Self {
+        self.sets.push((PersonalAccessTokenCol::Token , val.into()));
         self
     }
-    pub fn set_abilities(mut self, val: serde_json::Value) -> Self {
-        self.sets.push((AdminCol::Abilities , val.into()));
+    pub fn set_token_kind(mut self, val: PersonalAccessTokenKind) -> Self {
+        self.sets.push((PersonalAccessTokenCol::TokenKind , val.into()));
+        self
+    }
+    pub fn set_family_id(mut self, val: uuid::Uuid) -> Self {
+        self.sets.push((PersonalAccessTokenCol::FamilyId , val.into()));
+        self
+    }
+    pub fn set_parent_token_id(mut self, val: Option<uuid::Uuid>) -> Self {
+        self.sets.push((PersonalAccessTokenCol::ParentTokenId , val.into()));
+        self
+    }
+    pub fn set_abilities(mut self, val: Option<serde_json::Value>) -> Self {
+        self.sets.push((PersonalAccessTokenCol::Abilities , val.into()));
+        self
+    }
+    pub fn set_last_used_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
+        self.sets.push((PersonalAccessTokenCol::LastUsedAt , val.into()));
+        self
+    }
+    pub fn set_expires_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
+        self.sets.push((PersonalAccessTokenCol::ExpiresAt , val.into()));
+        self
+    }
+    pub fn set_revoked_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
+        self.sets.push((PersonalAccessTokenCol::RevokedAt , val.into()));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AdminCol::CreatedAt , val.into()));
+        self.sets.push((PersonalAccessTokenCol::CreatedAt , val.into()));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AdminCol::UpdatedAt , val.into()));
+        self.sets.push((PersonalAccessTokenCol::UpdatedAt , val.into()));
         self
     }
-    pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((AdminCol::DeletedAt , val.into()));
-        self
-    }
-    pub fn where_id(mut self, op: Op, val: i64) -> Self {
+    pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_username(mut self, op: Op, val: String) -> Self {
+    pub fn where_tokenable_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenableType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_email(mut self, op: Op, val: Option<String>) -> Self {
+    pub fn where_tokenable_id(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_locale(mut self, op: Op, val: Option<String>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_password(mut self, op: Op, val: String) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Password.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenableId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_admin_type(mut self, op: Op, val: AdminType) -> Self {
+    pub fn where_token(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::AdminType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Token.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_abilities(mut self, op: Op, val: serde_json::Value) -> Self {
+    pub fn where_token_kind(mut self, op: Op, val: PersonalAccessTokenKind) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenKind.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_family_id(mut self, op: Op, val: uuid::Uuid) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::FamilyId.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_parent_token_id(mut self, op: Op, val: Option<uuid::Uuid>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::ParentTokenId.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_abilities(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_last_used_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::LastUsedAt.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_expires_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::ExpiresAt.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_revoked_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::RevokedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::DeletedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AdminCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: PersonalAccessTokenCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1535,13 +1514,13 @@ impl<'db> AdminUpdate<'db> {
 
     async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<u64> {
         let (mut cols, mut set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, PersonalAccessTokenCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AdminCol::UpdatedAt);
+            cols.push(PersonalAccessTokenCol::UpdatedAt);
             set_binds.push(now.into());
         }
         // find target ids for localized updates
-        let select_sql = format!("SELECT id FROM admin WHERE {}", self.where_sql.join(" AND "));
+        let select_sql = format!("SELECT id FROM personal_access_tokens WHERE {}", self.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
         for b in &self.binds { select_q = bind_scalar(select_q, b.clone()); }
         let target_ids = db.fetch_all_scalar(select_q).await?;
@@ -1557,7 +1536,7 @@ impl<'db> AdminUpdate<'db> {
             renumbered.push(renumber_placeholders(&clause, offset + 1));
         }
         where_sql = renumbered;
-        let mut sql = String::from("UPDATE admin SET ");
+        let mut sql = String::from("UPDATE personal_access_tokens SET ");
         sql.push_str(&parts.join(", "));
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
@@ -1571,30 +1550,33 @@ impl<'db> AdminUpdate<'db> {
     }
 }
 #[doc(hidden)]
-pub struct AdminUnsafeUpdate<'db> {
-    inner: AdminUpdate<'db>,
+pub struct PersonalAccessTokenUnsafeUpdate<'db> {
+    inner: PersonalAccessTokenUpdate<'db>,
 }
 
-impl<'db> AdminUnsafeUpdate<'db> {
-    fn new(inner: AdminUpdate<'db>) -> Self { Self { inner } }
+impl<'db> PersonalAccessTokenUnsafeUpdate<'db> {
+    fn new(inner: PersonalAccessTokenUpdate<'db>) -> Self { Self { inner } }
     pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> AdminUpdate<'db> { self.inner }
+    pub fn done(self) -> PersonalAccessTokenUpdate<'db> { self.inner }
 }
-pub struct AdminTableAdapter;
-impl AdminTableAdapter {
-    fn parse_col(name: &str) -> Option<AdminCol> {
+pub struct PersonalAccessTokenTableAdapter;
+impl PersonalAccessTokenTableAdapter {
+    fn parse_col(name: &str) -> Option<PersonalAccessTokenCol> {
         match name {
-            "id" => Some(AdminCol::Id),
-            "username" => Some(AdminCol::Username),
-            "email" => Some(AdminCol::Email),
-            "locale" => Some(AdminCol::Locale),
-            "password" => Some(AdminCol::Password),
-            "name" => Some(AdminCol::Name),
-            "admin_type" => Some(AdminCol::AdminType),
-            "abilities" => Some(AdminCol::Abilities),
-            "created_at" => Some(AdminCol::CreatedAt),
-            "updated_at" => Some(AdminCol::UpdatedAt),
-            "deleted_at" => Some(AdminCol::DeletedAt),
+            "id" => Some(PersonalAccessTokenCol::Id),
+            "tokenable_type" => Some(PersonalAccessTokenCol::TokenableType),
+            "tokenable_id" => Some(PersonalAccessTokenCol::TokenableId),
+            "name" => Some(PersonalAccessTokenCol::Name),
+            "token" => Some(PersonalAccessTokenCol::Token),
+            "token_kind" => Some(PersonalAccessTokenCol::TokenKind),
+            "family_id" => Some(PersonalAccessTokenCol::FamilyId),
+            "parent_token_id" => Some(PersonalAccessTokenCol::ParentTokenId),
+            "abilities" => Some(PersonalAccessTokenCol::Abilities),
+            "last_used_at" => Some(PersonalAccessTokenCol::LastUsedAt),
+            "expires_at" => Some(PersonalAccessTokenCol::ExpiresAt),
+            "revoked_at" => Some(PersonalAccessTokenCol::RevokedAt),
+            "created_at" => Some(PersonalAccessTokenCol::CreatedAt),
+            "updated_at" => Some(PersonalAccessTokenCol::UpdatedAt),
             _ => None,
         }
     }
@@ -1608,29 +1590,31 @@ impl AdminTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<AdminCol> {
+    fn parse_like_col(name: &str) -> Option<PersonalAccessTokenCol> {
         match name {
-            "username" => Some(AdminCol::Username),
-            "email" => Some(AdminCol::Email),
-            "locale" => Some(AdminCol::Locale),
-            "password" => Some(AdminCol::Password),
-            "name" => Some(AdminCol::Name),
+            "tokenable_type" => Some(PersonalAccessTokenCol::TokenableType),
+            "tokenable_id" => Some(PersonalAccessTokenCol::TokenableId),
+            "name" => Some(PersonalAccessTokenCol::Name),
+            "token" => Some(PersonalAccessTokenCol::Token),
             _ => None,
         }
     }
     fn parse_bind_for_col(name: &str, raw: &str) -> Option<BindValue> {
         match name {
-            "id" => raw.trim().parse::<i64>().ok().map(Into::into),
-            "username" => Some(raw.trim().to_string().into()),
-            "email" => Some(Self::parse_bind(raw.trim())),
-            "locale" => Some(Self::parse_bind(raw.trim())),
-            "password" => Some(raw.trim().to_string().into()),
+            "id" => uuid::Uuid::parse_str(raw.trim()).ok().map(Into::into),
+            "tokenable_type" => Some(raw.trim().to_string().into()),
+            "tokenable_id" => Some(raw.trim().to_string().into()),
             "name" => Some(raw.trim().to_string().into()),
-            "admin_type" => Some(Self::parse_bind(raw.trim())),
+            "token" => Some(raw.trim().to_string().into()),
+            "token_kind" => Some(Self::parse_bind(raw.trim())),
+            "family_id" => uuid::Uuid::parse_str(raw.trim()).ok().map(Into::into),
+            "parent_token_id" => Some(Self::parse_bind(raw.trim())),
             "abilities" => Some(Self::parse_bind(raw.trim())),
+            "last_used_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
+            "expires_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
+            "revoked_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             "created_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             "updated_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            "deleted_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             _ => None,
         }
     }
@@ -1659,25 +1643,28 @@ impl AdminTableAdapter {
         None
     }
 }
-impl GeneratedTableAdapter for AdminTableAdapter {
-    type Query<'db> = AdminQuery<'db>;
-    type Row = AdminView;
-    fn model_key(&self) -> &'static str { "Admin" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "username", "email", "locale", "password", "name", "admin_type", "created_at", "updated_at", "deleted_at"] }
-    fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at", "deleted_at"] }
+impl GeneratedTableAdapter for PersonalAccessTokenTableAdapter {
+    type Query<'db> = PersonalAccessTokenQuery<'db>;
+    type Row = PersonalAccessTokenView;
+    fn model_key(&self) -> &'static str { "PersonalAccessToken" }
+    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "tokenable_type", "tokenable_id", "name", "token", "token_kind", "family_id", "parent_token_id", "last_used_at", "expires_at", "revoked_at", "created_at", "updated_at"] }
+    fn timestamp_columns(&self) -> &'static [&'static str] { &["last_used_at", "expires_at", "revoked_at", "created_at", "updated_at"] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
         &[
-            DataTableColumnDescriptor { name: "id", label: "ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "username", label: "Username", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "email", label: "Email", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "locale", label: "Locale", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "password", label: "Password", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "id", label: "ID", data_type: "uuid::Uuid", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "tokenable_type", label: "Tokenable Type", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "tokenable_id", label: "Tokenable ID", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
             DataTableColumnDescriptor { name: "name", label: "Name", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "admin_type", label: "Admin Type", data_type: "AdminType", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "abilities", label: "Abilities", data_type: "serde_json::Value", sortable: false, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "token", label: "Token", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "token_kind", label: "Token Kind", data_type: "PersonalAccessTokenKind", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "family_id", label: "Family ID", data_type: "uuid::Uuid", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "parent_token_id", label: "Parent Token ID", data_type: "Option<uuid::Uuid>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "abilities", label: "Abilities", data_type: "Option<serde_json::Value>", sortable: false, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "last_used_at", label: "Last Used At", data_type: "Option<time::OffsetDateTime>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
+            DataTableColumnDescriptor { name: "expires_at", label: "Expires At", data_type: "Option<time::OffsetDateTime>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
+            DataTableColumnDescriptor { name: "revoked_at", label: "Revoked At", data_type: "Option<time::OffsetDateTime>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
             DataTableColumnDescriptor { name: "created_at", label: "Created At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
             DataTableColumnDescriptor { name: "updated_at", label: "Updated At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
-            DataTableColumnDescriptor { name: "deleted_at", label: "Deleted At", data_type: "Option<time::OffsetDateTime>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
         ]
     }
     fn relation_column_descriptors(&self) -> &'static [DataTableRelationColumnDescriptor] {
@@ -1698,7 +1685,7 @@ impl GeneratedTableAdapter for AdminTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: AdminQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<AdminQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: PersonalAccessTokenQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<PersonalAccessTokenQuery<'db>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -1792,53 +1779,59 @@ impl GeneratedTableAdapter for AdminTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: AdminQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<AdminQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: PersonalAccessTokenQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<PersonalAccessTokenQuery<'db>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(AdminCol::Id, dir),
-            "username" => query.order_by(AdminCol::Username, dir),
-            "email" => query.order_by(AdminCol::Email, dir),
-            "locale" => query.order_by(AdminCol::Locale, dir),
-            "password" => query.order_by(AdminCol::Password, dir),
-            "name" => query.order_by(AdminCol::Name, dir),
-            "admin_type" => query.order_by(AdminCol::AdminType, dir),
-            "abilities" => query.order_by(AdminCol::Abilities, dir),
-            "created_at" => query.order_by(AdminCol::CreatedAt, dir),
-            "updated_at" => query.order_by(AdminCol::UpdatedAt, dir),
-            "deleted_at" => query.order_by(AdminCol::DeletedAt, dir),
+            "id" => query.order_by(PersonalAccessTokenCol::Id, dir),
+            "tokenable_type" => query.order_by(PersonalAccessTokenCol::TokenableType, dir),
+            "tokenable_id" => query.order_by(PersonalAccessTokenCol::TokenableId, dir),
+            "name" => query.order_by(PersonalAccessTokenCol::Name, dir),
+            "token" => query.order_by(PersonalAccessTokenCol::Token, dir),
+            "token_kind" => query.order_by(PersonalAccessTokenCol::TokenKind, dir),
+            "family_id" => query.order_by(PersonalAccessTokenCol::FamilyId, dir),
+            "parent_token_id" => query.order_by(PersonalAccessTokenCol::ParentTokenId, dir),
+            "abilities" => query.order_by(PersonalAccessTokenCol::Abilities, dir),
+            "last_used_at" => query.order_by(PersonalAccessTokenCol::LastUsedAt, dir),
+            "expires_at" => query.order_by(PersonalAccessTokenCol::ExpiresAt, dir),
+            "revoked_at" => query.order_by(PersonalAccessTokenCol::RevokedAt, dir),
+            "created_at" => query.order_by(PersonalAccessTokenCol::CreatedAt, dir),
+            "updated_at" => query.order_by(PersonalAccessTokenCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: AdminQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<AdminQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: PersonalAccessTokenQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<PersonalAccessTokenQuery<'db>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &AdminView, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &PersonalAccessTokenView, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
-            "username" => Some(row.username.clone()),
-            "email" => row.email.as_ref().map(|v| v.to_string()),
-            "locale" => row.locale.as_ref().map(|v| v.to_string()),
-            "password" => Some(row.password.clone()),
+            "tokenable_type" => Some(row.tokenable_type.clone()),
+            "tokenable_id" => Some(row.tokenable_id.clone()),
             "name" => Some(row.name.clone()),
+            "token" => Some(row.token.clone()),
+            "family_id" => Some(row.family_id.to_string()),
+            "parent_token_id" => row.parent_token_id.as_ref().map(|v| v.to_string()),
+            "last_used_at" => row.last_used_at.as_ref().and_then(|v| v.format(&time::format_description::well_known::Rfc3339).ok()),
+            "expires_at" => row.expires_at.as_ref().and_then(|v| v.format(&time::format_description::well_known::Rfc3339).ok()),
+            "revoked_at" => row.revoked_at.as_ref().and_then(|v| v.format(&time::format_description::well_known::Rfc3339).ok()),
             "created_at" => row.created_at.format(&time::format_description::well_known::Rfc3339).ok(),
             "updated_at" => row.updated_at.format(&time::format_description::well_known::Rfc3339).ok(),
-            "deleted_at" => row.deleted_at.as_ref().and_then(|v| v.format(&time::format_description::well_known::Rfc3339).ok()),
             _ => None,
         }
     }
-    fn count<'db>(&self, query: AdminQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: PersonalAccessTokenQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: AdminQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<AdminView>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: PersonalAccessTokenQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<PersonalAccessTokenView>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
 #[derive(Debug, Clone, Copy)]
-pub struct AdminDataTableConfig {
+pub struct PersonalAccessTokenDataTableConfig {
     pub default_sorting_column: &'static str,
     pub default_sorted: SortDirection,
     pub default_export_ignore_columns: &'static [&'static str],
@@ -1846,87 +1839,79 @@ pub struct AdminDataTableConfig {
     pub default_unsortable: &'static [&'static str],
     pub default_row_per_page: Option<i64>,
 }
-impl Default for AdminDataTableConfig {
+impl Default for PersonalAccessTokenDataTableConfig {
     fn default() -> Self {
         Self {
             default_sorting_column: "id",
             default_sorted: SortDirection::Desc,
             default_export_ignore_columns: &["actions", "action"],
-            default_timestamp_columns: &["created_at", "updated_at", "deleted_at"],
+            default_timestamp_columns: &["last_used_at", "expires_at", "revoked_at", "created_at", "updated_at"],
             default_unsortable: &[],
             default_row_per_page: None,
         }
     }
 }
-pub trait AdminDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> AdminQuery<'db> { query }
+pub trait PersonalAccessTokenDataTableHooks: Send + Sync + 'static {
+    fn scope<'db>(&'db self, query: PersonalAccessTokenQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> PersonalAccessTokenQuery<'db> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: AdminQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<AdminQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<AdminQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut AdminView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: AdminView) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn filter_query<'db>(&'db self, _query: PersonalAccessTokenQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<PersonalAccessTokenQuery<'db>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: PersonalAccessTokenQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<PersonalAccessTokenQuery<'db>> { Ok(query) }
+    fn map_row(&self, _row: &mut PersonalAccessTokenView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: PersonalAccessTokenView) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         let value = serde_json::to_value(row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
-        if let Some(id_value) = record.get("id").cloned() {
-            let id_text = match id_value {
-                serde_json::Value::Number(number) => number.to_string(),
-                serde_json::Value::String(text) => text,
-                other => other.to_string(),
-            };
-            record.insert("id".to_string(), serde_json::Value::String(id_text));
-        }
         Ok(record)
     }
-    fn row_to_record(&self, row: AdminView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: PersonalAccessTokenView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: PersonalAccessTokenQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
-pub struct AdminDefaultDataTableHooks;
-impl AdminDataTableHooks for AdminDefaultDataTableHooks {}
-pub struct AdminDataTable<H = AdminDefaultDataTableHooks> where H: AdminDataTableHooks {
+pub struct PersonalAccessTokenDefaultDataTableHooks;
+impl PersonalAccessTokenDataTableHooks for PersonalAccessTokenDefaultDataTableHooks {}
+pub struct PersonalAccessTokenDataTable<H = PersonalAccessTokenDefaultDataTableHooks> where H: PersonalAccessTokenDataTableHooks {
     pub db: sqlx::PgPool,
     pub hooks: H,
-    pub config: AdminDataTableConfig,
-    adapter: AdminTableAdapter,
+    pub config: PersonalAccessTokenDataTableConfig,
+    adapter: PersonalAccessTokenTableAdapter,
 }
-impl AdminDataTable<AdminDefaultDataTableHooks> {
+impl PersonalAccessTokenDataTable<PersonalAccessTokenDefaultDataTableHooks> {
     pub fn new(db: sqlx::PgPool) -> Self {
         Self {
             db,
-            hooks: AdminDefaultDataTableHooks,
-            config: AdminDataTableConfig::default(),
-            adapter: AdminTableAdapter,
+            hooks: PersonalAccessTokenDefaultDataTableHooks,
+            config: PersonalAccessTokenDataTableConfig::default(),
+            adapter: PersonalAccessTokenTableAdapter,
         }
     }
 }
-impl<H: AdminDataTableHooks> AdminDataTable<H> {
-    pub fn with_hooks<NH: AdminDataTableHooks>(self, hooks: NH) -> AdminDataTable<NH> {
-        AdminDataTable {
+impl<H: PersonalAccessTokenDataTableHooks> PersonalAccessTokenDataTable<H> {
+    pub fn with_hooks<NH: PersonalAccessTokenDataTableHooks>(self, hooks: NH) -> PersonalAccessTokenDataTable<NH> {
+        PersonalAccessTokenDataTable {
             db: self.db,
             hooks,
             config: self.config,
-            adapter: AdminTableAdapter,
+            adapter: PersonalAccessTokenTableAdapter,
         }
     }
-    pub fn with_config(mut self, config: AdminDataTableConfig) -> Self {
+    pub fn with_config(mut self, config: PersonalAccessTokenDataTableConfig) -> Self {
         self.config = config;
         self
     }
 }
-impl<H: AdminDataTableHooks> AutoDataTable for AdminDataTable<H> {
-    type Adapter = AdminTableAdapter;
+impl<H: PersonalAccessTokenDataTableHooks> AutoDataTable for PersonalAccessTokenDataTable<H> {
+    type Adapter = PersonalAccessTokenTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> AdminQuery<'db> {
-        self.hooks.scope(Admin::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> PersonalAccessTokenQuery<'db> {
+        self.hooks.scope(PersonalAccessToken::new(&self.db, None).query(), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: AdminQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<AdminQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: AdminQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<AdminQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut AdminView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: AdminView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: AdminQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: PersonalAccessTokenQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<PersonalAccessTokenQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: PersonalAccessTokenQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<PersonalAccessTokenQuery<'db>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut PersonalAccessTokenView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: PersonalAccessTokenView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: PersonalAccessTokenQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -1937,9 +1922,9 @@ impl<H: AdminDataTableHooks> AutoDataTable for AdminDataTable<H> {
 
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for AdminView {
-    type Id = i64;
+impl ActiveRecord for PersonalAccessTokenView {
+    type Id = uuid::Uuid;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Admin::new(db, None).find(id).await.map_err(|e| e.into())
+        PersonalAccessToken::new(db, None).find(id).await.map_err(|e| e.into())
     }
 }

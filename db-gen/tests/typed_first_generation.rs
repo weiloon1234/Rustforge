@@ -159,7 +159,7 @@ meta = ["flags:bool", "extra:json"]
     assert!(mod_rs.contains("pub use enums::*;"));
     assert!(enums_rs.contains("pub enum ArticleStatus"));
     assert!(mod_rs.contains(
-        "pub use article::{Article, ArticleView, ArticleQuery, ArticleInsert, ArticleUpdate, ArticleCol, ArticleTableAdapter, ArticleDataTable, ArticleDataTableConfig, ArticleDataTableHooks, ArticleDefaultDataTableHooks, ArticleViewsExt};"
+        "pub use article::{Article, ArticleView, ArticleQuery, ArticleInsert, ArticleUpdate, ArticleCol, ArticleViewsExt, ArticleTableAdapter, ArticleDataTable, ArticleDataTableConfig, ArticleDataTableHooks, ArticleDefaultDataTableHooks};"
     ));
     assert!(!mod_rs.contains("pub use article::*;"));
 

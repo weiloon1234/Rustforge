@@ -1,47 +1,56 @@
-use core_db::common::sql::DbConn;
-use core_db::platform::countries::{repo::CountryRepo, Country};
+use core_db::{
+    common::sql::{DbConn, Op, OrderDir},
+    generated::models::{
+        Country as CountryModel, CountryCol, CountryStatus as GeneratedCountryStatus,
+    },
+    platform::countries::{
+        normalize_country_iso2, normalize_country_status, Country, CountryCurrency,
+        COUNTRY_STATUS_ENABLED,
+    },
+};
 use core_i18n::t;
 use core_web::error::AppError;
-use sqlx::Executor;
 
 use crate::internal::api::state::AppApiState;
 
 pub const BOOTSTRAP_COUNTRIES_CACHE_KEY: &str = "bootstrap:countries:enabled:v1";
 pub const BOOTSTRAP_COUNTRIES_CACHE_TTL_SECS: u64 = 300;
-const COUNTRY_STATUS_ENABLED: &str = "enabled";
-const COUNTRY_STATUS_DISABLED: &str = "disabled";
 
 pub async fn update_status(
     state: &AppApiState,
     iso2: &str,
     status: &str,
 ) -> Result<Country, AppError> {
-    let iso2 = normalize_iso2(iso2).ok_or_else(|| AppError::NotFound(t("Country not found")))?;
+    let iso2 =
+        normalize_country_iso2(iso2).ok_or_else(|| AppError::NotFound(t("Country not found")))?;
     let status = normalize_country_status(status)
         .ok_or_else(|| AppError::BadRequest(t("Invalid country status")))?;
+    let status_enum = GeneratedCountryStatus::from_storage(status)
+        .ok_or_else(|| AppError::BadRequest(t("Invalid country status")))?;
 
-    let affected = state
-        .db
-        .execute(
-            sqlx::query("UPDATE countries SET status = $1, updated_at = NOW() WHERE iso2 = $2")
-                .bind(status)
-                .bind(&iso2),
-        )
+    let affected = CountryModel::new(DbConn::pool(&state.db), None)
+        .update()
+        .where_iso2(Op::Eq, iso2.clone())
+        .set_status(status_enum)
+        .set_updated_at(time::OffsetDateTime::now_utc())
+        .save()
         .await
-        .map_err(AppError::from)?
-        .rows_affected();
+        .map_err(AppError::from)?;
+
     if affected == 0 {
         return Err(AppError::NotFound(t("Country not found")));
     }
 
-    let updated = CountryRepo::new(DbConn::pool(&state.db))
-        .find_by_iso2(&iso2)
+    let updated = CountryModel::new(DbConn::pool(&state.db), None)
+        .query()
+        .where_iso2(Op::Eq, iso2)
+        .first()
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(t("Country not found")))?;
 
     invalidate_bootstrap_country_cache(state).await?;
-    Ok(updated)
+    Ok(country_view_to_runtime(updated))
 }
 
 pub async fn list_enabled_for_bootstrap(state: &AppApiState) -> Result<Vec<Country>, AppError> {
@@ -53,10 +62,17 @@ pub async fn list_enabled_for_bootstrap(state: &AppApiState) -> Result<Vec<Count
             BOOTSTRAP_COUNTRIES_CACHE_KEY,
             BOOTSTRAP_COUNTRIES_CACHE_TTL_SECS,
             move || async move {
-                let all = CountryRepo::new(DbConn::pool(&db)).list_all().await?;
-                Ok(all
+                let rows = CountryModel::new(DbConn::pool(&db), None)
+                    .query()
+                    .where_status(Op::Eq, GeneratedCountryStatus::Enabled)
+                    .order_by(CountryCol::Name, OrderDir::Asc)
+                    .order_by(CountryCol::Iso2, OrderDir::Asc)
+                    .get()
+                    .await?;
+                Ok(rows
                     .into_iter()
-                    .filter(|country| country.status.eq_ignore_ascii_case(COUNTRY_STATUS_ENABLED))
+                    .map(country_view_to_runtime)
+                    .filter(|country| country.status == COUNTRY_STATUS_ENABLED)
                     .collect::<Vec<_>>())
             },
         )
@@ -74,19 +90,34 @@ pub async fn invalidate_bootstrap_country_cache(state: &AppApiState) -> Result<(
         .map_err(AppError::from)
 }
 
-fn normalize_country_status(value: &str) -> Option<&'static str> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        COUNTRY_STATUS_ENABLED => Some(COUNTRY_STATUS_ENABLED),
-        COUNTRY_STATUS_DISABLED => Some(COUNTRY_STATUS_DISABLED),
-        _ => None,
-    }
-}
+fn country_view_to_runtime(view: core_db::generated::models::CountryView) -> Country {
+    let currencies = serde_json::from_value::<Vec<CountryCurrency>>(view.currencies).unwrap_or_default();
 
-fn normalize_iso2(value: &str) -> Option<String> {
-    let normalized = value.trim().to_ascii_uppercase();
-    if normalized.is_empty() {
-        None
-    } else {
-        Some(normalized)
+    Country {
+        iso2: view.iso2,
+        iso3: view.iso3,
+        iso_numeric: view.iso_numeric,
+        name: view.name,
+        official_name: view.official_name,
+        capital: view.capital,
+        capitals: view.capitals,
+        region: view.region,
+        subregion: view.subregion,
+        currencies,
+        primary_currency_code: view.primary_currency_code,
+        calling_code: view.calling_code,
+        calling_root: view.calling_root,
+        calling_suffixes: view.calling_suffixes,
+        tlds: view.tlds,
+        timezones: view.timezones,
+        latitude: view.latitude,
+        longitude: view.longitude,
+        independent: view.independent,
+        status: view.status.as_str().to_string(),
+        assignment_status: view.assignment_status,
+        un_member: view.un_member,
+        flag_emoji: view.flag_emoji,
+        created_at: view.created_at,
+        updated_at: view.updated_at,
     }
 }

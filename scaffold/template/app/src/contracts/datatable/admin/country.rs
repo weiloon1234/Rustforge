@@ -2,14 +2,13 @@ use core_web::datatable::{
     DataTableFilterFieldDto, DataTableFilterFieldType, DataTableFilterOptionDto,
     DataTableGenericEmailExportRequest, DataTableGenericQueryRequest, DataTableScopedContract,
 };
+use core_db::platform::countries::CountryStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 pub const SCOPED_KEY: &str = "admin.country";
 pub const ROUTE_PREFIX: &str = "/datatable/country";
-const COUNTRY_STATUS_ENABLED: &str = "enabled";
-const COUNTRY_STATUS_DISABLED: &str = "disabled";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
@@ -76,14 +75,11 @@ impl DataTableScopedContract for AdminCountryDataTableContract {
 }
 
 fn status_filter_options() -> Vec<DataTableFilterOptionDto> {
-    vec![
-        DataTableFilterOptionDto {
-            label: "Enabled".to_string(),
-            value: COUNTRY_STATUS_ENABLED.to_string(),
-        },
-        DataTableFilterOptionDto {
-            label: "Disabled".to_string(),
-            value: COUNTRY_STATUS_DISABLED.to_string(),
-        },
-    ]
+    CountryStatus::datatable_filter_options()
+        .into_iter()
+        .map(|item| DataTableFilterOptionDto {
+            label: item.label.to_string(),
+            value: item.value.to_string(),
+        })
+        .collect()
 }

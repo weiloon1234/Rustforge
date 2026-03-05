@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use serde::{Deserialize, Serialize};
 
 pub fn renumber_placeholders(sql: &str, start: usize) -> String {
