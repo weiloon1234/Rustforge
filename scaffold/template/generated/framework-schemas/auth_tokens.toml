@@ -1,0 +1,27 @@
+[PersonalAccessTokenKind]
+type = "enum"
+storage = "string"
+variants = ["Access", "Refresh"]
+
+[model.personal_access_token]
+table = "personal_access_tokens"
+pk = "id"
+pk_type = "uuid"
+id_strategy = "manual"
+fields = [
+  "id:uuid",
+  "tokenable_type:String",
+  "tokenable_id:String",
+  "name:String",
+  "token:String",
+  "token_kind:PersonalAccessTokenKind",
+  "family_id:uuid",
+  "parent_token_id:Option<uuid::Uuid>",
+  "abilities:Option<serde_json::Value>",
+  "last_used_at:Option<time::OffsetDateTime>",
+  "expires_at:Option<time::OffsetDateTime>",
+  "revoked_at:Option<time::OffsetDateTime>",
+  "created_at:datetime",
+  "updated_at:datetime"
+]
+disable_timestamps = true

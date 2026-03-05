@@ -1,3 +1,25 @@
+const FRAMEWORK_SCHEMA_FILES: &[(&str, &str)] = &[
+    (
+        "attachments.toml",
+        include_str!("framework-schemas/attachments.toml"),
+    ),
+    (
+        "auth_tokens.toml",
+        include_str!("framework-schemas/auth_tokens.toml"),
+    ),
+    ("country.toml", include_str!("framework-schemas/country.toml")),
+    (
+        "http_logs.toml",
+        include_str!("framework-schemas/http_logs.toml"),
+    ),
+    ("jobs.toml", include_str!("framework-schemas/jobs.toml")),
+    (
+        "localized.toml",
+        include_str!("framework-schemas/localized.toml"),
+    ),
+    ("meta.toml", include_str!("framework-schemas/meta.toml")),
+];
+
 fn main() {
     let app_dir = std::path::Path::new("..").join("app");
     let configs_path = app_dir.join("configs.toml");
@@ -9,12 +31,14 @@ fn main() {
     println!("cargo:rerun-if-changed={}", permissions_path.display());
     println!("cargo:rerun-if-changed={}", schemas_dir.display());
     println!("cargo:rerun-if-changed=build.rs");
+    for (file_name, _) in FRAMEWORK_SCHEMA_FILES {
+        println!("cargo:rerun-if-changed=framework-schemas/{file_name}");
+    }
 
     let (cfgs, _) =
         db_gen::config::load(configs_path.to_str().unwrap()).expect("Failed to load configs");
 
-    let schema = db_gen::load_with_framework(schemas_dir.to_str().unwrap())
-        .expect("Failed to load layered schemas");
+    let schema = load_layered_schema(schemas_dir.as_path()).expect("Failed to load layered schemas");
     let permissions = db_gen::load_permissions(permissions_path.to_str().unwrap())
         .expect("Failed to load permissions");
 
@@ -50,6 +74,43 @@ fn main() {
     writeln!(f, "pub mod extensions;").unwrap();
     writeln!(f, "pub mod ts_exports;").unwrap();
     writeln!(f, "pub mod generated {{ pub use crate::*; }}").unwrap();
+}
+
+fn load_layered_schema(
+    app_schemas_dir: &std::path::Path,
+) -> Result<db_gen::Schema, Box<dyn std::error::Error>> {
+    let out_dir = std::env::var("OUT_DIR")?;
+    let layered_dir = std::path::Path::new(&out_dir).join("layered-schemas");
+
+    if layered_dir.exists() {
+        std::fs::remove_dir_all(&layered_dir)?;
+    }
+    std::fs::create_dir_all(&layered_dir)?;
+
+    for (file_name, content) in FRAMEWORK_SCHEMA_FILES {
+        std::fs::write(layered_dir.join(file_name), content)?;
+    }
+
+    for entry in std::fs::read_dir(app_schemas_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
+            continue;
+        }
+
+        let Some(base_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let target_name = format!("app__{base_name}");
+        std::fs::copy(&path, layered_dir.join(target_name))?;
+    }
+
+    db_gen::schema::load(layered_dir.to_str().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "layered schema path is not valid UTF-8",
+        )
+    })?)
 }
 
 fn apply_updated_at_save_hotfix(models_out: &std::path::Path) -> std::io::Result<()> {

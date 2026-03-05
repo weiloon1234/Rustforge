@@ -1,0 +1,36 @@
+[model.webhook_log]
+table = "webhook_logs"
+pk = "id"
+pk_type = "uuid"
+id_strategy = "manual"
+disable_timestamps = true
+fields = [
+  "id:uuid",
+  "request_url:String",
+  "request_method:String",
+  "request_headers:Option<serde_json::Value>",
+  "request_body:Option<String>",
+  "response_status:Option<i32>",
+  "response_body:Option<String>",
+  "duration_ms:Option<i32>",
+  "created_at:datetime"
+]
+
+[model.http_client_log]
+table = "http_client_logs"
+pk = "id"
+pk_type = "uuid"
+id_strategy = "manual"
+disable_timestamps = true
+fields = [
+  "id:uuid",
+  "request_url:String",
+  "request_method:String",
+  "request_headers:Option<serde_json::Value>",
+  "request_body:Option<String>",
+  "response_status:Option<i32>",
+  "response_headers:Option<serde_json::Value>",
+  "response_body:Option<String>",
+  "duration_ms:Option<i32>",
+  "created_at:datetime"
+]
