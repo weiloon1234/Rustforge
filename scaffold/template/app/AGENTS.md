@@ -199,7 +199,12 @@ For contract types used by frontend:
 
 1. Add `#[derive(TS)]`.
 2. Add `#[ts(export, export_to = "{portal}/types/")]`.
-3. Run:
+3. Shared TS types are framework-owned SSOT:
+   - `core_web::ts_exports::ts_export_files()`
+   - `core_db::ts_exports::ts_export_files()`
+   - `generated::ts_exports::ts_export_files()`
+4. `app/src/bin/export-types.rs` orchestrates only (merge app contracts + framework registries, then emit files).
+5. Run:
 
 ```bash
 cargo run -p app --bin export-types

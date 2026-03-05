@@ -59,36 +59,49 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
         }
     }
 
-    fn row_to_record(
+    fn mappings(
         &self,
-        row: generated::models::AdminView,
+        record: &mut serde_json::Map<String, serde_json::Value>,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let identity = admin_identity(
-            Some(row.username.as_str()),
-            Some(row.name.as_str()),
-            row.email.as_deref(),
-            Some(row.id),
-        );
-        let mut record = self.default_row_to_record(row)?;
-        if let Some(abilities_val) = record.get("abilities") {
-            let strings: Vec<String> = abilities_val
-                .as_array()
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|item| item.as_str().map(ToString::to_string))
-                        .collect()
-                })
-                .unwrap_or_default();
+    ) -> anyhow::Result<()> {
+        if let Some(abilities_val) = record.get("abilities").cloned() {
+            let strings: Vec<String> = match abilities_val {
+                serde_json::Value::Array(items) => items
+                    .into_iter()
+                    .filter_map(|item| item.as_str().map(ToString::to_string))
+                    .collect(),
+                _ => Vec::new(),
+            };
             record.insert("abilities".to_string(), serde_json::to_value(strings)?);
         }
+
+        let username = record
+            .get("username")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        let name = record
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        let email = record
+            .get("email")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty());
+        let id = record.get("id").and_then(|value| match value {
+            serde_json::Value::Number(number) => number.as_i64(),
+            serde_json::Value::String(text) => text.trim().parse::<i64>().ok(),
+            _ => None,
+        });
+
+        let identity = admin_identity(username, name, email, id);
         record.insert("identity".to_string(), serde_json::Value::String(identity));
         record.remove("password");
         record.remove("deleted_at");
-
-        Ok(record)
+        Ok(())
     }
 }
 

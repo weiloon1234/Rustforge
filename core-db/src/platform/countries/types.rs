@@ -2,8 +2,9 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum PhoneNumberOutputFormat {
     E164,
@@ -12,7 +13,7 @@ pub enum PhoneNumberOutputFormat {
     Rfc3966,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum CountryStatus {
     Enabled,
@@ -88,14 +89,17 @@ pub enum PhoneNumberFormatError {
     InvalidNumber { iso2: String, input: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct CountryCurrency {
     pub code: String,
     #[serde(default)]
+    #[ts(optional)]
     pub name: Option<String>,
     #[serde(default)]
+    #[ts(optional)]
     pub symbol: Option<String>,
     #[serde(default)]
+    #[ts(optional)]
     pub minor_units: Option<i16>,
 }
 
@@ -144,34 +148,51 @@ pub struct CountrySeed {
     pub flag_emoji: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[ts(rename = "CountryRuntime")]
 pub struct Country {
     pub iso2: String,
     pub iso3: String,
+    #[ts(optional)]
     pub iso_numeric: Option<String>,
     pub name: String,
+    #[ts(optional)]
     pub official_name: Option<String>,
+    #[ts(optional)]
     pub capital: Option<String>,
     pub capitals: Vec<String>,
+    #[ts(optional)]
     pub region: Option<String>,
+    #[ts(optional)]
     pub subregion: Option<String>,
     pub currencies: Vec<CountryCurrency>,
+    #[ts(optional)]
     pub primary_currency_code: Option<String>,
+    #[ts(optional)]
     pub calling_code: Option<String>,
+    #[ts(optional)]
     pub calling_root: Option<String>,
     pub calling_suffixes: Vec<String>,
     pub tlds: Vec<String>,
     pub timezones: Vec<String>,
+    #[ts(optional)]
     pub latitude: Option<f64>,
+    #[ts(optional)]
     pub longitude: Option<f64>,
+    #[ts(optional)]
     pub independent: Option<bool>,
     pub status: String,
+    #[ts(optional)]
     pub assignment_status: Option<String>,
+    #[ts(optional)]
     pub un_member: Option<bool>,
+    #[ts(optional)]
     pub flag_emoji: Option<String>,
     #[schemars(with = "String")]
+    #[ts(type = "string")]
     pub created_at: time::OffsetDateTime,
     #[schemars(with = "String")]
+    #[ts(type = "string")]
     pub updated_at: time::OffsetDateTime,
 }
 

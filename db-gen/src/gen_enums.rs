@@ -478,6 +478,53 @@ fn escape_rust_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\"', "\\\"")
 }
 
+fn enum_storage_values(spec: &EnumSpec) -> Vec<String> {
+    match spec.storage.as_str() {
+        "string" | "text" => match &spec.variants {
+            EnumVariants::Simple(names) => names.iter().map(|name| name.to_lowercase()).collect(),
+            EnumVariants::Explicit(vars) => vars
+                .iter()
+                .map(|variant| {
+                    variant
+                        .value
+                        .as_str()
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "String enum variant '{}' must have string value",
+                                variant.name
+                            )
+                        })
+                        .to_string()
+                })
+                .collect(),
+        },
+        "i16" | "i32" | "i64" => match &spec.variants {
+            EnumVariants::Explicit(vars) => vars
+                .iter()
+                .map(|variant| {
+                    variant
+                        .value
+                        .as_i64()
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "Integer enum variant '{}' must have integer value",
+                                variant.name
+                            )
+                        })
+                        .to_string()
+                })
+                .collect(),
+            EnumVariants::Simple(_) => panic!(
+                "Integer enums require explicit values, use syntax: variants = [{{name = \"Name\", value = 0}}]"
+            ),
+        },
+        other => panic!(
+            "Unsupported enum storage type: {}. Supported: string, i16, i32, i64",
+            other
+        ),
+    }
+}
+
 /// Generate enums.rs from schema enum definitions.
 pub fn generate_enums(
     schema: &crate::schema::Schema,
@@ -504,10 +551,33 @@ pub fn generate_enums(
     writeln!(f, "// AUTO-GENERATED FILE — DO NOT EDIT")?;
     writeln!(f, "// Generated from TOML schema enum definitions\n")?;
 
+    writeln!(f, "#[derive(Debug, Clone, Copy)]")?;
+    writeln!(f, "pub struct SchemaEnumTsMeta {{")?;
+    writeln!(f, "    pub name: &'static str,")?;
+    writeln!(f, "    pub variants: &'static [&'static str],")?;
+    writeln!(f, "}}\n")?;
+
     for (name, spec) in &enum_specs {
         let code = generate_enum(name, spec);
         writeln!(f, "{}\n", code)?;
     }
+
+    writeln!(f, "pub const SCHEMA_ENUM_TS_META: &[SchemaEnumTsMeta] = &[")?;
+    for (name, spec) in &enum_specs {
+        let variants = enum_storage_values(spec);
+        let variants_list = variants
+            .iter()
+            .map(|value| format!("\"{}\"", escape_rust_string(value)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(
+            f,
+            "    SchemaEnumTsMeta {{ name: \"{}\", variants: &[{}] }},",
+            escape_rust_string(name),
+            variants_list
+        )?;
+    }
+    writeln!(f, "];")?;
 
     println!("Generated {} enums to {:?}", enum_specs.len(), enums_file);
 

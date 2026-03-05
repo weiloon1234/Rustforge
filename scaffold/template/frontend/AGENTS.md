@@ -234,8 +234,12 @@ make gen          # Code generation + type generation
 
 1. Rust contract structs derive `ts_rs::TS` with `#[ts(export, export_to = "{portal}/types/")]`
 2. `app/build.rs` auto-discovers contract/datatable TS types from `app/src/contracts/api/v1/**` and `app/src/contracts/datatable/**`
-3. `app/src/bin/export-types.rs` exports discovered types, assembles `.ts` files with enum imports, and writes to `frontend/src/`
-4. Per-portal `types/index.ts`, shared framework types, and enum types are emitted automatically
+3. Shared TS schema is owned by framework/generated registries:
+   - `core_web::ts_exports::ts_export_files()`
+   - `core_db::ts_exports::ts_export_files()`
+   - `generated::ts_exports::ts_export_files()`
+4. `app/src/bin/export-types.rs` orchestrates output only: merges discovered app contracts + framework registries, then writes `frontend/src/**`
+5. Per-portal `types/index.ts` and shared `types/index.ts` barrels are emitted automatically
 
 ### Adding types for a new domain
 

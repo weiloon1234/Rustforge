@@ -19,6 +19,7 @@ use serde_json::Value;
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
 use tokio_util::io::ReaderStream;
+use ts_rs::TS;
 use validator::Validate;
 
 use crate::contracts::{ContractJson, RequestContract, ResponseContract};
@@ -46,8 +47,9 @@ impl Default for DataTableRouteOptions {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(rename = "DataTablePaginationMode")]
 pub enum DataTablePaginationModeDto {
     Offset,
     Cursor,
@@ -62,8 +64,9 @@ impl DataTablePaginationModeDto {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(rename = "DataTableSortDirection")]
 pub enum DataTableSortDirectionDto {
     Asc,
     Desc,
@@ -78,7 +81,7 @@ impl DataTableSortDirectionDto {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Validate, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, Validate, JsonSchema, TS)]
 pub struct DataTableQueryRequestBase {
     #[serde(default = "default_include_meta")]
     pub include_meta: bool,
@@ -173,7 +176,7 @@ impl DataTableQueryRequestBase {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Validate, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, Validate, JsonSchema, TS)]
 pub struct DataTableEmailExportRequestBase {
     #[validate(nested)]
     pub query: DataTableQueryRequestBase,
@@ -190,7 +193,7 @@ pub struct DataTableEmailExportRequestBase {
     pub export_file_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum DataTableFilterFieldType {
     Text,
@@ -201,17 +204,18 @@ pub enum DataTableFilterFieldType {
     Boolean,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct DataTableFilterOptionDto {
     pub label: String,
     pub value: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct DataTableFilterFieldDto {
     pub field: String,
     pub filter_key: String,
     #[serde(rename = "type")]
+    #[ts(rename = "type")]
     pub field_type: DataTableFilterFieldType,
     pub label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -222,7 +226,7 @@ pub struct DataTableFilterFieldDto {
     pub options: Option<Vec<DataTableFilterOptionDto>>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 pub struct DataTableColumnMetaDto {
     pub name: String,
     pub label: String,
@@ -232,7 +236,7 @@ pub struct DataTableColumnMetaDto {
     pub filter_ops: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 pub struct DataTableRelationColumnMetaDto {
     pub relation: String,
     pub column: String,
@@ -240,7 +244,7 @@ pub struct DataTableRelationColumnMetaDto {
     pub filter_ops: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 pub struct DataTableDefaultsDto {
     pub sorting_column: String,
     pub sorted: String,
@@ -250,16 +254,17 @@ pub struct DataTableDefaultsDto {
     pub unsortable: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 pub struct DataTableMetaDto {
     pub model_key: String,
     pub defaults: DataTableDefaultsDto,
     pub columns: Vec<DataTableColumnMetaDto>,
     pub relation_columns: Vec<DataTableRelationColumnMetaDto>,
+    #[ts(type = "(DataTableFilterFieldDto | DataTableFilterFieldDto[])[]")]
     pub filter_rows: Vec<Vec<DataTableFilterFieldDto>>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 pub struct DataTableDiagnosticsDto {
     pub duration_ms: u64,
     pub auto_filters_applied: usize,
@@ -290,7 +295,7 @@ where
     pub meta: Option<DataTableMetaDto>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum DataTableEmailExportState {
     WaitingCsv,
@@ -300,7 +305,7 @@ pub enum DataTableEmailExportState {
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct DataTableEmailExportStatusDto {
     pub state: DataTableEmailExportState,
     pub recipients: Vec<String>,
@@ -368,14 +373,14 @@ impl DataTableEmailExportManager {
     }
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 pub struct DataTableEmailExportQueuedDto {
     pub job_id: String,
     pub csv_state: String,
     pub email_state: DataTableEmailExportState,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 pub struct DataTableExportStatusResponseDto {
     pub job_id: String,
     pub model_key: String,

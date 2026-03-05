@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use ts_rs::TS;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -18,8 +19,9 @@ pub struct ResizeRule {
 
 use schemars::JsonSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct Attachment {
+    #[ts(type = "string")]
     pub id: Uuid,
     pub path: String,
     #[serde(default)]
@@ -29,6 +31,7 @@ pub struct Attachment {
     pub width: Option<i32>,
     pub height: Option<i32>,
     #[schemars(with = "String")]
+    #[ts(type = "string")]
     pub created_at: time::OffsetDateTime,
 }
 
@@ -95,19 +98,24 @@ impl AttachmentMap {
 ///
 /// It matches metadata-first upload flows and can also carry an optional `id`
 /// for client-side references when needed.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct AttachmentUploadDto {
     #[serde(default)]
+    #[ts(optional, type = "string")]
     pub id: Option<Uuid>,
     #[serde(default)]
+    #[ts(optional)]
     pub name: Option<String>,
     pub path: String,
     #[serde(alias = "type")]
+    #[ts(rename = "content_type")]
     pub content_type: String,
     pub size: i64,
     #[serde(default)]
+    #[ts(optional)]
     pub width: Option<i32>,
     #[serde(default)]
+    #[ts(optional)]
     pub height: Option<i32>,
 }
 

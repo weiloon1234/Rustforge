@@ -3,9 +3,9 @@
 pub mod admin_guard;
 pub use admin_guard::*;
 
-use core_datatable::DataTableActor;
-use core_web::auth::AuthIdentity;
 use std::collections::BTreeMap;
+use core_web::auth::AuthIdentity;
+use core_datatable::DataTableActor;
 
 pub async fn authenticate_any_guard(db: &sqlx::PgPool, token: &str) -> Option<AuthIdentity> {
     if let Ok(auth) = core_web::auth::authenticate_token::<AdminGuard>(db, token).await {

@@ -228,6 +228,9 @@
   "Optional localized cover image": "可选的多语言封面图片",
   "Invalid page id": "无效的页面 ID",
   "Other": "其它",
+  "Calling code": "区号",
+  "Region": "地区",
+  "Status": "状态",
 
   "Page loaded": "页面已加载",
   "Page updated": "页面已更新",

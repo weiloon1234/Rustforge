@@ -1,16 +1,14 @@
 // AUTO-GENERATED FILE — DO NOT EDIT
 // Generated from TOML schema enum definitions
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub enum AdminType {
     #[serde(rename = "developer")]
     Developer,
     #[serde(rename = "superadmin")]
     SuperAdmin,
     #[serde(rename = "admin")]
-    Admin,
+    Admin
 }
 
 impl Default for AdminType {
@@ -72,10 +70,7 @@ impl AdminType {
 
 // sqlx support for TEXT storage
 impl sqlx::Encode<'_, sqlx::Postgres> for AdminType {
-    fn encode_by_ref(
-        &self,
-        buf: &mut sqlx::postgres::PgArgumentBuffer,
-    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
         let s = match self {
             Self::Developer => "developer",
             Self::SuperAdmin => "superadmin",
@@ -115,9 +110,8 @@ impl From<AdminType> for core_db::common::sql::BindValue {
     }
 }
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[repr(i16)]
 pub enum ContentPageSystemFlag {
     #[serde(rename = "0")]
@@ -184,10 +178,7 @@ impl ContentPageSystemFlag {
 
 // sqlx support for integer storage
 impl sqlx::Encode<'_, sqlx::Postgres> for ContentPageSystemFlag {
-    fn encode_by_ref(
-        &self,
-        buf: &mut sqlx::postgres::PgArgumentBuffer,
-    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
         <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
     }
 }
@@ -215,3 +206,16 @@ impl From<ContentPageSystemFlag> for core_db::common::sql::BindValue {
         core_db::common::sql::BindValue::I64(v as i64)
     }
 }
+
+
+
+#[derive(Debug, Clone, Copy)]
+pub struct SchemaEnumTsMeta {
+    pub name: &'static str,
+    pub variants: &'static [&'static str],
+}
+
+pub const SCHEMA_ENUM_TS_META: &[SchemaEnumTsMeta] = &[
+    SchemaEnumTsMeta { name: "AdminType", variants: &["developer", "superadmin", "admin"] },
+    SchemaEnumTsMeta { name: "ContentPageSystemFlag", variants: &["0", "1"] },
+];

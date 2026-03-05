@@ -10,20 +10,12 @@ pub const DEFAULT_LOCALE: &str = "en";
 
 pub const DEFAULT_TIMEZONE: &str = "+08:00";
 
-pub const SUPPORTED_LOCALES: &[&str] = &["en", "zh"];
+pub const SUPPORTED_LOCALES: &[&str] = &[
+    "en",
+    "zh",
+];
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-    ts_rs::TS,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema, ts_rs::TS)]
 pub enum Locale {
     #[serde(rename = "en")]
     En,
@@ -82,21 +74,11 @@ impl LocalizedText {
 
 impl ts_rs::TS for LocalizedText {
     type WithoutGenerics = Self;
-    fn name() -> String {
-        "LocalizedText".to_string()
-    }
-    fn inline() -> String {
-        Self::name()
-    }
-    fn inline_flattened() -> String {
-        panic!("LocalizedText cannot be flattened")
-    }
-    fn decl() -> String {
-        panic!("LocalizedText declaration is provided by shared platform types")
-    }
-    fn decl_concrete() -> String {
-        Self::decl()
-    }
+    fn name() -> String { "LocalizedText".to_string() }
+    fn inline() -> String { Self::name() }
+    fn inline_flattened() -> String { panic!("LocalizedText cannot be flattened") }
+    fn decl() -> String { panic!("LocalizedText declaration is provided by shared platform types") }
+    fn decl_concrete() -> String { Self::decl() }
 }
 
 pub trait LocalizedMapHelper {
@@ -107,9 +89,7 @@ impl LocalizedMapHelper for core_db::platform::localized::types::LocalizedMap {
     fn get_localized_text(&self, field: &str, owner_id: i64) -> Option<LocalizedText> {
         let by_owner = self.inner.get(field)?;
         let by_locale = by_owner.get(&owner_id)?;
-        if by_locale.is_empty() {
-            return None;
-        }
+        if by_locale.is_empty() { return None; }
         let mut out = LocalizedText {
             en: String::new(),
             zh: String::new(),
@@ -124,24 +104,21 @@ impl LocalizedMapHelper for core_db::platform::localized::types::LocalizedMap {
             }
         }
         if let Some(default_val) = by_locale.get(DEFAULT_LOCALE) {
-            if out.en.is_empty() {
-                out.en = default_val.clone();
-            }
-            if out.zh.is_empty() {
-                out.zh = default_val.clone();
-            }
+            if out.en.is_empty() { out.en = default_val.clone(); }
+            if out.zh.is_empty() { out.zh = default_val.clone(); }
         }
         Some(out)
     }
 }
 
 pub const CONTENT_PAGE_OWNER_TYPE: &str = "content_page";
-pub const CONTENT_PAGE_FIELDS: &[&str] = &["title", "content", "cover"];
+pub const CONTENT_PAGE_FIELDS: &[&str] = &[
+    "title",
+    "content",
+    "cover",
+];
 
-pub async fn load_content_page_localized<'a>(
-    db: DbConn<'a>,
-    ids: &[i64],
-) -> Result<core_db::platform::localized::types::LocalizedMap> {
+pub async fn load_content_page_localized<'a>(db: DbConn<'a>, ids: &[i64]) -> Result<core_db::platform::localized::types::LocalizedMap> {
     core_db::platform::localized::repo::LocalizedRepo::new(db)
         .load_for_owners(CONTENT_PAGE_OWNER_TYPE, ids, CONTENT_PAGE_FIELDS)
         .await
@@ -150,8 +127,7 @@ pub async fn load_content_page_localized<'a>(
 pub trait ContentPageLocalized {
     fn content_page_title_translations(&self, id: i64) -> Option<crate::generated::LocalizedText>;
     fn content_page_title(&self, id: i64) -> Option<String>;
-    fn content_page_content_translations(&self, id: i64)
-        -> Option<crate::generated::LocalizedText>;
+    fn content_page_content_translations(&self, id: i64) -> Option<crate::generated::LocalizedText>;
     fn content_page_content(&self, id: i64) -> Option<String>;
     fn content_page_cover_translations(&self, id: i64) -> Option<crate::generated::LocalizedText>;
     fn content_page_cover(&self, id: i64) -> Option<String>;
@@ -165,10 +141,7 @@ impl ContentPageLocalized for core_db::platform::localized::types::LocalizedMap 
         let locale = core_i18n::current_locale();
         self.get_value("title", id, locale)
     }
-    fn content_page_content_translations(
-        &self,
-        id: i64,
-    ) -> Option<crate::generated::LocalizedText> {
+    fn content_page_content_translations(&self, id: i64) -> Option<crate::generated::LocalizedText> {
         self.get_localized_text("content", id)
     }
     fn content_page_content(&self, id: i64) -> Option<String> {
@@ -202,3 +175,4 @@ pub fn get_attachment_rules(name: &str) -> Option<AttachmentRules> {
         _ => None,
     }
 }
+

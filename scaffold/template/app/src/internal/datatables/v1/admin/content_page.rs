@@ -34,20 +34,18 @@ impl ContentPageDataTableHooks for ContentPageDataTableAppHooks {
         Ok(authorize_with_optional_export(base_authorized, input, ctx))
     }
 
-    fn row_to_record(
+    fn mappings(
         &self,
-        row: generated::models::ContentPageView,
+        record: &mut serde_json::Map<String, serde_json::Value>,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let mut record = self.default_row_to_record(row)?;
+    ) -> anyhow::Result<()> {
         record.remove("title_translations");
         record.remove("content_translations");
         record.remove("cover_translations");
         record.remove("created_at");
         record.remove("deleted_at");
-
-        Ok(record)
+        Ok(())
     }
 }
 
