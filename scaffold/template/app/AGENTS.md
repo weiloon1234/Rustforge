@@ -1,0 +1,201 @@
+# App Backend Guide (Rust)
+
+Scope: `app/` crate only.
+
+Design rules:
+1. Keep it simple.
+2. Keep a single source of truth.
+3. Do not edit generated outputs directly.
+
+## SSOT Files
+
+- `schemas/*.toml` — schema-defined models/enums.
+- `permissions.toml` — permission catalog.
+- `configs.toml` — auth/language/realtime/CORS config.
+- `../i18n/*.json` — translation keys and values.
+
+Generated outputs are produced from these inputs (plus build-time codegen) and can be overwritten.
+
+## Runtime Layers
+
+- `src/contracts/` — DTOs for API/datatable input/output.
+- `src/internal/api/` — HTTP handlers and route wiring.
+- `src/internal/workflows/` — business/domain logic.
+- `src/internal/datatables/` — datatable runtime wiring and hooks.
+- `src/internal/jobs/` — async worker jobs and schedules.
+- `src/internal/middleware/` — custom request middleware.
+- `src/internal/realtime/` — websocket channel policy.
+- `src/validation/` — sync/async validation helpers.
+- `src/seeds/` — database seeders.
+
+Boundary rule: handlers should stay thin; workflows own domain logic.
+
+## App State
+
+Main state for API handlers is `src/internal/api/state.rs` (`AppApiState`).
+When a shared runtime dependency is needed in handlers/datatables/workflows, add it there from boot context and pass it through state.
+
+## Recipe: Extend Schema-Generated Model
+
+Use this when the domain is schema-driven.
+
+1. Add or update model/enum in `schemas/{domain}.toml`.
+2. Add matching SQL migration in `../migrations/{timestamp}_{name}.sql`.
+3. Add/adjust permissions in `permissions.toml`.
+4. Add contracts in `src/contracts/api/v1/{portal}/{domain}.rs`.
+5. Add workflow in `src/internal/workflows/{domain}.rs`.
+6. Add API handler in `src/internal/api/v1/{portal}/{domain}.rs`.
+7. Register modules in each `mod.rs` (`contracts`, `workflows`, `api`).
+8. Add translation keys to all locale files in `../i18n/*.json`.
+9. Run:
+
+```bash
+cargo check -p app
+cargo run -p app --bin export-types
+```
+
+## Recipe: Create a New Datatable
+
+Datatable is contract + runtime + catalog registration.
+
+1. Contract file: `src/contracts/datatable/admin/{domain}.rs`.
+2. Runtime hooks file: `src/internal/datatables/v1/admin/{domain}.rs`.
+3. Register in catalog SSOT: `src/internal/datatables/v1/admin/mod.rs`.
+
+Required contract constants:
+- `SCOPED_KEY`
+- `ROUTE_PREFIX`
+
+Scoped routes expected:
+- `POST /datatable/<scope>/query`
+- `POST /datatable/<scope>/export/csv`
+- `POST /datatable/<scope>/export/email`
+- `GET /datatable/<scope>/export/status`
+
+Do not mount per-model datatable routes manually outside the admin catalog wiring.
+
+## Recipe: Create New API Route/Domain Flow
+
+1. Contract types in `src/contracts/api/v1/{portal}/{domain}.rs`.
+2. Workflow in `src/internal/workflows/{domain}.rs`.
+3. Handler/router in `src/internal/api/v1/{portal}/{domain}.rs`.
+4. Wire route in `src/internal/api/v1/{portal}/mod.rs`.
+5. Wire top-level portal router in `src/internal/api/v1/mod.rs` if needed.
+6. Add `mod` exports in relevant `mod.rs` files.
+
+Validation input wrappers:
+- Use `ContractJson<T>` for sync validations.
+- Use `AsyncContractJson<T>` when async DB rules are involved.
+
+## Recipe: Create Validation Rules
+
+### Sync custom rule
+
+- Put helper in `src/validation/{domain}.rs`.
+- Return `Result<(), validator::ValidationError>`.
+- Attach in contract via validation attributes.
+
+### Async/DB rule
+
+- Prefer built-in `#[rf(async_unique/...)]` rules where possible.
+- For custom async checks, implement `AsyncValidate` on the contract input type.
+
+Register new validation modules in `src/validation/mod.rs`.
+
+## Async Domain Actions: Jobs vs Events/Notifications
+
+Canonical async runtime primitive is `jobs`.
+
+- Queueable execution units must be implemented as jobs in `src/internal/jobs/`.
+- Register jobs/schedules in `src/internal/jobs/mod.rs`.
+- Dispatch from workflows (not route glue).
+
+Domain concepts like "event" or "notification" are fine at naming/business level, but execution should still flow through jobs.
+
+## Recipe: Realtime (WebSocket)
+
+1. Configure channels in `configs.toml` under `[realtime.channels.*]`.
+2. Implement authorization/policy in `src/internal/realtime/`.
+3. Keep websocket startup in `src/bin/websocket-server.rs`.
+
+Do not duplicate realtime access logic in unrelated layers.
+
+## Recipe: Custom Middleware
+
+1. Create middleware in `src/internal/middleware/{name}.rs`.
+2. Register/export in `src/internal/middleware/mod.rs`.
+3. Apply with route layering (`from_fn_with_state`) in the relevant API router.
+
+Keep middleware focused: auth/context enrichment/guardrails.
+
+## Configs Guide (`configs.toml`)
+
+Common extension points:
+- `[languages]`
+- `[auth]` and `[auth.guards.*]`
+- `[realtime.channels.*]`
+- `[cors]`
+- `[attachment_type.*]`
+
+When config changes require runtime state access, wire them via `AppApiState`.
+
+## Permissions Guide (`permissions.toml`)
+
+Permissions are SSOT and generate typed permission artifacts.
+
+Each entry should define:
+- `key`
+- `guard`
+- `label`
+- `group`
+- `description`
+
+Admin-specific rule:
+- Admin API routes are usually protected by admin auth middleware.
+- Domain operations should still check domain permission keys (`*.read`, `*.manage`) explicitly where required.
+- Datatable export should require `export` permission in addition to base read permission.
+
+After updates, run generation/checks:
+
+```bash
+cargo build -p generated
+cargo check -p app
+```
+
+## Type Export (Rust -> TS)
+
+For contract types used by frontend:
+
+1. Add `#[derive(TS)]`.
+2. Add `#[ts(export, export_to = "{portal}/types/")]`.
+3. Run:
+
+```bash
+cargo run -p app --bin export-types
+```
+
+## i18n Rule
+
+All user-facing strings must go through translation keys.
+
+- Rust side: use `core_i18n::t()` / `t_args()`.
+- Add keys in `../i18n/*.json`.
+
+## Seeder Recipe
+
+1. Create seeder in `src/seeds/{name}.rs` implementing `core_db::seeder::Seeder`.
+2. Register in `src/seeds/mod.rs`.
+3. Run with:
+
+```bash
+./console db seed
+```
+
+## Minimal Delivery Checklist
+
+1. SSOT file updated (`schemas`/`permissions`/`configs` when relevant).
+2. Migration added when schema/data changes.
+3. Contracts + workflow + route wired.
+4. Datatable registered (if applicable).
+5. Translations added.
+6. Generation/check commands pass.

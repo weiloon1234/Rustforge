@@ -27,7 +27,10 @@ fn cleanup_generated_dirs(root: &Path) {
                 continue;
             }
 
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
             if forbidden.iter().any(|f| f == &name) {
                 fs::remove_dir_all(&path).unwrap_or_else(|error| {
                     panic!(
@@ -68,7 +71,10 @@ fn cleanup_public_generated_assets(root: &Path) {
                 continue;
             }
 
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
             if name == ".gitkeep" {
                 continue;
             }
@@ -120,7 +126,10 @@ fn cleanup_empty_public_dirs(dir: &Path) -> bool {
             continue;
         }
 
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
         if name != ".gitkeep" {
             is_empty = false;
         }

@@ -98,12 +98,21 @@ fn scaffold_smoke_generation_and_force_behaviour() {
         "GEMINI.md",
         "frontend/CLAUDE.md",
         "frontend/GEMINI.md",
+        "app/CLAUDE.md",
+        "app/GEMINI.md",
+    ];
+
+    let deprecated_agent_artifacts = [
+        "app/src/contracts/AGENTS.md",
         "app/src/contracts/CLAUDE.md",
         "app/src/contracts/GEMINI.md",
+        "app/src/internal/AGENTS.md",
         "app/src/internal/CLAUDE.md",
         "app/src/internal/GEMINI.md",
+        "app/src/seeds/AGENTS.md",
         "app/src/seeds/CLAUDE.md",
         "app/src/seeds/GEMINI.md",
+        "app/src/validation/AGENTS.md",
         "app/src/validation/CLAUDE.md",
         "app/src/validation/GEMINI.md",
     ];
@@ -145,6 +154,13 @@ fn scaffold_smoke_generation_and_force_behaviour() {
         }
     }
 
+    for rel in deprecated_agent_artifacts {
+        assert!(
+            !out_dir.join(rel).exists(),
+            "deprecated AGENTS artifact should not exist in fresh scaffold output: {rel}"
+        );
+    }
+
     let no_force = run_scaffold(&out_dir, false);
     assert!(
         !no_force.status.success(),
@@ -160,11 +176,37 @@ fn scaffold_smoke_generation_and_force_behaviour() {
         "expected non-empty output error message"
     );
 
+    // Simulate stale artifacts from older scaffold versions to verify --force cleanup.
+    for rel in deprecated_agent_artifacts {
+        let path = out_dir.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap_or_else(|e| {
+                panic!(
+                    "failed to create stale artifact parent {}: {e}",
+                    parent.display()
+                )
+            });
+        }
+        fs::write(&path, b"stale").unwrap_or_else(|e| {
+            panic!(
+                "failed to create stale artifact file {}: {e}",
+                path.display()
+            )
+        });
+    }
+
     let second_force = run_scaffold(&out_dir, true);
     assert_ok(
         &second_force,
         "scaffold --force rerun in non-empty dir should succeed",
     );
+
+    for rel in deprecated_agent_artifacts {
+        assert!(
+            !out_dir.join(rel).exists(),
+            "deprecated AGENTS artifact should be removed by --force rerun: {rel}"
+        );
+    }
 
     let _ = fs::remove_dir_all(&out_dir);
 }

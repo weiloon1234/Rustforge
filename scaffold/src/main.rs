@@ -39,6 +39,7 @@ async fn main() -> anyhow::Result<()> {
     let files = template_files();
     if cli.force {
         cleanup_module_path_conflicts(&output, files.iter().map(|file| file.path()))?;
+        cleanup_deprecated_agent_artifacts(&output)?;
     }
     let agent_dirs = agent_link_dirs_from_paths(files.iter().map(|f| f.path()));
     for file in files {
@@ -223,9 +224,46 @@ where
 
         let flat_abs = output.join(&flat_rel);
         if flat_abs.is_file() {
-            fs::remove_file(&flat_abs)
-                .with_context(|| format!("failed to remove conflicting module {}", flat_abs.display()))?;
+            fs::remove_file(&flat_abs).with_context(|| {
+                format!("failed to remove conflicting module {}", flat_abs.display())
+            })?;
             println!("{} {}", "Removed conflict".yellow(), flat_abs.display());
+        }
+    }
+
+    Ok(())
+}
+
+fn cleanup_deprecated_agent_artifacts(output: &Path) -> anyhow::Result<()> {
+    const DEPRECATED_AGENT_DIRS: &[&str] = &[
+        "app/src/contracts",
+        "app/src/internal",
+        "app/src/seeds",
+        "app/src/validation",
+    ];
+    const DEPRECATED_AGENT_FILES: &[&str] = &["AGENTS.md", "CLAUDE.md", "GEMINI.md"];
+
+    for rel_dir in DEPRECATED_AGENT_DIRS {
+        for file_name in DEPRECATED_AGENT_FILES {
+            let path = output.join(rel_dir).join(file_name);
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) => {
+                    return Err(err).with_context(|| format!("failed to stat {}", path.display()));
+                }
+            };
+
+            if metadata.is_dir() {
+                bail!(
+                    "refusing to remove directory while cleaning deprecated AGENTS artifact: {}",
+                    path.display()
+                );
+            }
+
+            fs::remove_file(&path)
+                .with_context(|| format!("failed to remove deprecated {}", path.display()))?;
+            println!("{} {}", "Removed deprecated".yellow(), path.display());
         }
     }
 
@@ -295,7 +333,7 @@ mod tests {
         let dirs = agent_link_dirs_from_paths([
             "AGENTS.md",
             "frontend/AGENTS.md",
-            "app/src/contracts/AGENTS.md",
+            "app/AGENTS.md",
             "frontend/AGENTS.md",
             "README.md",
         ]);
@@ -304,7 +342,7 @@ mod tests {
             dirs,
             vec![
                 PathBuf::new(),
-                PathBuf::from("app/src/contracts"),
+                PathBuf::from("app"),
                 PathBuf::from("frontend"),
             ]
         );
