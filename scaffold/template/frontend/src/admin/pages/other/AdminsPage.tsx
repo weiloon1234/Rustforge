@@ -14,7 +14,6 @@ import { ADMIN_TYPE, PERMISSION, PERMISSIONS, PERMISSION_META } from "@admin/typ
 import type { ApiResponse } from "@shared/types";
 import {
   Button,
-  Checkbox,
   DataTable,
   type DataTableCellContext,
   useAutoForm,
@@ -27,6 +26,11 @@ import {
 import type { DataTablePostCallEvent } from "@shared/components";
 import { useAuthStore } from "@admin/stores/auth";
 import { api } from "@admin/api";
+
+function normalizeErrorMessage(error: unknown, fallback: string): string {
+  const maybe = error as { response?: { data?: { message?: string } } };
+  return maybe?.response?.data?.message ?? fallback;
+}
 
 const TYPE_COLORS: Record<AdminType, string> = {
   developer: "bg-purple-100 text-purple-700",
@@ -139,43 +143,6 @@ function PermissionSummary({ admin }: { admin: AdminDatatableRow }) {
   );
 }
 
-function PermissionCheckboxes({
-  abilities,
-  availablePermissions,
-  onChange,
-}: {
-  abilities: Permission[];
-  availablePermissions: readonly PermissionMeta[];
-  onChange: (next: Permission[]) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">{t("Permissions")}</legend>
-      <div className="flex flex-wrap gap-x-6 gap-y-1">
-        {availablePermissions.map((meta) => {
-          const label = resolvePermissionLabel(t, meta.key, meta.label);
-          return (
-            <Checkbox
-              key={meta.key}
-              label={label}
-              checked={abilities.includes(meta.key as Permission)}
-              onChange={(e) => {
-                const permission = meta.key as Permission;
-                if (e.target.checked) {
-                  onChange([...abilities, permission]);
-                } else {
-                  onChange(abilities.filter((value) => value !== permission));
-                }
-              }}
-            />
-          );
-        })}
-      </div>
-    </fieldset>
-  );
-}
-
 function CreateAdminForm({
   onCreated,
   formId,
@@ -189,12 +156,10 @@ function CreateAdminForm({
 }) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
-  const [abilities, setAbilities] = useState<Permission[]>([]);
 
-  const { submit, busy, form, errors } = useAutoForm(api, {
+  const { submit, busy, form } = useAutoForm(api, {
     url: "admins",
     method: "post",
-    extraPayload: { abilities },
     fields: [
       {
         name: "username",
@@ -224,11 +189,27 @@ function CreateAdminForm({
         placeholder: t("Enter password"),
         required: true,
       },
+      ...(availablePermissions.length > 0 ? [{
+        name: "abilities",
+        type: "checkboxGroup" as const,
+        label: t("Permissions"),
+        options: availablePermissions.map((meta) => ({
+          value: meta.key,
+          label: resolvePermissionLabel(t, meta.key, meta.label),
+        })),
+        columns: 2,
+      }] : []),
     ],
     onSuccess: () => {
       close();
       alertSuccess({ title: t("Success"), message: t("Admin created") });
       onCreated();
+    },
+    onError: (error) => {
+      alertError({
+        title: t("Error"),
+        message: normalizeErrorMessage(error, t("Failed to create admin.")),
+      });
     },
   });
 
@@ -237,20 +218,8 @@ function CreateAdminForm({
   }, [busy, onBusyChange]);
 
   return (
-    <form id={formId} onSubmit={submit} className="space-y-4">
-      {errors.general && (
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-          {errors.general}
-        </p>
-      )}
+    <form id={formId} onSubmit={submit}>
       {form}
-      {availablePermissions.length > 0 && (
-        <PermissionCheckboxes
-          abilities={abilities}
-          availablePermissions={availablePermissions}
-          onChange={setAbilities}
-        />
-      )}
     </form>
   );
 }
@@ -282,16 +251,10 @@ function EditAdminForm({
     currentPermissions.every((permission) =>
       assignablePermissionKeys.has(permission),
     );
-  const [abilities, setAbilities] = useState<Permission[]>(
-    currentPermissions.filter((permission) =>
-      assignablePermissionKeys.has(permission),
-    ),
-  );
 
-  const { submit, busy, form, errors } = useAutoForm(api, {
+  const { submit, busy, form } = useAutoForm(api, {
     url: `admins/${admin.id}`,
     method: "patch",
-    extraPayload: canEditAbilities ? { abilities } : {},
     fields: [
       {
         name: "username",
@@ -322,16 +285,35 @@ function EditAdminForm({
         required: false,
         notes: t("Leave blank to keep current password"),
       },
+      ...(canEditAbilities && availablePermissions.length > 0 ? [{
+        name: "abilities",
+        type: "checkboxGroup" as const,
+        label: t("Permissions"),
+        options: availablePermissions.map((meta) => ({
+          value: meta.key,
+          label: resolvePermissionLabel(t, meta.key, meta.label),
+        })),
+        columns: 2,
+      }] : []),
     ],
     defaults: {
       username: admin.username,
       name: admin.name,
       email: admin.email ?? "",
+      ...(canEditAbilities ? {
+        abilities: JSON.stringify(currentPermissions.filter((p) => assignablePermissionKeys.has(p))),
+      } : {}),
     },
     onSuccess: () => {
       close();
       alertSuccess({ title: t("Success"), message: t("Admin updated") });
       onUpdated();
+    },
+    onError: (error) => {
+      alertError({
+        title: t("Error"),
+        message: normalizeErrorMessage(error, t("Failed to update admin.")),
+      });
     },
   });
 
@@ -340,20 +322,8 @@ function EditAdminForm({
   }, [busy, onBusyChange]);
 
   return (
-    <form id={formId} onSubmit={submit} className="space-y-4">
-      {errors.general && (
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-          {errors.general}
-        </p>
-      )}
+    <form id={formId} onSubmit={submit}>
       {form}
-      {canEditAbilities && availablePermissions.length > 0 && (
-        <PermissionCheckboxes
-          abilities={abilities}
-          availablePermissions={availablePermissions}
-          onChange={setAbilities}
-        />
-      )}
     </form>
   );
 }

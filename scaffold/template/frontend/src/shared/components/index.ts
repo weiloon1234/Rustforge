@@ -16,6 +16,9 @@ export type { SelectProps, SelectOption } from "@shared/components/Select";
 export { Checkbox } from "@shared/components/Checkbox";
 export type { CheckboxProps } from "@shared/components/Checkbox";
 
+export { CheckboxGroup } from "@shared/components/CheckboxGroup";
+export type { CheckboxGroupProps, CheckboxGroupOption } from "@shared/components/CheckboxGroup";
+
 export { Button } from "@shared/components/Button";
 export type { ButtonProps, ButtonVariant, ButtonSize } from "@shared/components/Button";
 

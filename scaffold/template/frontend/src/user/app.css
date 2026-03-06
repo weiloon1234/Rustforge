@@ -279,6 +279,8 @@
   .rf-checkbox-error { @apply border-error; }
   .rf-checkbox-label { @apply text-sm text-foreground select-none; }
 
+  .rf-checkbox-group { @apply grid gap-x-6 gap-y-1; }
+
   .rf-radio-group { @apply flex flex-col gap-2; }
   .rf-radio-wrapper { @apply flex items-center gap-2.5 cursor-pointer; }
   .rf-radio-hidden { @apply sr-only; }

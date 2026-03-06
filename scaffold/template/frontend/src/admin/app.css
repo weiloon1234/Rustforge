@@ -321,6 +321,10 @@
         @apply text-sm text-foreground select-none;
     }
 
+    .rf-checkbox-group {
+        @apply grid gap-x-6 gap-y-1;
+    }
+
     .rf-radio-group {
         @apply flex flex-col gap-2;
     }

@@ -5,6 +5,7 @@ import { TextArea } from "@shared/components/TextArea";
 import { Select, type SelectOption } from "@shared/components/Select";
 import { Checkbox } from "@shared/components/Checkbox";
 import { Radio, type RadioOption } from "@shared/components/Radio";
+import { CheckboxGroup, type CheckboxGroupOption } from "@shared/components/CheckboxGroup";
 import {
   DatePickerInput,
   DateTimePickerInput,
@@ -52,6 +53,7 @@ type FieldDef =
   | { name: string; type: "textarea"; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean; rows?: number }
   | { name: string; type: "select"; label: string; options: SelectOption[]; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean }
   | { name: string; type: "checkbox"; label: string; span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean }
+  | { name: string; type: "checkboxGroup"; label: string; options: CheckboxGroupOption[]; span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean; columns?: number }
   | { name: string; type: "radio"; label: string; options: RadioOption[]; span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean }
   | {
       name: string;
@@ -175,6 +177,11 @@ function buildDefaults(fields: FieldDef[], defaults?: Record<string, AutoFormDef
       values[field.name] = "";
       continue;
     }
+    if (field.type === "checkboxGroup") {
+      const raw = defaults?.[field.name];
+      values[field.name] = Array.isArray(raw) ? JSON.stringify(raw) : (typeof raw === "string" ? raw : "[]");
+      continue;
+    }
     values[field.name] = toTextDefault(defaults?.[field.name]);
   }
   return values;
@@ -263,7 +270,7 @@ function appendFormDataValue(formData: FormData, key: string, value: unknown): v
 
 function shouldSerializeEmptyAsNull(field: FieldDef): boolean {
   if (field.required) return false;
-  return field.type !== "checkbox" && field.type !== "file" && field.type !== "files";
+  return field.type !== "checkbox" && field.type !== "checkboxGroup" && field.type !== "file" && field.type !== "files";
 }
 
 export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFormResult {
@@ -343,6 +350,10 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
       }
 
       const value = values[field.name] ?? "";
+      if (field.type === "checkboxGroup") {
+        try { payload[field.name] = JSON.parse(value || "[]"); } catch { payload[field.name] = []; }
+        continue;
+      }
       if (field.type === "checkbox") {
         payload[field.name] = value ? "1" : "0";
         continue;
@@ -451,6 +462,26 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
                   />
                 </div>
               );
+
+            case "checkboxGroup": {
+              const parsed: string[] = (() => { try { return JSON.parse(values[field.name] || "[]"); } catch { return []; } })();
+              return (
+                <div key={field.name} style={style}>
+                  <CheckboxGroup
+                    name={field.name}
+                    label={field.label}
+                    options={field.options}
+                    value={parsed}
+                    onChange={(next) => setValue(field.name, JSON.stringify(next))}
+                    errors={errors}
+                    notes={field.notes}
+                    required={field.required}
+                    disabled={field.disabled}
+                    columns={field.columns}
+                  />
+                </div>
+              );
+            }
 
             case "radio":
               return (
