@@ -7,6 +7,7 @@ pub mod gen_models;
 pub mod gen_permissions;
 pub mod permissions;
 pub mod schema;
+pub mod template;
 
 pub use config::ConfigsFile;
 pub use gen_auth::generate_auth;

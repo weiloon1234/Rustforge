@@ -4,74 +4,26 @@
 pub mod enums;
 pub use enums::*;
 pub mod admin;
-pub use admin::{
-    Admin, AdminCol, AdminDataTable, AdminDataTableConfig, AdminDataTableHooks,
-    AdminDefaultDataTableHooks, AdminInsert, AdminQuery, AdminTableAdapter, AdminUpdate, AdminView,
-    AdminViewsExt,
-};
+pub use admin::{Admin, AdminView, AdminQuery, AdminInsert, AdminUpdate, AdminCol, AdminViewsExt, AdminTableAdapter, AdminDataTable, AdminDataTableConfig, AdminDataTableHooks, AdminDefaultDataTableHooks};
 pub mod attachment;
-pub use attachment::{
-    Attachment, AttachmentCol, AttachmentDataTable, AttachmentDataTableConfig,
-    AttachmentDataTableHooks, AttachmentDefaultDataTableHooks, AttachmentInsert, AttachmentQuery,
-    AttachmentTableAdapter, AttachmentUpdate, AttachmentView, AttachmentViewsExt,
-};
+pub use attachment::{Attachment, AttachmentView, AttachmentQuery, AttachmentInsert, AttachmentUpdate, AttachmentCol, AttachmentViewsExt, AttachmentTableAdapter, AttachmentDataTable, AttachmentDataTableConfig, AttachmentDataTableHooks, AttachmentDefaultDataTableHooks};
 pub mod content_page;
-pub use content_page::{
-    ContentPage, ContentPageCol, ContentPageDataTable, ContentPageDataTableConfig,
-    ContentPageDataTableHooks, ContentPageDefaultDataTableHooks, ContentPageInsert,
-    ContentPageQuery, ContentPageTableAdapter, ContentPageUpdate, ContentPageView,
-    ContentPageViewsExt,
-};
+pub use content_page::{ContentPage, ContentPageView, ContentPageQuery, ContentPageInsert, ContentPageUpdate, ContentPageCol, ContentPageViewsExt, ContentPageTableAdapter, ContentPageDataTable, ContentPageDataTableConfig, ContentPageDataTableHooks, ContentPageDefaultDataTableHooks};
 pub mod country;
-pub use country::{
-    Country, CountryCol, CountryDataTable, CountryDataTableConfig, CountryDataTableHooks,
-    CountryDefaultDataTableHooks, CountryInsert, CountryQuery, CountryTableAdapter, CountryUpdate,
-    CountryView, CountryViewsExt,
-};
+pub use country::{Country, CountryView, CountryQuery, CountryInsert, CountryUpdate, CountryCol, CountryViewsExt, CountryTableAdapter, CountryDataTable, CountryDataTableConfig, CountryDataTableHooks, CountryDefaultDataTableHooks};
 pub mod failed_job;
-pub use failed_job::{
-    FailedJob, FailedJobCol, FailedJobDataTable, FailedJobDataTableConfig, FailedJobDataTableHooks,
-    FailedJobDefaultDataTableHooks, FailedJobInsert, FailedJobQuery, FailedJobTableAdapter,
-    FailedJobUpdate, FailedJobView, FailedJobViewsExt,
-};
+pub use failed_job::{FailedJob, FailedJobView, FailedJobQuery, FailedJobInsert, FailedJobUpdate, FailedJobCol, FailedJobViewsExt, FailedJobTableAdapter, FailedJobDataTable, FailedJobDataTableConfig, FailedJobDataTableHooks, FailedJobDefaultDataTableHooks};
 pub mod http_client_log;
-pub use http_client_log::{
-    HttpClientLog, HttpClientLogCol, HttpClientLogDataTable, HttpClientLogDataTableConfig,
-    HttpClientLogDataTableHooks, HttpClientLogDefaultDataTableHooks, HttpClientLogInsert,
-    HttpClientLogQuery, HttpClientLogTableAdapter, HttpClientLogUpdate, HttpClientLogView,
-    HttpClientLogViewsExt,
-};
+pub use http_client_log::{HttpClientLog, HttpClientLogView, HttpClientLogQuery, HttpClientLogInsert, HttpClientLogUpdate, HttpClientLogCol, HttpClientLogViewsExt, HttpClientLogTableAdapter, HttpClientLogDataTable, HttpClientLogDataTableConfig, HttpClientLogDataTableHooks, HttpClientLogDefaultDataTableHooks};
 pub mod localized;
-pub use localized::{
-    Localized, LocalizedCol, LocalizedDataTable, LocalizedDataTableConfig, LocalizedDataTableHooks,
-    LocalizedDefaultDataTableHooks, LocalizedInsert, LocalizedQuery, LocalizedTableAdapter,
-    LocalizedUpdate, LocalizedView, LocalizedViewsExt,
-};
+pub use localized::{Localized, LocalizedView, LocalizedQuery, LocalizedInsert, LocalizedUpdate, LocalizedCol, LocalizedViewsExt, LocalizedTableAdapter, LocalizedDataTable, LocalizedDataTableConfig, LocalizedDataTableHooks, LocalizedDefaultDataTableHooks};
 pub mod meta;
-pub use meta::{
-    Meta, MetaCol, MetaDataTable, MetaDataTableConfig, MetaDataTableHooks,
-    MetaDefaultDataTableHooks, MetaInsert, MetaQuery, MetaTableAdapter, MetaUpdate, MetaView,
-    MetaViewsExt,
-};
+pub use meta::{Meta, MetaView, MetaQuery, MetaInsert, MetaUpdate, MetaCol, MetaViewsExt, MetaTableAdapter, MetaDataTable, MetaDataTableConfig, MetaDataTableHooks, MetaDefaultDataTableHooks};
 pub mod outbox_job;
-pub use outbox_job::{
-    OutboxJob, OutboxJobCol, OutboxJobDataTable, OutboxJobDataTableConfig, OutboxJobDataTableHooks,
-    OutboxJobDefaultDataTableHooks, OutboxJobInsert, OutboxJobQuery, OutboxJobTableAdapter,
-    OutboxJobUpdate, OutboxJobView, OutboxJobViewsExt,
-};
+pub use outbox_job::{OutboxJob, OutboxJobView, OutboxJobQuery, OutboxJobInsert, OutboxJobUpdate, OutboxJobCol, OutboxJobViewsExt, OutboxJobTableAdapter, OutboxJobDataTable, OutboxJobDataTableConfig, OutboxJobDataTableHooks, OutboxJobDefaultDataTableHooks};
 pub mod personal_access_token;
-pub use personal_access_token::{
-    PersonalAccessToken, PersonalAccessTokenCol, PersonalAccessTokenDataTable,
-    PersonalAccessTokenDataTableConfig, PersonalAccessTokenDataTableHooks,
-    PersonalAccessTokenDefaultDataTableHooks, PersonalAccessTokenInsert, PersonalAccessTokenQuery,
-    PersonalAccessTokenTableAdapter, PersonalAccessTokenUpdate, PersonalAccessTokenView,
-    PersonalAccessTokenViewsExt,
-};
+pub use personal_access_token::{PersonalAccessToken, PersonalAccessTokenView, PersonalAccessTokenQuery, PersonalAccessTokenInsert, PersonalAccessTokenUpdate, PersonalAccessTokenCol, PersonalAccessTokenViewsExt, PersonalAccessTokenTableAdapter, PersonalAccessTokenDataTable, PersonalAccessTokenDataTableConfig, PersonalAccessTokenDataTableHooks, PersonalAccessTokenDefaultDataTableHooks};
 pub mod webhook_log;
-pub use webhook_log::{
-    WebhookLog, WebhookLogCol, WebhookLogDataTable, WebhookLogDataTableConfig,
-    WebhookLogDataTableHooks, WebhookLogDefaultDataTableHooks, WebhookLogInsert, WebhookLogQuery,
-    WebhookLogTableAdapter, WebhookLogUpdate, WebhookLogView, WebhookLogViewsExt,
-};
+pub use webhook_log::{WebhookLog, WebhookLogView, WebhookLogQuery, WebhookLogInsert, WebhookLogUpdate, WebhookLogCol, WebhookLogViewsExt, WebhookLogTableAdapter, WebhookLogDataTable, WebhookLogDataTableConfig, WebhookLogDataTableHooks, WebhookLogDefaultDataTableHooks};
 pub mod common;
 pub use common::*;

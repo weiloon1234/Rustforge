@@ -1,0 +1,26 @@
+[ArticleStatus]
+type = "enum"
+storage = "string"
+variants = ["Draft", "Published"]
+
+[ArticleSystemFlag]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "No", value = 0 },
+  { name = "Yes", value = 1 },
+]
+
+[model.article]
+table = "articles"
+fields = [
+  "id:i64",
+  "author_id:i64",
+  "title:string",
+  "status:ArticleStatus",
+  "is_system:ArticleSystemFlag"
+]
+relations = ["author:belongs_to:user:author_id:id"]
+localized = ["title"]
+meta = ["flags:bool", "extra:json"]
+attachment = ["hero:image"]

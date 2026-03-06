@@ -1,0 +1,13 @@
+[[permissions]]
+key = "article.read"
+guard = "admin"
+label = "Read Articles"
+group = "article"
+description = "Read article records"
+
+[[permissions]]
+key = "article.manage"
+guard = "admin"
+label = "Manage Articles"
+group = "article"
+description = "Manage article records"

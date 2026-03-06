@@ -1,4 +1,5 @@
 target/
+scaffold/template/Cargo.lock
 
 **/*.rs.bk
 **/*.pdb

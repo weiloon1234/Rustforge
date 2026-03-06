@@ -93,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
 fn template_files() -> Vec<&'static File<'static>> {
     let mut files = Vec::new();
     collect_template_files(&TEMPLATE_DIR, &mut files);
+    files.retain(|file| !should_skip_template_file(file.path()));
     files.sort_by(|a, b| a.path().cmp(b.path()));
     files
 }
@@ -115,6 +116,10 @@ fn render_template(content: &str, replacements: &[(&str, &str)]) -> String {
     }
 
     rendered
+}
+
+fn should_skip_template_file(path: &Path) -> bool {
+    path == Path::new("Cargo.lock")
 }
 
 fn is_shebang_script(bytes: &[u8]) -> bool {
@@ -352,5 +357,14 @@ mod tests {
     fn shebang_detection_is_prefix_based() {
         assert!(is_shebang_script(b"#!/usr/bin/env bash\necho hi\n"));
         assert!(!is_shebang_script(b"echo hi\n"));
+    }
+
+    #[test]
+    fn template_files_exclude_template_lockfile() {
+        let paths: Vec<_> = template_files().into_iter().map(|file| file.path()).collect();
+        assert!(
+            !paths.contains(&Path::new("Cargo.lock")),
+            "template lockfile must never ship in scaffold output"
+        );
     }
 }

@@ -1,101 +1,88 @@
 use crate::schema::{to_snake, to_title_case, Schema};
+use crate::template::{render_template, TemplateContext};
 use std::error::Error;
-use std::fmt::Write as FmtWrite;
+use std::fmt::Write as _;
 use std::fs;
-use std::io::Write as IoWrite;
 use std::path::Path;
+
+#[derive(Debug, Clone)]
+struct DatatableModelSpec {
+    snake: String,
+    title: String,
+}
 
 pub fn generate_datatable_skeletons(schema: &Schema, out_dir: &Path) -> Result<(), Box<dyn Error>> {
     fs::create_dir_all(out_dir)?;
+    let models = collect_datatable_models(schema);
 
     let mod_path = out_dir.join("mod.rs");
     if !mod_path.exists() {
         fs::write(&mod_path, "include!(\"mod.generated.rs\");\n")?;
     }
 
-    let mut generated = String::new();
-    generated.push_str("// AUTO-GENERATED FILE — DO NOT EDIT\n");
-    generated.push_str("// Generated from app/schemas to bootstrap app-level datatable hooks.\n\n");
-
-    for model_name in schema.models.keys() {
-        let model_snake = to_snake(model_name);
-        let model_title = to_title_case(&model_snake);
-        let file_path = out_dir.join(format!("{model_snake}.rs"));
-
-        writeln!(generated, "pub mod {model_snake};")?;
-        writeln!(
-            generated,
-            "pub use {model_snake}::{{{model_title}DataTableAppHooks, app_{model_snake}_datatable, app_{model_snake}_datatable_with_config, register_{model_snake}_datatable}};"
-        )?;
-
-        if !file_path.exists() {
-            let mut f = fs::File::create(&file_path)?;
-            writeln!(
-                f,
-                "// App-level datatable hooks for {model_title}.\n// Generated once by db-gen; safe to edit.\n"
-            )?;
-            writeln!(f, "use core_datatable::DataTableRegistry;")?;
-            writeln!(
-                f,
-                "use generated::models::{{{model_title}DataTable, {model_title}DataTableConfig, {model_title}DataTableHooks}};"
-            )?;
-            writeln!(f)?;
-            writeln!(f, "#[derive(Default, Clone)]")?;
-            writeln!(f, "pub struct {model_title}DataTableAppHooks;")?;
-            writeln!(f)?;
-            writeln!(
-                f,
-                "impl {model_title}DataTableHooks for {model_title}DataTableAppHooks {{"
-            )?;
-            writeln!(
-                f,
-                "    // Override scope/authorize/filters/mappings/summary when needed."
-            )?;
-            writeln!(f, "}}\n")?;
-            writeln!(
-                f,
-                "pub type App{model_title}DataTable = {model_title}DataTable<{model_title}DataTableAppHooks>;\n"
-            )?;
-            writeln!(
-                f,
-                "pub fn app_{model_snake}_datatable(db: sqlx::PgPool) -> App{model_title}DataTable {{"
-            )?;
-            writeln!(
-                f,
-                "    {model_title}DataTable::new(db).with_hooks({model_title}DataTableAppHooks::default())"
-            )?;
-            writeln!(f, "}}\n")?;
-            writeln!(f, "pub fn app_{model_snake}_datatable_with_config(")?;
-            writeln!(f, "    db: sqlx::PgPool,")?;
-            writeln!(f, "    config: {model_title}DataTableConfig,")?;
-            writeln!(f, ") -> App{model_title}DataTable {{")?;
-            writeln!(
-                f,
-                "    {model_title}DataTable::new(db).with_hooks({model_title}DataTableAppHooks::default()).with_config(config)"
-            )?;
-            writeln!(f, "}}\n")?;
-            writeln!(
-                f,
-                "pub fn register_{model_snake}_datatable(registry: &mut DataTableRegistry, db: sqlx::PgPool) {{"
-            )?;
-            writeln!(f, "    registry.register(app_{model_snake}_datatable(db));")?;
-            writeln!(f, "}}")?;
-        }
-    }
-
-    writeln!(
-        generated,
-        "\nuse core_datatable::DataTableRegistry;\n\n#[allow(unused_variables)]\npub fn register_all_generated_datatables(registry: &mut DataTableRegistry, db: &sqlx::PgPool) {{"
-    )?;
-    for model_name in schema.models.keys() {
-        let model_snake = to_snake(model_name);
-        writeln!(
-            generated,
-            "    register_{model_snake}_datatable(registry, db.clone());"
-        )?;
-    }
-    writeln!(generated, "}}")?;
-
+    let module_exports = render_module_exports(&models)?;
+    let register_all_calls = render_register_all_calls(&models)?;
+    let mut mod_context = TemplateContext::new();
+    mod_context.insert("module_exports", module_exports)?;
+    mod_context.insert("register_all_calls", register_all_calls)?;
+    let generated = render_template("datatables/mod.generated.rs.tpl", &mod_context)?;
     fs::write(out_dir.join("mod.generated.rs"), generated)?;
+
+    for model in &models {
+        let file_path = out_dir.join(format!("{}.rs", model.snake));
+        if file_path.exists() {
+            continue;
+        }
+
+        let mut model_context = TemplateContext::new();
+        model_context.insert("model_title", model.title.clone())?;
+        model_context.insert("model_snake", model.snake.clone())?;
+        let rendered = render_template("datatables/model.rs.tpl", &model_context)?;
+        fs::write(file_path, rendered)?;
+    }
+
     Ok(())
+}
+
+fn collect_datatable_models(schema: &Schema) -> Vec<DatatableModelSpec> {
+    schema
+        .models
+        .keys()
+        .map(|model_name| {
+            let snake = to_snake(model_name);
+            let title = to_title_case(&snake);
+            DatatableModelSpec { snake, title }
+        })
+        .collect()
+}
+
+fn render_module_exports(models: &[DatatableModelSpec]) -> Result<String, std::fmt::Error> {
+    let mut out = String::new();
+    for model in models {
+        writeln!(out, "{}", render_module_export_entry(model))?;
+    }
+    Ok(out.trim_end().to_string())
+}
+
+fn render_module_export_entry(model: &DatatableModelSpec) -> String {
+    format!(
+        "pub mod {snake};\npub use {snake}::{{{title}DataTableAppHooks, app_{snake}_datatable, app_{snake}_datatable_with_config, register_{snake}_datatable}};",
+        snake = model.snake,
+        title = model.title,
+    )
+}
+
+fn render_register_all_calls(models: &[DatatableModelSpec]) -> Result<String, std::fmt::Error> {
+    let mut out = String::new();
+    for model in models {
+        writeln!(out, "{}", render_register_call(model))?;
+    }
+    Ok(out.trim_end().to_string())
+}
+
+fn render_register_call(model: &DatatableModelSpec) -> String {
+    format!(
+        "    register_{}_datatable(registry, db.clone());",
+        model.snake
+    )
 }

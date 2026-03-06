@@ -1,0 +1,15 @@
+[languages]
+default = "en"
+supported = ["en", "zh"]
+timezone = "+08:00"
+
+[attachment_type.image]
+allowed = ["image/png", "image/jpeg"]
+
+[attachment_type.image.resize]
+width = 1200
+height = 630
+quality = 85
+
+[auth.guards.admin]
+provider = "admin"

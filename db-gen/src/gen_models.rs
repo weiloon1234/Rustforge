@@ -1,9 +1,10 @@
 use crate::config::ConfigsFile;
 use crate::schema::{
     parse_attachments, parse_computed, parse_fields, parse_meta, parse_relations, to_snake,
-    to_title_case, AttachmentFieldSpec, EnumOrOther, FieldSpec, MetaType, ModelSpec, RelationKind,
-    Schema, SpecialType,
+    to_title_case, AttachmentFieldSpec, EnumOrOther, FieldSpec, MetaFieldSpec, MetaType, ModelSpec,
+    RelationKind, RelationSpec, Schema, SpecialType,
 };
+use crate::template::{render_template, TemplateContext};
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt::Write;
@@ -153,6 +154,2819 @@ fn build_nested_where_has_expr(
     render(path, leaf_expr_template, root_var)
 }
 
+fn render_query_field_where_methods(db_fields: &[FieldSpec], col_ident: &str) -> String {
+    let mut out = String::new();
+    for f in db_fields {
+        let fn_name = format!("where_{}", to_snake(&f.name));
+        writeln!(
+            out,
+            "    pub fn {fn_name}(mut self, op: Op, val: {typ}) -> Self {{",
+            typ = f.ty
+        )
+        .unwrap();
+        writeln!(out, "        let idx = self.binds.len() + 1;").unwrap();
+        writeln!(
+            out,
+            "        self.where_sql.push(format!(\"{{}} {{}} ${{}}\", {col_ident}::{}.as_sql(), op.as_sql(), idx));",
+            to_title_case(&f.name)
+        )
+        .unwrap();
+        writeln!(out, "        self.binds.push(val.into());").unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+
+        let fn_name_raw = format!("where_{}_raw", to_snake(&f.name));
+        writeln!(
+            out,
+            "    pub fn {fn_name_raw}<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {{"
+        )
+        .unwrap();
+        writeln!(out, "        let idx = self.binds.len() + 1;").unwrap();
+        writeln!(
+            out,
+            "        self.where_sql.push(format!(\"{{}} {{}} ${{}}\", {col_ident}::{}.as_sql(), op.as_sql(), idx));",
+            to_title_case(&f.name)
+        )
+        .unwrap();
+        writeln!(out, "        self.binds.push(val.into());").unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+    out
+}
+
+fn render_query_relation_filter_methods(relations: &[RelationSpec], table: &str) -> String {
+    let mut out = String::new();
+    for rel in relations {
+        let fn_name = format!("where_has_{}", to_snake(&rel.name));
+        let target_query = format!("{}Query", to_title_case(&rel.target_model));
+        let link_clause = match rel.kind {
+            RelationKind::HasMany => format!(
+                "{}.{} = {}.{}",
+                rel.target_table, rel.foreign_key, table, rel.local_key
+            ),
+            RelationKind::BelongsTo => format!(
+                "{}.{} = {}.{}",
+                rel.target_table, rel.target_pk, table, rel.foreign_key
+            ),
+        };
+        writeln!(
+            out,
+            "    pub fn {fn_name}(mut self, scope: impl FnOnce({target_query}<'db>) -> {target_query}<'db>) -> Self {{"
+        )
+        .unwrap();
+        writeln!(out, "        let start_idx = self.binds.len() + 1;").unwrap();
+        writeln!(
+            out,
+            "        let scoped = scope({target_query}::new(self.db, None));"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        sub_where.insert(0, \"{link}\".to_string());",
+            link = link_clause
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let mut clause = String::from(\"EXISTS (SELECT 1 FROM {rel_table} WHERE \");",
+            rel_table = rel.target_table
+        )
+        .unwrap();
+        writeln!(out, "        clause.push_str(&sub_where.join(\" AND \"));").unwrap();
+        writeln!(out, "        clause.push(')');").unwrap();
+        writeln!(
+            out,
+            "        let clause = renumber_placeholders(&clause, start_idx);"
+        )
+        .unwrap();
+        writeln!(out, "        self.where_sql.push(clause);").unwrap();
+        writeln!(out, "        self.binds.extend(sub_binds);").unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+
+    for rel in relations {
+        let fn_name = format!("where_doesnt_have_{}", to_snake(&rel.name));
+        let target_query = format!("{}Query", to_title_case(&rel.target_model));
+        let link_clause = match rel.kind {
+            RelationKind::HasMany => format!(
+                "{}.{} = {}.{}",
+                rel.target_table, rel.foreign_key, table, rel.local_key
+            ),
+            RelationKind::BelongsTo => format!(
+                "{}.{} = {}.{}",
+                rel.target_table, rel.target_pk, table, rel.foreign_key
+            ),
+        };
+        writeln!(
+            out,
+            "    pub fn {fn_name}(mut self, scope: impl FnOnce({target_query}<'db>) -> {target_query}<'db>) -> Self {{"
+        )
+        .unwrap();
+        writeln!(out, "        let start_idx = self.binds.len() + 1;").unwrap();
+        writeln!(
+            out,
+            "        let scoped = scope({target_query}::new(self.db, None));"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        sub_where.insert(0, \"{link}\".to_string());",
+            link = link_clause
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let mut clause = String::from(\"NOT EXISTS (SELECT 1 FROM {rel_table} WHERE \");",
+            rel_table = rel.target_table
+        )
+        .unwrap();
+        writeln!(out, "        clause.push_str(&sub_where.join(\" AND \"));").unwrap();
+        writeln!(out, "        clause.push(')');").unwrap();
+        writeln!(
+            out,
+            "        let clause = renumber_placeholders(&clause, start_idx);"
+        )
+        .unwrap();
+        writeln!(out, "        self.where_sql.push(clause);").unwrap();
+        writeln!(out, "        self.binds.extend(sub_binds);").unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+
+    for rel in relations {
+        let fn_name = format!("or_where_has_{}", to_snake(&rel.name));
+        let target_query = format!("{}Query", to_title_case(&rel.target_model));
+        let link_clause = match rel.kind {
+            RelationKind::HasMany => format!(
+                "{}.{} = {}.{}",
+                rel.target_table, rel.foreign_key, table, rel.local_key
+            ),
+            RelationKind::BelongsTo => format!(
+                "{}.{} = {}.{}",
+                rel.target_table, rel.target_pk, table, rel.foreign_key
+            ),
+        };
+        writeln!(
+            out,
+            "    pub fn {fn_name}(mut self, scope: impl FnOnce({target_query}<'db>) -> {target_query}<'db>) -> Self {{"
+        )
+        .unwrap();
+        writeln!(out, "        let start_idx = self.binds.len() + 1;").unwrap();
+        writeln!(
+            out,
+            "        let scoped = scope({target_query}::new(self.db, None));"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        sub_where.insert(0, \"{link}\".to_string());",
+            link = link_clause
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let mut clause = String::from(\"EXISTS (SELECT 1 FROM {rel_table} WHERE \");",
+            rel_table = rel.target_table
+        )
+        .unwrap();
+        writeln!(out, "        clause.push_str(&sub_where.join(\" AND \"));").unwrap();
+        writeln!(out, "        clause.push(')');").unwrap();
+        writeln!(
+            out,
+            "        let clause = renumber_placeholders(&clause, start_idx);"
+        )
+        .unwrap();
+        writeln!(out, "        if let Some(last) = self.where_sql.pop() {{").unwrap();
+        writeln!(
+            out,
+            "            self.where_sql.push(format!(\"({{}} OR {{}})\", last, clause));"
+        )
+        .unwrap();
+        writeln!(out, "        }} else {{").unwrap();
+        writeln!(out, "            self.where_sql.push(clause);").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "        self.binds.extend(sub_binds);").unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+    out
+}
+
+fn render_query_select_method(col_ident: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn select(mut self, cols: &[{col_ident}]) -> Self {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();"
+    )
+    .unwrap();
+    writeln!(out, "        self.select_sql = Some(names.join(\", \"));").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_simple_join_method(method_name: &str, sql_keyword: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    fn {method_name}(mut self, table: &str, first: &str, op: &str, second: &str) -> Self {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        self.join_sql.push(format!(\"{sql_keyword} {{}} ON {{}} {{}} {{}}\", table, first, op, second));"
+    )
+    .unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_query_source_methods() -> String {
+    let mut out = String::new();
+    writeln!(out, "    fn from_raw(mut self, sql: &str) -> Self {{").unwrap();
+    writeln!(out, "        self.from_sql = Some(sql.to_string());").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "    fn count_sql(mut self, sql: &str) -> Self {{").unwrap();
+    writeln!(out, "        self.count_sql = Some(sql.to_string());").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_where_exists_method() -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    fn where_exists<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        let mut clause = clause.into();").unwrap();
+    writeln!(
+        out,
+        "        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
+    )
+    .unwrap();
+    writeln!(out, "        let mut idx = self.binds.len() + 1;").unwrap();
+    writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
+    writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
+    writeln!(out, "            clause.replace_range(pos..pos + 1, &ph);").unwrap();
+    writeln!(out, "            idx += 1;").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        self.where_sql.push(format!(\"EXISTS ({{}})\", clause));"
+    )
+    .unwrap();
+    writeln!(out, "        self.binds.extend(incoming);").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_select_subquery_method() -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    fn select_subquery(mut self, alias: &str, sql: &str) -> Self {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let current = self.select_sql.get_or_insert_with(|| \"*\".to_string());"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        current.push_str(&format!(\", ({{}}) AS {{}}\", sql, alias));"
+    )
+    .unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_select_list_methods(col_ident: &str, base_select: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn select_cols(mut self, cols: &[{col_ident}]) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        if cols.is_empty() {{").unwrap();
+    writeln!(
+        out,
+        "            self.select_sql = Some(\"{base_select}\".to_string());"
+    )
+    .unwrap();
+    writeln!(out, "        }} else {{").unwrap();
+    writeln!(
+        out,
+        "            let mut seen = std::collections::BTreeSet::new();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            let mut list: Vec<String> = \"{base_select}\".split(',').map(|s| s.trim().to_string()).collect();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            for s in &list {{ seen.insert(s.clone()); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            for c in cols {{ let s = c.as_sql().to_string(); if seen.insert(s.clone()) {{ list.push(s); }} }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            self.select_sql = Some(list.join(\", \"));"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn add_select_cols(mut self, cols: &[{col_ident}]) -> Self {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut seen = std::collections::BTreeSet::new();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut list: Vec<String> = match self.select_sql.take() {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            _ => \"{base_select}\".split(',').map(|s| s.trim().to_string()).collect(),"
+    )
+    .unwrap();
+    writeln!(out, "        }};").unwrap();
+    writeln!(out, "        for s in &list {{ seen.insert(s.clone()); }}").unwrap();
+    writeln!(
+        out,
+        "        for c in cols {{ let s = c.as_sql().to_string(); if seen.insert(s.clone()) {{ list.push(s); }} }}"
+    )
+    .unwrap();
+    writeln!(out, "        self.select_sql = Some(list.join(\", \"));").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn select_raw(mut self, sql: impl Into<String>) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        let s = sql.into();").unwrap();
+    writeln!(out, "        if s.is_empty() {{").unwrap();
+    writeln!(
+        out,
+        "            self.select_sql = Some(\"{base_select}\".to_string());"
+    )
+    .unwrap();
+    writeln!(out, "        }} else {{").unwrap();
+    writeln!(
+        out,
+        "            self.select_sql = Some(format!(\"{base_select}, {{}}\", s));"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn add_select_raw(mut self, sql: impl Into<String>) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        let s = sql.into();").unwrap();
+    writeln!(out, "        if s.is_empty() {{ return self; }}").unwrap();
+    writeln!(
+        out,
+        "        let mut base = self.select_sql.take().unwrap_or_else(|| \"{base_select}\".to_string());"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if !base.is_empty() {{ base.push_str(\", \"); }}"
+    )
+    .unwrap();
+    writeln!(out, "        base.push_str(&s);").unwrap();
+    writeln!(out, "        self.select_sql = Some(base);").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_raw_join_method(method_name: &str, sql_keyword: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    fn {method_name}<T: Into<BindValue>>(mut self, table: impl Into<String>, on_clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut clause = format!(\"{sql_keyword} {{}} ON {{}}\", table.into(), on_clause.into());"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut idx = self.join_binds.len() + self.binds.len() + 1;"
+    )
+    .unwrap();
+    writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
+    writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
+    writeln!(out, "            clause.replace_range(pos..pos+1, &ph);").unwrap();
+    writeln!(out, "            idx += 1;").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        self.join_sql.push(clause);").unwrap();
+    writeln!(out, "        self.join_binds.append(&mut incoming);").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_group_by_method(col_ident: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn group_by(mut self, cols: &[{col_ident}]) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        for c in cols {{").unwrap();
+    writeln!(
+        out,
+        "            self.group_by_sql.push(c.as_sql().to_string());"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_having_raw_method() -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn having_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        let mut clause = clause.into();").unwrap();
+    writeln!(
+        out,
+        "        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
+    )
+    .unwrap();
+    writeln!(out, "        let mut idx = self.having_binds.len() + 1;").unwrap();
+    writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
+    writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
+    writeln!(out, "            clause.replace_range(pos..pos + 1, &ph);").unwrap();
+    writeln!(out, "            idx += 1;").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        self.having_sql.push(clause);").unwrap();
+    writeln!(out, "        self.having_binds.extend(incoming);").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_limit_offset_methods() -> String {
+    let mut out = String::new();
+    writeln!(out, "    pub fn limit(mut self, n: i64) -> Self {{").unwrap();
+    writeln!(out, "        self.limit = Some(n);").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "    pub fn offset(mut self, n: i64) -> Self {{").unwrap();
+    writeln!(out, "        self.offset = Some(n);").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_null_check_methods(col_ident: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn where_null(mut self, col: {col_ident}) -> Self {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        self.where_sql.push(format!(\"{{}} IS NULL\", col.as_sql()));"
+    )
+    .unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn where_not_null(mut self, col: {col_ident}) -> Self {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        self.where_sql.push(format!(\"{{}} IS NOT NULL\", col.as_sql()));"
+    )
+    .unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_where_set_methods(col_ident: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: {col_ident}, vals: &[T]) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        if vals.is_empty() {{").unwrap();
+    writeln!(out, "            self.where_sql.push(\"1=0\".to_string());").unwrap();
+    writeln!(out, "            return self;").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        let start = self.binds.len() + 1;").unwrap();
+    writeln!(
+        out,
+        "        let mut placeholders = Vec::with_capacity(vals.len());"
+    )
+    .unwrap();
+    writeln!(out, "        for (i, v) in vals.iter().enumerate() {{").unwrap();
+    writeln!(
+        out,
+        "            placeholders.push(format!(\"${{}}\", start + i));"
+    )
+    .unwrap();
+    writeln!(out, "            self.binds.push(v.clone().into());").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        let clause = format!(\"{{}} IN ({{}})\", col.as_sql(), placeholders.join(\", \"));"
+    )
+    .unwrap();
+    writeln!(out, "        self.where_sql.push(clause);").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: {col_ident}, vals: &[T]) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        if vals.is_empty() {{ return self; }}").unwrap();
+    writeln!(out, "        let start = self.binds.len() + 1;").unwrap();
+    writeln!(
+        out,
+        "        let mut placeholders = Vec::with_capacity(vals.len());"
+    )
+    .unwrap();
+    writeln!(out, "        for (i, v) in vals.iter().enumerate() {{").unwrap();
+    writeln!(
+        out,
+        "            placeholders.push(format!(\"${{}}\", start + i));"
+    )
+    .unwrap();
+    writeln!(out, "            self.binds.push(v.clone().into());").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        let clause = format!(\"{{}} NOT IN ({{}})\", col.as_sql(), placeholders.join(\", \"));"
+    )
+    .unwrap();
+    writeln!(out, "        self.where_sql.push(clause);").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn where_between<T: Into<BindValue>>(mut self, col: {col_ident}, low: T, high: T) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        let idx1 = self.binds.len() + 1;").unwrap();
+    writeln!(out, "        let idx2 = idx1 + 1;").unwrap();
+    writeln!(
+        out,
+        "        self.where_sql.push(format!(\"{{}} BETWEEN ${{}} AND ${{}}\", col.as_sql(), idx1, idx2));"
+    )
+    .unwrap();
+    writeln!(out, "        self.binds.push(low.into());").unwrap();
+    writeln!(out, "        self.binds.push(high.into());").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_or_where_methods(col_ident: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn or_where_col<T: Into<BindValue>>(mut self, col: {col_ident}, op: Op, val: T) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        let idx = self.binds.len() + 1;").unwrap();
+    writeln!(
+        out,
+        "        let clause = format!(\"{{}} {{}} ${{}}\", col.as_sql(), op.as_sql(), idx);"
+    )
+    .unwrap();
+    writeln!(out, "        if let Some(last) = self.where_sql.pop() {{").unwrap();
+    writeln!(
+        out,
+        "            self.where_sql.push(format!(\"({{}} OR {{}})\", last, clause));"
+    )
+    .unwrap();
+    writeln!(out, "        }} else {{").unwrap();
+    writeln!(out, "            self.where_sql.push(clause);").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        self.binds.push(val.into());").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn or_where_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        let mut clause = clause.into();").unwrap();
+    writeln!(
+        out,
+        "        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
+    )
+    .unwrap();
+    writeln!(out, "        let mut idx = self.binds.len() + 1;").unwrap();
+    writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
+    writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
+    writeln!(out, "            clause.replace_range(pos..pos + 1, &ph);").unwrap();
+    writeln!(out, "            idx += 1;").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if let Some(last) = self.where_sql.pop() {{").unwrap();
+    writeln!(
+        out,
+        "            self.where_sql.push(format!(\"({{}} OR {{}})\", last, clause));"
+    )
+    .unwrap();
+    writeln!(out, "        }} else {{").unwrap();
+    writeln!(out, "            self.where_sql.push(clause);").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        self.binds.extend(incoming);").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_where_group_methods() -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn where_group(self, f: impl FnOnce(Self) -> Self) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        let start_where = self.where_sql.len();").unwrap();
+    writeln!(out, "        let grouped = f(self);").unwrap();
+    writeln!(out, "        let mut result = grouped;").unwrap();
+    writeln!(out, "        if result.where_sql.len() > start_where {{").unwrap();
+    writeln!(
+        out,
+        "            let group_clauses: Vec<String> = result.where_sql.drain(start_where..).collect();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            let grouped_sql = format!(\"({{}})\", group_clauses.join(\" AND \"));"
+    )
+    .unwrap();
+    writeln!(out, "            result.where_sql.push(grouped_sql);").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        result").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn or_where_group(self, f: impl FnOnce(Self) -> Self) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        let start_where = self.where_sql.len();").unwrap();
+    writeln!(out, "        let grouped = f(self);").unwrap();
+    writeln!(out, "        let mut result = grouped;").unwrap();
+    writeln!(out, "        if result.where_sql.len() > start_where {{").unwrap();
+    writeln!(
+        out,
+        "            let group_clauses: Vec<String> = result.where_sql.drain(start_where..).collect();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            let grouped_sql = format!(\"({{}})\", group_clauses.join(\" AND \"));"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            if let Some(last) = result.where_sql.pop() {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "                result.where_sql.push(format!(\"({{}} OR {{}})\", last, grouped_sql));"
+    )
+    .unwrap();
+    writeln!(out, "            }} else {{").unwrap();
+    writeln!(out, "                result.where_sql.push(grouped_sql);").unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        result").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_distinct_methods(col_ident: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn distinct(mut self) -> Self {{ self.distinct = true; self }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn distinct_on(mut self, cols: &[{col_ident}]) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        if cols.is_empty() {{ return self; }}").unwrap();
+    writeln!(
+        out,
+        "        let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();"
+    )
+    .unwrap();
+    writeln!(out, "        self.distinct_on = Some(list.join(\", \"));").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_order_methods(col_ident: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn order_by(mut self, col: {col_ident}, dir: OrderDir) -> Self {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        self.order_sql.push(format!(\"{{}} {{}}\", col.as_sql(), dir.as_sql()));"
+    )
+    .unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn order_by_nulls_first(mut self, col: {col_ident}, dir: OrderDir) -> Self {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        self.order_sql.push(format!(\"{{}} {{}} NULLS FIRST\", col.as_sql(), dir.as_sql()));"
+    )
+    .unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn order_by_nulls_last(mut self, col: {col_ident}, dir: OrderDir) -> Self {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        self.order_sql.push(format!(\"{{}} {{}} NULLS LAST\", col.as_sql(), dir.as_sql()));"
+    )
+    .unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_lock_methods() -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn for_update(mut self) -> Self {{ self.lock_sql = Some(\"FOR UPDATE\"); self }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn for_update_skip_locked(mut self) -> Self {{ self.lock_sql = Some(\"FOR UPDATE SKIP LOCKED\"); self }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn for_no_key_update(mut self) -> Self {{ self.lock_sql = Some(\"FOR NO KEY UPDATE\"); self }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn for_share(mut self) -> Self {{ self.lock_sql = Some(\"FOR SHARE\"); self }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn for_key_share(mut self) -> Self {{ self.lock_sql = Some(\"FOR KEY SHARE\"); self }}"
+    )
+    .unwrap();
+    out
+}
+
+fn render_find_methods(view_ident: &str, parent_pk_ty: &str, table: &str, pk: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub async fn first(self) -> Result<Option<{view_ident}>> {{"
+    )
+    .unwrap();
+    writeln!(out, "        let mut v = self.limit(1).get().await?;").unwrap();
+    writeln!(out, "        Ok(v.pop())").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    writeln!(
+        out,
+        "    pub async fn first_or_fail(self) -> Result<{view_ident}> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        self.first().await?.ok_or_else(|| anyhow::anyhow!(\"{table}: record not found\"))"
+    )
+    .unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    writeln!(
+        out,
+        "    pub async fn find(self, id: {parent_pk_ty}) -> Result<Option<{view_ident}>> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        self.where_{}(Op::Eq, id).first().await",
+        to_snake(pk)
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    pub async fn find_or_fail(self, id: {parent_pk_ty}) -> Result<{view_ident}> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        self.find(id).await?.ok_or_else(|| anyhow::anyhow!(\"{table}: record not found\"))"
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_small_terminal_methods(
+    query_ident: &str,
+    view_ident: &str,
+    col_ident: &str,
+    pk_col_variant: &str,
+    has_created_at: bool,
+) -> String {
+    let mut out = String::new();
+    writeln!(out, "    pub async fn exists(self) -> Result<bool> {{").unwrap();
+    writeln!(out, "        Ok(self.count().await? > 0)").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    writeln!(
+        out,
+        "    pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>"
+    )
+    .unwrap();
+    writeln!(out, "    where").unwrap();
+    writeln!(out, "        F: FnMut(Vec<{view_ident}>) -> Fut,").unwrap();
+    writeln!(
+        out,
+        "        Fut: std::future::Future<Output = Result<bool>>,"
+    )
+    .unwrap();
+    writeln!(out, "    {{").unwrap();
+    writeln!(out, "        let mut page = 0i64;").unwrap();
+    writeln!(out, "        let db = self.db.clone();").unwrap();
+    writeln!(out, "        loop {{").unwrap();
+    writeln!(
+        out,
+        "            let mut query = {query_ident}::new(db.clone(), self.base_url.clone());"
+    )
+    .unwrap();
+    writeln!(out, "            query.where_sql = self.where_sql.clone();").unwrap();
+    writeln!(out, "            query.binds = self.binds.clone();").unwrap();
+    writeln!(out, "            query.order_sql = self.order_sql.clone();").unwrap();
+    writeln!(
+        out,
+        "            let rows = query.limit(size).offset(page * size).get().await?;"
+    )
+    .unwrap();
+    writeln!(out, "            if rows.is_empty() {{ break; }}").unwrap();
+    writeln!(
+        out,
+        "            let should_continue = callback(rows).await?;"
+    )
+    .unwrap();
+    writeln!(out, "            if !should_continue {{ break; }}").unwrap();
+    writeln!(out, "            page += 1;").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        Ok(())").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    writeln!(out, "    pub fn latest(self) -> Self {{").unwrap();
+    if has_created_at {
+        writeln!(
+            out,
+            "        self.order_by({col_ident}::CreatedAt, OrderDir::Desc)"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            out,
+            "        self.order_by({col_ident}::{pk_col_variant}, OrderDir::Desc)"
+        )
+        .unwrap();
+    }
+    writeln!(out, "    }}\n").unwrap();
+    writeln!(out, "    pub fn oldest(self) -> Self {{").unwrap();
+    if has_created_at {
+        writeln!(
+            out,
+            "        self.order_by({col_ident}::CreatedAt, OrderDir::Asc)"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            out,
+            "        self.order_by({col_ident}::{pk_col_variant}, OrderDir::Asc)"
+        )
+        .unwrap();
+    }
+    writeln!(out, "    }}\n").unwrap();
+    writeln!(out, "    pub fn take(self, n: i64) -> Self {{").unwrap();
+    writeln!(out, "        self.limit(n)").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    writeln!(out, "    pub fn skip(self, n: i64) -> Self {{").unwrap();
+    writeln!(out, "        self.offset(n)").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    writeln!(
+        out,
+        "    pub async fn sole(self) -> Result<{view_ident}> {{"
+    )
+    .unwrap();
+    writeln!(out, "        let mut rows = self.limit(2).get().await?;").unwrap();
+    writeln!(out, "        match rows.len() {{").unwrap();
+    writeln!(
+        out,
+        "            0 => anyhow::bail!(\"sole: no record found\"),"
+    )
+    .unwrap();
+    writeln!(out, "            1 => Ok(rows.remove(0)),").unwrap();
+    writeln!(
+        out,
+        "            _ => anyhow::bail!(\"sole: multiple records found\"),"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    writeln!(
+        out,
+        "    fn order_by_raw(mut self, sql: impl Into<String>) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        self.order_sql.push(sql.into());").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    writeln!(
+        out,
+        "    fn group_by_raw(mut self, sql: impl Into<String>) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        self.group_by_sql.push(sql.into());").unwrap();
+    writeln!(out, "        self").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    writeln!(
+        out,
+        "    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&{view_ident}) -> (K, V)) -> Result<std::collections::HashMap<K, V>>"
+    )
+    .unwrap();
+    writeln!(out, "    where").unwrap();
+    writeln!(out, "        K: Eq + std::hash::Hash,").unwrap();
+    writeln!(out, "    {{").unwrap();
+    writeln!(out, "        let rows = self.get().await?;").unwrap();
+    writeln!(
+        out,
+        "        Ok(rows.into_iter().map(|r| extract(&r)).collect())"
+    )
+    .unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    out
+}
+
+fn render_into_where_parts_method(col_ident: &str, has_soft_delete: bool) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn into_where_parts(self) -> (Vec<String>, Vec<BindValue>) {{"
+    )
+    .unwrap();
+    if has_soft_delete {
+        writeln!(
+            out,
+            "        let Self {{ where_sql, binds, with_deleted, only_deleted, .. }} = self;"
+        )
+        .unwrap();
+    } else {
+        writeln!(out, "        let Self {{ where_sql, binds, .. }} = self;").unwrap();
+    }
+    writeln!(out, "        let mut where_sql = where_sql;").unwrap();
+    if has_soft_delete {
+        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
+        writeln!(out, "            if only_deleted {{").unwrap();
+        writeln!(
+            out,
+            "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));"
+        )
+        .unwrap();
+        writeln!(out, "            }} else if !with_deleted {{").unwrap();
+        writeln!(
+            out,
+            "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    writeln!(out, "        (where_sql, binds)").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool) -> String {
+    let mut out = String::new();
+    writeln!(out, "    pub async fn delete(self) -> Result<u64> {{").unwrap();
+    writeln!(out, "        if self.limit.is_some() {{").unwrap();
+    writeln!(
+        out,
+        "            anyhow::bail!(\"delete() does not support limit; add where clauses\");"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    if has_soft_delete {
+        writeln!(
+            out,
+            "        let Self {{ db, where_sql, binds, with_deleted, only_deleted, .. }} = self;"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            out,
+            "        let Self {{ db, where_sql, binds, .. }} = self;"
+        )
+        .unwrap();
+    }
+    writeln!(
+        out,
+        "        if where_sql.is_empty() {{ anyhow::bail!(\"delete(): no conditions set\"); }}"
+    )
+    .unwrap();
+    if has_soft_delete {
+        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
+        writeln!(out, "            let mut where_sql = where_sql;").unwrap();
+        writeln!(out, "            if only_deleted {{").unwrap();
+        writeln!(
+            out,
+            "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));"
+        )
+        .unwrap();
+        writeln!(out, "            }} else if !with_deleted {{").unwrap();
+        writeln!(
+            out,
+            "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "            let idx = binds.len() + 1;").unwrap();
+        writeln!(
+            out,
+            "            let mut sql = format!(\"UPDATE {table} SET {{}} = ${{}}\", {col_ident}::DeletedAt.as_sql(), idx);"
+        )
+        .unwrap();
+        writeln!(out, "            if !where_sql.is_empty() {{").unwrap();
+        writeln!(out, "                sql.push_str(\" WHERE \");").unwrap();
+        writeln!(
+            out,
+            "                sql.push_str(&where_sql.join(\" AND \"));"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "            let mut q = sqlx::query(&sql);").unwrap();
+        writeln!(
+            out,
+            "            for b in binds {{ q = bind_query(q, b); }}"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            q = bind_query(q, time::OffsetDateTime::now_utc().into());"
+        )
+        .unwrap();
+        writeln!(out, "            let res = db.execute(q).await?;").unwrap();
+        writeln!(out, "            return Ok(res.rows_affected());").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    writeln!(
+        out,
+        "        let mut sql = String::from(\"DELETE FROM {table}\");"
+    )
+    .unwrap();
+    writeln!(out, "        if !where_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" WHERE \");").unwrap();
+    writeln!(out, "            sql.push_str(&where_sql.join(\" AND \"));").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
+    writeln!(out, "        for b in binds {{ q = bind_query(q, b); }}").unwrap();
+    writeln!(out, "        let res = db.execute(q).await?;").unwrap();
+    writeln!(out, "        Ok(res.rows_affected())").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_restore_method(table: &str, col_ident: &str) -> String {
+    let mut out = String::new();
+    writeln!(out, "    pub async fn restore(self) -> Result<u64> {{").unwrap();
+    writeln!(
+        out,
+        "        if !HAS_SOFT_DELETE {{ anyhow::bail!(\"restore() not supported\"); }}"
+    )
+    .unwrap();
+    writeln!(out, "        if self.limit.is_some() {{").unwrap();
+    writeln!(
+        out,
+        "            anyhow::bail!(\"restore() does not support limit; add where clauses\");"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        let Self {{ db, where_sql, binds, with_deleted, only_deleted, .. }} = self;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if where_sql.is_empty() {{ anyhow::bail!(\"restore(): no conditions set\"); }}"
+    )
+    .unwrap();
+    writeln!(out, "        let mut where_sql = where_sql;").unwrap();
+    writeln!(out, "        if !with_deleted && !only_deleted {{").unwrap();
+    writeln!(
+        out,
+        "            where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        let mut sql = format!(\"UPDATE {table} SET {{}} = NULL\", {col_ident}::DeletedAt.as_sql());"
+    )
+    .unwrap();
+    writeln!(out, "        if !where_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" WHERE \");").unwrap();
+    writeln!(out, "            sql.push_str(&where_sql.join(\" AND \"));").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
+    writeln!(out, "        for b in binds {{ q = bind_query(q, b); }}").unwrap();
+    writeln!(out, "        let res = db.execute(q).await?;").unwrap();
+    writeln!(out, "        Ok(res.rows_affected())").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_soft_delete_scope_methods() -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn with_deleted(mut self) -> Self {{ self.with_deleted = true; self }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn only_deleted(mut self) -> Self {{ self.only_deleted = true; self }}"
+    )
+    .unwrap();
+    out
+}
+
+fn render_insert_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> String {
+    let mut out = String::new();
+    for f in db_fields {
+        let fn_name = format!("set_{}", to_snake(&f.name));
+        if let Some(SpecialType::Hashed) = f.special_type {
+            writeln!(
+                out,
+                "    pub fn {fn_name}(mut self, val: &str) -> anyhow::Result<Self> {{",
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        let hashed = core_db::common::auth::hash::hash_password(val)?;"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        self.cols.push({col_ident}::{});",
+                to_title_case(&f.name)
+            )
+            .unwrap();
+            writeln!(out, "        self.binds.push(hashed.into());").unwrap();
+            writeln!(out, "        Ok(self)").unwrap();
+            writeln!(out, "    }}").unwrap();
+
+            let fn_name_raw = format!("{}_raw", fn_name);
+            writeln!(
+                out,
+                "    pub fn {fn_name_raw}(mut self, val: String) -> Self {{",
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        self.cols.push({col_ident}::{});",
+                to_title_case(&f.name)
+            )
+            .unwrap();
+            writeln!(out, "        self.binds.push(val.into());").unwrap();
+            writeln!(out, "        self").unwrap();
+            writeln!(out, "    }}").unwrap();
+        } else {
+            writeln!(
+                out,
+                "    pub fn {fn_name}(mut self, val: {typ}) -> Self {{",
+                typ = f.ty
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        self.cols.push({col_ident}::{});",
+                to_title_case(&f.name)
+            )
+            .unwrap();
+            writeln!(out, "        self.binds.push(val.into());").unwrap();
+            writeln!(out, "        self").unwrap();
+            writeln!(out, "    }}").unwrap();
+        }
+    }
+    out
+}
+
+fn render_localized_setters(localized_fields: &[String], cfgs: &ConfigsFile) -> String {
+    let mut out = String::new();
+    for f in localized_fields {
+        let fn_name = format!("set_{}_lang", to_snake(f));
+        writeln!(
+            out,
+            "    pub fn {fn_name}(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        self.translations.entry(\"{f}\").or_default().insert(locale.into(), val.into());"
+        )
+        .unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+
+        let fn_name_bulk = format!("set_{}_langs", to_snake(f));
+        writeln!(
+            out,
+            "    pub fn {fn_name_bulk}(mut self, langs: localized::LocalizedText) -> Self {{"
+        )
+        .unwrap();
+        for lang in &cfgs.languages.supported {
+            let variant = to_title_case(lang);
+            writeln!(
+                out,
+                "        if !langs.{lang}.is_empty() {{ self = self.{fn_name}(localized::Locale::{variant}, langs.{lang}); }}"
+            )
+            .unwrap();
+        }
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+    out
+}
+
+fn render_meta_setters(meta_fields: &[MetaFieldSpec]) -> String {
+    let mut out = String::new();
+    for m in meta_fields {
+        let fn_name = format!("set_meta_{}", m.name);
+        match &m.ty {
+            MetaType::String => {
+                writeln!(
+                    out,
+                    "    pub fn {fn_name}(mut self, val: impl Into<String>) -> Self {{"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::String(val.into()));",
+                    name = m.name
+                )
+                .unwrap();
+                writeln!(out, "        self").unwrap();
+                writeln!(out, "    }}").unwrap();
+            }
+            MetaType::Bool => {
+                writeln!(out, "    pub fn {fn_name}(mut self, val: bool) -> Self {{").unwrap();
+                writeln!(
+                    out,
+                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::Bool(val));",
+                    name = m.name
+                )
+                .unwrap();
+                writeln!(out, "        self").unwrap();
+                writeln!(out, "    }}").unwrap();
+            }
+            MetaType::I32 => {
+                writeln!(out, "    pub fn {fn_name}(mut self, val: i32) -> Self {{").unwrap();
+                writeln!(
+                    out,
+                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val));",
+                    name = m.name
+                )
+                .unwrap();
+                writeln!(out, "        self").unwrap();
+                writeln!(out, "    }}").unwrap();
+            }
+            MetaType::I64 => {
+                writeln!(out, "    pub fn {fn_name}(mut self, val: i64) -> Self {{").unwrap();
+                writeln!(
+                    out,
+                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val));",
+                    name = m.name
+                )
+                .unwrap();
+                writeln!(out, "        self").unwrap();
+                writeln!(out, "    }}").unwrap();
+            }
+            MetaType::F64 => {
+                writeln!(out, "    pub fn {fn_name}(mut self, val: f64) -> Self {{").unwrap();
+                writeln!(
+                    out,
+                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val));",
+                    name = m.name
+                )
+                .unwrap();
+                writeln!(out, "        self").unwrap();
+                writeln!(out, "    }}").unwrap();
+            }
+            MetaType::Json => {
+                writeln!(
+                    out,
+                    "    pub fn {fn_name}(mut self, val: JsonValue) -> Self {{"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "        self.meta.insert(\"{name}\".to_string(), val);",
+                    name = m.name
+                )
+                .unwrap();
+                writeln!(out, "        self").unwrap();
+                writeln!(out, "    }}").unwrap();
+                let typed_fn_name = format!("set_meta_{}_as", m.name);
+                writeln!(
+                    out,
+                    "    pub fn {typed_fn_name}<T: serde::Serialize>(mut self, val: &T) -> anyhow::Result<Self> {{"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "        self.meta.insert(\"{name}\".to_string(), serde_json::to_value(val)?);",
+                    name = m.name
+                )
+                .unwrap();
+                writeln!(out, "        Ok(self)").unwrap();
+                writeln!(out, "    }}").unwrap();
+            }
+            MetaType::DateTime => {
+                writeln!(
+                    out,
+                    "    pub fn {fn_name}(mut self, val: time::OffsetDateTime) -> Self {{"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::String(val.to_string()));",
+                    name = m.name
+                )
+                .unwrap();
+                writeln!(out, "        self").unwrap();
+                writeln!(out, "    }}").unwrap();
+            }
+            MetaType::Custom(ty) => {
+                writeln!(
+                    out,
+                    "    pub fn {fn_name}(mut self, val: &{ty}) -> anyhow::Result<Self> {{",
+                    ty = ty
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "        self.meta.insert(\"{name}\".to_string(), serde_json::to_value(val)?);",
+                    name = m.name
+                )
+                .unwrap();
+                writeln!(out, "        Ok(self)").unwrap();
+                writeln!(out, "    }}").unwrap();
+            }
+        }
+    }
+    out
+}
+
+fn render_insert_attachment_setters(
+    single_attachments: &[AttachmentFieldSpec],
+    multi_attachments: &[AttachmentFieldSpec],
+) -> String {
+    let mut out = String::new();
+    for a in single_attachments {
+        let fn_name = format!("set_attachment_{}", to_snake(&a.name));
+        writeln!(
+            out,
+            "    pub fn {fn_name}(mut self, att: AttachmentInput) -> Self {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        self.attachments_single.insert(\"{name}\", att);",
+            name = a.name
+        )
+        .unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+    for a in multi_attachments {
+        let fn_name = format!("add_attachment_{}", to_snake(&a.name));
+        writeln!(
+            out,
+            "    pub fn {fn_name}(mut self, att: AttachmentInput) -> Self {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        self.attachments_multi.entry(\"{name}\").or_default().push(att);",
+            name = a.name
+        )
+        .unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+    out
+}
+
+fn render_update_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> String {
+    let mut out = String::new();
+    for f in db_fields {
+        let fn_name = format!("set_{}", to_snake(&f.name));
+        if let Some(SpecialType::Hashed) = f.special_type {
+            writeln!(
+                out,
+                "    pub fn {fn_name}(mut self, val: &str) -> anyhow::Result<Self> {{",
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        let hashed = core_db::common::auth::hash::hash_password(val)?;"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        self.sets.push(({col_ident}::{} , hashed.into()));",
+                to_title_case(&f.name)
+            )
+            .unwrap();
+            writeln!(out, "        Ok(self)").unwrap();
+            writeln!(out, "    }}").unwrap();
+
+            let fn_name_raw = format!("{}_raw", fn_name);
+            writeln!(
+                out,
+                "    pub fn {fn_name_raw}(mut self, val: String) -> Self {{",
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        self.sets.push(({col_ident}::{} , val.into()));",
+                to_title_case(&f.name)
+            )
+            .unwrap();
+            writeln!(out, "        self").unwrap();
+            writeln!(out, "    }}").unwrap();
+        } else {
+            writeln!(
+                out,
+                "    pub fn {fn_name}(mut self, val: {typ}) -> Self {{",
+                typ = f.ty
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        self.sets.push(({col_ident}::{} , val.into()));",
+                to_title_case(&f.name)
+            )
+            .unwrap();
+            writeln!(out, "        self").unwrap();
+            writeln!(out, "    }}").unwrap();
+        }
+    }
+    out
+}
+
+fn render_update_attachment_setters(
+    single_attachments: &[AttachmentFieldSpec],
+    multi_attachments: &[AttachmentFieldSpec],
+) -> String {
+    let mut out = String::new();
+    for a in single_attachments {
+        let fn_name = format!("set_attachment_{}", to_snake(&a.name));
+        writeln!(
+            out,
+            "    pub fn {fn_name}(mut self, att: AttachmentInput) -> Self {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        self.attachments_single.insert(\"{name}\", att);",
+            name = a.name
+        )
+        .unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+
+        let clear_fn = format!("clear_attachment_{}", to_snake(&a.name));
+        writeln!(out, "    pub fn {clear_fn}(mut self) -> Self {{").unwrap();
+        writeln!(
+            out,
+            "        if !self.attachments_clear_single.contains(&\"{name}\") {{ self.attachments_clear_single.push(\"{name}\"); }}",
+            name = a.name
+        )
+        .unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+    for a in multi_attachments {
+        let add_fn = format!("add_attachment_{}", to_snake(&a.name));
+        writeln!(
+            out,
+            "    pub fn {add_fn}(mut self, att: AttachmentInput) -> Self {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        self.attachments_multi.entry(\"{name}\").or_default().push(att);",
+            name = a.name
+        )
+        .unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+
+        let del_fn = format!("delete_attachment_{}", to_snake(&a.name));
+        writeln!(
+            out,
+            "    pub fn {del_fn}(mut self, ids: impl IntoIterator<Item = Uuid>) -> Self {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        self.attachments_delete_multi.entry(\"{name}\").or_default().extend(ids);",
+            name = a.name
+        )
+        .unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+    out
+}
+
+fn render_support_data_loaders(
+    model_snake: &str,
+    pk: &str,
+    parent_pk_ty: &str,
+    localized_fields: &[String],
+    has_meta: bool,
+    has_attachments: bool,
+    rows_ident: &str,
+    db_expr: &str,
+) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "        let ids: Vec<{parent_pk_ty}> = {rows_ident}.iter().map(|r| r.{pk}.clone()).collect();"
+    )
+    .unwrap();
+    if localized_fields.is_empty() {
+        writeln!(out, "        let localized = LocalizedMap::default();").unwrap();
+    } else {
+        writeln!(
+            out,
+            "        let localized = localized::load_{model_snake}_localized({db_expr}, &ids).await?;"
+        )
+        .unwrap();
+    }
+    if has_meta {
+        writeln!(
+            out,
+            "        let meta_map = localized::load_{model_snake}_meta({db_expr}, &ids).await?;"
+        )
+        .unwrap();
+    }
+    if has_attachments {
+        writeln!(
+            out,
+            "        let attachments = localized::load_{model_snake}_attachments({db_expr}, &ids).await?;"
+        )
+        .unwrap();
+    }
+    out
+}
+
+fn build_hydrate_view_expr(
+    row_expr: &str,
+    localized_fields: &[String],
+    has_meta: bool,
+    has_attachments: bool,
+    base_url_expr: &str,
+) -> String {
+    match (has_meta, has_attachments) {
+        (true, true) => format!(
+            "hydrate_view({row_expr}, &localized, &meta_map, &attachments, {base_url_expr})"
+        ),
+        (true, false) => {
+            format!("hydrate_view({row_expr}, &localized, &meta_map, {base_url_expr})")
+        }
+        (false, true) => {
+            format!("hydrate_view({row_expr}, &localized, &attachments, {base_url_expr})")
+        }
+        (false, false) => {
+            if localized_fields.is_empty() {
+                format!("hydrate_view({row_expr}, &LocalizedMap::default(), {base_url_expr})")
+            } else {
+                format!("hydrate_view({row_expr}, &localized, {base_url_expr})")
+            }
+        }
+    }
+}
+
+fn render_view_collection_build(
+    out_ident: &str,
+    row_var: &str,
+    rows_ident: &str,
+    localized_fields: &[String],
+    has_meta: bool,
+    has_attachments: bool,
+    base_url_expr: &str,
+) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "        let mut {out_ident} = Vec::with_capacity({rows_ident}.len());"
+    )
+    .unwrap();
+    writeln!(out, "        for {row_var} in {rows_ident} {{").unwrap();
+    writeln!(
+        out,
+        "            {out_ident}.push({});",
+        build_hydrate_view_expr(
+            row_var,
+            localized_fields,
+            has_meta,
+            has_attachments,
+            base_url_expr
+        )
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    out
+}
+
+fn render_relation_loader_bindings(relations: &[RelationSpec]) -> String {
+    let mut out = String::new();
+    for rel in relations {
+        let rel_name = to_snake(&rel.name);
+        writeln!(
+            out,
+            "        let {rel_name} = m.load_{rel_name}(&rows).await?;"
+        )
+        .unwrap();
+    }
+    out
+}
+
+fn render_with_relations_collection_build(
+    model_title: &str,
+    relations: &[RelationSpec],
+    pk: &str,
+    rows_ident: &str,
+    row_var: &str,
+    out_ident: &str,
+    localized_fields: &[String],
+    has_meta: bool,
+    has_attachments: bool,
+    base_url_expr: &str,
+) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "        let mut {out_ident} = Vec::with_capacity({rows_ident}.len());"
+    )
+    .unwrap();
+    writeln!(out, "        for {row_var} in {rows_ident} {{").unwrap();
+    writeln!(out, "            let key = {row_var}.{pk}.clone();").unwrap();
+    writeln!(
+        out,
+        "            let view = {};",
+        build_hydrate_view_expr(
+            &format!("{row_var}.clone()"),
+            localized_fields,
+            has_meta,
+            has_attachments,
+            base_url_expr
+        )
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            {out_ident}.push({model_title}WithRelations {{"
+    )
+    .unwrap();
+    writeln!(out, "                row: view,").unwrap();
+    for rel in relations {
+        let field = to_snake(&rel.name);
+        match rel.kind {
+            RelationKind::HasMany => {
+                writeln!(
+                    out,
+                    "                {field}: {field}.get(&key).cloned().unwrap_or_default(),"
+                )
+                .unwrap();
+            }
+            RelationKind::BelongsTo => {
+                writeln!(
+                    out,
+                    "                {field}: {field}.get(&key).cloned().unwrap_or(None),"
+                )
+                .unwrap();
+            }
+        }
+    }
+    writeln!(out, "            }});").unwrap();
+    writeln!(out, "        }}").unwrap();
+    out
+}
+
+fn render_scoped_where_setup(has_soft_delete: bool, col_ident: &str) -> String {
+    let mut out = String::new();
+    writeln!(out, "        let mut where_sql = where_sql;").unwrap();
+    if has_soft_delete {
+        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
+        writeln!(out, "            if only_deleted {{").unwrap();
+        writeln!(
+            out,
+            "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));"
+        )
+        .unwrap();
+        writeln!(out, "            }} else if !with_deleted {{").unwrap();
+        writeln!(
+            out,
+            "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    out
+}
+
+fn render_from_and_where_clause_setup(table: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
+    )
+    .unwrap();
+    writeln!(out, "        let from_clause = if join_sql.is_empty() {{").unwrap();
+    writeln!(out, "            format!(\"FROM {{}}\", table_name)").unwrap();
+    writeln!(out, "        }} else {{").unwrap();
+    writeln!(
+        out,
+        "            format!(\"FROM {{}} {{}}\", table_name, join_sql.join(\" \"))"
+    )
+    .unwrap();
+    writeln!(out, "        }};").unwrap();
+    writeln!(
+        out,
+        "        let where_clause = if where_sql.is_empty() {{ String::new() }} else {{ format!(\" WHERE {{}}\", where_sql.join(\" AND \")) }};"
+    )
+    .unwrap();
+    out
+}
+
+fn render_select_clause_setup() -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "        let select_clause = match (distinct, distinct_on.as_ref()) {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            (false, None) => select_sql.unwrap_or_else(|| \"*\".to_string()),"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            (true, None) => format!(\"DISTINCT {{}}\", select_sql.unwrap_or_else(|| \"*\".to_string())),"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            (_, Some(on)) => format!(\"DISTINCT ON ({{}}) {{}}\", on, select_sql.unwrap_or_else(|| \"*\".to_string())),"
+    )
+    .unwrap();
+    writeln!(out, "        }};").unwrap();
+    out
+}
+
+fn render_paginate_count_sql_setup() -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "        let count_expr = count_sql.unwrap_or_else(|| \"COUNT(*)\".to_string());"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let count_sql = if distinct || distinct_on.is_some() {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            format!(\"SELECT COUNT(*) FROM (SELECT {{}} {{}}{{}}) AS sub\", select_clause, from_clause, where_clause)"
+    )
+    .unwrap();
+    writeln!(out, "        }} else {{").unwrap();
+    writeln!(
+        out,
+        "            format!(\"SELECT {{}} {{}}{{}}\", count_expr, from_clause, where_clause)"
+    )
+    .unwrap();
+    writeln!(out, "        }};").unwrap();
+    out
+}
+
+fn render_get_as_method(table: &str) -> String {
+    let mut out = String::new();
+    writeln!(out, "    pub async fn get_as<T>(self) -> Result<Vec<T>>").unwrap();
+    writeln!(out, "    where").unwrap();
+    writeln!(
+        out,
+        "        T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Unpin + 'static,"
+    )
+    .unwrap();
+    writeln!(out, "    {{").unwrap();
+    writeln!(
+        out,
+        "        let Self {{ db, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds, .. }} = self;"
+    )
+    .unwrap();
+    writeln!(out, "        let mut where_sql = where_sql;").unwrap();
+    out.push_str(&render_select_clause_setup());
+    out.push_str(&render_from_and_where_clause_setup(table));
+    writeln!(
+        out,
+        "        let mut sql = format!(\"SELECT {{}} {{}}{{}}\", select_clause, from_clause, where_clause);"
+    )
+    .unwrap();
+    writeln!(out, "        if !group_by_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" GROUP BY \");").unwrap();
+    writeln!(out, "            sql.push_str(&group_by_sql.join(\", \"));").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if !having_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" HAVING \");").unwrap();
+    writeln!(
+        out,
+        "            sql.push_str(&having_sql.join(\" AND \"));"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if !order_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" ORDER BY \");").unwrap();
+    writeln!(out, "            sql.push_str(&order_sql.join(\", \"));").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if let Some(off) = offset {{").unwrap();
+    writeln!(out, "            sql.push_str(\" OFFSET \");").unwrap();
+    writeln!(out, "            sql.push_str(&off.to_string());").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if let Some(l) = limit {{").unwrap();
+    writeln!(out, "            sql.push_str(\" LIMIT \");").unwrap();
+    writeln!(out, "            sql.push_str(&l.to_string());").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
+    )
+    .unwrap();
+    writeln!(out, "        let mut q = sqlx::query_as::<_, T>(&sql);").unwrap();
+    writeln!(out, "        for b in binds {{ q = bind(q, b); }}").unwrap();
+    writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
+    writeln!(out, "        for b in having_binds {{ q = bind(q, b); }}").unwrap();
+    writeln!(out, "        Ok(db.fetch_all(q).await?)").unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_count_method(has_soft_delete: bool, col_ident: &str, table: &str) -> String {
+    let mut out = String::new();
+    writeln!(out, "    pub async fn count(self) -> Result<i64> {{").unwrap();
+    writeln!(
+        out,
+        "        let Self {{ db, from_sql, count_sql, join_sql, join_binds, where_sql, binds {extra} , .. }} = self;",
+        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
+    )
+    .unwrap();
+    out.push_str(&render_scoped_where_setup(has_soft_delete, col_ident));
+    out.push_str(&render_from_and_where_clause_setup(table));
+    writeln!(
+        out,
+        "        let count_expr = count_sql.unwrap_or_else(|| \"COUNT(*)\".to_string());"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let sql = format!(\"SELECT {{}} {{}}{{}}\", count_expr, from_clause, where_clause);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut q = sqlx::query_scalar::<_, i64>(&sql);"
+    )
+    .unwrap();
+    writeln!(out, "        for b in binds {{ q = bind_scalar(q, b); }}").unwrap();
+    writeln!(
+        out,
+        "        for b in join_binds {{ q = bind_scalar(q, b); }}"
+    )
+    .unwrap();
+    writeln!(out, "        let count = db.fetch_scalar(q).await?;").unwrap();
+    writeln!(out, "        Ok(count)").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    out
+}
+
+fn render_pluck_ids_method(
+    parent_pk_ty: &str,
+    pk: &str,
+    has_soft_delete: bool,
+    col_ident: &str,
+    table: &str,
+) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub async fn pluck_ids(self) -> Result<Vec<{parent_pk_ty}>> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let Self {{ db, from_sql, join_sql, join_binds, where_sql, binds, order_sql, limit, offset {extra} , .. }} = self;",
+        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
+    )
+    .unwrap();
+    out.push_str(&render_scoped_where_setup(has_soft_delete, col_ident));
+    out.push_str(&render_from_and_where_clause_setup(table));
+    writeln!(
+        out,
+        "        let order_clause = if order_sql.is_empty() {{ String::new() }} else {{ format!(\" ORDER BY {{}}\", order_sql.join(\", \")) }};"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let limit_clause = limit.map(|n| format!(\" LIMIT {{}}\", n)).unwrap_or_default();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let offset_clause = offset.map(|n| format!(\" OFFSET {{}}\", n)).unwrap_or_default();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let sql = format!(\"SELECT {pk} {{}}{{}}{{}}{{}}{{}}\", from_clause, where_clause, order_clause, limit_clause, offset_clause);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut q = sqlx::query_scalar::<_, {parent_pk_ty}>(&sql);"
+    )
+    .unwrap();
+    writeln!(out, "        for b in binds {{ q = bind_scalar(q, b); }}").unwrap();
+    writeln!(
+        out,
+        "        for b in join_binds {{ q = bind_scalar(q, b); }}"
+    )
+    .unwrap();
+    writeln!(out, "        let ids = db.fetch_all_scalar(q).await?;").unwrap();
+    writeln!(out, "        Ok(ids)").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    out
+}
+
+fn render_scalar_aggregate_method(
+    method_name: &str,
+    result_ty: &str,
+    select_expr: &str,
+    has_soft_delete: bool,
+    col_ident: &str,
+    table: &str,
+) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub async fn {method_name}(self, col: {col_ident}) -> Result<{result_ty}> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let Self {{ db, from_sql, join_sql, join_binds, where_sql, binds {extra} , .. }} = self;",
+        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
+    )
+    .unwrap();
+    out.push_str(&render_scoped_where_setup(has_soft_delete, col_ident));
+    out.push_str(&render_from_and_where_clause_setup(table));
+    writeln!(
+        out,
+        "        let sql = format!(\"SELECT {select_expr} {{}}{{}}\", col.as_sql(), from_clause, where_clause);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut q = sqlx::query_scalar::<_, {result_ty}>(&sql);"
+    )
+    .unwrap();
+    writeln!(out, "        for b in binds {{ q = bind_scalar(q, b); }}").unwrap();
+    writeln!(
+        out,
+        "        for b in join_binds {{ q = bind_scalar(q, b); }}"
+    )
+    .unwrap();
+    writeln!(out, "        let result = db.fetch_scalar(q).await?;").unwrap();
+    writeln!(out, "        Ok(result)").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    out
+}
+
+fn render_paginate_method(
+    view_ident: &str,
+    row_ident: &str,
+    has_soft_delete: bool,
+    col_ident: &str,
+    table: &str,
+    model_snake: &str,
+    pk: &str,
+    parent_pk_ty: &str,
+    localized_fields: &[String],
+    has_meta: bool,
+    has_attachments: bool,
+) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<{view_ident}>> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let page = if page < 1 {{ 1 }} else {{ page }};"
+    )
+    .unwrap();
+    writeln!(out, "        let per_page = resolve_per_page(per_page);").unwrap();
+    writeln!(
+        out,
+        "        let Self {{ db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds {extra}, .. }} = self;",
+        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
+    )
+    .unwrap();
+    out.push_str(&render_scoped_where_setup(has_soft_delete, col_ident));
+    out.push_str(&render_select_clause_setup());
+    out.push_str(&render_from_and_where_clause_setup(table));
+    out.push_str(&render_paginate_count_sql_setup());
+    writeln!(
+        out,
+        "        let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        for b in binds.iter().cloned() {{ count_q = bind_scalar(count_q, b); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        for b in join_binds.iter().cloned() {{ count_q = bind_scalar(count_q, b); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let total: i64 = db.fetch_scalar(count_q).await?;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let last_page = ((total + per_page - 1) / per_page).max(1);"
+    )
+    .unwrap();
+    writeln!(out, "        let current_page = page.min(last_page);").unwrap();
+    writeln!(
+        out,
+        "        let offset_val = (current_page - 1) * per_page;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut sql = format!(\"SELECT {{}} {{}}{{}}\", select_clause, from_clause, where_clause);"
+    )
+    .unwrap();
+    writeln!(out, "        if !order_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" ORDER BY \");").unwrap();
+    writeln!(out, "            sql.push_str(&order_sql.join(\", \"));").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        sql.push_str(&format!(\" OFFSET {{}}\", offset_val));"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        sql.push_str(&format!(\" LIMIT {{}}\", per_page));"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        for b in binds.iter().cloned() {{ q = bind(q, b); }}"
+    )
+    .unwrap();
+    writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
+    writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
+    out.push_str(&render_support_data_loaders(
+        model_snake,
+        pk,
+        parent_pk_ty,
+        localized_fields,
+        has_meta,
+        has_attachments,
+        "rows",
+        "db",
+    ));
+    out.push_str(&render_view_collection_build(
+        "data",
+        "r",
+        "rows",
+        localized_fields,
+        has_meta,
+        has_attachments,
+        "base_url.as_deref()",
+    ));
+    writeln!(
+        out,
+        "        Ok(Page {{ data, total, per_page, current_page, last_page }})"
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_paginate_with_relations_method(
+    model_title: &str,
+    model_ident: &str,
+    row_ident: &str,
+    has_soft_delete: bool,
+    col_ident: &str,
+    table: &str,
+    model_snake: &str,
+    pk: &str,
+    parent_pk_ty: &str,
+    relations: &[RelationSpec],
+    localized_fields: &[String],
+    has_meta: bool,
+    has_attachments: bool,
+) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub async fn paginate_with_relations(self, page: i64, per_page: i64) -> Result<Page<{model_title}WithRelations>> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let page = if page < 1 {{ 1 }} else {{ page }};"
+    )
+    .unwrap();
+    writeln!(out, "        let per_page = resolve_per_page(per_page);").unwrap();
+    writeln!(
+        out,
+        "        let Self {{ db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds {extra}, .. }} = self;",
+        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
+    )
+    .unwrap();
+    out.push_str(&render_scoped_where_setup(has_soft_delete, col_ident));
+    out.push_str(&render_select_clause_setup());
+    out.push_str(&render_from_and_where_clause_setup(table));
+    out.push_str(&render_paginate_count_sql_setup());
+    writeln!(
+        out,
+        "        let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        for b in binds.iter().cloned() {{ count_q = bind_scalar(count_q, b); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        for b in join_binds.iter().cloned() {{ count_q = bind_scalar(count_q, b); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let total: i64 = db.fetch_scalar(count_q).await?;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let last_page = ((total + per_page - 1) / per_page).max(1);"
+    )
+    .unwrap();
+    writeln!(out, "        let current_page = page.min(last_page);").unwrap();
+    writeln!(
+        out,
+        "        let offset_val = (current_page - 1) * per_page;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut sql = format!(\"SELECT {{}} {{}}{{}}\", select_clause, from_clause, where_clause);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if !order_sql.is_empty() {{ sql.push_str(\" ORDER BY \"); sql.push_str(&order_sql.join(\", \")); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        sql.push_str(&format!(\" OFFSET {{}}\", offset_val));"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        sql.push_str(&format!(\" LIMIT {{}}\", per_page));"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        for b in binds.iter().cloned() {{ q = bind(q, b); }}"
+    )
+    .unwrap();
+    writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
+    writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
+    writeln!(
+        out,
+        "        let m = {model_ident} {{ db: db.clone(), base_url: base_url.clone() }};"
+    )
+    .unwrap();
+    out.push_str(&render_relation_loader_bindings(relations));
+    out.push_str(&render_support_data_loaders(
+        model_snake,
+        pk,
+        parent_pk_ty,
+        localized_fields,
+        has_meta,
+        has_attachments,
+        "rows",
+        "db.clone()",
+    ));
+    out.push_str(&render_with_relations_collection_build(
+        model_title,
+        relations,
+        pk,
+        "rows",
+        "row",
+        "data",
+        localized_fields,
+        has_meta,
+        has_attachments,
+        "base_url.as_deref()",
+    ));
+    writeln!(
+        out,
+        "        Ok(Page {{ data, total, per_page, current_page, last_page }})"
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    out
+}
+
+fn render_get_method(
+    view_ident: &str,
+    row_ident: &str,
+    has_soft_delete: bool,
+    col_ident: &str,
+    table: &str,
+    model_snake: &str,
+    pk: &str,
+    parent_pk_ty: &str,
+    localized_fields: &[String],
+    has_meta: bool,
+    has_attachments: bool,
+) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub async fn get(self) -> Result<Vec<{view_ident}>> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let Self {{ db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds {extra}, .. }} = self;",
+        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
+    )
+    .unwrap();
+    out.push_str(&render_scoped_where_setup(has_soft_delete, col_ident));
+    out.push_str(&render_select_clause_setup());
+    writeln!(
+        out,
+        "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut sql = format!(\"SELECT {{}} FROM {{}}\", select_clause, table_name);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if !join_sql.is_empty() {{ sql.push(' '); sql.push_str(&join_sql.join(\" \")); }}"
+    )
+    .unwrap();
+    writeln!(out, "        if !where_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" WHERE \");").unwrap();
+    writeln!(out, "            sql.push_str(&where_sql.join(\" AND \"));").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if !group_by_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" GROUP BY \");").unwrap();
+    writeln!(out, "            sql.push_str(&group_by_sql.join(\", \"));").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if !having_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" HAVING \");").unwrap();
+    writeln!(
+        out,
+        "            sql.push_str(&having_sql.join(\" AND \"));"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if !order_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" ORDER BY \");").unwrap();
+    writeln!(out, "            sql.push_str(&order_sql.join(\", \"));").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if let Some(off) = offset {{").unwrap();
+    writeln!(out, "            sql.push_str(\" OFFSET \");").unwrap();
+    writeln!(out, "            sql.push_str(&off.to_string());").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if let Some(l) = limit {{").unwrap();
+    writeln!(out, "            sql.push_str(\" LIMIT \");").unwrap();
+    writeln!(out, "            sql.push_str(&l.to_string());").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
+    )
+    .unwrap();
+    writeln!(out, "        for b in binds {{").unwrap();
+    writeln!(out, "            q = bind(q, b);").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
+    writeln!(out, "        for b in having_binds {{ q = bind(q, b); }}").unwrap();
+    writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
+    out.push_str(&render_support_data_loaders(
+        model_snake,
+        pk,
+        parent_pk_ty,
+        localized_fields,
+        has_meta,
+        has_attachments,
+        "rows",
+        "db.clone()",
+    ));
+    out.push_str(&render_view_collection_build(
+        "out_vec",
+        "r",
+        "rows",
+        localized_fields,
+        has_meta,
+        has_attachments,
+        "base_url.as_deref()",
+    ));
+    writeln!(out, "        Ok(out_vec)").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    out
+}
+
+fn render_get_with_relations_method(
+    model_title: &str,
+    model_ident: &str,
+    row_ident: &str,
+    has_soft_delete: bool,
+    col_ident: &str,
+    table: &str,
+    model_snake: &str,
+    pk: &str,
+    parent_pk_ty: &str,
+    relations: &[RelationSpec],
+    localized_fields: &[String],
+    has_meta: bool,
+    has_attachments: bool,
+) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub async fn get_with_relations(self) -> Result<Vec<{model_title}WithRelations>> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let Self {{ db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds {extra}, .. }} = self;",
+        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
+    )
+    .unwrap();
+    out.push_str(&render_scoped_where_setup(has_soft_delete, col_ident));
+    out.push_str(&render_select_clause_setup());
+    writeln!(
+        out,
+        "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut sql = format!(\"SELECT {{}} FROM {{}}\", select_clause, table_name);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if !join_sql.is_empty() {{ sql.push(' '); sql.push_str(&join_sql.join(\" \")); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if !where_sql.is_empty() {{ sql.push_str(\" WHERE \"); sql.push_str(&where_sql.join(\" AND \")); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if !order_sql.is_empty() {{ sql.push_str(\" ORDER BY \"); sql.push_str(&order_sql.join(\", \")); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if let Some(off) = offset {{ sql.push_str(\" OFFSET \"); sql.push_str(&off.to_string()); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if let Some(l) = limit {{ sql.push_str(\" LIMIT \"); sql.push_str(&l.to_string()); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
+    )
+    .unwrap();
+    writeln!(out, "        for b in binds {{ q = bind(q, b); }}").unwrap();
+    writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
+    writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
+    writeln!(
+        out,
+        "        let m = {model_ident} {{ db: db.clone(), base_url: base_url.clone() }};"
+    )
+    .unwrap();
+    out.push_str(&render_relation_loader_bindings(relations));
+    out.push_str(&render_support_data_loaders(
+        model_snake,
+        pk,
+        parent_pk_ty,
+        localized_fields,
+        has_meta,
+        has_attachments,
+        "rows",
+        "db.clone()",
+    ));
+    out.push_str(&render_with_relations_collection_build(
+        model_title,
+        relations,
+        pk,
+        "rows",
+        "row",
+        "out_vec",
+        localized_fields,
+        has_meta,
+        has_attachments,
+        "base_url.as_deref()",
+    ));
+    writeln!(out, "        Ok(out_vec)").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    out
+}
+
+fn render_with_counts_method(
+    model_title: &str,
+    view_ident: &str,
+    has_many_rels: &[&RelationSpec],
+    pk: &str,
+) -> String {
+    let mut out = String::new();
+    if has_many_rels.is_empty() {
+        return out;
+    }
+
+    let rel_ident = format!("{}Rel", model_title);
+    writeln!(
+        out,
+        "    pub async fn with_counts(self, rels: &[{rel_ident}]) -> Result<(Vec<{view_ident}>, std::collections::HashMap<String, std::collections::HashMap<i64, i64>>)> {{"
+    )
+    .unwrap();
+    writeln!(out, "        let db = self.db.clone();").unwrap();
+    writeln!(out, "        let rows = self.get().await?;").unwrap();
+    writeln!(
+        out,
+        "        let ids: Vec<i64> = rows.iter().map(|r| r.{pk}).collect();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if ids.is_empty() {{ return Ok((rows, std::collections::HashMap::new())); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut all_counts: std::collections::HashMap<String, std::collections::HashMap<i64, i64>> = std::collections::HashMap::new();"
+    )
+    .unwrap();
+    writeln!(out, "        for rel in rels {{").unwrap();
+    writeln!(
+        out,
+        "            let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!(\"${{}}\", i)).collect();"
+    )
+    .unwrap();
+    writeln!(out, "            let sql = format!(").unwrap();
+    writeln!(
+        out,
+        "                \"SELECT {{}}, COUNT(*) as cnt FROM {{}} WHERE {{}} IN ({{}}) GROUP BY {{}}\","
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "                rel.foreign_key(), rel.target_table(), rel.foreign_key(), placeholders.join(\", \"), rel.foreign_key()"
+    )
+    .unwrap();
+    writeln!(out, "            );").unwrap();
+    writeln!(
+        out,
+        "            let mut q = sqlx::query_as::<_, (i64, i64)>(&sql);"
+    )
+    .unwrap();
+    writeln!(out, "            for id in &ids {{ q = q.bind(*id); }}").unwrap();
+    writeln!(
+        out,
+        "            let count_rows: Vec<(i64, i64)> = db.fetch_all(q).await?;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            let counts: std::collections::HashMap<i64, i64> = count_rows.into_iter().collect();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            all_counts.insert(rel.name().to_string(), counts);"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        Ok((rows, all_counts))").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    out
+}
+
+fn render_first_or_create_method(insert_ident: &str, view_ident: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub async fn first_or_create(self, create: impl FnOnce({insert_ident}<'db>) -> {insert_ident}<'db>) -> Result<{view_ident}> {{"
+    )
+    .unwrap();
+    writeln!(out, "        let db = self.db.clone();").unwrap();
+    writeln!(out, "        let base_url = self.base_url.clone();").unwrap();
+    writeln!(
+        out,
+        "        if let Some(existing) = self.first().await? {{"
+    )
+    .unwrap();
+    writeln!(out, "            return Ok(existing);").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        let insert_builder = create({insert_ident}::new(db, base_url));"
+    )
+    .unwrap();
+    writeln!(out, "        insert_builder.save().await").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    out
+}
+
+fn render_update_or_create_method(
+    update_ident: &str,
+    insert_ident: &str,
+    view_ident: &str,
+    model_ident: &str,
+    pk: &str,
+) -> String {
+    let mut out = String::new();
+    writeln!(out, "    pub async fn update_or_create(").unwrap();
+    writeln!(out, "        self,").unwrap();
+    writeln!(
+        out,
+        "        on_update: impl FnOnce({update_ident}<'db>) -> {update_ident}<'db>,"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        on_create: impl FnOnce({insert_ident}<'db>) -> {insert_ident}<'db>,"
+    )
+    .unwrap();
+    writeln!(out, "    ) -> Result<{view_ident}> {{").unwrap();
+    writeln!(out, "        let db = self.db.clone();").unwrap();
+    writeln!(out, "        let base_url = self.base_url.clone();").unwrap();
+    writeln!(out, "        let where_sql = self.where_sql.clone();").unwrap();
+    writeln!(out, "        let binds = self.binds.clone();").unwrap();
+    writeln!(
+        out,
+        "        if let Some(existing) = self.first().await? {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            let mut update_builder = {update_ident}::new(db.clone(), base_url.clone());"
+    )
+    .unwrap();
+    writeln!(out, "            update_builder.where_sql = where_sql;").unwrap();
+    writeln!(out, "            update_builder.binds = binds;").unwrap();
+    writeln!(
+        out,
+        "            let update_builder = on_update(update_builder);"
+    )
+    .unwrap();
+    writeln!(out, "            update_builder.save().await?;").unwrap();
+    writeln!(
+        out,
+        "            return {model_ident}::new(db, base_url.clone()).query().find(existing.{pk}).await.map(|r| r.unwrap());",
+        pk = to_snake(pk)
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        let insert_builder = on_create({insert_ident}::new(db, base_url));"
+    )
+    .unwrap();
+    writeln!(out, "        insert_builder.save().await").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    out
+}
+
+fn render_increment_method(col_ident: &str, table: &str, has_soft_delete: bool) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub async fn increment(self, col: {col_ident}, amount: i64) -> Result<u64> {{"
+    )
+    .unwrap();
+    writeln!(out, "        let db = self.db.clone();").unwrap();
+    writeln!(out, "        let mut where_sql = self.where_sql;").unwrap();
+    writeln!(out, "        let binds = self.binds;").unwrap();
+    if has_soft_delete {
+        writeln!(out, "        if HAS_SOFT_DELETE && !self.with_deleted {{").unwrap();
+        writeln!(
+            out,
+            "            where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));"
+        )
+        .unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    writeln!(
+        out,
+        "        let where_clause = if where_sql.is_empty() {{ String::new() }} else {{ format!(\" WHERE {{}}\", where_sql.join(\" AND \")) }};"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let sql = format!(\"UPDATE {table} SET {{}} = {{}} + {{}} {{}}\", col.as_sql(), col.as_sql(), amount, where_clause);"
+    )
+    .unwrap();
+    writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
+    writeln!(out, "        for b in binds {{ q = bind_query(q, b); }}").unwrap();
+    writeln!(out, "        let res = db.execute(q).await?;").unwrap();
+    writeln!(out, "        Ok(res.rows_affected())").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    out
+}
+
+fn render_decrement_method(col_ident: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub async fn decrement(self, col: {col_ident}, amount: i64) -> Result<u64> {{"
+    )
+    .unwrap();
+    writeln!(out, "        self.increment(col, -amount).await").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    out
+}
+
 pub fn generate_models(
     schema: &Schema,
     cfgs: &ConfigsFile,
@@ -169,12 +2983,7 @@ pub fn generate_models_with_options(
 ) -> Result<(), Box<dyn Error>> {
     fs::create_dir_all(out_dir)?;
 
-    let mut mod_out = String::new();
-    mod_out.push_str("// AUTO-GENERATED FILE — DO NOT EDIT\n");
-    mod_out.push_str("// Generated by build.rs from schema.toml + configs.toml\n\n");
-
-    writeln!(mod_out, "pub mod enums;")?;
-    writeln!(mod_out, "pub use enums::*;")?;
+    let mut model_module_exports = String::new();
 
     for (name, cfg) in &schema.models {
         let file_stem = to_snake(name);
@@ -208,21 +3017,25 @@ pub fn generate_models_with_options(
             exports.push(format!("{model_title}Rel"));
         }
 
-        writeln!(mod_out, "pub mod {};", file_stem)?;
+        writeln!(model_module_exports, "pub mod {};", file_stem)?;
         writeln!(
-            mod_out,
+            model_module_exports,
             "pub use {}::{{{}}};",
             file_stem,
             exports.join(", ")
         )?;
     }
 
-    let common_code = generate_common();
-    fs::write(out_dir.join("common.rs"), common_code)?;
-    writeln!(mod_out, "pub mod common;")?;
-    writeln!(mod_out, "pub use common::*;")?;
-
-    fs::write(out_dir.join("mod.rs"), mod_out)?;
+    fs::write(out_dir.join("common.rs"), generate_common())?;
+    let mut mod_context = TemplateContext::new();
+    mod_context.insert(
+        "model_module_exports",
+        model_module_exports.trim_end().to_string(),
+    )?;
+    fs::write(
+        out_dir.join("mod.rs"),
+        render_template("models/mod.rs.tpl", &mod_context)?,
+    )?;
     Ok(())
 }
 
@@ -365,79 +3178,76 @@ fn render_model(
         .collect::<Vec<_>>()
         .join(", ");
 
-    let mut out = String::new();
-    writeln!(out, "// AUTO-GENERATED FILE — DO NOT EDIT").unwrap();
-    writeln!(
-        out,
-        "// Generated by build.rs from schema.toml + configs.toml"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "#![allow(dead_code, unused_imports, unused_variables, unused_mut)]"
-    )
-    .unwrap();
-    writeln!(out, "use anyhow::Result;").unwrap();
+    let mut imports = String::new();
+    writeln!(imports, "use anyhow::Result;").unwrap();
     if !relations.is_empty() || !localized_fields.is_empty() || has_meta {
-        writeln!(out, "use std::collections::HashMap;").unwrap();
+        writeln!(imports, "use std::collections::HashMap;").unwrap();
     }
     if has_meta {
-        writeln!(out, "use serde_json::Value as JsonValue;").unwrap();
+        writeln!(imports, "use serde_json::Value as JsonValue;").unwrap();
     }
-    writeln!(out, "use serde::{{Deserialize, Serialize}};").unwrap();
-    writeln!(out, "use schemars::JsonSchema;").unwrap();
+    writeln!(imports, "use serde::{{Deserialize, Serialize}};").unwrap();
+    writeln!(imports, "use schemars::JsonSchema;").unwrap();
 
-    writeln!(out, "use sqlx::FromRow;").unwrap();
+    writeln!(imports, "use sqlx::FromRow;").unwrap();
     if use_snowflake_id {
         writeln!(
-            out,
+            imports,
             "use core_db::common::sql::{{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, bind, bind_query, bind_scalar, generate_snowflake_i64, DbConn}};"
         )
         .unwrap();
     } else {
         writeln!(
-            out,
+            imports,
             "use core_db::common::sql::{{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, bind, bind_query, bind_scalar, DbConn}};"
         )
         .unwrap();
     }
-    writeln!(out, "use core_db::common::pagination::resolve_per_page;").unwrap();
+    writeln!(
+        imports,
+        "use core_db::common::pagination::resolve_per_page;"
+    )
+    .unwrap();
     if options.include_datatable {
         writeln!(
-            out,
+            imports,
             "use core_datatable::{{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection}};"
         )
         .unwrap();
     }
     if has_attachments {
-        writeln!(out, "use core_db::platform::attachments::types::{{Attachment, AttachmentInput, AttachmentMap}};").unwrap();
-        writeln!(out, "use uuid::Uuid;").unwrap();
+        writeln!(imports, "use core_db::platform::attachments::types::{{Attachment, AttachmentInput, AttachmentMap}};").unwrap();
+        writeln!(imports, "use uuid::Uuid;").unwrap();
     }
     writeln!(
-        out,
+        imports,
         "use core_db::platform::localized::types::LocalizedMap;"
     )
     .unwrap();
     writeln!(
-        out,
+        imports,
         "use crate::generated::models::common::{{Page, renumber_placeholders}};"
     )
     .unwrap();
-    writeln!(out, "use core_db::common::collection::TypedCollectionExt;").unwrap();
+    writeln!(
+        imports,
+        "use core_db::common::collection::TypedCollectionExt;"
+    )
+    .unwrap();
     if has_meta {
-        writeln!(out, "use core_db::platform::meta::types::MetaMap;").unwrap();
+        writeln!(imports, "use core_db::platform::meta::types::MetaMap;").unwrap();
     }
     if !localized_fields.is_empty() || has_meta {
-        writeln!(out, "use crate::generated::localized;").unwrap();
+        writeln!(imports, "use crate::generated::localized;").unwrap();
     }
     if !localized_fields.is_empty() {
-        writeln!(out, "use core_i18n::current_locale;").unwrap();
+        writeln!(imports, "use core_i18n::current_locale;").unwrap();
     }
     for rel in &relations {
         let target_mod = to_snake(&rel.target_model);
         let target_title = to_title_case(&rel.target_model);
         writeln!(
-            out,
+            imports,
             "use crate::generated::models::{}::{{{}Col, {}Query, {}Row}};",
             target_mod, target_title, target_title, target_title
         )
@@ -478,28 +3288,48 @@ fn render_model(
         .iter()
         .any(|m| matches!(&m.ty, MetaType::Custom(ty) if !ty.contains("::")));
     if options.include_extensions_imports && (has_custom_types || has_custom_meta_types) {
-        writeln!(out, "use crate::extensions::{}::types::*;", model_snake).unwrap();
+        writeln!(imports, "use crate::extensions::{}::types::*;", model_snake).unwrap();
     }
     if options.include_extensions_imports && !computed_fields.is_empty() {
         writeln!(
-            out,
+            imports,
             "use crate::extensions::{}::types::{}Computed;",
             model_snake, model_title
         )
         .unwrap();
     }
     if !localized_fields.is_empty() {
-        writeln!(out, "use crate::generated::localized::LocalizedMapHelper;").unwrap();
+        writeln!(
+            imports,
+            "use crate::generated::localized::LocalizedMapHelper;"
+        )
+        .unwrap();
     }
     if !enum_explained_fields.is_empty() {
-        writeln!(out, "use super::enums::*;").unwrap();
+        writeln!(imports, "use super::enums::*;").unwrap();
     }
 
-    writeln!(out).unwrap();
-    writeln!(out, "const HAS_CREATED_AT: bool = {};", has_created_at).unwrap();
-    writeln!(out, "const HAS_UPDATED_AT: bool = {};", has_updated_at).unwrap();
-    writeln!(out, "const HAS_SOFT_DELETE: bool = {};", has_soft_delete).unwrap();
-    writeln!(out).unwrap();
+    let mut constants = String::new();
+    writeln!(
+        constants,
+        "const HAS_CREATED_AT: bool = {};",
+        has_created_at
+    )
+    .unwrap();
+    writeln!(
+        constants,
+        "const HAS_UPDATED_AT: bool = {};",
+        has_updated_at
+    )
+    .unwrap();
+    writeln!(
+        constants,
+        "const HAS_SOFT_DELETE: bool = {};",
+        has_soft_delete
+    )
+    .unwrap();
+
+    let mut out = String::new();
 
     // Row
     writeln!(
@@ -984,6 +3814,9 @@ fn render_model(
         writeln!(out, "}}\n").unwrap();
     }
 
+    let row_view_json_section = out;
+    let mut out = String::new();
+
     // Col enum
     writeln!(out, "#[derive(Debug, Clone, Copy, JsonSchema)]").unwrap();
     writeln!(out, "pub enum {col_ident} {{").unwrap();
@@ -1235,6 +4068,9 @@ fn render_model(
     }
     writeln!(out, "}}\n").unwrap();
 
+    let column_model_section = out;
+    let mut out = String::new();
+
     // Query
     writeln!(out, "#[derive(Clone)]").unwrap();
     writeln!(out, "pub struct {query_ident}<'db> {{").unwrap();
@@ -1262,6 +4098,9 @@ fn render_model(
     }
     writeln!(out, "}}\n").unwrap();
 
+    let query_struct_section = out;
+    let mut out = String::new();
+
     writeln!(out, "impl<'db> {query_ident}<'db> {{").unwrap();
     writeln!(
         out,
@@ -1288,42 +4127,7 @@ fn render_model(
     )
     .unwrap();
 
-    for f in &db_fields {
-        let fn_name = format!("where_{}", to_snake(&f.name));
-        writeln!(
-            out,
-            "    pub fn {fn_name}(mut self, op: Op, val: {typ}) -> Self {{",
-            typ = f.ty
-        )
-        .unwrap();
-        writeln!(out, "        let idx = self.binds.len() + 1;").unwrap();
-        writeln!(
-            out,
-            "        self.where_sql.push(format!(\"{{}} {{}} ${{}}\", {col_ident}::{}.as_sql(), op.as_sql(), idx));",
-            to_title_case(&f.name)
-        )
-        .unwrap();
-        writeln!(out, "        self.binds.push(val.into());").unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-
-        let fn_name_raw = format!("where_{}_raw", to_snake(&f.name));
-        writeln!(
-            out,
-            "    pub fn {fn_name_raw}<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {{"
-        )
-        .unwrap();
-        writeln!(out, "        let idx = self.binds.len() + 1;").unwrap();
-        writeln!(
-            out,
-            "        self.where_sql.push(format!(\"{{}} {{}} ${{}}\", {col_ident}::{}.as_sql(), op.as_sql(), idx));",
-            to_title_case(&f.name)
-        )
-        .unwrap();
-        writeln!(out, "        self.binds.push(val.into());").unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-    }
+    out.push_str(&render_query_field_where_methods(&db_fields, &col_ident));
 
     writeln!(
         out,
@@ -1374,2307 +4178,189 @@ fn render_model(
     writeln!(out, "        self").unwrap();
     writeln!(out, "    }}").unwrap();
 
-    writeln!(
-        out,
-        "    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: {col_ident}, vals: &[T]) -> Self {{"
-    ).unwrap();
-    writeln!(out, "        if vals.is_empty() {{").unwrap();
-    writeln!(out, "            self.where_sql.push(\"1=0\".to_string());").unwrap();
-    writeln!(out, "            return self;").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        let start = self.binds.len() + 1;").unwrap();
-    writeln!(
-        out,
-        "        let mut placeholders = Vec::with_capacity(vals.len());"
-    )
-    .unwrap();
-    writeln!(out, "        for (i, v) in vals.iter().enumerate() {{").unwrap();
-    writeln!(
-        out,
-        "            placeholders.push(format!(\"${{}}\", start + i));"
-    )
-    .unwrap();
-    writeln!(out, "            self.binds.push(v.clone().into());").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        let clause = format!(\"{{}} IN ({{}})\", col.as_sql(), placeholders.join(\", \"));").unwrap();
-    writeln!(out, "        self.where_sql.push(clause);").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: {col_ident}, vals: &[T]) -> Self {{"
-    ).unwrap();
-    writeln!(out, "        if vals.is_empty() {{ return self; }}").unwrap();
-    writeln!(out, "        let start = self.binds.len() + 1;").unwrap();
-    writeln!(
-        out,
-        "        let mut placeholders = Vec::with_capacity(vals.len());"
-    )
-    .unwrap();
-    writeln!(out, "        for (i, v) in vals.iter().enumerate() {{").unwrap();
-    writeln!(
-        out,
-        "            placeholders.push(format!(\"${{}}\", start + i));"
-    )
-    .unwrap();
-    writeln!(out, "            self.binds.push(v.clone().into());").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        let clause = format!(\"{{}} NOT IN ({{}})\", col.as_sql(), placeholders.join(\", \"));").unwrap();
-    writeln!(out, "        self.where_sql.push(clause);").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    pub fn where_between<T: Into<BindValue>>(mut self, col: {col_ident}, low: T, high: T) -> Self {{"
-    ).unwrap();
-    writeln!(out, "        let idx1 = self.binds.len() + 1;").unwrap();
-    writeln!(out, "        let idx2 = idx1 + 1;").unwrap();
-    writeln!(out, "        self.where_sql.push(format!(\"{{}} BETWEEN ${{}} AND ${{}}\", col.as_sql(), idx1, idx2));").unwrap();
-    writeln!(out, "        self.binds.push(low.into());").unwrap();
-    writeln!(out, "        self.binds.push(high.into());").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    pub fn where_null(mut self, col: {col_ident}) -> Self {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        self.where_sql.push(format!(\"{{}} IS NULL\", col.as_sql()));"
-    )
-    .unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    pub fn where_not_null(mut self, col: {col_ident}) -> Self {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        self.where_sql.push(format!(\"{{}} IS NOT NULL\", col.as_sql()));"
-    )
-    .unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    // or_where_col - modifies the last where clause to use OR
-    writeln!(
-        out,
-        "    pub fn or_where_col<T: Into<BindValue>>(mut self, col: {col_ident}, op: Op, val: T) -> Self {{"
-    ).unwrap();
-    writeln!(out, "        let idx = self.binds.len() + 1;").unwrap();
-    writeln!(
-        out,
-        "        let clause = format!(\"{{}} {{}} ${{}}\", col.as_sql(), op.as_sql(), idx);"
-    )
-    .unwrap();
-    writeln!(out, "        if let Some(last) = self.where_sql.pop() {{").unwrap();
-    writeln!(
-        out,
-        "            self.where_sql.push(format!(\"({{}} OR {{}})\", last, clause));"
-    )
-    .unwrap();
-    writeln!(out, "        }} else {{").unwrap();
-    writeln!(out, "            self.where_sql.push(clause);").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        self.binds.push(val.into());").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    // or_where_raw
-    writeln!(
-        out,
-        "    fn or_where_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {{"
-    ).unwrap();
-    writeln!(out, "        let mut clause = clause.into();").unwrap();
-    writeln!(
-        out,
-        "        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
-    )
-    .unwrap();
-    writeln!(out, "        let mut idx = self.binds.len() + 1;").unwrap();
-    writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
-    writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
-    writeln!(out, "            clause.replace_range(pos..pos + 1, &ph);").unwrap();
-    writeln!(out, "            idx += 1;").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        if let Some(last) = self.where_sql.pop() {{").unwrap();
-    writeln!(
-        out,
-        "            self.where_sql.push(format!(\"({{}} OR {{}})\", last, clause));"
-    )
-    .unwrap();
-    writeln!(out, "        }} else {{").unwrap();
-    writeln!(out, "            self.where_sql.push(clause);").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        self.binds.extend(incoming);").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    // where_group - group conditions with AND within, creates a parenthesized group
-    writeln!(
-        out,
-        "    pub fn where_group(self, f: impl FnOnce(Self) -> Self) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        let start_where = self.where_sql.len();").unwrap();
-    writeln!(out, "        let grouped = f(self);").unwrap();
-    writeln!(out, "        let mut result = grouped;").unwrap();
-    writeln!(out, "        if result.where_sql.len() > start_where {{").unwrap();
-    writeln!(out, "            let group_clauses: Vec<String> = result.where_sql.drain(start_where..).collect();").unwrap();
-    writeln!(
-        out,
-        "            let grouped_sql = format!(\"({{}})\", group_clauses.join(\" AND \"));"
-    )
-    .unwrap();
-    writeln!(out, "            result.where_sql.push(grouped_sql);").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        result").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    // or_where_group - group conditions with OR linkage to previous
-    writeln!(
-        out,
-        "    pub fn or_where_group(self, f: impl FnOnce(Self) -> Self) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        let start_where = self.where_sql.len();").unwrap();
-    writeln!(out, "        let grouped = f(self);").unwrap();
-    writeln!(out, "        let mut result = grouped;").unwrap();
-    writeln!(out, "        if result.where_sql.len() > start_where {{").unwrap();
-    writeln!(out, "            let group_clauses: Vec<String> = result.where_sql.drain(start_where..).collect();").unwrap();
-    writeln!(
-        out,
-        "            let grouped_sql = format!(\"({{}})\", group_clauses.join(\" AND \"));"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            if let Some(last) = result.where_sql.pop() {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                result.where_sql.push(format!(\"({{}} OR {{}})\", last, grouped_sql));"
-    )
-    .unwrap();
-    writeln!(out, "            }} else {{").unwrap();
-    writeln!(out, "                result.where_sql.push(grouped_sql);").unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        result").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    pub fn select_cols(mut self, cols: &[{col_ident}]) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        if cols.is_empty() {{").unwrap();
-    writeln!(
-        out,
-        "            self.select_sql = Some(\"{base_select}\".to_string());"
-    )
-    .unwrap();
-    writeln!(out, "        }} else {{").unwrap();
-    writeln!(
-        out,
-        "            let mut seen = std::collections::BTreeSet::new();"
-    )
-    .unwrap();
-    writeln!(out, "            let mut list: Vec<String> = \"{base_select}\".split(',').map(|s| s.trim().to_string()).collect();").unwrap();
-    writeln!(
-        out,
-        "            for s in &list {{ seen.insert(s.clone()); }}"
-    )
-    .unwrap();
-    writeln!(out, "            for c in cols {{ let s = c.as_sql().to_string(); if seen.insert(s.clone()) {{ list.push(s); }} }}").unwrap();
-    writeln!(
-        out,
-        "            self.select_sql = Some(list.join(\", \"));"
-    )
-    .unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    pub fn add_select_cols(mut self, cols: &[{col_ident}]) -> Self {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut seen = std::collections::BTreeSet::new();"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut list: Vec<String> = match self.select_sql.take() {{"
-    )
-    .unwrap();
-    writeln!(out, "            Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),").unwrap();
-    writeln!(
-        out,
-        "            _ => \"{base_select}\".split(',').map(|s| s.trim().to_string()).collect(),"
-    )
-    .unwrap();
-    writeln!(out, "        }};").unwrap();
-    writeln!(out, "        for s in &list {{ seen.insert(s.clone()); }}").unwrap();
-    writeln!(out, "        for c in cols {{ let s = c.as_sql().to_string(); if seen.insert(s.clone()) {{ list.push(s); }} }}").unwrap();
-    writeln!(out, "        self.select_sql = Some(list.join(\", \"));").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    fn select_raw(mut self, sql: impl Into<String>) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        let s = sql.into();").unwrap();
-    writeln!(out, "        if s.is_empty() {{").unwrap();
-    writeln!(
-        out,
-        "            self.select_sql = Some(\"{base_select}\".to_string());"
-    )
-    .unwrap();
-    writeln!(out, "        }} else {{").unwrap();
-    writeln!(
-        out,
-        "            self.select_sql = Some(format!(\"{base_select}, {{}}\", s));"
-    )
-    .unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    fn add_select_raw(mut self, sql: impl Into<String>) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        let s = sql.into();").unwrap();
-    writeln!(out, "        if s.is_empty() {{ return self; }}").unwrap();
-    writeln!(out, "        let mut base = self.select_sql.take().unwrap_or_else(|| \"{base_select}\".to_string());").unwrap();
-    writeln!(
-        out,
-        "        if !base.is_empty() {{ base.push_str(\", \"); }}"
-    )
-    .unwrap();
-    writeln!(out, "        base.push_str(&s);").unwrap();
-    writeln!(out, "        self.select_sql = Some(base);").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    // Raw joins (inner / left) with bind support; placeholders use '?' in on-clause
-    writeln!(
-        out,
-        "    fn inner_join_raw<T: Into<BindValue>>(mut self, table: impl Into<String>, on_clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {{"
-    ).unwrap();
-    writeln!(out, "        let mut clause = format!(\"INNER JOIN {{}} ON {{}}\", table.into(), on_clause.into());").unwrap();
-    writeln!(
-        out,
-        "        let mut incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut idx = self.join_binds.len() + self.binds.len() + 1;"
-    )
-    .unwrap();
-    writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
-    writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
-    writeln!(out, "            clause.replace_range(pos..pos+1, &ph);").unwrap();
-    writeln!(out, "            idx += 1;").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        self.join_sql.push(clause);").unwrap();
-    writeln!(out, "        self.join_binds.append(&mut incoming);").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    fn left_join_raw<T: Into<BindValue>>(mut self, table: impl Into<String>, on_clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {{"
-    ).unwrap();
-    writeln!(out, "        let mut clause = format!(\"LEFT JOIN {{}} ON {{}}\", table.into(), on_clause.into());").unwrap();
-    writeln!(
-        out,
-        "        let mut incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut idx = self.join_binds.len() + self.binds.len() + 1;"
-    )
-    .unwrap();
-    writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
-    writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
-    writeln!(out, "            clause.replace_range(pos..pos+1, &ph);").unwrap();
-    writeln!(out, "            idx += 1;").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        self.join_sql.push(clause);").unwrap();
-    writeln!(out, "        self.join_binds.append(&mut incoming);").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    fn right_join_raw<T: Into<BindValue>>(mut self, table: impl Into<String>, on_clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {{"
-    ).unwrap();
-    writeln!(out, "        let mut clause = format!(\"RIGHT JOIN {{}} ON {{}}\", table.into(), on_clause.into());").unwrap();
-    writeln!(
-        out,
-        "        let mut incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut idx = self.join_binds.len() + self.binds.len() + 1;"
-    )
-    .unwrap();
-    writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
-    writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
-    writeln!(out, "            clause.replace_range(pos..pos+1, &ph);").unwrap();
-    writeln!(out, "            idx += 1;").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        self.join_sql.push(clause);").unwrap();
-    writeln!(out, "        self.join_binds.append(&mut incoming);").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    fn full_join_raw<T: Into<BindValue>>(mut self, table: impl Into<String>, on_clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {{"
-    ).unwrap();
-    writeln!(out, "        let mut clause = format!(\"FULL OUTER JOIN {{}} ON {{}}\", table.into(), on_clause.into());").unwrap();
-    writeln!(
-        out,
-        "        let mut incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut idx = self.join_binds.len() + self.binds.len() + 1;"
-    )
-    .unwrap();
-    writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
-    writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
-    writeln!(out, "            clause.replace_range(pos..pos+1, &ph);").unwrap();
-    writeln!(out, "            idx += 1;").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        self.join_sql.push(clause);").unwrap();
-    writeln!(out, "        self.join_binds.append(&mut incoming);").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    pub fn order_by(mut self, col: {col_ident}, dir: OrderDir) -> Self {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        self.order_sql.push(format!(\"{{}} {{}}\", col.as_sql(), dir.as_sql()));"
-    )
-    .unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    // order_by_nulls_first
-    writeln!(
-        out,
-        "    pub fn order_by_nulls_first(mut self, col: {col_ident}, dir: OrderDir) -> Self {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        self.order_sql.push(format!(\"{{}} {{}} NULLS FIRST\", col.as_sql(), dir.as_sql()));"
-    ).unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    // order_by_nulls_last
-    writeln!(
-        out,
-        "    pub fn order_by_nulls_last(mut self, col: {col_ident}, dir: OrderDir) -> Self {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        self.order_sql.push(format!(\"{{}} {{}} NULLS LAST\", col.as_sql(), dir.as_sql()));"
-    ).unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    pub fn distinct(mut self) -> Self {{ self.distinct = true; self }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    pub fn distinct_on(mut self, cols: &[{col_ident}]) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        if cols.is_empty() {{ return self; }}").unwrap();
-    writeln!(
-        out,
-        "        let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();"
-    )
-    .unwrap();
-    writeln!(out, "        self.distinct_on = Some(list.join(\", \"));").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}
-    pub fn select(mut self, cols: &[{col_ident}]) -> Self {{
-        let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
-        self.select_sql = Some(names.join(\", \"));
-        self
-    }}
-    fn join(mut self, table: &str, first: &str, op: &str, second: &str) -> Self {{
-        self.join_sql.push(format!(\"JOIN {{}} ON {{}} {{}} {{}}\", table, first, op, second));
-        self
-    }}
-    fn left_join(mut self, table: &str, first: &str, op: &str, second: &str) -> Self {{
-        self.join_sql.push(format!(\"LEFT JOIN {{}} ON {{}} {{}} {{}}\", table, first, op, second));
-        self
-    }}
-    fn right_join(mut self, table: &str, first: &str, op: &str, second: &str) -> Self {{
-        self.join_sql.push(format!(\"RIGHT JOIN {{}} ON {{}} {{}} {{}}\", table, first, op, second));
-        self
-    }}
-    fn from_raw(mut self, sql: &str) -> Self {{
-        self.from_sql = Some(sql.to_string());
-        self
-    }}
-    fn count_sql(mut self, sql: &str) -> Self {{
-        self.count_sql = Some(sql.to_string());
-        self
-    }}
-    fn where_exists<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {{
-        let mut clause = clause.into();
-        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {{
-            let ph = format!(\"${{}}\", idx);
-            clause.replace_range(pos..pos + 1, &ph);
-            idx += 1;
-        }}
-        self.where_sql.push(format!(\"EXISTS ({{}})\", clause));
-        self.binds.extend(incoming);
-        self
-    }}
-    fn select_subquery(mut self, alias: &str, sql: &str) -> Self {{
-        let current = self.select_sql.get_or_insert_with(|| \"*\".to_string());
-        current.push_str(&format!(\", ({{}}) AS {{}}\", sql, alias));
-        self
-    }}
-", col_ident = col_ident).unwrap();
-
-    writeln!(
-        out,
-        "    pub fn for_update(mut self) -> Self {{ self.lock_sql = Some(\"FOR UPDATE\"); self }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    pub fn for_update_skip_locked(mut self) -> Self {{ self.lock_sql = Some(\"FOR UPDATE SKIP LOCKED\"); self }}"
-    )
-    .unwrap();
-    writeln!(out, "    pub fn for_no_key_update(mut self) -> Self {{ self.lock_sql = Some(\"FOR NO KEY UPDATE\"); self }}").unwrap();
-    writeln!(
-        out,
-        "    pub fn for_share(mut self) -> Self {{ self.lock_sql = Some(\"FOR SHARE\"); self }}"
-    )
-    .unwrap();
-    writeln!(out, "    pub fn for_key_share(mut self) -> Self {{ self.lock_sql = Some(\"FOR KEY SHARE\"); self }}").unwrap();
-
-    // group_by
-    writeln!(
-        out,
-        "    pub fn group_by(mut self, cols: &[{col_ident}]) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        for c in cols {{").unwrap();
-    writeln!(
-        out,
-        "            self.group_by_sql.push(c.as_sql().to_string());"
-    )
-    .unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    // having_raw
-    writeln!(
-        out,
-        "    pub fn having_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {{"
-    ).unwrap();
-    writeln!(out, "        let mut clause = clause.into();").unwrap();
-    writeln!(
-        out,
-        "        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
-    )
-    .unwrap();
-    writeln!(out, "        let mut idx = self.having_binds.len() + 1;").unwrap();
-    writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
-    writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
-    writeln!(out, "            clause.replace_range(pos..pos + 1, &ph);").unwrap();
-    writeln!(out, "            idx += 1;").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        self.having_sql.push(clause);").unwrap();
-    writeln!(out, "        self.having_binds.extend(incoming);").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(out, "    pub fn limit(mut self, n: i64) -> Self {{").unwrap();
-    writeln!(out, "        self.limit = Some(n);").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(out, "    pub fn offset(mut self, n: i64) -> Self {{").unwrap();
-    writeln!(out, "        self.offset = Some(n);").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
+    out.push_str(&render_where_set_methods(&col_ident));
+    out.push_str(&render_null_check_methods(&col_ident));
+    out.push_str(&render_or_where_methods(&col_ident));
+    out.push_str(&render_where_group_methods());
+    out.push_str(&render_select_list_methods(&col_ident, &base_select));
+    out.push_str(&render_raw_join_method("inner_join_raw", "INNER JOIN"));
+    out.push_str(&render_raw_join_method("left_join_raw", "LEFT JOIN"));
+    out.push_str(&render_raw_join_method("right_join_raw", "RIGHT JOIN"));
+    out.push_str(&render_raw_join_method("full_join_raw", "FULL OUTER JOIN"));
+    out.push_str(&render_order_methods(&col_ident));
+    out.push_str(&render_distinct_methods(&col_ident));
+    out.push_str(&render_query_select_method(&col_ident));
+    out.push_str(&render_simple_join_method("join", "JOIN"));
+    out.push_str(&render_simple_join_method("left_join", "LEFT JOIN"));
+    out.push_str(&render_simple_join_method("right_join", "RIGHT JOIN"));
+    out.push_str(&render_query_source_methods());
+    out.push_str(&render_where_exists_method());
+    out.push_str(&render_select_subquery_method());
+    out.push_str(&render_lock_methods());
+    out.push_str(&render_group_by_method(&col_ident));
+    out.push_str(&render_having_raw_method());
+    out.push_str(&render_limit_offset_methods());
     if has_soft_delete {
-        writeln!(
-            out,
-            "    pub fn with_deleted(mut self) -> Self {{ self.with_deleted = true; self }}"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "    pub fn only_deleted(mut self) -> Self {{ self.only_deleted = true; self }}"
-        )
-        .unwrap();
+        out.push_str(&render_soft_delete_scope_methods());
     }
 
-    // where_has relations
-    for rel in &relations {
-        let fn_name = format!("where_has_{}", to_snake(&rel.name));
-        let target_query = format!("{}Query", to_title_case(&rel.target_model));
-        let link_clause = match rel.kind {
-            RelationKind::HasMany => format!(
-                "{}.{} = {}.{}",
-                rel.target_table, rel.foreign_key, table, rel.local_key
-            ),
-            RelationKind::BelongsTo => format!(
-                "{}.{} = {}.{}",
-                rel.target_table, rel.target_pk, table, rel.foreign_key
-            ),
-        };
-        writeln!(
-            out,
-            "    pub fn {fn_name}(mut self, scope: impl FnOnce({target_query}<'db>) -> {target_query}<'db>) -> Self {{"
-        )
-        .unwrap();
-        writeln!(out, "        let start_idx = self.binds.len() + 1;").unwrap();
-        writeln!(
-            out,
-            "        let scoped = scope({target_query}::new(self.db, None));"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        sub_where.insert(0, \"{link}\".to_string());",
-            link = link_clause
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let mut clause = String::from(\"EXISTS (SELECT 1 FROM {rel_table} WHERE \");",
-            rel_table = rel.target_table
-        )
-        .unwrap();
-        writeln!(out, "        clause.push_str(&sub_where.join(\" AND \"));").unwrap();
-        writeln!(out, "        clause.push(')');").unwrap();
-        writeln!(
-            out,
-            "        let clause = renumber_placeholders(&clause, start_idx);"
-        )
-        .unwrap();
-        writeln!(out, "        self.where_sql.push(clause);").unwrap();
-        writeln!(out, "        self.binds.extend(sub_binds);").unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-    }
+    out.push_str(&render_query_relation_filter_methods(&relations, &table));
 
-    // where_doesnt_have relations (NOT EXISTS)
-    for rel in &relations {
-        let fn_name = format!("where_doesnt_have_{}", to_snake(&rel.name));
-        let target_query = format!("{}Query", to_title_case(&rel.target_model));
-        let link_clause = match rel.kind {
-            RelationKind::HasMany => format!(
-                "{}.{} = {}.{}",
-                rel.target_table, rel.foreign_key, table, rel.local_key
-            ),
-            RelationKind::BelongsTo => format!(
-                "{}.{} = {}.{}",
-                rel.target_table, rel.target_pk, table, rel.foreign_key
-            ),
-        };
-        writeln!(
-            out,
-            "    pub fn {fn_name}(mut self, scope: impl FnOnce({target_query}<'db>) -> {target_query}<'db>) -> Self {{"
-        )
-        .unwrap();
-        writeln!(out, "        let start_idx = self.binds.len() + 1;").unwrap();
-        writeln!(
-            out,
-            "        let scoped = scope({target_query}::new(self.db, None));"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        sub_where.insert(0, \"{link}\".to_string());",
-            link = link_clause
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let mut clause = String::from(\"NOT EXISTS (SELECT 1 FROM {rel_table} WHERE \");",
-            rel_table = rel.target_table
-        )
-        .unwrap();
-        writeln!(out, "        clause.push_str(&sub_where.join(\" AND \"));").unwrap();
-        writeln!(out, "        clause.push(')');").unwrap();
-        writeln!(
-            out,
-            "        let clause = renumber_placeholders(&clause, start_idx);"
-        )
-        .unwrap();
-        writeln!(out, "        self.where_sql.push(clause);").unwrap();
-        writeln!(out, "        self.binds.extend(sub_binds);").unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-    }
+    let query_builder_methods_section = out;
+    let mut out = String::new();
 
-    // or_where_has relations (EXISTS with OR)
-    for rel in &relations {
-        let fn_name = format!("or_where_has_{}", to_snake(&rel.name));
-        let target_query = format!("{}Query", to_title_case(&rel.target_model));
-        let link_clause = match rel.kind {
-            RelationKind::HasMany => format!(
-                "{}.{} = {}.{}",
-                rel.target_table, rel.foreign_key, table, rel.local_key
-            ),
-            RelationKind::BelongsTo => format!(
-                "{}.{} = {}.{}",
-                rel.target_table, rel.target_pk, table, rel.foreign_key
-            ),
-        };
-        writeln!(
-            out,
-            "    pub fn {fn_name}(mut self, scope: impl FnOnce({target_query}<'db>) -> {target_query}<'db>) -> Self {{"
-        )
-        .unwrap();
-        writeln!(out, "        let start_idx = self.binds.len() + 1;").unwrap();
-        writeln!(
-            out,
-            "        let scoped = scope({target_query}::new(self.db, None));"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        sub_where.insert(0, \"{link}\".to_string());",
-            link = link_clause
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let mut clause = String::from(\"EXISTS (SELECT 1 FROM {rel_table} WHERE \");",
-            rel_table = rel.target_table
-        )
-        .unwrap();
-        writeln!(out, "        clause.push_str(&sub_where.join(\" AND \"));").unwrap();
-        writeln!(out, "        clause.push(')');").unwrap();
-        writeln!(
-            out,
-            "        let clause = renumber_placeholders(&clause, start_idx);"
-        )
-        .unwrap();
-        writeln!(out, "        if let Some(last) = self.where_sql.pop() {{").unwrap();
-        writeln!(
-            out,
-            "            self.where_sql.push(format!(\"({{}} OR {{}})\", last, clause));"
-        )
-        .unwrap();
-        writeln!(out, "        }} else {{").unwrap();
-        writeln!(out, "            self.where_sql.push(clause);").unwrap();
-        writeln!(out, "        }}").unwrap();
-        writeln!(out, "        self.binds.extend(sub_binds);").unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-    }
-
-    writeln!(
-        out,
-        "    pub async fn get_as<T>(self) -> Result<Vec<T>>
-    where
-        T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Unpin + 'static,
-    {{
-        let Self {{ db, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds, .. }} = self;
-        let mut where_sql = where_sql;
-        let select_clause = match (distinct, distinct_on.as_ref()) {{
-            (false, None) => select_sql.unwrap_or_else(|| \"*\".to_string()),
-            (true, None) => format!(\"DISTINCT {{}}\", select_sql.unwrap_or_else(|| \"*\".to_string())),
-            (_, Some(on)) => format!(\"DISTINCT ON ({{}}) {{}}\", on, select_sql.unwrap_or_else(|| \"*\".to_string())),
-        }};
-        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());
-        let mut sql = format!(\"SELECT {{}} FROM {{}}\", select_clause, table_name);
-        if !join_sql.is_empty() {{ sql.push(' '); sql.push_str(&join_sql.join(\" \")); }}
-        if !where_sql.is_empty() {{
-            sql.push_str(\" WHERE \");
-            sql.push_str(&where_sql.join(\" AND \"));
-        }}
-        if !group_by_sql.is_empty() {{
-             sql.push_str(\" GROUP BY \");
-             sql.push_str(&group_by_sql.join(\", \"));
-        }}
-        if !having_sql.is_empty() {{
-             sql.push_str(\" HAVING \");
-             sql.push_str(&having_sql.join(\" AND \"));
-        }}
-        if !order_sql.is_empty() {{
-            sql.push_str(\" ORDER BY \");
-            sql.push_str(&order_sql.join(\", \"));
-        }}
-        if let Some(off) = offset {{
-            sql.push_str(\" OFFSET \");
-            sql.push_str(&off.to_string());
-        }}
-        if let Some(l) = limit {{
-            sql.push_str(\" LIMIT \");
-            sql.push_str(&l.to_string());
-        }}
-        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}
-        let mut q = sqlx::query_as::<_, T>(&sql);
-        for b in binds {{ q = bind(q, b); }}
-        for b in join_binds {{ q = bind(q, b); }}
-        for b in having_binds {{ q = bind(q, b); }}
-        Ok(db.fetch_all(q).await?)
-    }}
-
-    pub async fn get(self) -> Result<Vec<{view_ident}>> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let Self {{ db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds {extra}, .. }} = self;",
-        extra = if has_soft_delete {
-            ", with_deleted, only_deleted"
-        } else {
-            ""
-        }
-    )
-    .unwrap();
-    writeln!(out, "        let mut where_sql = where_sql;").unwrap();
-    if has_soft_delete {
-        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
-        writeln!(out, "            if only_deleted {{").unwrap();
-        writeln!(
-            out,
-            "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));"
-        )
-        .unwrap();
-        writeln!(out, "            }} else if !with_deleted {{").unwrap();
-        writeln!(
-            out,
-            "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));"
-        )
-        .unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(
-        out,
-        "        let select_clause = match (distinct, distinct_on.as_ref()) {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            (false, None) => select_sql.unwrap_or_else(|| \"*\".to_string()),"
-    )
-    .unwrap();
-    writeln!(out, "            (true, None) => format!(\"DISTINCT {{}}\", select_sql.unwrap_or_else(|| \"*\".to_string())),").unwrap();
-    writeln!(out, "            (_, Some(on)) => format!(\"DISTINCT ON ({{}}) {{}}\", on, select_sql.unwrap_or_else(|| \"*\".to_string())),").unwrap();
-    writeln!(out, "        }};").unwrap();
-    writeln!(
-        out,
-        "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut sql = format!(\"SELECT {{}} FROM {{}}\", select_clause, table_name);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if !join_sql.is_empty() {{ sql.push(' '); sql.push_str(&join_sql.join(\" \")); }}"
-    )
-    .unwrap();
-    writeln!(out, "        if !where_sql.is_empty() {{").unwrap();
-    writeln!(out, "            sql.push_str(\" WHERE \");").unwrap();
-    writeln!(out, "            sql.push_str(&where_sql.join(\" AND \"));").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        if !group_by_sql.is_empty() {{").unwrap();
-    writeln!(out, "            sql.push_str(\" GROUP BY \");").unwrap();
-    writeln!(out, "            sql.push_str(&group_by_sql.join(\", \"));").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        if !having_sql.is_empty() {{").unwrap();
-    writeln!(out, "            sql.push_str(\" HAVING \");").unwrap();
-    writeln!(
-        out,
-        "            sql.push_str(&having_sql.join(\" AND \"));"
-    )
-    .unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        if !order_sql.is_empty() {{").unwrap();
-    writeln!(out, "            sql.push_str(\" ORDER BY \");").unwrap();
-    writeln!(out, "            sql.push_str(&order_sql.join(\", \"));").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        if let Some(off) = offset {{").unwrap();
-    writeln!(out, "            sql.push_str(\" OFFSET \");").unwrap();
-    writeln!(out, "            sql.push_str(&off.to_string());").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        if let Some(l) = limit {{").unwrap();
-    writeln!(out, "            sql.push_str(\" LIMIT \");").unwrap();
-    writeln!(out, "            sql.push_str(&l.to_string());").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(
-        out,
-        "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
-    )
-    .unwrap();
-    writeln!(out, "        for b in binds {{").unwrap();
-    writeln!(out, "            q = bind(q, b);").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
-    writeln!(out, "        for b in having_binds {{ q = bind(q, b); }}").unwrap();
-    {
-        writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-        writeln!(
-            out,
-            "        let ids: Vec<{parent_pk_ty}> = rows.iter().map(|r| r.{pk}.clone()).collect();"
-        )
-        .unwrap();
-        if localized_fields.is_empty() {
-            writeln!(out, "        let localized = LocalizedMap::default();").unwrap();
-        } else {
-            writeln!(out, "        let localized = localized::load_{model_snake}_localized(db.clone(), &ids).await?;").unwrap();
-        }
-        if has_meta {
-            writeln!(out, "        let meta_map = localized::load_{model_snake}_meta(db.clone(), &ids).await?;").unwrap();
-        }
-        if has_attachments {
-            writeln!(out, "        let attachments = localized::load_{model_snake}_attachments(db.clone(), &ids).await?;").unwrap();
-        }
-        writeln!(
-            out,
-            "        let mut out_vec = Vec::with_capacity(rows.len());"
-        )
-        .unwrap();
-        writeln!(out, "        for r in rows {{").unwrap();
-        match (has_meta, has_attachments) {
-            (true, true) => writeln!(out, "            out_vec.push(hydrate_view(r, &localized, &meta_map, &attachments, base_url.as_deref()));").unwrap(),
-            (true, false) => writeln!(out, "            out_vec.push(hydrate_view(r, &localized, &meta_map, base_url.as_deref()));").unwrap(),
-            (false, true) => writeln!(out, "            out_vec.push(hydrate_view(r, &localized, &attachments, base_url.as_deref()));").unwrap(),
-            (false, false) => {
-                if localized_fields.is_empty() {
-                    writeln!(out, "            out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));").unwrap();
-                } else {
-                    writeln!(out, "            out_vec.push(hydrate_view(r, &localized, base_url.as_deref()));").unwrap();
-                }
-            }
-        }
-        writeln!(out, "        }}").unwrap();
-        writeln!(out, "        Ok(out_vec)").unwrap();
-    }
-    writeln!(out, "    }}\n").unwrap();
+    out.push_str(&render_get_as_method(&table));
+    out.push_str(&render_get_method(
+        &view_ident,
+        &row_ident,
+        has_soft_delete,
+        &col_ident,
+        &table,
+        &model_snake,
+        &pk,
+        &parent_pk_ty,
+        &localized_fields,
+        has_meta,
+        has_attachments,
+    ));
 
     if !relations.is_empty() {
-        writeln!(
-            out,
-            "    pub async fn get_with_relations(self) -> Result<Vec<{model_title}WithRelations>> {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let Self {{ db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds {extra}, .. }} = self;",
-            extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
-        )
-        .unwrap();
-        writeln!(out, "        let mut where_sql = where_sql;").unwrap();
-        if has_soft_delete {
-            writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
-            writeln!(out, "            if only_deleted {{").unwrap();
-            writeln!(
-                out,
-                "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));"
-            )
-            .unwrap();
-            writeln!(out, "            }} else if !with_deleted {{").unwrap();
-            writeln!(
-                out,
-                "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));"
-            )
-            .unwrap();
-            writeln!(out, "            }}").unwrap();
-            writeln!(out, "        }}").unwrap();
-        }
-        writeln!(
-            out,
-            "        let select_clause = match (distinct, distinct_on.as_ref()) {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "            (false, None) => select_sql.unwrap_or_else(|| \"*\".to_string()),"
-        )
-        .unwrap();
-        writeln!(out, "            (true, None) => format!(\"DISTINCT {{}}\", select_sql.unwrap_or_else(|| \"*\".to_string())),").unwrap();
-        writeln!(out, "            (_, Some(on)) => format!(\"DISTINCT ON ({{}}) {{}}\", on, select_sql.unwrap_or_else(|| \"*\".to_string())),").unwrap();
-        writeln!(out, "        }};").unwrap();
-        writeln!(
-            out,
-            "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let mut sql = format!(\"SELECT {{}} FROM {{}}\", select_clause, table_name);"
-        )
-        .unwrap();
-        writeln!(out, "        if !join_sql.is_empty() {{ sql.push(' '); sql.push_str(&join_sql.join(\" \")); }}").unwrap();
-        writeln!(out, "        if !where_sql.is_empty() {{ sql.push_str(\" WHERE \"); sql.push_str(&where_sql.join(\" AND \")); }}").unwrap();
-        writeln!(out, "        if !order_sql.is_empty() {{ sql.push_str(\" ORDER BY \"); sql.push_str(&order_sql.join(\", \")); }}").unwrap();
-        writeln!(out, "        if let Some(off) = offset {{ sql.push_str(\" OFFSET \"); sql.push_str(&off.to_string()); }}").unwrap();
-        writeln!(out, "        if let Some(l) = limit {{ sql.push_str(\" LIMIT \"); sql.push_str(&l.to_string()); }}").unwrap();
-        writeln!(
-            out,
-            "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
-        )
-        .unwrap();
-        writeln!(out, "        for b in binds {{ q = bind(q, b); }}").unwrap();
-        writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
-        writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-        writeln!(
-            out,
-            "        let m = {model_ident} {{ db: db.clone(), base_url: base_url.clone() }};"
-        )
-        .unwrap();
-        for rel in &relations {
-            let rel_name = to_snake(&rel.name);
-            writeln!(
-                out,
-                "        let {rel_name} = m.load_{rel_name}(&rows).await?;"
-            )
-            .unwrap();
-        }
-        writeln!(
-            out,
-            "        let ids: Vec<i64> = rows.iter().map(|r| r.{pk}).collect();"
-        )
-        .unwrap();
-        if localized_fields.is_empty() {
-            writeln!(out, "        let localized = LocalizedMap::default();").unwrap();
-        } else {
-            writeln!(out, "        let localized = localized::load_{model_snake}_localized(db.clone(), &ids).await?;").unwrap();
-        }
-        if has_meta {
-            writeln!(out, "        let meta_map = localized::load_{model_snake}_meta(db.clone(), &ids).await?;").unwrap();
-        }
-        if has_attachments {
-            writeln!(out, "        let attachments = localized::load_{model_snake}_attachments(db.clone(), &ids).await?;").unwrap();
-        }
-        writeln!(
-            out,
-            "        let mut out_vec = Vec::with_capacity(rows.len());"
-        )
-        .unwrap();
-        writeln!(out, "        for row in rows {{").unwrap();
-        writeln!(out, "            let key = row.{pk}.clone();").unwrap();
-        match (has_meta, has_attachments) {
-            (true, true) => writeln!(out, "            let view = hydrate_view(row.clone(), &localized, &meta_map, &attachments, base_url.as_deref());").unwrap(),
-            (true, false) => writeln!(out, "            let view = hydrate_view(row.clone(), &localized, &meta_map, base_url.as_deref());").unwrap(),
-            (false, true) => writeln!(out, "            let view = hydrate_view(row.clone(), &localized, &attachments, base_url.as_deref());").unwrap(),
-            (false, false) => {
-                if localized_fields.is_empty() {
-                    writeln!(out, "            let view = hydrate_view(row.clone(), &LocalizedMap::default(), base_url.as_deref());").unwrap();
-                } else {
-                    writeln!(out, "            let view = hydrate_view(row.clone(), &localized, base_url.as_deref());").unwrap();
-                }
-            }
-        }
-        writeln!(
-            out,
-            "            out_vec.push({model_title}WithRelations {{"
-        )
-        .unwrap();
-        writeln!(out, "                row: view,").unwrap();
-        for rel in &relations {
-            let field = to_snake(&rel.name);
-            match rel.kind {
-                RelationKind::HasMany => {
-                    writeln!(
-                        out,
-                        "                {field}: {field}.get(&key).cloned().unwrap_or_default(),"
-                    )
-                    .unwrap();
-                }
-                RelationKind::BelongsTo => {
-                    writeln!(
-                        out,
-                        "                {field}: {field}.get(&key).cloned().unwrap_or(None),"
-                    )
-                    .unwrap();
-                }
-            }
-        }
-        writeln!(out, "            }});").unwrap();
-        writeln!(out, "        }}").unwrap();
-        writeln!(out, "        Ok(out_vec)").unwrap();
-        writeln!(out, "    }}\n").unwrap();
+        out.push_str(&render_get_with_relations_method(
+            &model_title,
+            &model_ident,
+            &row_ident,
+            has_soft_delete,
+            &col_ident,
+            &table,
+            &model_snake,
+            &pk,
+            &parent_pk_ty,
+            &relations,
+            &localized_fields,
+            has_meta,
+            has_attachments,
+        ));
     }
 
-    writeln!(
-        out,
-        "    pub async fn first(self) -> Result<Option<{view_ident}>> {{"
-    )
-    .unwrap();
-    writeln!(out, "        let mut v = self.limit(1).get().await?;").unwrap();
-    writeln!(out, "        Ok(v.pop())").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-    writeln!(
-        out,
-        "    pub async fn first_or_fail(self) -> Result<{view_ident}> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        self.first().await?.ok_or_else(|| anyhow::anyhow!(\"{table}: record not found\"))"
-    )
-    .unwrap();
-    writeln!(out, "    }}\n").unwrap();
+    out.push_str(&render_find_methods(
+        &view_ident,
+        &parent_pk_ty,
+        &table,
+        &pk,
+    ));
 
-    writeln!(
-        out,
-        "    pub async fn find(self, id: {parent_pk_ty}) -> Result<Option<{view_ident}>> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        self.where_{}(Op::Eq, id).first().await",
-        to_snake(&pk)
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    pub async fn find_or_fail(self, id: {parent_pk_ty}) -> Result<{view_ident}> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        self.find(id).await?.ok_or_else(|| anyhow::anyhow!(\"{table}: record not found\"))"
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
+    out.push_str(&render_first_or_create_method(&insert_ident, &view_ident));
+    out.push_str(&render_update_or_create_method(
+        &update_ident,
+        &insert_ident,
+        &view_ident,
+        &model_ident,
+        &pk,
+    ));
+    out.push_str(&render_increment_method(
+        &col_ident,
+        &table,
+        has_soft_delete,
+    ));
+    out.push_str(&render_decrement_method(&col_ident));
 
-    // first_or_create - finds first matching row, or creates one using the insert builder
-    writeln!(out, "    pub async fn first_or_create(self, create: impl FnOnce({insert_ident}<'db>) -> {insert_ident}<'db>) -> Result<{view_ident}> {{").unwrap();
-    writeln!(out, "        let db = self.db.clone();").unwrap();
-    writeln!(out, "        let base_url = self.base_url.clone();").unwrap();
-    writeln!(
-        out,
-        "        if let Some(existing) = self.first().await? {{"
-    )
-    .unwrap();
-    writeln!(out, "            return Ok(existing);").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(
-        out,
-        "        let insert_builder = create({insert_ident}::new(db, base_url));"
-    )
-    .unwrap();
-    writeln!(out, "        insert_builder.save().await").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out).unwrap();
+    out.push_str(&render_count_method(has_soft_delete, &col_ident, &table));
 
-    // update_or_create - finds first matching row and updates it, or creates if not found
-    writeln!(out, "    pub async fn update_or_create(").unwrap();
-    writeln!(out, "        self,").unwrap();
-    writeln!(
-        out,
-        "        on_update: impl FnOnce({update_ident}<'db>) -> {update_ident}<'db>,"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        on_create: impl FnOnce({insert_ident}<'db>) -> {insert_ident}<'db>,"
-    )
-    .unwrap();
-    writeln!(out, "    ) -> Result<{view_ident}> {{").unwrap();
-    writeln!(out, "        let db = self.db.clone();").unwrap();
-    writeln!(out, "        let base_url = self.base_url.clone();").unwrap();
-    writeln!(out, "        let where_sql = self.where_sql.clone();").unwrap();
-    writeln!(out, "        let binds = self.binds.clone();").unwrap();
-    writeln!(
-        out,
-        "        if let Some(existing) = self.first().await? {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            let mut update_builder = {update_ident}::new(db.clone(), base_url.clone());"
-    )
-    .unwrap();
-    writeln!(out, "            update_builder.where_sql = where_sql;").unwrap();
-    writeln!(out, "            update_builder.binds = binds;").unwrap();
-    writeln!(
-        out,
-        "            let update_builder = on_update(update_builder);"
-    )
-    .unwrap();
-    writeln!(out, "            update_builder.save().await?;").unwrap();
-    writeln!(
-        out,
-        "            return {model_ident}::new(db, base_url.clone()).query().find(existing.{pk}).await.map(|r| r.unwrap());",
-        pk = to_snake(&pk)
-    )
-    .unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(
-        out,
-        "        let insert_builder = on_create({insert_ident}::new(db, base_url));"
-    )
-    .unwrap();
-    writeln!(out, "        insert_builder.save().await").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out).unwrap();
+    out.push_str(&render_pluck_ids_method(
+        &parent_pk_ty,
+        &pk,
+        has_soft_delete,
+        &col_ident,
+        &table,
+    ));
+    out.push_str(&render_small_terminal_methods(
+        &query_ident,
+        &view_ident,
+        &col_ident,
+        &pk_col_variant,
+        has_created_at,
+    ));
+    out.push_str(&render_scalar_aggregate_method(
+        "sum",
+        "Option<f64>",
+        "SUM({}::DOUBLE PRECISION)",
+        has_soft_delete,
+        &col_ident,
+        &table,
+    ));
 
-    // increment - atomically increment a column value
-    writeln!(
-        out,
-        "    pub async fn increment(self, col: {col_ident}, amount: i64) -> Result<u64> {{"
-    )
-    .unwrap();
-    writeln!(out, "        let db = self.db.clone();").unwrap();
-    writeln!(out, "        let mut where_sql = self.where_sql;").unwrap();
-    writeln!(out, "        let binds = self.binds;").unwrap();
-    if has_soft_delete {
-        writeln!(out, "        if HAS_SOFT_DELETE && !self.with_deleted {{").unwrap();
-        writeln!(out, "            where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(out, "        let where_clause = if where_sql.is_empty() {{ String::new() }} else {{ format!(\" WHERE {{}}\", where_sql.join(\" AND \")) }};").unwrap();
-    writeln!(out, "        let sql = format!(\"UPDATE {table} SET {{}} = {{}} + {{}} {{}}\", col.as_sql(), col.as_sql(), amount, where_clause);").unwrap();
-    writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
-    writeln!(out, "        for b in binds {{ q = bind_query(q, b); }}").unwrap();
-    writeln!(out, "        let res = db.execute(q).await?;").unwrap();
-    writeln!(out, "        Ok(res.rows_affected())").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out).unwrap();
+    out.push_str(&render_with_counts_method(
+        &model_title,
+        &view_ident,
+        &has_many_rels,
+        &pk,
+    ));
+    out.push_str(&render_scalar_aggregate_method(
+        "avg",
+        "Option<f64>",
+        "AVG({}::DOUBLE PRECISION)",
+        has_soft_delete,
+        &col_ident,
+        &table,
+    ));
+    out.push_str(&render_scalar_aggregate_method(
+        "min_val",
+        "Option<i64>",
+        "MIN({})",
+        has_soft_delete,
+        &col_ident,
+        &table,
+    ));
+    out.push_str(&render_scalar_aggregate_method(
+        "max_val",
+        "Option<i64>",
+        "MAX({})",
+        has_soft_delete,
+        &col_ident,
+        &table,
+    ));
 
-    // decrement - atomically decrement a column value
-    writeln!(
-        out,
-        "    pub async fn decrement(self, col: {col_ident}, amount: i64) -> Result<u64> {{"
-    )
-    .unwrap();
-    writeln!(out, "        self.increment(col, -amount).await").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out).unwrap();
-
-    // count() aggregate
-    writeln!(out, "    pub async fn count(self) -> Result<i64> {{").unwrap();
-    writeln!(
-        out,
-        "        let Self {{ db, from_sql, count_sql, join_sql, join_binds, where_sql, binds {extra} , .. }} = self;",
-        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
-    ).unwrap();
-    writeln!(out, "        let mut where_sql = where_sql;").unwrap();
-    if has_soft_delete {
-        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
-        writeln!(out, "            if only_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }} else if !with_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(
-        out,
-        "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
-    )
-    .unwrap();
-    writeln!(out, "        let from_clause = if join_sql.is_empty() {{").unwrap();
-    writeln!(out, "            format!(\"FROM {{}}\", table_name)").unwrap();
-    writeln!(out, "        }} else {{").unwrap();
-    writeln!(
-        out,
-        "            format!(\"FROM {{}} {{}}\", table_name, join_sql.join(\" \"))"
-    )
-    .unwrap();
-    writeln!(out, "        }};").unwrap();
-    writeln!(out, "        let where_clause = if where_sql.is_empty() {{ String::new() }} else {{ format!(\" WHERE {{}}\", where_sql.join(\" AND \")) }};").unwrap();
-    writeln!(
-        out,
-        "        let count_expr = count_sql.unwrap_or_else(|| \"COUNT(*)\".to_string());"
-    )
-    .unwrap();
-    writeln!(out, "        let sql = format!(\"SELECT {{}} {{}}{{}}\", count_expr, from_clause, where_clause);").unwrap();
-    writeln!(
-        out,
-        "        let mut q = sqlx::query_scalar::<_, i64>(&sql);"
-    )
-    .unwrap();
-    writeln!(out, "        for b in binds {{ q = bind_scalar(q, b); }}").unwrap();
-    writeln!(
-        out,
-        "        for b in join_binds {{ q = bind_scalar(q, b); }}"
-    )
-    .unwrap();
-    writeln!(out, "        let count = db.fetch_scalar(q).await?;").unwrap();
-    writeln!(out, "        Ok(count)").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-
-    // exists() aggregate
-    writeln!(out, "    pub async fn exists(self) -> Result<bool> {{").unwrap();
-    writeln!(out, "        Ok(self.count().await? > 0)").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-
-    // pluck_ids - returns Vec of primary key values
-    writeln!(
-        out,
-        "    pub async fn pluck_ids(self) -> Result<Vec<{parent_pk_ty}>> {{"
-    )
-    .unwrap();
-    writeln!(out, "        let Self {{ db, from_sql, join_sql, join_binds, where_sql, binds, order_sql, limit, offset {extra} , .. }} = self;", extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }).unwrap();
-    writeln!(out, "        let mut where_sql = where_sql;").unwrap();
-    if has_soft_delete {
-        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
-        writeln!(out, "            if only_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }} else if !with_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(
-        out,
-        "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
-    )
-    .unwrap();
-    writeln!(out, "        let from_clause = if join_sql.is_empty() {{ format!(\"FROM {{}}\", table_name) }} else {{ format!(\"FROM {{}} {{}}\", table_name, join_sql.join(\" \")) }};").unwrap();
-    writeln!(out, "        let where_clause = if where_sql.is_empty() {{ String::new() }} else {{ format!(\" WHERE {{}}\", where_sql.join(\" AND \")) }};").unwrap();
-    writeln!(out, "        let order_clause = if order_sql.is_empty() {{ String::new() }} else {{ format!(\" ORDER BY {{}}\", order_sql.join(\", \")) }};").unwrap();
-    writeln!(out, "        let limit_clause = limit.map(|n| format!(\" LIMIT {{}}\", n)).unwrap_or_default();").unwrap();
-    writeln!(out, "        let offset_clause = offset.map(|n| format!(\" OFFSET {{}}\", n)).unwrap_or_default();").unwrap();
-    writeln!(out, "        let sql = format!(\"SELECT {pk} {{}}{{}}{{}}{{}}{{}}\", from_clause, where_clause, order_clause, limit_clause, offset_clause);").unwrap();
-    writeln!(
-        out,
-        "        let mut q = sqlx::query_scalar::<_, {parent_pk_ty}>(&sql);"
-    )
-    .unwrap();
-    writeln!(out, "        for b in binds {{ q = bind_scalar(q, b); }}").unwrap();
-    writeln!(
-        out,
-        "        for b in join_binds {{ q = bind_scalar(q, b); }}"
-    )
-    .unwrap();
-    writeln!(out, "        let ids = db.fetch_all_scalar(q).await?;").unwrap();
-    writeln!(out, "        Ok(ids)").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-
-    // chunk - process rows in batches
-    writeln!(
-        out,
-        "    pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>"
-    )
-    .unwrap();
-    writeln!(out, "    where").unwrap();
-    writeln!(out, "        F: FnMut(Vec<{view_ident}>) -> Fut,").unwrap();
-    writeln!(
-        out,
-        "        Fut: std::future::Future<Output = Result<bool>>,"
-    )
-    .unwrap();
-    writeln!(out, "    {{").unwrap();
-    writeln!(out, "        let mut page = 0i64;").unwrap();
-    writeln!(out, "        let db = self.db.clone();").unwrap();
-    writeln!(out, "        loop {{").unwrap();
-    writeln!(
-        out,
-        "            let mut query = {query_ident}::new(db.clone(), self.base_url.clone());"
-    )
-    .unwrap();
-    writeln!(out, "            query.where_sql = self.where_sql.clone();").unwrap();
-    writeln!(out, "            query.binds = self.binds.clone();").unwrap();
-    writeln!(out, "            query.order_sql = self.order_sql.clone();").unwrap();
-    writeln!(
-        out,
-        "            let rows = query.limit(size).offset(page * size).get().await?;"
-    )
-    .unwrap();
-    writeln!(out, "            if rows.is_empty() {{ break; }}").unwrap();
-    writeln!(
-        out,
-        "            let should_continue = callback(rows).await?;"
-    )
-    .unwrap();
-    writeln!(out, "            if !should_continue {{ break; }}").unwrap();
-    writeln!(out, "            page += 1;").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        Ok(())").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-
-    // latest - order by created_at desc
-    writeln!(out, "    pub fn latest(self) -> Self {{").unwrap();
-    if has_created_at {
-        writeln!(
-            out,
-            "        self.order_by({col_ident}::CreatedAt, OrderDir::Desc)"
-        )
-        .unwrap();
-    } else {
-        writeln!(
-            out,
-            "        self.order_by({col_ident}::{pk_col_variant}, OrderDir::Desc)"
-        )
-        .unwrap();
-    }
-    writeln!(out, "    }}\n").unwrap();
-
-    // oldest - order by created_at asc
-    writeln!(out, "    pub fn oldest(self) -> Self {{").unwrap();
-    if has_created_at {
-        writeln!(
-            out,
-            "        self.order_by({col_ident}::CreatedAt, OrderDir::Asc)"
-        )
-        .unwrap();
-    } else {
-        writeln!(
-            out,
-            "        self.order_by({col_ident}::{pk_col_variant}, OrderDir::Asc)"
-        )
-        .unwrap();
-    }
-    writeln!(out, "    }}\n").unwrap();
-
-    // take - alias for limit
-    writeln!(out, "    pub fn take(self, n: i64) -> Self {{").unwrap();
-    writeln!(out, "        self.limit(n)").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-
-    // skip - alias for offset
-    writeln!(out, "    pub fn skip(self, n: i64) -> Self {{").unwrap();
-    writeln!(out, "        self.offset(n)").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-
-    // sole - returns exactly one row or error
-    writeln!(
-        out,
-        "    pub async fn sole(self) -> Result<{view_ident}> {{"
-    )
-    .unwrap();
-    writeln!(out, "        let mut rows = self.limit(2).get().await?;").unwrap();
-    writeln!(out, "        match rows.len() {{").unwrap();
-    writeln!(
-        out,
-        "            0 => anyhow::bail!(\"sole: no record found\"),"
-    )
-    .unwrap();
-    writeln!(out, "            1 => Ok(rows.remove(0)),").unwrap();
-    writeln!(
-        out,
-        "            _ => anyhow::bail!(\"sole: multiple records found\"),"
-    )
-    .unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-
-    // order_by_raw - raw ORDER BY clause
-    writeln!(
-        out,
-        "    fn order_by_raw(mut self, sql: impl Into<String>) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        self.order_sql.push(sql.into());").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-
-    // group_by_raw - raw GROUP BY clause
-    writeln!(
-        out,
-        "    fn group_by_raw(mut self, sql: impl Into<String>) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        self.group_by_sql.push(sql.into());").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-    // sum() aggregate
-
-    // pluck_pair - extract two fields into a HashMap
-    writeln!(out, "    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&{view_ident}) -> (K, V)) -> Result<std::collections::HashMap<K, V>>").unwrap();
-    writeln!(out, "    where").unwrap();
-    writeln!(out, "        K: Eq + std::hash::Hash,").unwrap();
-    writeln!(out, "    {{").unwrap();
-    writeln!(out, "        let rows = self.get().await?;").unwrap();
-    writeln!(
-        out,
-        "        Ok(rows.into_iter().map(|r| extract(&r)).collect())"
-    )
-    .unwrap();
-    writeln!(out, "    }}\n").unwrap();
-    writeln!(
-        out,
-        "    pub async fn sum(self, col: {col_ident}) -> Result<Option<f64>> {{"
-    )
-    .unwrap();
-
-    // with_counts - get rows with relation counts
-    if !has_many_rels.is_empty() {
-        let rel_ident = format!("{}Rel", model_title);
-        writeln!(out, "    pub async fn with_counts(self, rels: &[{rel_ident}]) -> Result<(Vec<{view_ident}>, std::collections::HashMap<String, std::collections::HashMap<i64, i64>>)> {{").unwrap();
-        writeln!(out, "        let db = self.db.clone();").unwrap();
-        writeln!(out, "        let rows = self.get().await?;").unwrap();
-        writeln!(
-            out,
-            "        let ids: Vec<i64> = rows.iter().map(|r| r.{pk}).collect();"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        if ids.is_empty() {{ return Ok((rows, std::collections::HashMap::new())); }}"
-        )
-        .unwrap();
-        writeln!(out, "        let mut all_counts: std::collections::HashMap<String, std::collections::HashMap<i64, i64>> = std::collections::HashMap::new();").unwrap();
-        writeln!(out, "        for rel in rels {{").unwrap();
-        writeln!(out, "            let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!(\"${{}}\", i)).collect();").unwrap();
-        writeln!(out, "            let sql = format!(").unwrap();
-        writeln!(out, "                \"SELECT {{}}, COUNT(*) as cnt FROM {{}} WHERE {{}} IN ({{}}) GROUP BY {{}}\",").unwrap();
-        writeln!(out, "                rel.foreign_key(), rel.target_table(), rel.foreign_key(), placeholders.join(\", \"), rel.foreign_key()").unwrap();
-        writeln!(out, "            );").unwrap();
-        writeln!(
-            out,
-            "            let mut q = sqlx::query_as::<_, (i64, i64)>(&sql);"
-        )
-        .unwrap();
-        writeln!(out, "            for id in &ids {{ q = q.bind(*id); }}").unwrap();
-        writeln!(
-            out,
-            "            let count_rows: Vec<(i64, i64)> = db.fetch_all(q).await?;"
-        )
-        .unwrap();
-        writeln!(out, "            let counts: std::collections::HashMap<i64, i64> = count_rows.into_iter().collect();").unwrap();
-        writeln!(
-            out,
-            "            all_counts.insert(rel.name().to_string(), counts);"
-        )
-        .unwrap();
-        writeln!(out, "        }}").unwrap();
-        writeln!(out, "        Ok((rows, all_counts))").unwrap();
-        writeln!(out, "    }}\n").unwrap();
-    }
-    writeln!(
-        out,
-        "        let Self {{ db, from_sql, join_sql, join_binds, where_sql, binds {extra} , .. }} = self;",
-        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
-    ).unwrap();
-    writeln!(out, "        let mut where_sql = where_sql;").unwrap();
-    if has_soft_delete {
-        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
-        writeln!(out, "            if only_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }} else if !with_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(
-        out,
-        "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
-    )
-    .unwrap();
-    writeln!(out, "        let from_clause = if join_sql.is_empty() {{").unwrap();
-    writeln!(out, "            format!(\"FROM {{}}\", table_name)").unwrap();
-    writeln!(out, "        }} else {{").unwrap();
-    writeln!(
-        out,
-        "            format!(\"FROM {{}} {{}}\", table_name, join_sql.join(\" \"))"
-    )
-    .unwrap();
-    writeln!(out, "        }};").unwrap();
-    writeln!(out, "        let where_clause = if where_sql.is_empty() {{ String::new() }} else {{ format!(\" WHERE {{}}\", where_sql.join(\" AND \")) }};").unwrap();
-    writeln!(out, "        let sql = format!(\"SELECT SUM({{}}::DOUBLE PRECISION) {{}}{{}}\", col.as_sql(), from_clause, where_clause);").unwrap();
-    writeln!(
-        out,
-        "        let mut q = sqlx::query_scalar::<_, Option<f64>>(&sql);"
-    )
-    .unwrap();
-    writeln!(out, "        for b in binds {{ q = bind_scalar(q, b); }}").unwrap();
-    writeln!(
-        out,
-        "        for b in join_binds {{ q = bind_scalar(q, b); }}"
-    )
-    .unwrap();
-    writeln!(out, "        let result = db.fetch_scalar(q).await?;").unwrap();
-    writeln!(out, "        Ok(result)").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-
-    // avg() aggregate
-    writeln!(
-        out,
-        "    pub async fn avg(self, col: {col_ident}) -> Result<Option<f64>> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let Self {{ db, from_sql, join_sql, join_binds, where_sql, binds {extra} , .. }} = self;",
-        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
-    ).unwrap();
-    writeln!(out, "        let mut where_sql = where_sql;").unwrap();
-    if has_soft_delete {
-        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
-        writeln!(out, "            if only_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }} else if !with_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(
-        out,
-        "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
-    )
-    .unwrap();
-    writeln!(out, "        let from_clause = if join_sql.is_empty() {{").unwrap();
-    writeln!(out, "            format!(\"FROM {{}}\", table_name)").unwrap();
-    writeln!(out, "        }} else {{").unwrap();
-    writeln!(
-        out,
-        "            format!(\"FROM {{}} {{}}\", table_name, join_sql.join(\" \"))"
-    )
-    .unwrap();
-    writeln!(out, "        }};").unwrap();
-    writeln!(out, "        let where_clause = if where_sql.is_empty() {{ String::new() }} else {{ format!(\" WHERE {{}}\", where_sql.join(\" AND \")) }};").unwrap();
-    writeln!(out, "        let sql = format!(\"SELECT AVG({{}}::DOUBLE PRECISION) {{}}{{}}\", col.as_sql(), from_clause, where_clause);").unwrap();
-    writeln!(
-        out,
-        "        let mut q = sqlx::query_scalar::<_, Option<f64>>(&sql);"
-    )
-    .unwrap();
-    writeln!(out, "        for b in binds {{ q = bind_scalar(q, b); }}").unwrap();
-    writeln!(
-        out,
-        "        for b in join_binds {{ q = bind_scalar(q, b); }}"
-    )
-    .unwrap();
-    writeln!(out, "        let result = db.fetch_scalar(q).await?;").unwrap();
-    writeln!(out, "        Ok(result)").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-
-    // min_val() aggregate - returns i64 for simplicity
-    writeln!(
-        out,
-        "    pub async fn min_val(self, col: {col_ident}) -> Result<Option<i64>> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let Self {{ db, from_sql, join_sql, join_binds, where_sql, binds {extra} , .. }} = self;",
-        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
-    ).unwrap();
-    writeln!(out, "        let mut where_sql = where_sql;").unwrap();
-    if has_soft_delete {
-        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
-        writeln!(out, "            if only_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }} else if !with_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(
-        out,
-        "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
-    )
-    .unwrap();
-    writeln!(out, "        let from_clause = if join_sql.is_empty() {{").unwrap();
-    writeln!(out, "            format!(\"FROM {{}}\", table_name)").unwrap();
-    writeln!(out, "        }} else {{").unwrap();
-    writeln!(
-        out,
-        "            format!(\"FROM {{}} {{}}\", table_name, join_sql.join(\" \"))"
-    )
-    .unwrap();
-    writeln!(out, "        }};").unwrap();
-    writeln!(out, "        let where_clause = if where_sql.is_empty() {{ String::new() }} else {{ format!(\" WHERE {{}}\", where_sql.join(\" AND \")) }};").unwrap();
-    writeln!(out, "        let sql = format!(\"SELECT MIN({{}}) {{}}{{}}\", col.as_sql(), from_clause, where_clause);").unwrap();
-    writeln!(
-        out,
-        "        let mut q = sqlx::query_scalar::<_, Option<i64>>(&sql);"
-    )
-    .unwrap();
-    writeln!(out, "        for b in binds {{ q = bind_scalar(q, b); }}").unwrap();
-    writeln!(
-        out,
-        "        for b in join_binds {{ q = bind_scalar(q, b); }}"
-    )
-    .unwrap();
-    writeln!(out, "        let result = db.fetch_scalar(q).await?;").unwrap();
-    writeln!(out, "        Ok(result)").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-
-    // max_val() aggregate - returns i64 for simplicity
-    writeln!(
-        out,
-        "    pub async fn max_val(self, col: {col_ident}) -> Result<Option<i64>> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let Self {{ db, from_sql, join_sql, join_binds, where_sql, binds {extra} , .. }} = self;",
-        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
-    ).unwrap();
-    writeln!(out, "        let mut where_sql = where_sql;").unwrap();
-    if has_soft_delete {
-        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
-        writeln!(out, "            if only_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }} else if !with_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(
-        out,
-        "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
-    )
-    .unwrap();
-    writeln!(out, "        let from_clause = if join_sql.is_empty() {{").unwrap();
-    writeln!(out, "            format!(\"FROM {{}}\", table_name)").unwrap();
-    writeln!(out, "        }} else {{").unwrap();
-    writeln!(
-        out,
-        "            format!(\"FROM {{}} {{}}\", table_name, join_sql.join(\" \"))"
-    )
-    .unwrap();
-    writeln!(out, "        }};").unwrap();
-    writeln!(out, "        let where_clause = if where_sql.is_empty() {{ String::new() }} else {{ format!(\" WHERE {{}}\", where_sql.join(\" AND \")) }};").unwrap();
-    writeln!(out, "        let sql = format!(\"SELECT MAX({{}}) {{}}{{}}\", col.as_sql(), from_clause, where_clause);").unwrap();
-    writeln!(
-        out,
-        "        let mut q = sqlx::query_scalar::<_, Option<i64>>(&sql);"
-    )
-    .unwrap();
-    writeln!(out, "        for b in binds {{ q = bind_scalar(q, b); }}").unwrap();
-    writeln!(
-        out,
-        "        for b in join_binds {{ q = bind_scalar(q, b); }}"
-    )
-    .unwrap();
-    writeln!(out, "        let result = db.fetch_scalar(q).await?;").unwrap();
-    writeln!(out, "        Ok(result)").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-
-    writeln!(
-        out,
-        "    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<{view_ident}>> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let page = if page < 1 {{ 1 }} else {{ page }};"
-    )
-    .unwrap();
-    writeln!(out, "        let per_page = resolve_per_page(per_page);").unwrap();
-    writeln!(
-        out,
-        "        let Self {{ db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds {extra}, .. }} = self;",
-        extra = if has_soft_delete {
-            ", with_deleted, only_deleted"
-        } else {
-            ""
-        }
-    )
-    .unwrap();
-    writeln!(out, "        let mut where_sql = where_sql;").unwrap();
-    if has_soft_delete {
-        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
-        writeln!(out, "            if only_deleted {{").unwrap();
-        writeln!(
-            out,
-            "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));"
-        )
-        .unwrap();
-        writeln!(out, "            }} else if !with_deleted {{").unwrap();
-        writeln!(
-            out,
-            "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));"
-        )
-        .unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(
-        out,
-        "        let select_clause = match (distinct, distinct_on.as_ref()) {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            (false, None) => select_sql.unwrap_or_else(|| \"*\".to_string()),"
-    )
-    .unwrap();
-    writeln!(out, "            (true, None) => format!(\"DISTINCT {{}}\", select_sql.unwrap_or_else(|| \"*\".to_string())),").unwrap();
-    writeln!(out, "            (_, Some(on)) => format!(\"DISTINCT ON ({{}}) {{}}\", on, select_sql.unwrap_or_else(|| \"*\".to_string())),").unwrap();
-    writeln!(out, "        }};").unwrap();
-    writeln!(
-        out,
-        "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
-    )
-    .unwrap();
-    writeln!(out, "        let from_clause = if join_sql.is_empty() {{").unwrap();
-    writeln!(out, "            format!(\"FROM {{}}\", table_name)").unwrap();
-    writeln!(out, "        }} else {{").unwrap();
-    writeln!(
-        out,
-        "            format!(\"FROM {{}} {{}}\", table_name, join_sql.join(\" \"))"
-    )
-    .unwrap();
-    writeln!(out, "        }};").unwrap();
-    writeln!(out, "        let where_clause = if where_sql.is_empty() {{ String::new() }} else {{ format!(\" WHERE {{}}\", where_sql.join(\" AND \")) }};").unwrap();
-
-    writeln!(
-        out,
-        "        let count_expr = count_sql.unwrap_or_else(|| \"COUNT(*)\".to_string());"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let count_sql = if distinct || distinct_on.is_some() {{"
-    )
-    .unwrap();
-    writeln!(out, "            format!(\"SELECT COUNT(*) FROM (SELECT {{}} {{}}{{}}) AS sub\", select_clause, from_clause, where_clause)").unwrap();
-    writeln!(out, "        }} else {{").unwrap();
-    writeln!(
-        out,
-        "            format!(\"SELECT {{}} {{}}{{}}\", count_expr, from_clause, where_clause)"
-    )
-    .unwrap();
-    writeln!(out, "        }};").unwrap();
-    writeln!(
-        out,
-        "        let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        for b in binds.iter().cloned() {{ count_q = bind_scalar(count_q, b); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        for b in join_binds.iter().cloned() {{ count_q = bind_scalar(count_q, b); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let total: i64 = db.fetch_scalar(count_q).await?;"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let last_page = ((total + per_page - 1) / per_page).max(1);"
-    )
-    .unwrap();
-    writeln!(out, "        let current_page = page.min(last_page);").unwrap();
-    writeln!(
-        out,
-        "        let offset_val = (current_page - 1) * per_page;"
-    )
-    .unwrap();
-    writeln!(out, "        let mut sql = format!(\"SELECT {{}} {{}}{{}}\", select_clause, from_clause, where_clause);").unwrap();
-    writeln!(out, "        if !order_sql.is_empty() {{").unwrap();
-    writeln!(out, "            sql.push_str(\" ORDER BY \");").unwrap();
-    writeln!(out, "            sql.push_str(&order_sql.join(\", \"));").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(
-        out,
-        "        sql.push_str(&format!(\" OFFSET {{}}\", offset_val));"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        sql.push_str(&format!(\" LIMIT {{}}\", per_page));"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        for b in binds.iter().cloned() {{ q = bind(q, b); }}"
-    )
-    .unwrap();
-    writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
-    writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-    writeln!(
-        out,
-        "        let ids: Vec<{parent_pk_ty}> = rows.iter().map(|r| r.{pk}.clone()).collect();"
-    )
-    .unwrap();
-    if localized_fields.is_empty() {
-        writeln!(out, "        let localized = LocalizedMap::default();").unwrap();
-    } else {
-        writeln!(
-            out,
-            "        let localized = localized::load_{model_snake}_localized(db, &ids).await?;"
-        )
-        .unwrap();
-    }
-    if has_meta {
-        writeln!(
-            out,
-            "        let meta_map = localized::load_{model_snake}_meta(db, &ids).await?;"
-        )
-        .unwrap();
-    }
-    if has_attachments {
-        writeln!(
-            out,
-            "        let attachments = localized::load_{model_snake}_attachments(db, &ids).await?;"
-        )
-        .unwrap();
-    }
-    writeln!(
-        out,
-        "        let mut data = Vec::with_capacity(rows.len());"
-    )
-    .unwrap();
-    writeln!(out, "        for r in rows {{").unwrap();
-    match (has_meta, has_attachments) {
-        (true, true) => writeln!(out, "            data.push(hydrate_view(r, &localized, &meta_map, &attachments, base_url.as_deref()));").unwrap(),
-        (true, false) => writeln!(out, "            data.push(hydrate_view(r, &localized, &meta_map, base_url.as_deref()));").unwrap(),
-        (false, true) => writeln!(out, "            data.push(hydrate_view(r, &localized, &attachments, base_url.as_deref()));").unwrap(),
-        (false, false) => {
-             if localized_fields.is_empty() {
-                writeln!(out, "            data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));").unwrap();
-            } else {
-                writeln!(out, "            data.push(hydrate_view(r, &localized, base_url.as_deref()));").unwrap();
-            }
-        }
-    }
-    writeln!(out, "        }}").unwrap();
-    writeln!(
-        out,
-        "        Ok(Page {{ data, total, per_page, current_page, last_page }})"
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
+    out.push_str(&render_paginate_method(
+        &view_ident,
+        &row_ident,
+        has_soft_delete,
+        &col_ident,
+        &table,
+        &model_snake,
+        &pk,
+        &parent_pk_ty,
+        &localized_fields,
+        has_meta,
+        has_attachments,
+    ));
 
     if !relations.is_empty() {
-        writeln!(
-            out,
-            "    pub async fn paginate_with_relations(self, page: i64, per_page: i64) -> Result<Page<{model_title}WithRelations>> {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let page = if page < 1 {{ 1 }} else {{ page }};"
-        )
-        .unwrap();
-        writeln!(out, "        let per_page = resolve_per_page(per_page);").unwrap();
-        writeln!(
-            out,
-            "        let Self {{ db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds {extra}, .. }} = self;",
-            extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
-        )
-        .unwrap();
-        writeln!(out, "        let mut where_sql = where_sql;").unwrap();
-        if has_soft_delete {
-            writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
-            writeln!(out, "            if only_deleted {{").unwrap();
-            writeln!(out, "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-            writeln!(out, "            }} else if !with_deleted {{").unwrap();
-            writeln!(out, "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-            writeln!(out, "            }}").unwrap();
-            writeln!(out, "        }}").unwrap();
-        }
-        writeln!(
-            out,
-            "        let select_clause = match (distinct, distinct_on.as_ref()) {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "            (false, None) => select_sql.unwrap_or_else(|| \"*\".to_string()),"
-        )
-        .unwrap();
-        writeln!(out, "            (true, None) => format!(\"DISTINCT {{}}\", select_sql.unwrap_or_else(|| \"*\".to_string())),").unwrap();
-        writeln!(out, "            (_, Some(on)) => format!(\"DISTINCT ON ({{}}) {{}}\", on, select_sql.unwrap_or_else(|| \"*\".to_string())),").unwrap();
-        writeln!(out, "        }};").unwrap();
-        writeln!(
-            out,
-            "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
-        )
-        .unwrap();
-        writeln!(out, "        let from_clause = if join_sql.is_empty() {{").unwrap();
-        writeln!(out, "            format!(\"FROM {{}}\", table_name)").unwrap();
-        writeln!(out, "        }} else {{").unwrap();
-        writeln!(
-            out,
-            "            format!(\"FROM {{}} {{}}\", table_name, join_sql.join(\" \"))"
-        )
-        .unwrap();
-        writeln!(out, "        }};").unwrap();
-        writeln!(out, "        let where_clause = if where_sql.is_empty() {{ String::new() }} else {{ format!(\" WHERE {{}}\", where_sql.join(\" AND \")) }};").unwrap();
-        writeln!(
-            out,
-            "        let count_expr = count_sql.unwrap_or_else(|| \"COUNT(*)\".to_string());"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let count_sql = if distinct || distinct_on.is_some() {{"
-        )
-        .unwrap();
-        writeln!(out, "            format!(\"SELECT COUNT(*) FROM (SELECT {{}} {{}}{{}}) AS sub\", select_clause, from_clause, where_clause)").unwrap();
-        writeln!(out, "        }} else {{").unwrap();
-        writeln!(
-            out,
-            "            format!(\"SELECT {{}} {{}}{{}}\", count_expr, from_clause, where_clause)"
-        )
-        .unwrap();
-        writeln!(out, "        }};").unwrap();
-        writeln!(
-            out,
-            "        let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        for b in binds.iter().cloned() {{ count_q = bind_scalar(count_q, b); }}"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        for b in join_binds.iter().cloned() {{ count_q = bind_scalar(count_q, b); }}"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let total: i64 = db.fetch_scalar(count_q).await?;"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let last_page = ((total + per_page - 1) / per_page).max(1);"
-        )
-        .unwrap();
-        writeln!(out, "        let current_page = page.min(last_page);").unwrap();
-        writeln!(
-            out,
-            "        let offset_val = (current_page - 1) * per_page;"
-        )
-        .unwrap();
-        writeln!(out, "        let mut sql = format!(\"SELECT {{}} {{}}{{}}\", select_clause, from_clause, where_clause);").unwrap();
-        writeln!(out, "        if !order_sql.is_empty() {{ sql.push_str(\" ORDER BY \"); sql.push_str(&order_sql.join(\", \")); }}").unwrap();
-        writeln!(
-            out,
-            "        sql.push_str(&format!(\" OFFSET {{}}\", offset_val));"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        sql.push_str(&format!(\" LIMIT {{}}\", per_page));"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        for b in binds.iter().cloned() {{ q = bind(q, b); }}"
-        )
-        .unwrap();
-        writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
-        writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-        writeln!(
-            out,
-            "        let m = {model_ident} {{ db: db.clone(), base_url: base_url.clone() }};"
-        )
-        .unwrap();
-        for rel in &relations {
-            let rel_name = to_snake(&rel.name);
-            writeln!(
-                out,
-                "        let {rel_name} = m.load_{rel_name}(&rows).await?;"
-            )
-            .unwrap();
-        }
-        writeln!(
-            out,
-            "        let ids: Vec<i64> = rows.iter().map(|r| r.{pk}).collect();"
-        )
-        .unwrap();
-        if localized_fields.is_empty() {
-            writeln!(out, "        let localized = LocalizedMap::default();").unwrap();
-        } else {
-            writeln!(out, "        let localized = localized::load_{model_snake}_localized(db.clone(), &ids).await?;").unwrap();
-        }
-        if has_meta {
-            writeln!(out, "        let meta_map = localized::load_{model_snake}_meta(db.clone(), &ids).await?;").unwrap();
-        }
-        if has_attachments {
-            writeln!(out, "        let attachments = localized::load_{model_snake}_attachments(db.clone(), &ids).await?;").unwrap();
-        }
-        writeln!(
-            out,
-            "        let mut data = Vec::with_capacity(rows.len());"
-        )
-        .unwrap();
-        writeln!(out, "        for row in rows {{").unwrap();
-        writeln!(out, "            let key = row.{pk}.clone();").unwrap();
-        match (has_meta, has_attachments) {
-            (true, true) => writeln!(out, "            let view = hydrate_view(row.clone(), &localized, &meta_map, &attachments, base_url.as_deref());").unwrap(),
-            (true, false) => writeln!(out, "            let view = hydrate_view(row.clone(), &localized, &meta_map, base_url.as_deref());").unwrap(),
-            (false, true) => writeln!(out, "            let view = hydrate_view(row.clone(), &localized, &attachments, base_url.as_deref());").unwrap(),
-            (false, false) => {
-                if localized_fields.is_empty() {
-                    writeln!(out, "            let view = hydrate_view(row.clone(), &LocalizedMap::default(), base_url.as_deref());").unwrap();
-                } else {
-                    writeln!(out, "            let view = hydrate_view(row.clone(), &localized, base_url.as_deref());").unwrap();
-                }
-            }
-        }
-        writeln!(out, "            data.push({model_title}WithRelations {{").unwrap();
-        writeln!(out, "                row: view,").unwrap();
-        for rel in &relations {
-            let field = to_snake(&rel.name);
-            match rel.kind {
-                RelationKind::HasMany => {
-                    writeln!(
-                        out,
-                        "                {field}: {field}.get(&key).cloned().unwrap_or_default(),"
-                    )
-                    .unwrap();
-                }
-                RelationKind::BelongsTo => {
-                    writeln!(
-                        out,
-                        "                {field}: {field}.get(&key).cloned().unwrap_or(None),"
-                    )
-                    .unwrap();
-                }
-            }
-        }
-        writeln!(out, "            }});").unwrap();
-        writeln!(out, "        }}").unwrap();
-        writeln!(
-            out,
-            "        Ok(Page {{ data, total, per_page, current_page, last_page }})"
-        )
-        .unwrap();
-        writeln!(out, "    }}").unwrap();
+        out.push_str(&render_paginate_with_relations_method(
+            &model_title,
+            &model_ident,
+            &row_ident,
+            has_soft_delete,
+            &col_ident,
+            &table,
+            &model_snake,
+            &pk,
+            &parent_pk_ty,
+            &relations,
+            &localized_fields,
+            has_meta,
+            has_attachments,
+        ));
     }
 
-    writeln!(
-        out,
-        "    pub fn into_where_parts(self) -> (Vec<String>, Vec<BindValue>) {{"
-    )
-    .unwrap();
+    out.push_str(&render_into_where_parts_method(&col_ident, has_soft_delete));
+    out.push_str(&render_delete_method(&table, &col_ident, has_soft_delete));
     if has_soft_delete {
-        writeln!(
-            out,
-            "        let Self {{ where_sql, binds, with_deleted, only_deleted, .. }} = self;"
-        )
-        .unwrap();
-    } else {
-        writeln!(out, "        let Self {{ where_sql, binds, .. }} = self;").unwrap();
-    }
-    writeln!(out, "        let mut where_sql = where_sql;").unwrap();
-    if has_soft_delete {
-        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
-        writeln!(out, "            if only_deleted {{").unwrap();
-        writeln!(
-            out,
-            "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));"
-        )
-        .unwrap();
-        writeln!(out, "            }} else if !with_deleted {{").unwrap();
-        writeln!(
-            out,
-            "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));"
-        )
-        .unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(out, "        (where_sql, binds)").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out, "    pub async fn delete(self) -> Result<u64> {{").unwrap();
-    writeln!(out, "        if self.limit.is_some() {{").unwrap();
-    writeln!(
-        out,
-        "            anyhow::bail!(\"delete() does not support limit; add where clauses\");"
-    )
-    .unwrap();
-    writeln!(out, "        }}").unwrap();
-    if has_soft_delete {
-        writeln!(
-            out,
-            "        let Self {{ db, where_sql, binds, with_deleted, only_deleted, .. }} = self;"
-        )
-        .unwrap();
-    } else {
-        writeln!(
-            out,
-            "        let Self {{ db, where_sql, binds, .. }} = self;"
-        )
-        .unwrap();
-    }
-    writeln!(
-        out,
-        "        if where_sql.is_empty() {{ anyhow::bail!(\"delete(): no conditions set\"); }}"
-    )
-    .unwrap();
-    if has_soft_delete {
-        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
-        writeln!(out, "            let mut where_sql = where_sql;").unwrap();
-        writeln!(out, "            if only_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }} else if !with_deleted {{").unwrap();
-        writeln!(out, "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));").unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "            let idx = binds.len() + 1;").unwrap();
-        writeln!(out, "            let mut sql = format!(\"UPDATE {table} SET {{}} = ${{}}\", {col_ident}::DeletedAt.as_sql(), idx);").unwrap();
-        writeln!(out, "            if !where_sql.is_empty() {{").unwrap();
-        writeln!(out, "                sql.push_str(\" WHERE \");").unwrap();
-        writeln!(
-            out,
-            "                sql.push_str(&where_sql.join(\" AND \"));"
-        )
-        .unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "            let mut q = sqlx::query(&sql);").unwrap();
-        writeln!(
-            out,
-            "            for b in binds {{ q = bind_query(q, b); }}"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "            q = bind_query(q, time::OffsetDateTime::now_utc().into());"
-        )
-        .unwrap();
-        writeln!(out, "            let res = db.execute(q).await?;").unwrap();
-        writeln!(out, "            return Ok(res.rows_affected());").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(
-        out,
-        "        let mut sql = String::from(\"DELETE FROM {table}\");"
-    )
-    .unwrap();
-    writeln!(out, "        if !where_sql.is_empty() {{").unwrap();
-    writeln!(out, "            sql.push_str(\" WHERE \");").unwrap();
-    writeln!(out, "            sql.push_str(&where_sql.join(\" AND \"));").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
-    writeln!(out, "        for b in binds {{ q = bind_query(q, b); }}").unwrap();
-    writeln!(out, "        let res = db.execute(q).await?;").unwrap();
-    writeln!(out, "        Ok(res.rows_affected())").unwrap();
-    writeln!(out, "    }}").unwrap();
-    if has_soft_delete {
-        writeln!(out, "    pub async fn restore(self) -> Result<u64> {{").unwrap();
-        writeln!(
-            out,
-            "        if !HAS_SOFT_DELETE {{ anyhow::bail!(\"restore() not supported\"); }}"
-        )
-        .unwrap();
-        writeln!(out, "        if self.limit.is_some() {{").unwrap();
-        writeln!(
-            out,
-            "            anyhow::bail!(\"restore() does not support limit; add where clauses\");"
-        )
-        .unwrap();
-        writeln!(out, "        }}").unwrap();
-        writeln!(
-            out,
-            "        let Self {{ db, where_sql, binds, with_deleted, only_deleted, .. }} = self;"
-        )
-        .unwrap();
-        writeln!(out, "        if where_sql.is_empty() {{ anyhow::bail!(\"restore(): no conditions set\"); }}").unwrap();
-        writeln!(out, "        let mut where_sql = where_sql;").unwrap();
-        writeln!(out, "        if !with_deleted && !only_deleted {{").unwrap();
-        writeln!(
-            out,
-            "            where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));"
-        )
-        .unwrap();
-        writeln!(out, "        }}").unwrap();
-        writeln!(out, "        let mut sql = format!(\"UPDATE {table} SET {{}} = NULL\", {col_ident}::DeletedAt.as_sql());").unwrap();
-        writeln!(out, "        if !where_sql.is_empty() {{").unwrap();
-        writeln!(out, "            sql.push_str(\" WHERE \");").unwrap();
-        writeln!(out, "            sql.push_str(&where_sql.join(\" AND \"));").unwrap();
-        writeln!(out, "        }}").unwrap();
-        writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
-        writeln!(out, "        for b in binds {{ q = bind_query(q, b); }}").unwrap();
-        writeln!(out, "        let res = db.execute(q).await?;").unwrap();
-        writeln!(out, "        Ok(res.rows_affected())").unwrap();
-        writeln!(out, "    }}").unwrap();
+        out.push_str(&render_restore_method(&table, &col_ident));
     }
     writeln!(out, "}}\n").unwrap();
+
+    let query_terminal_methods_section = out;
+    let mut out = String::new();
 
     writeln!(out, "#[doc(hidden)]").unwrap();
     writeln!(out, "pub struct {unsafe_query_ident}<'db> {{").unwrap();
@@ -3748,6 +4434,35 @@ fn render_model(
     .unwrap();
     writeln!(out, "}}\n").unwrap();
 
+    let unsafe_query_section = out;
+    let mut query_context = TemplateContext::new();
+    query_context
+        .insert(
+            "query_struct_section",
+            query_struct_section.trim_start().to_string(),
+        )
+        .unwrap();
+    query_context
+        .insert(
+            "query_builder_methods_section",
+            query_builder_methods_section.trim_start().to_string(),
+        )
+        .unwrap();
+    query_context
+        .insert(
+            "query_terminal_methods_section",
+            query_terminal_methods_section.trim_start().to_string(),
+        )
+        .unwrap();
+    query_context
+        .insert(
+            "unsafe_query_section",
+            unsafe_query_section.trim_start().to_string(),
+        )
+        .unwrap();
+    let query_section = render_template("models/query.rs.tpl", &query_context).unwrap();
+    let mut out = String::new();
+
     // Insert builder (DB columns + localized setters)
     writeln!(out, "pub struct {insert_ident}<'db> {{").unwrap();
     writeln!(out, "    db: DbConn<'db>,").unwrap();
@@ -3806,241 +4521,21 @@ fn render_model(
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
 
-    for f in &db_fields {
-        let fn_name = format!("set_{}", to_snake(&f.name));
+    let insert_struct_section = out;
+    let mut out = String::new();
 
-        if let Some(SpecialType::Hashed) = f.special_type {
-            // Hashed Type Logic
-
-            // 1. set_{name} -> Hashes the input
-            writeln!(
-                out,
-                "    pub fn {fn_name}(mut self, val: &str) -> anyhow::Result<Self> {{",
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        let hashed = core_db::common::auth::hash::hash_password(val)?;"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.cols.push({col_ident}::{});",
-                to_title_case(&f.name)
-            )
-            .unwrap();
-            writeln!(out, "        self.binds.push(hashed.into());").unwrap();
-            writeln!(out, "        Ok(self)").unwrap();
-            writeln!(out, "    }}").unwrap();
-
-            // 2. set_{name}_raw -> Sets raw hash (String)
-            let fn_name_raw = format!("{}_raw", fn_name);
-            writeln!(
-                out,
-                "    pub fn {fn_name_raw}(mut self, val: String) -> Self {{",
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.cols.push({col_ident}::{});",
-                to_title_case(&f.name)
-            )
-            .unwrap();
-            writeln!(out, "        self.binds.push(val.into());").unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-        } else {
-            // Standard Logic
-            writeln!(
-                out,
-                "    pub fn {fn_name}(mut self, val: {typ}) -> Self {{",
-                typ = f.ty
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.cols.push({col_ident}::{});",
-                to_title_case(&f.name)
-            )
-            .unwrap();
-            writeln!(out, "        self.binds.push(val.into());").unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-        }
-    }
+    out.push_str(&render_insert_field_setters(&db_fields, &col_ident));
     if !localized_fields.is_empty() {
-        for f in &localized_fields {
-            let fn_name = format!("set_{}_lang", to_snake(f));
-            // Strong typed setter
-            writeln!(out, "    pub fn {fn_name}(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {{").unwrap();
-            writeln!(out, "        self.translations.entry(\"{f}\").or_default().insert(locale.into(), val.into());").unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-
-            // Bulk setter
-            let fn_name_bulk = format!("set_{}_langs", to_snake(f));
-            writeln!(
-                out,
-                "    pub fn {fn_name_bulk}(mut self, langs: localized::LocalizedText) -> Self {{"
-            )
-            .unwrap();
-            for lang in &cfgs.languages.supported {
-                let variant = to_title_case(lang);
-                writeln!(out, "        if !langs.{lang}.is_empty() {{ self = self.{fn_name}(localized::Locale::{variant}, langs.{lang}); }}").unwrap();
-            }
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-        }
+        out.push_str(&render_localized_setters(&localized_fields, cfgs));
     }
     if has_meta {
-        for m in &meta_fields {
-            let fn_name = format!("set_meta_{}", m.name);
-            match &m.ty {
-                MetaType::String => {
-                    writeln!(
-                        out,
-                        "    pub fn {fn_name}(mut self, val: impl Into<String>) -> Self {{"
-                    )
-                    .unwrap();
-                    writeln!(out, "        self.meta.insert(\"{name}\".to_string(), JsonValue::String(val.into()));", name = m.name).unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::Bool => {
-                    writeln!(out, "    pub fn {fn_name}(mut self, val: bool) -> Self {{").unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), JsonValue::Bool(val));",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::I32 => {
-                    writeln!(out, "    pub fn {fn_name}(mut self, val: i32) -> Self {{").unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val));",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::I64 => {
-                    writeln!(out, "    pub fn {fn_name}(mut self, val: i64) -> Self {{").unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val));",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::F64 => {
-                    writeln!(out, "    pub fn {fn_name}(mut self, val: f64) -> Self {{").unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val));",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::Json => {
-                    writeln!(
-                        out,
-                        "    pub fn {fn_name}(mut self, val: JsonValue) -> Self {{"
-                    )
-                    .unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), val);",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                    let typed_fn_name = format!("set_meta_{}_as", m.name);
-                    writeln!(
-                        out,
-                        "    pub fn {typed_fn_name}<T: serde::Serialize>(mut self, val: &T) -> anyhow::Result<Self> {{"
-                    )
-                    .unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), serde_json::to_value(val)?);",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        Ok(self)").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::DateTime => {
-                    writeln!(
-                        out,
-                        "    pub fn {fn_name}(mut self, val: time::OffsetDateTime) -> Self {{"
-                    )
-                    .unwrap();
-                    writeln!(out, "        self.meta.insert(\"{name}\".to_string(), JsonValue::String(val.to_string()));", name = m.name).unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::Custom(ty) => {
-                    writeln!(
-                        out,
-                        "    pub fn {fn_name}(mut self, val: &{ty}) -> anyhow::Result<Self> {{",
-                        ty = ty
-                    )
-                    .unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), serde_json::to_value(val)?);",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        Ok(self)").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-            }
-        }
+        out.push_str(&render_meta_setters(&meta_fields));
     }
     if has_attachments {
-        for a in &single_attachments {
-            let fn_name = format!("set_attachment_{}", to_snake(&a.name));
-            writeln!(
-                out,
-                "    pub fn {fn_name}(mut self, att: AttachmentInput) -> Self {{"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.attachments_single.insert(\"{name}\", att);",
-                name = a.name
-            )
-            .unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-        }
-        for a in &multi_attachments {
-            let fn_name = format!("add_attachment_{}", to_snake(&a.name));
-            writeln!(
-                out,
-                "    pub fn {fn_name}(mut self, att: AttachmentInput) -> Self {{"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.attachments_multi.entry(\"{name}\").or_default().push(att);",
-                name = a.name
-            )
-            .unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-        }
+        out.push_str(&render_insert_attachment_setters(
+            &single_attachments,
+            &multi_attachments,
+        ));
     }
 
     // on_conflict_do_nothing - INSERT ... ON CONFLICT DO NOTHING
@@ -4064,6 +4559,9 @@ fn render_model(
     writeln!(out, "        self.conflict_cols = conflict_cols.to_vec();").unwrap();
     writeln!(out, "        self").unwrap();
     writeln!(out, "    }}").unwrap();
+
+    let insert_builder_methods_section = out;
+    let mut out = String::new();
 
     writeln!(
         out,
@@ -4323,6 +4821,29 @@ fn render_model(
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
 
+    let insert_save_methods_section = out;
+    let mut insert_context = TemplateContext::new();
+    insert_context
+        .insert(
+            "insert_struct_section",
+            insert_struct_section.trim_start().to_string(),
+        )
+        .unwrap();
+    insert_context
+        .insert(
+            "insert_builder_methods_section",
+            insert_builder_methods_section.trim_start().to_string(),
+        )
+        .unwrap();
+    insert_context
+        .insert(
+            "insert_save_methods_section",
+            insert_save_methods_section.trim_start().to_string(),
+        )
+        .unwrap();
+    let insert_section = render_template("models/insert.rs.tpl", &insert_context).unwrap();
+    let mut out = String::new();
+
     // Update builder (DB columns only)
     writeln!(out, "pub struct {update_ident}<'db> {{").unwrap();
     writeln!(out, "    db: DbConn<'db>,").unwrap();
@@ -4392,272 +4913,21 @@ fn render_model(
     )
     .unwrap();
 
-    for f in &db_fields {
-        let fn_name = format!("set_{}", to_snake(&f.name));
+    let update_struct_section = out;
+    let mut out = String::new();
 
-        if let Some(SpecialType::Hashed) = f.special_type {
-            // Hashed Type Logic
-
-            // 1. set_{name} -> Hashes the input
-            writeln!(
-                out,
-                "    pub fn {fn_name}(mut self, val: &str) -> anyhow::Result<Self> {{",
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        let hashed = core_db::common::auth::hash::hash_password(val)?;"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.sets.push(({col_ident}::{} , hashed.into()));",
-                to_title_case(&f.name)
-            )
-            .unwrap();
-            writeln!(out, "        Ok(self)").unwrap();
-            writeln!(out, "    }}").unwrap();
-
-            // 2. set_{name}_raw -> Sets raw hash (String)
-            let fn_name_raw = format!("{}_raw", fn_name);
-            writeln!(
-                out,
-                "    pub fn {fn_name_raw}(mut self, val: String) -> Self {{",
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.sets.push(({col_ident}::{} , val.into()));",
-                to_title_case(&f.name)
-            )
-            .unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-        } else {
-            // Standard Logic
-            writeln!(
-                out,
-                "    pub fn {fn_name}(mut self, val: {typ}) -> Self {{",
-                typ = f.ty
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.sets.push(({col_ident}::{} , val.into()));",
-                to_title_case(&f.name)
-            )
-            .unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-        }
-    }
-
+    out.push_str(&render_update_field_setters(&db_fields, &col_ident));
     if !localized_fields.is_empty() {
-        for f in &localized_fields {
-            let fn_name = format!("set_{}_lang", to_snake(f));
-            // Strong typed setter
-            writeln!(out, "    pub fn {fn_name}(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {{").unwrap();
-            writeln!(out, "        self.translations.entry(\"{f}\").or_default().insert(locale.into(), val.into());").unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-
-            // Bulk setter
-            let fn_name_bulk = format!("set_{}_langs", to_snake(f));
-            writeln!(
-                out,
-                "    pub fn {fn_name_bulk}(mut self, langs: localized::LocalizedText) -> Self {{"
-            )
-            .unwrap();
-            for lang in &cfgs.languages.supported {
-                let variant = to_title_case(lang);
-                writeln!(out, "        if !langs.{lang}.is_empty() {{ self = self.{fn_name}(localized::Locale::{variant}, langs.{lang}); }}").unwrap();
-            }
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-        }
+        out.push_str(&render_localized_setters(&localized_fields, cfgs));
     }
-
     if has_meta {
-        for m in &meta_fields {
-            let fn_name = format!("set_meta_{}", m.name);
-            match &m.ty {
-                MetaType::String => {
-                    writeln!(
-                        out,
-                        "    pub fn {fn_name}(mut self, val: impl Into<String>) -> Self {{"
-                    )
-                    .unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), JsonValue::String(val.into()));",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::Bool => {
-                    writeln!(out, "    pub fn {fn_name}(mut self, val: bool) -> Self {{").unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), JsonValue::Bool(val));",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::I32 => {
-                    writeln!(out, "    pub fn {fn_name}(mut self, val: i32) -> Self {{").unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val));",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::I64 => {
-                    writeln!(out, "    pub fn {fn_name}(mut self, val: i64) -> Self {{").unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val));",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::F64 => {
-                    writeln!(out, "    pub fn {fn_name}(mut self, val: f64) -> Self {{").unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val));",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::Json => {
-                    writeln!(
-                        out,
-                        "    pub fn {fn_name}(mut self, val: JsonValue) -> Self {{"
-                    )
-                    .unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), val);",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                    let typed_fn_name = format!("set_meta_{}_as", m.name);
-                    writeln!(
-                        out,
-                        "    pub fn {typed_fn_name}<T: serde::Serialize>(mut self, val: &T) -> anyhow::Result<Self> {{"
-                    )
-                    .unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), serde_json::to_value(val)?);",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        Ok(self)").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::DateTime => {
-                    writeln!(
-                        out,
-                        "    pub fn {fn_name}(mut self, val: time::OffsetDateTime) -> Self {{"
-                    )
-                    .unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), JsonValue::String(val.to_string()));",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        self").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-                MetaType::Custom(ty) => {
-                    writeln!(
-                        out,
-                        "    pub fn {fn_name}(mut self, val: &{ty}) -> anyhow::Result<Self> {{",
-                        ty = ty
-                    )
-                    .unwrap();
-                    writeln!(
-                        out,
-                        "        self.meta.insert(\"{name}\".to_string(), serde_json::to_value(val)?);",
-                        name = m.name
-                    )
-                    .unwrap();
-                    writeln!(out, "        Ok(self)").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-            }
-        }
+        out.push_str(&render_meta_setters(&meta_fields));
     }
-
     if has_attachments {
-        for a in &single_attachments {
-            let fn_name = format!("set_attachment_{}", to_snake(&a.name));
-            writeln!(
-                out,
-                "    pub fn {fn_name}(mut self, att: AttachmentInput) -> Self {{"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.attachments_single.insert(\"{name}\", att);",
-                name = a.name
-            )
-            .unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-
-            let clear_fn = format!("clear_attachment_{}", to_snake(&a.name));
-            writeln!(out, "    pub fn {clear_fn}(mut self) -> Self {{").unwrap();
-            writeln!(out, "        if !self.attachments_clear_single.contains(&\"{name}\") {{ self.attachments_clear_single.push(\"{name}\"); }}", name = a.name).unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-        }
-        for a in &multi_attachments {
-            let add_fn = format!("add_attachment_{}", to_snake(&a.name));
-            writeln!(
-                out,
-                "    pub fn {add_fn}(mut self, att: AttachmentInput) -> Self {{"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.attachments_multi.entry(\"{name}\").or_default().push(att);",
-                name = a.name
-            )
-            .unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-
-            let del_fn = format!("delete_attachment_{}", to_snake(&a.name));
-            writeln!(
-                out,
-                "    pub fn {del_fn}(mut self, ids: impl IntoIterator<Item = Uuid>) -> Self {{"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.attachments_delete_multi.entry(\"{name}\").or_default().extend(ids);",
-                name = a.name
-            )
-            .unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-        }
+        out.push_str(&render_update_attachment_setters(
+            &single_attachments,
+            &multi_attachments,
+        ));
     }
 
     for f in &db_fields {
@@ -4716,6 +4986,9 @@ fn render_model(
     writeln!(out, "        self.binds.extend(incoming);").unwrap();
     writeln!(out, "        self").unwrap();
     writeln!(out, "    }}").unwrap();
+
+    let update_builder_methods_section = out;
+    let mut out = String::new();
 
     writeln!(out, "    pub async fn save(self) -> Result<u64> {{").unwrap();
     writeln!(
@@ -4981,6 +5254,9 @@ fn render_model(
 
     writeln!(out, "}}").unwrap();
 
+    let update_save_methods_section = out;
+    let mut out = String::new();
+
     writeln!(out, "#[doc(hidden)]").unwrap();
     writeln!(out, "pub struct {unsafe_update_ident}<'db> {{").unwrap();
     writeln!(out, "    inner: {update_ident}<'db>,").unwrap();
@@ -5002,6 +5278,35 @@ fn render_model(
     )
     .unwrap();
     writeln!(out, "}}").unwrap();
+
+    let unsafe_update_section = out;
+    let mut update_context = TemplateContext::new();
+    update_context
+        .insert(
+            "update_struct_section",
+            update_struct_section.trim_start().to_string(),
+        )
+        .unwrap();
+    update_context
+        .insert(
+            "update_builder_methods_section",
+            update_builder_methods_section.trim_start().to_string(),
+        )
+        .unwrap();
+    update_context
+        .insert(
+            "update_save_methods_section",
+            update_save_methods_section.trim_start().to_string(),
+        )
+        .unwrap();
+    update_context
+        .insert(
+            "unsafe_update_section",
+            unsafe_update_section.trim_start().to_string(),
+        )
+        .unwrap();
+    let update_section = render_template("models/update.rs.tpl", &update_context).unwrap();
+    let mut out = String::new();
 
     if options.include_datatable {
         let table_adapter_ident = format!("{}TableAdapter", model_title);
@@ -6258,9 +6563,12 @@ fn render_model(
         out,
         "    fn default_row_per_page(&self, ctx: &DataTableContext) -> i64 {{ self.config.default_row_per_page.unwrap_or(ctx.default_per_page) }}"
     )
-    .unwrap();
+        .unwrap();
         writeln!(out, "}}").unwrap();
     }
+
+    let datatable_section = out;
+    let mut out = String::new();
 
     // Implement ActiveRecord for View
     writeln!(out).unwrap();
@@ -6281,61 +6589,51 @@ fn render_model(
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
 
-    out
+    let active_record_section = out;
+
+    let mut context = TemplateContext::new();
+    context
+        .insert("imports", imports.trim_end().to_string())
+        .unwrap();
+    context
+        .insert("constants", constants.trim_end().to_string())
+        .unwrap();
+    context
+        .insert(
+            "row_view_json_section",
+            row_view_json_section.trim_start().to_string(),
+        )
+        .unwrap();
+    context
+        .insert(
+            "column_model_section",
+            column_model_section.trim_start().to_string(),
+        )
+        .unwrap();
+    context
+        .insert("query_section", query_section.trim_start().to_string())
+        .unwrap();
+    context
+        .insert("insert_section", insert_section.trim_start().to_string())
+        .unwrap();
+    context
+        .insert("update_section", update_section.trim_start().to_string())
+        .unwrap();
+    context
+        .insert(
+            "datatable_section",
+            datatable_section.trim_start().to_string(),
+        )
+        .unwrap();
+    context
+        .insert(
+            "active_record_section",
+            active_record_section.trim_start().to_string(),
+        )
+        .unwrap();
+    render_template("models/model.rs.tpl", &context).unwrap()
 }
 
 fn generate_common() -> String {
-    let mut out = String::new();
-    writeln!(out, "use serde::{{Deserialize, Serialize}};").unwrap();
-    writeln!(out,).unwrap();
-
-    // renumber_placeholders
-    writeln!(
-        out,
-        "pub fn renumber_placeholders(sql: &str, start: usize) -> String {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    let mut out = String::with_capacity(sql.len() + 8);"
-    )
-    .unwrap();
-    writeln!(out, "    let mut i = 0;").unwrap();
-    writeln!(out, "    let bytes = sql.as_bytes();").unwrap();
-    writeln!(out, "    while i < bytes.len() {{").unwrap();
-    writeln!(out, "        if bytes[i] == b'$' {{").unwrap();
-    writeln!(out, "            i += 1;").unwrap();
-    writeln!(out, "            let start_idx = i;").unwrap();
-    writeln!(
-        out,
-        "            while i < bytes.len() && bytes[i].is_ascii_digit() {{ i += 1; }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            let num: usize = sql[start_idx..i].parse().unwrap_or(0);"
-    )
-    .unwrap();
-    writeln!(out, "            let new_idx = start + num - 1;").unwrap();
-    writeln!(out, "            out.push('$');").unwrap();
-    writeln!(out, "            out.push_str(&new_idx.to_string());").unwrap();
-    writeln!(out, "        }} else {{").unwrap();
-    writeln!(out, "            out.push(bytes[i] as char);").unwrap();
-    writeln!(out, "            i += 1;").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out, "    out").unwrap();
-    writeln!(out, "}}").unwrap();
-
-    // Page
-    writeln!(out, "#[derive(Debug, Clone, Serialize, Deserialize)]").unwrap();
-    writeln!(out, "pub struct Page<T> {{").unwrap();
-    writeln!(out, "    pub data: Vec<T>,").unwrap();
-    writeln!(out, "    pub total: i64,").unwrap();
-    writeln!(out, "    pub per_page: i64,").unwrap();
-    writeln!(out, "    pub current_page: i64,").unwrap();
-    writeln!(out, "    pub last_page: i64,").unwrap();
-    writeln!(out, "}}").unwrap();
-
-    out
+    render_template("models/common.rs.tpl", &TemplateContext::new()).unwrap()
 }

@@ -1,4 +1,6 @@
 use crate::schema::{to_snake, EnumSpec, EnumVariants};
+use crate::template::{render_template, TemplateContext};
+use std::error::Error;
 
 #[derive(Debug, Clone, Copy)]
 pub struct GenerateEnumsOptions {
@@ -13,7 +15,6 @@ impl Default for GenerateEnumsOptions {
     }
 }
 
-/// Generate Rust enum code from EnumSpec
 pub fn generate_enum(name: &str, spec: &EnumSpec) -> String {
     generate_enum_with_options(name, spec, GenerateEnumsOptions::default())
 }
@@ -25,8 +26,6 @@ pub fn generate_enum_with_options(
 ) -> String {
     match spec.storage.as_str() {
         "string" | "text" => generate_string_enum(name, spec, options),
-        // PostgreSQL only has SMALLINT (i16), INTEGER (i32), and BIGINT (i64)
-        // No TINYINT (i8) or unsigned types
         "i16" | "i32" | "i64" => generate_integer_enum(name, spec, options),
         _ => panic!(
             "Unsupported enum storage type: {}. Supported: string, i16, i32, i64",
@@ -35,37 +34,203 @@ pub fn generate_enum_with_options(
     }
 }
 
-/// Generate string-based enum (stored as TEXT in database)
 fn generate_string_enum(name: &str, spec: &EnumSpec, options: GenerateEnumsOptions) -> String {
-    let variants = extract_variant_names(&spec.variants);
-    let variant_self_list = variants
+    let value_map = string_value_map(name, spec);
+    let variant_names = value_map
         .iter()
-        .map(|variant| format!("Self::{}", variant))
-        .collect::<Vec<_>>()
-        .join(", ");
+        .map(|(variant, _)| variant.clone())
+        .collect::<Vec<_>>();
+    let storage_values = value_map
+        .iter()
+        .map(|(_, value)| value.clone())
+        .collect::<Vec<_>>();
 
-    // Get value mappings
-    let value_map: Vec<(String, String)> = match &spec.variants {
-        EnumVariants::Simple(names) => {
-            // Use lowercase variant names as values
-            names
+    let mut context = TemplateContext::new();
+    context.insert("name", name.to_string()).unwrap();
+    context
+        .insert("variant_list", render_string_variant_list(&value_map))
+        .unwrap();
+    context
+        .insert(
+            "as_str_arms",
+            render_string_match_arms(&value_map, |(_, value)| value),
+        )
+        .unwrap();
+    context
+        .insert(
+            "as_label_arms",
+            render_string_match_arms(&value_map, |(variant, _)| variant),
+        )
+        .unwrap();
+    context
+        .insert(
+            "from_storage_arms",
+            render_string_from_storage_arms(&value_map),
+        )
+        .unwrap();
+    context
+        .insert(
+            "encode_arms",
+            render_string_match_arms(&value_map, |(_, value)| value),
+        )
+        .unwrap();
+    context
+        .insert("decode_arms", render_string_decode_arms(&value_map))
+        .unwrap();
+    context
+        .insert(
+            "encode_arms_qualified",
+            render_string_encode_arms_qualified(name, &value_map),
+        )
+        .unwrap();
+    insert_shared_enum_context(&mut context, name, &variant_names, &storage_values, options);
+
+    render_template("enums/string_enum.rs.tpl", &context).unwrap()
+}
+
+fn generate_integer_enum(name: &str, spec: &EnumSpec, options: GenerateEnumsOptions) -> String {
+    let rust_type = &spec.storage;
+    let (variant_decls, value_map) = integer_enum_parts(name, spec);
+    let variant_names = value_map
+        .iter()
+        .map(|(variant, _)| variant.clone())
+        .collect::<Vec<_>>();
+    let storage_values = value_map
+        .iter()
+        .map(|(_, value)| value.to_string())
+        .collect::<Vec<_>>();
+
+    let mut context = TemplateContext::new();
+    context.insert("name", name.to_string()).unwrap();
+    context.insert("rust_type", rust_type.to_string()).unwrap();
+    context.insert("variant_decls", variant_decls).unwrap();
+    context
+        .insert("as_str_arms", render_integer_match_arms(&value_map, true))
+        .unwrap();
+    context
+        .insert(
+            "as_label_arms",
+            render_integer_match_arms(&value_map, false),
+        )
+        .unwrap();
+    context
+        .insert(
+            "from_storage_arms",
+            value_map
                 .iter()
-                .map(|n| (n.clone(), n.to_lowercase()))
-                .collect()
-        }
+                .map(|(variant, value)| format!("            {value} => Some(Self::{variant}),"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+    context
+        .insert(
+            "decode_match",
+            indent_block(&generate_int_decode_match(&value_map, name), 8),
+        )
+        .unwrap();
+    insert_shared_enum_context(&mut context, name, &variant_names, &storage_values, options);
+
+    render_template("enums/integer_enum.rs.tpl", &context).unwrap()
+}
+
+fn string_value_map(name: &str, spec: &EnumSpec) -> Vec<(String, String)> {
+    match &spec.variants {
+        EnumVariants::Simple(names) => names
+            .iter()
+            .map(|name| (name.clone(), name.to_lowercase()))
+            .collect(),
         EnumVariants::Explicit(vars) => vars
             .iter()
-            .map(|v| {
-                let val = v.value.as_str().expect(&format!(
-                    "String enum '{}' variant '{}' must have string value",
-                    name, v.name
-                ));
-                (v.name.clone(), val.to_string())
+            .map(|variant| {
+                let value = variant.value.as_str().unwrap_or_else(|| {
+                    panic!(
+                        "String enum '{}' variant '{}' must have string value",
+                        name, variant.name
+                    )
+                });
+                (variant.name.clone(), value.to_string())
             })
             .collect(),
-    };
+    }
+}
 
-    let variant_list = value_map
+fn integer_enum_parts(name: &str, spec: &EnumSpec) -> (String, Vec<(String, i64)>) {
+    match &spec.variants {
+        EnumVariants::Explicit(vars) => {
+            let decls = vars
+                .iter()
+                .map(|variant| {
+                    let value = variant.value.as_i64().unwrap_or_else(|| {
+                        panic!(
+                            "Integer enum '{}' variant '{}' must have integer value",
+                            name, variant.name
+                        )
+                    });
+                    format!(
+                        "    #[serde(rename = \"{}\")]\n    {} = {},",
+                        value, variant.name, value
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let values = vars
+                .iter()
+                .map(|variant| {
+                    let value = variant.value.as_i64().unwrap_or_else(|| {
+                        panic!(
+                            "Integer enum '{}' variant '{}' must have integer value",
+                            name, variant.name
+                        )
+                    });
+                    (variant.name.clone(), value)
+                })
+                .collect::<Vec<_>>();
+            (decls, values)
+        }
+        EnumVariants::Simple(_) => panic!(
+            "Integer enums require explicit values, use syntax: variants = [{{name = \"Name\", value = 0}}]"
+        ),
+    }
+}
+
+fn insert_shared_enum_context(
+    context: &mut TemplateContext,
+    name: &str,
+    variant_names: &[String],
+    storage_values: &[String],
+    options: GenerateEnumsOptions,
+) {
+    context
+        .insert("default_variant", variant_names[0].clone())
+        .unwrap();
+    context
+        .insert("ts_union_literal", render_ts_union_literal(storage_values))
+        .unwrap();
+    context
+        .insert("i18n_key_arms", render_i18n_key_arms(name, variant_names))
+        .unwrap();
+    context
+        .insert("variant_self_list", render_variant_self_list(variant_names))
+        .unwrap();
+    context
+        .insert(
+            "datatable_filter_options_section",
+            render_datatable_filter_options_section(options),
+        )
+        .unwrap();
+}
+
+fn render_variant_self_list(variant_names: &[String]) -> String {
+    variant_names
+        .iter()
+        .map(|variant| format!("Self::{variant}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn render_string_variant_list(value_map: &[(String, String)]) -> String {
+    value_map
         .iter()
         .map(|(variant, value)| {
             format!(
@@ -74,284 +239,94 @@ fn generate_string_enum(name: &str, spec: &EnumSpec, options: GenerateEnumsOptio
             )
         })
         .collect::<Vec<_>>()
-        .join(",\n");
-
-    let encode_arms: Vec<String> = value_map
-        .iter()
-        .map(|(variant, value)| format!("            Self::{} => \"{}\",", variant, value))
-        .collect();
-
-    let decode_arms: Vec<String> = value_map
-        .iter()
-        .map(|(variant, value)| format!("            \"{}\" => Ok(Self::{}),", value, variant))
-        .collect();
-
-    // Qualified arms for From<Enum> to avoid Self:: ambiguity
-    let encode_arms_qualified: Vec<String> = value_map
-        .iter()
-        .map(|(variant, value)| format!("            {}::{} => \"{}\",", name, variant, value))
-        .collect();
-
-    let default_variant = &variants[0];
-    let encode_arms_str = encode_arms.join("\n");
-    let decode_arms_str = decode_arms.join("\n");
-    let encode_arms_str_qualified = encode_arms_qualified.join("\n");
-    let as_str_arms_str = encode_arms.join("\n");
-    let as_label_arms_str = value_map
-        .iter()
-        .map(|(variant, _)| {
-            format!(
-                "            Self::{} => \"{}\",",
-                variant,
-                escape_rust_string(variant)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let from_storage_arms_str = value_map
-        .iter()
-        .map(|(variant, value)| format!("            \"{}\" => Some(Self::{}),", value, variant))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let enum_key = to_snake(name);
-    let i18n_key_arms_str = value_map
-        .iter()
-        .map(|(variant, _)| {
-            format!(
-                "            Self::{} => \"enum.{}.{}\",",
-                variant,
-                enum_key,
-                to_snake(variant)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let ts_union = value_map
-        .iter()
-        .map(|(_, value)| format!("\"{}\"", escape_rust_string(value)))
-        .collect::<Vec<_>>()
-        .join(" | ");
-    let ts_union_literal = escape_rust_string(&ts_union);
-    let datatable_filter_options_impl = if options.include_datatable_filter_options {
-        r#"
-    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
-        Self::variants()
-            .iter()
-            .map(|v| {
-                let label = (*v).explained_label();
-                let value = (*v).as_str();
-                core_web::datatable::DataTableFilterOptionDto {
-                    label,
-                    value: value.to_string(),
-                }
-            })
-            .collect()
-    }"#
-    } else {
-        ""
-    };
-
-    format!(
-        r#"#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub enum {name} {{
-{variant_list}
-}}
-
-impl Default for {name} {{
-    fn default() -> Self {{
-        Self::{default_variant}
-    }}
-}}
-
-impl ts_rs::TS for {name} {{
-    type WithoutGenerics = Self;
-
-    fn name() -> String {{
-        "{name}".to_string()
-    }}
-
-    fn inline() -> String {{
-        Self::name()
-    }}
-
-    fn inline_flattened() -> String {{
-        panic!("{name} cannot be flattened")
-    }}
-
-    fn decl() -> String {{
-        "type {name} = {ts_union_literal};".to_string()
-    }}
-
-    fn decl_concrete() -> String {{
-        Self::decl()
-    }}
-}}
-
-impl {name} {{
-    pub const fn as_str(self) -> &'static str {{
-        match self {{
-{as_str_arms_str}
-        }}
-    }}
-
-    pub const fn as_label(self) -> &'static str {{
-        match self {{
-{as_label_arms_str}
-        }}
-    }}
-
-    pub fn from_storage(raw: &str) -> Option<Self> {{
-        match raw.trim() {{
-{from_storage_arms_str}
-            _ => None,
-        }}
-    }}
-
-    pub const fn i18n_key(self) -> &'static str {{
-        match self {{
-{i18n_key_arms_str}
-        }}
-    }}
-
-    pub fn explained_label(self) -> String {{
-        let i18n_key = self.i18n_key();
-        let translated_key = core_i18n::t(i18n_key);
-        if translated_key != i18n_key {{
-            return translated_key;
-        }}
-        let fallback_label = self.as_label();
-        let translated_label = core_i18n::t(fallback_label);
-        if translated_label != fallback_label {{
-            return translated_label;
-        }}
-        fallback_label.to_string()
-    }}
-
-    pub const fn variants() -> &'static [Self] {{
-        &[{variant_self_list}]
-    }}
-{datatable_filter_options_impl}
-}}
-
-// sqlx support for TEXT storage
-impl sqlx::Encode<'_, sqlx::Postgres> for {name} {{
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {{
-        let s = match self {{
-{encode_arms_str}
-        }};
-        <&str as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&s, buf)
-    }}
-}}
-
-impl sqlx::Decode<'_, sqlx::Postgres> for {name} {{
-    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {{
-        let s = <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        match s {{
-{decode_arms_str}
-            _ => Err(format!("Invalid {name}: {{}}", s).into()),
-        }}
-    }}
-}}
-
-impl sqlx::Type<sqlx::Postgres> for {name} {{
-    fn type_info() -> sqlx::postgres::PgTypeInfo {{
-        <String as sqlx::Type<sqlx::Postgres>>::type_info()
-    }}
-}}
-
-// For ActiveRecord BindValue
-impl From<{name}> for core_db::common::sql::BindValue {{
-    fn from(v: {name}) -> Self {{
-        let s = match v {{
-{encode_arms_str_qualified}
-        }};
-        core_db::common::sql::BindValue::String(s.to_string())
-    }}
-}}
-"#,
-        datatable_filter_options_impl = datatable_filter_options_impl
-    )
+        .join(",\n")
 }
 
-/// Generate integer-based enum (stored as SMALLINT/INTEGER in database)
-fn generate_integer_enum(name: &str, spec: &EnumSpec, options: GenerateEnumsOptions) -> String {
-    let rust_type = &spec.storage; // e.g., "i16", "i32"
-
-    let (variant_decls, value_map) = match &spec.variants {
-        EnumVariants::Explicit(vars) => {
-            let decls: Vec<String> = vars
-                .iter()
-                .map(|v| {
-                    let value = v.value.as_i64().expect(&format!(
-                        "Integer enum '{}' variant '{}' must have integer value",
-                        name, v.name
-                    ));
-                    format!(
-                        "    #[serde(rename = \"{}\")]\n    {} = {},",
-                        value, v.name, value
-                    )
-                })
-                .collect();
-            let map: Vec<(String, i64)> = vars
-                .iter()
-                .map(|v| (v.name.clone(), v.value.as_i64().unwrap()))
-                .collect();
-            (decls.join("\n"), map)
-        }
-        EnumVariants::Simple(_) => {
-            panic!("Integer enums require explicit values, use syntax: variants = [{{name = \"Name\", value = 0}}]");
-        }
-    };
-
-    let default_variant = &value_map[0].0;
-    let decode_match = generate_int_decode_match(&value_map, name);
-    let as_str_arms = value_map
+fn render_string_match_arms<F>(value_map: &[(String, String)], value_for: F) -> String
+where
+    F: Fn(&(String, String)) -> &String,
+{
+    value_map
         .iter()
-        .map(|(variant, value)| format!("            Self::{} => \"{}\",", variant, value))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let as_label_arms = value_map
-        .iter()
-        .map(|(variant, _)| {
+        .map(|pair| {
+            let (variant, _) = pair;
             format!(
-                "            Self::{} => \"{}\",",
-                variant,
-                escape_rust_string(variant)
+                "            Self::{variant} => \"{}\",",
+                escape_rust_string(value_for(pair))
             )
         })
         .collect::<Vec<_>>()
-        .join("\n");
-    let from_storage_arms = value_map
+        .join("\n")
+}
+
+fn render_string_from_storage_arms(value_map: &[(String, String)]) -> String {
+    value_map
         .iter()
-        .map(|(variant, value)| format!("            {} => Some(Self::{}),", value, variant))
+        .map(|(variant, value)| format!("            \"{}\" => Some(Self::{variant}),", value))
         .collect::<Vec<_>>()
-        .join("\n");
-    let enum_key = to_snake(name);
-    let i18n_key_arms = value_map
+        .join("\n")
+}
+
+fn render_string_decode_arms(value_map: &[(String, String)]) -> String {
+    value_map
         .iter()
-        .map(|(variant, _)| {
+        .map(|(variant, value)| format!("            \"{}\" => Ok(Self::{variant}),", value))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_string_encode_arms_qualified(name: &str, value_map: &[(String, String)]) -> String {
+    value_map
+        .iter()
+        .map(|(variant, value)| format!("            {name}::{variant} => \"{}\",", value))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_integer_match_arms(value_map: &[(String, i64)], storage_values: bool) -> String {
+    value_map
+        .iter()
+        .map(|(variant, value)| {
+            let rendered = if storage_values {
+                value.to_string()
+            } else {
+                escape_rust_string(variant)
+            };
+            format!("            Self::{variant} => \"{rendered}\",")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_i18n_key_arms(name: &str, variants: &[String]) -> String {
+    let enum_key = to_snake(name);
+    variants
+        .iter()
+        .map(|variant| {
             format!(
-                "            Self::{} => \"enum.{}.{}\",",
-                variant,
-                enum_key,
+                "            Self::{variant} => \"enum.{enum_key}.{}\",",
                 to_snake(variant)
             )
         })
         .collect::<Vec<_>>()
-        .join("\n");
-    let variant_self_list = value_map
+        .join("\n")
+}
+
+fn render_ts_union_literal(values: &[String]) -> String {
+    let union = values
         .iter()
-        .map(|(variant, _)| format!("Self::{}", variant))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let ts_union = value_map
-        .iter()
-        .map(|(_, value)| format!("\"{}\"", value))
+        .map(|value| format!("\"{}\"", escape_rust_string(value)))
         .collect::<Vec<_>>()
         .join(" | ");
-    let ts_union_literal = escape_rust_string(&ts_union);
-    let datatable_filter_options_impl = if options.include_datatable_filter_options {
-        r#"
+    escape_rust_string(&union)
+}
+
+fn render_datatable_filter_options_section(options: GenerateEnumsOptions) -> String {
+    if !options.include_datatable_filter_options {
+        return String::new();
+    }
+
+    r#"
     pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
         Self::variants()
             .iter()
@@ -365,150 +340,40 @@ fn generate_integer_enum(name: &str, spec: &EnumSpec, options: GenerateEnumsOpti
             })
             .collect()
     }"#
-    } else {
-        ""
-    };
-
-    format!(
-        r#"#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[repr({rust_type})]
-pub enum {name} {{
-{variant_decls}
-}}
-
-impl Default for {name} {{
-    fn default() -> Self {{
-        Self::{default_variant}
-    }}
-}}
-
-impl ts_rs::TS for {name} {{
-    type WithoutGenerics = Self;
-
-    fn name() -> String {{
-        "{name}".to_string()
-    }}
-
-    fn inline() -> String {{
-        Self::name()
-    }}
-
-    fn inline_flattened() -> String {{
-        panic!("{name} cannot be flattened")
-    }}
-
-    fn decl() -> String {{
-        "type {name} = {ts_union_literal};".to_string()
-    }}
-
-    fn decl_concrete() -> String {{
-        Self::decl()
-    }}
-}}
-
-impl {name} {{
-    pub const fn as_str(self) -> &'static str {{
-        match self {{
-{as_str_arms}
-        }}
-    }}
-
-    pub const fn as_label(self) -> &'static str {{
-        match self {{
-{as_label_arms}
-        }}
-    }}
-
-    pub fn from_storage(raw: &str) -> Option<Self> {{
-        let value = raw.trim().parse::<i64>().ok()?;
-        match value {{
-{from_storage_arms}
-            _ => None,
-        }}
-    }}
-
-    pub const fn i18n_key(self) -> &'static str {{
-        match self {{
-{i18n_key_arms}
-        }}
-    }}
-
-    pub fn explained_label(self) -> String {{
-        let i18n_key = self.i18n_key();
-        let translated_key = core_i18n::t(i18n_key);
-        if translated_key != i18n_key {{
-            return translated_key;
-        }}
-        let fallback_label = self.as_label();
-        let translated_label = core_i18n::t(fallback_label);
-        if translated_label != fallback_label {{
-            return translated_label;
-        }}
-        fallback_label.to_string()
-    }}
-
-    pub const fn variants() -> &'static [Self] {{
-        &[{variant_self_list}]
-    }}
-{datatable_filter_options_impl}
-}}
-
-// sqlx support for integer storage
-impl sqlx::Encode<'_, sqlx::Postgres> for {name} {{
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {{
-        <{rust_type} as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as {rust_type}), buf)
-    }}
-}}
-
-impl sqlx::Decode<'_, sqlx::Postgres> for {name} {{
-    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {{
-        let num = <{rust_type} as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        {decode_match}
-    }}
-}}
-
-impl sqlx::Type<sqlx::Postgres> for {name} {{
-    fn type_info() -> sqlx::postgres::PgTypeInfo {{
-        <{rust_type} as sqlx::Type<sqlx::Postgres>>::type_info()
-    }}
-}}
-
-// For ActiveRecord BindValue
-impl From<{name}> for core_db::common::sql::BindValue {{
-    fn from(v: {name}) -> Self {{
-        core_db::common::sql::BindValue::I64(v as i64)
-    }}
-}}
-"#,
-        datatable_filter_options_impl = datatable_filter_options_impl
-    )
+    .to_string()
 }
 
 fn generate_int_decode_match(value_map: &[(String, i64)], enum_name: &str) -> String {
-    let arms: Vec<String> = value_map
+    let arms = value_map
         .iter()
-        .map(|(variant, value)| format!("            {} => Ok(Self::{}),", value, variant))
-        .collect();
+        .map(|(variant, value)| format!("{value} => Ok(Self::{variant}),"))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     format!(
-        r#"match num {{
-{}
-            _ => Err(format!("Invalid {}: {{}}", num).into()),
-        }}"#,
-        arms.join("\n"),
+        "match num {{\n{}\n    _ => Err(format!(\"Invalid {}: {{}}\", num).into()),\n}}",
+        indent_block(&arms, 4),
         enum_name
     )
 }
 
-fn extract_variant_names(variants: &EnumVariants) -> Vec<String> {
-    match variants {
-        EnumVariants::Simple(names) => names.clone(),
-        EnumVariants::Explicit(vars) => vars.iter().map(|v| v.name.clone()).collect(),
-    }
+fn indent_block(block: &str, spaces: usize) -> String {
+    let indent = " ".repeat(spaces);
+    block
+        .lines()
+        .map(|line| {
+            if line.is_empty() {
+                String::new()
+            } else {
+                format!("{indent}{line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn escape_rust_string(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('\"', "\\\"")
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn enum_storage_values(spec: &EnumSpec) -> Vec<String> {
@@ -518,16 +383,13 @@ fn enum_storage_values(spec: &EnumSpec) -> Vec<String> {
             EnumVariants::Explicit(vars) => vars
                 .iter()
                 .map(|variant| {
-                    variant
-                        .value
-                        .as_str()
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "String enum variant '{}' must have string value",
-                                variant.name
-                            )
-                        })
-                        .to_string()
+                    variant.value.as_str().unwrap_or_else(|| {
+                        panic!(
+                            "String enum variant '{}' must have string value",
+                            variant.name
+                        )
+                    })
+                    .to_string()
                 })
                 .collect(),
         },
@@ -535,16 +397,13 @@ fn enum_storage_values(spec: &EnumSpec) -> Vec<String> {
             EnumVariants::Explicit(vars) => vars
                 .iter()
                 .map(|variant| {
-                    variant
-                        .value
-                        .as_i64()
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "Integer enum variant '{}' must have integer value",
-                                variant.name
-                            )
-                        })
-                        .to_string()
+                    variant.value.as_i64().unwrap_or_else(|| {
+                        panic!(
+                            "Integer enum variant '{}' must have integer value",
+                            variant.name
+                        )
+                    })
+                    .to_string()
                 })
                 .collect(),
             EnumVariants::Simple(_) => panic!(
@@ -558,11 +417,10 @@ fn enum_storage_values(spec: &EnumSpec) -> Vec<String> {
     }
 }
 
-/// Generate enums.rs from schema enum definitions.
 pub fn generate_enums(
     schema: &crate::schema::Schema,
     out_dir: &std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn Error>> {
     generate_enums_with_options(schema, out_dir, GenerateEnumsOptions::default())
 }
 
@@ -570,13 +428,10 @@ pub fn generate_enums_with_options(
     schema: &crate::schema::Schema,
     out_dir: &std::path::Path,
     options: GenerateEnumsOptions,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn Error>> {
     use crate::schema::EnumOrOther;
-    use std::io::Write;
 
     let mut enum_specs: Vec<(String, EnumSpec)> = vec![];
-
-    // Extract all enum definitions from schema
     for (name, section) in &schema.extra_sections {
         if let EnumOrOther::Enum(spec) = section {
             if spec.type_name == "enum" {
@@ -585,50 +440,50 @@ pub fn generate_enums_with_options(
         }
     }
 
-    // Generate enums.rs file
+    let enum_blocks = enum_specs
+        .iter()
+        .map(|(name, spec)| generate_enum_with_options(name, spec, options))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let schema_enum_ts_meta_entries = enum_specs
+        .iter()
+        .map(|(name, spec)| {
+            let variants = enum_storage_values(spec);
+            let variants_list = variants
+                .iter()
+                .map(|value| format!("\"{}\"", escape_rust_string(value)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "    SchemaEnumTsMeta {{ name: \"{}\", variants: &[{}] }},",
+                escape_rust_string(name),
+                variants_list
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut context = TemplateContext::new();
+    context.insert(
+        "enum_blocks",
+        if enum_blocks.is_empty() {
+            String::new()
+        } else {
+            format!("{enum_blocks}\n\n")
+        },
+    )?;
+    context.insert("schema_enum_ts_meta_entries", schema_enum_ts_meta_entries)?;
+    let rendered = render_template("enums/file.rs.tpl", &context)?;
+
     let enums_file = out_dir.join("enums.rs");
-    let mut f = std::fs::File::create(&enums_file)?;
-
-    writeln!(f, "// AUTO-GENERATED FILE — DO NOT EDIT")?;
-    writeln!(f, "// Generated from TOML schema enum definitions\n")?;
-
-    writeln!(f, "#[derive(Debug, Clone, Copy)]")?;
-    writeln!(f, "pub struct SchemaEnumTsMeta {{")?;
-    writeln!(f, "    pub name: &'static str,")?;
-    writeln!(f, "    pub variants: &'static [&'static str],")?;
-    writeln!(f, "}}\n")?;
-
-    for (name, spec) in &enum_specs {
-        let code = generate_enum_with_options(name, spec, options);
-        writeln!(f, "{}\n", code)?;
-    }
-
-    writeln!(f, "pub const SCHEMA_ENUM_TS_META: &[SchemaEnumTsMeta] = &[")?;
-    for (name, spec) in &enum_specs {
-        let variants = enum_storage_values(spec);
-        let variants_list = variants
-            .iter()
-            .map(|value| format!("\"{}\"", escape_rust_string(value)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        writeln!(
-            f,
-            "    SchemaEnumTsMeta {{ name: \"{}\", variants: &[{}] }},",
-            escape_rust_string(name),
-            variants_list
-        )?;
-    }
-    writeln!(f, "];")?;
-
+    std::fs::write(&enums_file, rendered)?;
     println!("Generated {} enums to {:?}", enum_specs.len(), enums_file);
-
     Ok(())
 }
 
-/// Backward-compatible alias.
 pub fn generate_all_enums(
     schema: &crate::schema::Schema,
     out_dir: &std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn Error>> {
     generate_enums(schema, out_dir)
 }

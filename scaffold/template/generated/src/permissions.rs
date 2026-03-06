@@ -32,73 +32,21 @@ pub enum Permission {
 
 impl ts_rs::TS for Permission {
     type WithoutGenerics = Self;
-    fn name() -> String {
-        "Permission".to_string()
-    }
-    fn inline() -> String {
-        Self::name()
-    }
-    fn inline_flattened() -> String {
-        panic!("Permission cannot be flattened")
-    }
-    fn decl() -> String {
-        "type Permission = \"admin.read\" | \"admin.manage\" | \"content_page.read\" | \"content_page.manage\" | \"country.read\" | \"country.manage\" | \"export\";".to_string()
-    }
-    fn decl_concrete() -> String {
-        Self::decl()
-    }
+    fn name() -> String { "Permission".to_string() }
+    fn inline() -> String { Self::name() }
+    fn inline_flattened() -> String { panic!("Permission cannot be flattened") }
+    fn decl() -> String { "type Permission = \"admin.read\" | \"admin.manage\" | \"content_page.read\" | \"content_page.manage\" | \"country.read\" | \"country.manage\" | \"export\";".to_string() }
+    fn decl_concrete() -> String { Self::decl() }
 }
 
 pub const PERMISSION_META: &[PermissionMeta] = &[
-    PermissionMeta {
-        key: "admin.read",
-        guard: "admin",
-        label: "Read Admins",
-        group: "admin",
-        description: "View admin profile and datatable records.",
-    },
-    PermissionMeta {
-        key: "admin.manage",
-        guard: "admin",
-        label: "Manage Admins",
-        group: "admin",
-        description: "Create/update/delete admin records and perform management actions.",
-    },
-    PermissionMeta {
-        key: "content_page.read",
-        guard: "admin",
-        label: "Read Content Pages",
-        group: "content_page",
-        description: "View policy pages and content-page datatable records.",
-    },
-    PermissionMeta {
-        key: "content_page.manage",
-        guard: "admin",
-        label: "Manage Content Pages",
-        group: "content_page",
-        description: "Update and delete non-system pages.",
-    },
-    PermissionMeta {
-        key: "country.read",
-        guard: "admin",
-        label: "Read Countries",
-        group: "country",
-        description: "View countries and country datatable records.",
-    },
-    PermissionMeta {
-        key: "country.manage",
-        guard: "admin",
-        label: "Manage Countries",
-        group: "country",
-        description: "Update country status.",
-    },
-    PermissionMeta {
-        key: "export",
-        guard: "admin",
-        label: "Export Data",
-        group: "datatable",
-        description: "Export datatable records as CSV.",
-    },
+    PermissionMeta { key: "admin.read", guard: "admin", label: "Read Admins", group: "admin", description: "View admin profile and datatable records." },
+    PermissionMeta { key: "admin.manage", guard: "admin", label: "Manage Admins", group: "admin", description: "Create/update/delete admin records and perform management actions." },
+    PermissionMeta { key: "content_page.read", guard: "admin", label: "Read Content Pages", group: "content_page", description: "View policy pages and content-page datatable records." },
+    PermissionMeta { key: "content_page.manage", guard: "admin", label: "Manage Content Pages", group: "content_page", description: "Update and delete non-system pages." },
+    PermissionMeta { key: "country.read", guard: "admin", label: "Read Countries", group: "country", description: "View countries and country datatable records." },
+    PermissionMeta { key: "country.manage", guard: "admin", label: "Manage Countries", group: "country", description: "Update country status." },
+    PermissionMeta { key: "export", guard: "admin", label: "Export Data", group: "datatable", description: "Export datatable records as CSV." },
 ];
 
 impl Permission {

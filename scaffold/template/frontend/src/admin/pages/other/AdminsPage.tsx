@@ -63,10 +63,7 @@ function TypeBadge({ type }: { type: AdminType }) {
 
 function PermissionSummary({ admin }: { admin: AdminDatatableRow }) {
   const { t } = useTranslation();
-  if (
-    admin.admin_type !== ADMIN_TYPE.ADMIN ||
-    admin.abilities.includes("*")
-  ) {
+  if (admin.admin_type !== ADMIN_TYPE.ADMIN || admin.abilities.includes("*")) {
     return (
       <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
         {t("All permissions")}
@@ -128,7 +125,7 @@ function PermissionSummary({ admin }: { admin: AdminDatatableRow }) {
       type="button"
       variant="plain"
       size="sm"
-      className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 hover:bg-gray-200"
+      className="rounded-full bg-gray-100 px-2! py-0.5! text-xs font-medium text-gray-700 hover:bg-gray-200"
       onClick={openPermissionModal}
     >
       {t(":count Permissions", { count: abilities.length })}
@@ -395,7 +392,9 @@ export default function AdminsPage() {
           formId={formId}
           onBusyChange={(busy) => {
             if (!modalId) return;
-            useModalStore.getState().update(modalId, { footer: renderFooter(busy) });
+            useModalStore
+              .getState()
+              .update(modalId, { footer: renderFooter(busy) });
           }}
         />
       ),
@@ -431,7 +430,9 @@ export default function AdminsPage() {
           formId={formId}
           onBusyChange={(busy) => {
             if (!modalId) return;
-            useModalStore.getState().update(modalId, { footer: renderFooter(busy) });
+            useModalStore
+              .getState()
+              .update(modalId, { footer: renderFooter(busy) });
           }}
         />
       ),

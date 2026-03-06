@@ -1,0 +1,4 @@
+[model.user]
+table = "users"
+fields = ["id:i64", "name:string", "profile_id:i64"]
+relations = ["profile:belongs_to:profile:profile_id:id"]
