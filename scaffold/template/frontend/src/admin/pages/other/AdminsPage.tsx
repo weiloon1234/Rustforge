@@ -1,19 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import type {
+  AdminMeOutput,
   AdminDatatableSummaryOutput,
   AdminDeleteOutput,
   AdminDatatableRow,
   AdminType,
   Permission,
+  PermissionMeta,
 } from "@admin/types";
-import { ADMIN_TYPE, PERMISSIONS, PERMISSION_META } from "@admin/types";
+import { ADMIN_TYPE, PERMISSION, PERMISSIONS, PERMISSION_META } from "@admin/types";
 import type { ApiResponse } from "@shared/types";
 import {
   Button,
   Checkbox,
   DataTable,
+  type DataTableCellContext,
   useAutoForm,
   useModalStore,
   alertConfirm,
@@ -22,7 +25,9 @@ import {
   formatDateTime,
 } from "@shared/components";
 import type { DataTablePostCallEvent } from "@shared/components";
+import { useAuthStore } from "@admin/stores/auth";
 import { api } from "@admin/api";
+import { hasPermission } from "@shared/permissions";
 
 const TYPE_COLORS: Record<AdminType, string> = {
   developer: "bg-purple-100 text-purple-700",
@@ -33,6 +38,11 @@ const TYPE_COLORS: Record<AdminType, string> = {
 const ADMIN_PERMISSION_META = PERMISSION_META.filter(
   (meta) => meta.guard.toLowerCase() === "admin",
 );
+const RESTRICTED_ADMIN_ASSIGNMENT_PERMISSIONS: readonly Permission[] = [
+  PERMISSION.ADMIN_READ,
+  PERMISSION.ADMIN_MANAGE,
+];
+const EMPTY_SCOPES: readonly string[] = [];
 
 const ENABLE_SUMMARY_CARDS = true;
 
@@ -133,9 +143,11 @@ function PermissionSummary({ admin }: { admin: AdminDatatableRow }) {
 
 function PermissionCheckboxes({
   abilities,
+  availablePermissions,
   onChange,
 }: {
   abilities: Permission[];
+  availablePermissions: readonly PermissionMeta[];
   onChange: (next: Permission[]) => void;
 }) {
   const { t } = useTranslation();
@@ -143,7 +155,7 @@ function PermissionCheckboxes({
     <fieldset className="space-y-2">
       <legend className="text-sm font-medium">{t("Permissions")}</legend>
       <div className="flex flex-wrap gap-x-6 gap-y-1">
-        {ADMIN_PERMISSION_META.map((meta) => {
+        {availablePermissions.map((meta) => {
           const label = resolvePermissionLabel(t, meta.key, meta.label);
           return (
             <Checkbox
@@ -169,10 +181,12 @@ function PermissionCheckboxes({
 function CreateAdminForm({
   onCreated,
   formId,
+  availablePermissions,
   onBusyChange,
 }: {
   onCreated: () => void;
   formId: string;
+  availablePermissions: readonly PermissionMeta[];
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -232,7 +246,13 @@ function CreateAdminForm({
         </p>
       )}
       {form}
-      <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
+      {availablePermissions.length > 0 && (
+        <PermissionCheckboxes
+          abilities={abilities}
+          availablePermissions={availablePermissions}
+          onChange={setAbilities}
+        />
+      )}
     </form>
   );
 }
@@ -241,26 +261,39 @@ function EditAdminForm({
   admin,
   onUpdated,
   formId,
+  availablePermissions,
   onBusyChange,
 }: {
   admin: AdminDatatableRow;
   onUpdated: () => void;
   formId: string;
+  availablePermissions: readonly PermissionMeta[];
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
   const isNormalAdmin = admin.admin_type === ADMIN_TYPE.ADMIN;
+  const currentPermissions = admin.abilities.filter(
+    (value): value is Permission => PERMISSIONS.includes(value as Permission),
+  );
+  const assignablePermissionKeys = new Set(
+    availablePermissions.map((meta) => meta.key),
+  );
+  const canEditAbilities =
+    isNormalAdmin &&
+    currentPermissions.every((permission) =>
+      assignablePermissionKeys.has(permission),
+    );
   const [abilities, setAbilities] = useState<Permission[]>(
-    admin.abilities.filter((value): value is Permission =>
-      PERMISSIONS.includes(value as Permission),
+    currentPermissions.filter((permission) =>
+      assignablePermissionKeys.has(permission),
     ),
   );
 
   const { submit, busy, form, errors } = useAutoForm(api, {
     url: `admins/${admin.id}`,
     method: "patch",
-    extraPayload: isNormalAdmin ? { abilities } : {},
+    extraPayload: canEditAbilities ? { abilities } : {},
     fields: [
       {
         name: "username",
@@ -316,20 +349,61 @@ function EditAdminForm({
         </p>
       )}
       {form}
-      {isNormalAdmin && (
-        <PermissionCheckboxes abilities={abilities} onChange={setAbilities} />
+      {canEditAbilities && availablePermissions.length > 0 && (
+        <PermissionCheckboxes
+          abilities={abilities}
+          availablePermissions={availablePermissions}
+          onChange={setAbilities}
+        />
       )}
     </form>
   );
 }
 
+function isPrivilegedAdminType(adminType: AdminType | null | undefined): boolean {
+  return (
+    adminType === ADMIN_TYPE.DEVELOPER || adminType === ADMIN_TYPE.SUPERADMIN
+  );
+}
+
+function canManageAdminAccounts(account: AdminMeOutput | null): boolean {
+  if (!account) return false;
+  if (isPrivilegedAdminType(account.admin_type)) return true;
+  return hasPermission(account.scopes ?? EMPTY_SCOPES, PERMISSION.ADMIN_MANAGE);
+}
+
+function resolveAssignableAdminPermissions(
+  account: AdminMeOutput | null,
+): readonly PermissionMeta[] {
+  if (!account) return [];
+  if (isPrivilegedAdminType(account.admin_type)) {
+    return ADMIN_PERMISSION_META;
+  }
+
+  const scopes = account.scopes ?? EMPTY_SCOPES;
+  return ADMIN_PERMISSION_META.filter(
+    (meta) =>
+      hasPermission(scopes, meta.key) &&
+      !RESTRICTED_ADMIN_ASSIGNMENT_PERMISSIONS.includes(meta.key),
+  );
+}
+
 export default function AdminsPage() {
   const { t } = useTranslation();
+  const account = useAuthStore((state) => state.account);
   const [summary, setSummary] = useState<AdminDatatableSummaryOutput | null>(
     null,
   );
   const [deletingAdminId, setDeletingAdminId] = useState<string | null>(null);
   const summaryRequestId = useRef(0);
+  const canManageAdmins = useMemo(
+    () => canManageAdminAccounts(account),
+    [account],
+  );
+  const assignableAdminPermissions = useMemo(
+    () => resolveAssignableAdminPermissions(account),
+    [account],
+  );
 
   const handleDatatablePostCall = (
     event: DataTablePostCallEvent<AdminDatatableRow>,
@@ -388,6 +462,7 @@ export default function AdminsPage() {
         <CreateAdminForm
           onCreated={refresh}
           formId={formId}
+          availablePermissions={assignableAdminPermissions}
           onBusyChange={(busy) => {
             if (!modalId) return;
             useModalStore
@@ -426,6 +501,7 @@ export default function AdminsPage() {
           admin={admin}
           onUpdated={refresh}
           formId={formId}
+          availablePermissions={assignableAdminPermissions}
           onBusyChange={(busy) => {
             if (!modalId) return;
             useModalStore
@@ -476,16 +552,20 @@ export default function AdminsPage() {
       url="datatable/admin/query"
       title={t("Admins")}
       subtitle={t("Manage administrator accounts")}
-      headerActions={(refresh) => (
-        <Button
-          onClick={() => handleCreate(refresh)}
-          variant="primary"
-          size="sm"
-        >
-          <Plus size={16} />
-          {t("Create Admin")}
-        </Button>
-      )}
+      headerActions={
+        canManageAdmins
+          ? (refresh) => (
+              <Button
+                onClick={() => handleCreate(refresh)}
+                variant="primary"
+                size="sm"
+              >
+                <Plus size={16} />
+                {t("Create Admin")}
+              </Button>
+            )
+          : undefined
+      }
       headerContent={
         ENABLE_SUMMARY_CARDS && summary ? (
           <div className="grid gap-2 sm:grid-cols-4">
@@ -511,42 +591,52 @@ export default function AdminsPage() {
         ) : undefined
       }
       columns={[
-        {
-          key: "actions",
-          label: t("Actions"),
-          sortable: false,
-          render: (admin, ctx) => {
-            const deleting = deletingAdminId === admin.id;
-            return (
-              <div className="flex gap-1">
-                <Button
-                  onClick={() => handleEdit(admin, ctx.refresh)}
-                  variant="plain"
-                  size="sm"
-                  iconOnly
-                  disabled={deleting}
-                  title={t("Edit")}
-                >
-                  <Pencil size={16} />
-                </Button>
-                {admin.admin_type === ADMIN_TYPE.ADMIN && (
-                  <Button
-                    onClick={() => handleDelete(admin, ctx.refresh)}
-                    variant="plain"
-                    size="sm"
-                    iconOnly
-                    busy={deleting}
-                    disabled={deleting}
-                    className="hover:bg-red-50 hover:text-red-600"
-                    title={t("Delete")}
-                  >
-                    <Trash2 size={16} />
-                  </Button>
-                )}
-              </div>
-            );
-          },
-        },
+        ...(canManageAdmins
+          ? [
+              {
+                key: "actions",
+                label: t("Actions"),
+                sortable: false,
+                render: (
+                  admin: AdminDatatableRow,
+                  ctx: DataTableCellContext<AdminDatatableRow>,
+                ) => {
+                  const deleting = deletingAdminId === admin.id;
+                  const isSelf = account?.id === admin.id;
+                  return (
+                    <div className="flex gap-1">
+                      {!isSelf && (
+                        <Button
+                          onClick={() => handleEdit(admin, ctx.refresh)}
+                          variant="plain"
+                          size="sm"
+                          iconOnly
+                          disabled={deleting}
+                          title={t("Edit")}
+                        >
+                          <Pencil size={16} />
+                        </Button>
+                      )}
+                      {!isSelf && admin.admin_type === ADMIN_TYPE.ADMIN && (
+                        <Button
+                          onClick={() => handleDelete(admin, ctx.refresh)}
+                          variant="plain"
+                          size="sm"
+                          iconOnly
+                          busy={deleting}
+                          disabled={deleting}
+                          className="hover:bg-red-50 hover:text-red-600"
+                          title={t("Delete")}
+                        >
+                          <Trash2 size={16} />
+                        </Button>
+                      )}
+                    </div>
+                  );
+                },
+              },
+            ]
+          : []),
         {
           key: "username",
           label: t("Username"),
