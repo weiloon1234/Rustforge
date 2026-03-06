@@ -148,7 +148,7 @@ Frontend SSOT:
 - Shared contact input uses `country_iso2: string` value shape (`frontend/src/shared/components/ContactInput.tsx`).
 
 See also:
-- `../docs/country-iso2-linkage.md` for migration-ready SQL and legacy conversion steps.
+- `../docs/country-iso2-linkage.md` for migration-ready SQL and numeric-ID-to-ISO2 conversion steps.
 
 ## Async Domain Actions: Jobs vs Events/Notifications
 
@@ -217,7 +217,7 @@ For contract types used by frontend:
 1. Add `#[derive(TS)]`.
 2. Add `#[ts(export, export_to = "{portal}/types/")]`.
 3. Shared TS types are framework-owned SSOT through `generated::ts_exports::ts_export_files()`.
-   - This registry is the compatibility bridge for scaffold template consumers and includes framework shapes (API/datatable/platform) plus generated enums/locales.
+   - This registry is the shared TS export registry for scaffold consumers and includes framework shapes (API/datatable/platform) plus generated enums/locales.
 4. `app/src/bin/export-types.rs` orchestrates only (merge app contracts + generated shared registry, then emit files).
 5. Run:
 

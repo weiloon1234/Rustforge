@@ -1,6 +1,45 @@
 import { useEffect } from 'react'
 import Prism from 'prismjs'
 
+const featureCards = [
+    {
+        href: '#/feature-autodatatable',
+        title: 'AutoDataTable',
+        description:
+            'Typed datatable contracts, runtime hooks, and export/query parity through one pipeline.',
+    },
+    {
+        href: '#/feature-meta',
+        title: 'Meta',
+        description:
+            'JSONB-backed per-model key/value fields with generated typed readers and writers.',
+    },
+    {
+        href: '#/feature-attachments',
+        title: 'Attachments',
+        description:
+            'Attachment uploads, typed attachment DTOs, and hydrated URLs on model views.',
+    },
+    {
+        href: '#/feature-localized-relations',
+        title: 'Localized & Relationships',
+        description:
+            'Localized field storage, relation helpers, and relation-aware query loaders.',
+    },
+    {
+        href: '#/feature-realtime',
+        title: 'Realtime / WebSocket',
+        description:
+            'Guard-reused websocket auth, channel policies, presence, and Redis-backed fan-out.',
+    },
+    {
+        href: '#/feature-realtime-protocol',
+        title: 'Realtime Protocol & Runbook',
+        description:
+            'Wire protocol, replay behavior, operational failure modes, and room lifecycle rules.',
+    },
+]
+
 export function FrameworkFeatures() {
     useEffect(() => {
         Prism.highlightAll()
@@ -11,150 +50,124 @@ export function FrameworkFeatures() {
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">Framework Features</h1>
                 <p className="text-xl text-gray-500">
-                    Dedicated framework-level capabilities for generated models.
+                    Canonical documentation for shipped framework capabilities and their extension points.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4">
+                    <p className="m-0 text-sm text-amber-900">
+                        <strong>Documentation ownership:</strong> this docs app is the framework SSOT.
+                        Root README stays operational. Starter-local guides stay in
+                        <code> scaffold/template/docs/</code>.
+                    </p>
+                </div>
+
+                <h2>What belongs here</h2>
                 <p>
-                    These are first-class model features provided by the framework itself, not
-                    app-specific conventions:
+                    A framework feature page should document the capability itself: where the source
+                    of truth lives, what runtime/API surface it exposes, what extension hooks exist,
+                    and the minimal path to use it safely. Starter-only setup details should stay in
+                    starter docs and be referenced by path when needed.
                 </p>
+
+                <h2>Feature anatomy</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Question</th>
+                            <th>Expected answer on each feature page</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>What is the capability for?</td>
+                            <td>Problem/intent and where it fits in the framework.</td>
+                        </tr>
+                        <tr>
+                            <td>Where is the SSOT?</td>
+                            <td>Schema/config/contract/runtime module that actually owns the behavior.</td>
+                        </tr>
+                        <tr>
+                            <td>What does the runtime surface look like?</td>
+                            <td>Generated model API, workflow call, router helper, or config contract.</td>
+                        </tr>
+                        <tr>
+                            <td>Where do apps extend it?</td>
+                            <td>Extension traits, app hooks, workflows, or starter-local docs.</td>
+                        </tr>
+                        <tr>
+                            <td>How do I verify it?</td>
+                            <td>Minimal example plus check/build or request flow.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h2>Feature index</h2>
+                <div className="not-prose grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {featureCards.map((card) => (
+                        <a
+                            key={card.href}
+                            href={card.href}
+                            className="rounded-xl border border-gray-200 bg-white p-5 transition-colors hover:bg-gray-50"
+                        >
+                            <h3 className="m-0 text-base font-semibold text-gray-900">{card.title}</h3>
+                            <p className="mt-2 text-sm text-gray-600">{card.description}</p>
+                        </a>
+                    ))}
+                </div>
+
+                <h2>Shipped capability map</h2>
                 <ul>
                     <li>
-                        <strong>Meta</strong> for flexible JSONB key-value data with typed read
-                        helpers.
+                        <strong>Model features:</strong> meta, attachments, localized fields, relations,
+                        computed/extension traits, enum explained fields.
                     </li>
                     <li>
-                        <strong>Attachments</strong> for single/multi file references with typed
-                        input and hydrated URLs.
+                        <strong>Transport features:</strong> typed contracts, guard/authz helpers,
+                        OpenAPI integration, bootstrap runtime injection.
                     </li>
                     <li>
-                        <strong>Localized fields + Relationships</strong> for multilingual content
-                        and relation-aware query patterns.
-                    </li>
-                    <li>
-                        <strong>Realtime / WebSocket</strong> for native WS subscriptions,
-                        guard-reused auth, channel policies, and presence.
+                        <strong>Operational features:</strong> jobs, notifications, caching, realtime,
+                        HTTP/webhook logging, datatable export.
                     </li>
                 </ul>
 
-                <h2>Feature Menu</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 not-prose">
-                    <a
-                        href="#/feature-meta"
-                        className="block rounded-lg border border-gray-200 bg-white p-4 hover:bg-gray-50"
-                    >
-                        <h3 className="m-0 text-base font-semibold text-gray-900">Meta</h3>
-                        <p className="mt-2 text-sm text-gray-600">
-                            Schema keys, generated APIs, and typed + fallback access patterns.
-                        </p>
-                    </a>
-                    <a
-                        href="#/feature-attachments"
-                        className="block rounded-lg border border-gray-200 bg-white p-4 hover:bg-gray-50"
-                    >
-                        <h3 className="m-0 text-base font-semibold text-gray-900">Attachments</h3>
-                        <p className="mt-2 text-sm text-gray-600">
-                            Attachment type registry, insert/update APIs, and hydrated URL usage.
-                        </p>
-                    </a>
-                    <a
-                        href="#/feature-localized-relations"
-                        className="block rounded-lg border border-gray-200 bg-white p-4 hover:bg-gray-50"
-                    >
-                        <h3 className="m-0 text-base font-semibold text-gray-900">
-                            Localized + Relationships
-                        </h3>
-                        <p className="mt-2 text-sm text-gray-600">
-                            Multilingual field APIs, relation loaders, and relation query helpers.
-                        </p>
-                    </a>
-                    <a
-                        href="#/feature-realtime"
-                        className="block rounded-lg border border-gray-200 bg-white p-4 hover:bg-gray-50"
-                    >
-                        <h3 className="m-0 text-base font-semibold text-gray-900">
-                            Realtime / WebSocket
-                        </h3>
-                        <p className="mt-2 text-sm text-gray-600">
-                            Native websocket protocol, guard reuse auth, Redis pubsub fan-out,
-                            and room presence.
-                        </p>
-                    </a>
-                </div>
+                <h2>Starter handoff points</h2>
+                <p>
+                    When a workflow becomes starter-specific, hand off to starter docs instead of
+                    duplicating it here. Current starter-local examples include:
+                </p>
+                <ul>
+                    <li>
+                        <code>scaffold/template/docs/computed-model-values.md</code> for app-facing
+                        model/view extension patterns.
+                    </li>
+                    <li>
+                        <code>scaffold/template/docs/country-iso2-linkage.md</code> for country
+                        linkage policy and migration playbook.
+                    </li>
+                    <li>
+                        <code>scaffold/template/app/AGENTS.md</code> for starter-specific extension
+                        recipes and file layout conventions.
+                    </li>
+                </ul>
 
-                <h2 className="mt-10">Single-Source-of-Truth Schema Example</h2>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-toml">{`[model.article]
-table = "articles"
-pk = "id"
-
-fields = [
-  "id:i64",
-  "author_id:i64",
-  "status:ArticleStatus",
-  "created_at:datetime",
-  "updated_at:datetime"
-]
-
-localized = ["title", "summary"]
-meta = [
-  "seo_title:string",
-  "is_featured:bool",
-  "priority:i32",
-  "extra:ExtraMeta",
-  "published_at:datetime"
-]
-attachment = ["cover:image"]
-attachments = ["gallery:image"]
-relations = [
-  "author:belongs_to:User:author_id:id",
-  "comments:has_many:Comment:article_id:id"
-]`}</code>
-                </pre>
-
-                <h2 className="mt-10">Generated API Mapping</h2>
-                <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm border-collapse border border-gray-200">
-                        <thead className="bg-gray-100">
-                            <tr>
-                                <th className="border p-2 text-left">Schema Key</th>
-                                <th className="border p-2 text-left">Generated Types / Methods</th>
-                                <th className="border p-2 text-left">Primary Page</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td className="border p-2 font-mono">meta</td>
-                                <td className="border p-2 font-mono">
-                                    set_meta_*, meta_*, meta_*_as&lt;T&gt;
-                                </td>
-                                <td className="border p-2">
-                                    <a href="#/feature-meta">Meta</a>
-                                </td>
-                            </tr>
-                            <tr>
-                                <td className="border p-2 font-mono">attachment / attachments</td>
-                                <td className="border p-2 font-mono">
-                                    set_attachment_*, add_attachment_*, clear_attachment_*, delete_attachment_*
-                                </td>
-                                <td className="border p-2">
-                                    <a href="#/feature-attachments">Attachments</a>
-                                </td>
-                            </tr>
-                            <tr>
-                                <td className="border p-2 font-mono">localized / relations</td>
-                                <td className="border p-2 font-mono">
-                                    set_*_lang, set_*_langs, where_has_*, get_with_relations
-                                </td>
-                                <td className="border p-2">
-                                    <a href="#/feature-localized-relations">Localized + Relationships</a>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                <h2>Where to go next</h2>
+                <ul>
+                    <li>
+                        Read <a href="#/requests">Requests &amp; Validation</a> for contract
+                        boundary semantics such as <code>Option&lt;T&gt;</code> and{' '}
+                        <code>Patch&lt;T&gt;</code>.
+                    </li>
+                    <li>
+                        Read <a href="#/model-api-view">`XxxView` &amp; Extensions</a> for computed
+                        values and typed app-facing model helpers.
+                    </li>
+                    <li>
+                        Read <a href="#/cookbook">Cookbook</a> for task-oriented implementation recipes.
+                    </li>
+                </ul>
             </div>
         </div>
     )

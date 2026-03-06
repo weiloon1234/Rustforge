@@ -4,93 +4,179 @@ export function Permissions() {
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">Permissions &amp; AuthZ</h1>
                 <p className="text-xl text-gray-500">
-                    Typed permission catalog with PAT-scope runtime enforcement.
+                    Typed permission catalog, runtime PAT scope matching, and explicit delegation rules across backend and frontend.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
-                <h2>1) Catalog SSOT</h2>
+                <h2>Permission SSOT</h2>
                 <p>
-                    Define permissions in <code>app/permissions.toml</code>.
+                    Define the catalog once in <code>app/permissions.toml</code>. That file remains the source of truth for permission keys, labels, grouping, and generated typed enums.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
                     <code className="language-toml">{`[[permissions]]
-key = "article.manage"
+key = "content_page.manage"
 guard = "admin"
-label = "Manage Articles"
-group = "article"
-description = "Create, update, and delete articles."`}</code>
+label = "Manage Content Pages"
+group = "content_page"`}</code>
                 </pre>
 
-                <h2>2) Generated Typed API</h2>
-                <p>
-                    <code>cargo check -p generated</code> generates{' '}
-                    <code>generated::permissions</code>:
-                </p>
+                <h2>Generated typed surface</h2>
                 <ul>
-                    <li>
-                        <code>Permission</code> enum
-                    </li>
-                    <li>
-                        <code>PermissionMeta</code> metadata
-                    </li>
-                    <li>
-                        helpers: <code>as_str</code>, <code>from_str</code>, <code>all</code>,{' '}
-                        <code>by_guard</code>
-                    </li>
+                    <li>Rust: <code>generated::permissions::Permission</code> and metadata helpers.</li>
+                    <li>TypeScript: generated permission union/object from <code>make gen-types</code>.</li>
+                    <li>Route metadata: permission declarations flow into OpenAPI via <code>with_permission_check_*</code>.</li>
                 </ul>
 
-                <h2>3) Runtime Source of Truth</h2>
+                <h2>Runtime matching rules</h2>
                 <p>
-                    Runtime checks read scopes from <code>personal_access_tokens.abilities</code>{' '}
-                    only. There is no per-request permission-table join.
+                    Runtime checks read token abilities from <code>personal_access_tokens.abilities</code>. There is no request-time permission-table join.
+                </p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Granted scope</th>
+                            <th>Required scope</th>
+                            <th>Result</th>
+                            <th>Why</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>*</code></td>
+                            <td><code>country.manage</code></td>
+                            <td>allow</td>
+                            <td>Global wildcard.</td>
+                        </tr>
+                        <tr>
+                            <td><code>country.*</code></td>
+                            <td><code>country.read</code></td>
+                            <td>allow</td>
+                            <td>Resource wildcard.</td>
+                        </tr>
+                        <tr>
+                            <td><code>country.manage</code></td>
+                            <td><code>country.read</code></td>
+                            <td>allow</td>
+                            <td><code>manage -&gt; read</code> convention.</td>
+                        </tr>
+                        <tr>
+                            <td><code>country.read</code></td>
+                            <td><code>country.manage</code></td>
+                            <td>deny</td>
+                            <td>No reverse implication.</td>
+                        </tr>
+                        <tr>
+                            <td><code>export</code></td>
+                            <td><code>content_page.read</code></td>
+                            <td>deny</td>
+                            <td>Standalone permissions do not imply resource permissions.</td>
+                        </tr>
+                        <tr>
+                            <td><code>content_page.manage</code></td>
+                            <td><code>country.read</code></td>
+                            <td>deny</td>
+                            <td>Implication only applies within the same resource scope.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h2>Practical permission rules</h2>
+                <ul>
+                    <li><code>resource.manage</code> implies <code>resource.read</code>.</li>
+                    <li>Standalone permissions such as <code>export</code> do not get special implication rules.</li>
+                    <li>Wildcard scopes still work because stored abilities remain raw strings.</li>
+                    <li>App-level exceptions stay app policy, not global matcher behavior.</li>
+                </ul>
+
+                <h2>Backend typed checks</h2>
+                <p>
+                    Prefer typed checks in handlers, workflows, and model extensions instead of raw string compares.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
-                    <code className="language-rust">{`use core_web::auth::TokenScopeGrant;
+                    <code className="language-rust">{`use core_web::authz::PermissionMode;
+use generated::permissions::Permission;
 
-let scope = match admin.admin_type {
-    AdminType::Developer | AdminType::SuperAdmin => TokenScopeGrant::Wildcard,
-    AdminType::Admin => TokenScopeGrant::AuthOnly,
-};`}</code>
-                </pre>
-
-                <h2>4) AuthZ Helpers</h2>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
-                    <code className="language-rust">{`// Route-level (runtime + OpenAPI):
 core_web::openapi::with_permission_check_post(
     create,
     generated::guards::AdminGuard,
-    core_web::authz::PermissionMode::Any,
-    [generated::permissions::Permission::ArticleManage],
+    PermissionMode::Any,
+    [Permission::ContentPageManage],
 );
 
-core_web::openapi::with_permission_check_get(
-    export_csv,
-    generated::guards::AdminGuard,
-    core_web::authz::PermissionMode::Any,
-    [generated::permissions::Permission::ArticleExport],
-);
-
-// Workflow-level:
 core_web::authz::ensure_permissions(
     &auth,
-    core_web::authz::PermissionMode::Any,
-    &[generated::permissions::Permission::ArticleManage],
+    PermissionMode::Any,
+    &[Permission::ContentPageManage],
 )?;`}</code>
                 </pre>
                 <p>
-                    Convention: <code>resource.manage</code> implicitly grants{' '}
-                    <code>resource.read</code>. Keep specialized actions separate (for example{' '}
-                    <code>article.export</code>).
+                    For app-facing helpers, add typed permission extension methods in <code>generated/src/extensions.rs</code> so workflows can call <code>auth.user.has_permission(...)</code> instead of scattering matcher details.
                 </p>
 
-                <h2>5) OpenAPI Contract</h2>
+                <h2>Frontend typed checks</h2>
                 <p>
-                    Use <code>with_permission_check_*</code> helpers so OpenAPI includes authz
-                    metadata: <code>x-required-guard</code>,{' '}
-                    <code>x-required-permission-mode</code>, and{' '}
-                    <code>x-required-permissions</code>.
+                    Keep auth payload scopes as raw <code>string[]</code> because wildcard matching works on the stored scope strings, but expose typed helpers in the portal auth store so UI gates read like the backend.
                 </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
+                    <code className="language-ts">{`import { PERMISSION } from '@admin/types/enums'
+import { useAuthStore } from '@admin/stores/auth'
+
+const canManage = useAuthStore((s) =>
+  useAuthStore.hasPermission(PERMISSION.content_page_manage, s.account)
+)`}</code>
+                </pre>
+
+                <h2>Delegation policy matrix</h2>
+                <p>
+                    Assigning permissions to other admins is a business rule layered on top of the generic matcher. The starter should filter assignable permissions in the frontend and enforce the same rule again in workflows.
+                </p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Actor type</th>
+                            <th>Can pass permission gate</th>
+                            <th>Can assign only owned permissions</th>
+                            <th>Special restrictions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>developer</code></td>
+                            <td>yes</td>
+                            <td>no</td>
+                            <td>Framework/starter treat developer as all-permissions.</td>
+                        </tr>
+                        <tr>
+                            <td><code>superadmin</code></td>
+                            <td>yes</td>
+                            <td>no</td>
+                            <td>Starter treats superadmin as all-permissions for admin gating.</td>
+                        </tr>
+                        <tr>
+                            <td><code>admin</code></td>
+                            <td>only if owned or implied</td>
+                            <td>yes</td>
+                            <td>Starter additionally blocks delegating <code>admin.read</code> and <code>admin.manage</code>.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h2>Starter admin-table rules</h2>
+                <ul>
+                    <li>Normal admins can only assign permissions they themselves have.</li>
+                    <li>Normal admins cannot assign <code>admin.read</code> or <code>admin.manage</code>, even if they personally have them.</li>
+                    <li>Normal admins still benefit from <code>manage -&gt; read</code>, so owning <code>content_page.manage</code> allows assigning <code>content_page.read</code>.</li>
+                    <li>Self-edit and self-delete from the admin CRUD table are blocked by starter policy.</li>
+                </ul>
+
+                <h2>Related docs</h2>
+                <ul>
+                    <li><a href="#/permission-matrix">Permission Matrix</a> for the short operational cheat sheet.</li>
+                    <li><a href="#/auth">Guards &amp; Auth</a> for token issue/refresh and guard wiring.</li>
+                    <li><a href="#/openapi">OpenAPI</a> for route metadata emitted by permission-aware helpers.</li>
+                    <li><a href="#/cookbook/add-admin-auth-permission-gates">Add Admin Auth &amp; Permission Gates</a> for the starter auth recipe.</li>
+                </ul>
             </div>
         </div>
     )

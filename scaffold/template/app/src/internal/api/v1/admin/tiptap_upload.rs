@@ -10,8 +10,7 @@ use core_web::{
     response::ApiResponse,
 };
 use generated::{
-    extensions::admin::types::AdminViewPermissionExt, guards::AdminGuard,
-    permissions::Permission,
+    extensions::admin::types::AdminViewPermissionExt, guards::AdminGuard, permissions::Permission,
 };
 use uuid::Uuid;
 

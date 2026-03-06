@@ -20,7 +20,8 @@ export function AutoDataTableFeature() {
                 <h2>Scaffold Now (verified)</h2>
                 <p>
                     This feature is wired by default for multiple admin datatable scopes in scaffold:
-                    <code>admin.account</code>, <code>admin.http_client_log</code>, and{' '}
+                    <code>admin.account</code>, <code>admin.content_page</code>,{' '}
+                    <code>admin.country</code>, <code>admin.http_client_log</code>, and{' '}
                     <code>admin.webhook_log</code>. Additional scopes (for example merchant/article) are
                     <strong> Concept Extension (optional)</strong>.
                 </p>
@@ -137,7 +138,8 @@ GET    /api/v1/admin/datatable/admin/export/status?job_id=...
 # Additional scaffold scopes (query/export)
 POST   /api/v1/admin/datatable/http-client-log/query
 POST   /api/v1/admin/datatable/webhook-log/query
-POST   /api/v1/admin/datatable/content_page/query`}</code>
+POST   /api/v1/admin/datatable/content_page/query
+POST   /api/v1/admin/datatable/country/query`}</code>
                 </pre>
 
                 <h2>Step 1: Contract SSOT (Row DTO + Filter Metadata)</h2>
@@ -239,12 +241,13 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
 }`}</code>
                 </pre>
 
-                <h2>Step 2: Datatable Hooks (Scope, Filters, Mappings)</h2>
+                <h2>Step 2: Datatable Hooks (Scope, Filters, Typed Mapping)</h2>
                 <p>
                     Hooks are defined per-model in{' '}
                     <code>app/src/internal/datatables/v1/admin/account.rs</code>. The generated hooks trait
                     provides <code>scope</code>, <code>authorize</code>,{' '}
-                    <code>filter_query</code>, <code>filters</code>, and <code>mappings</code>.
+                    <code>filter_query</code>, <code>filters</code>, <code>map_row</code>, and{' '}
+                    <code>row_to_record</code>.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`// app/src/internal/datatables/v1/admin/account.rs
@@ -290,19 +293,32 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
         }
     }
 
-    /// Post-fetch row transformation: strip sensitive fields,
-    /// transform abilities from JSON array to Vec<String>.
-    fn mappings(
-        &self, record: &mut serde_json::Map<String, serde_json::Value>,
+    /// Typed post-fetch row transform. Mutate the app-facing row first.
+    fn map_row(
+        &self, row: &mut AdminView,
         _input: &DataTableInput, _ctx: &DataTableContext,
     ) -> anyhow::Result<()> {
+        row.identity = row.identity();
+        Ok(())
+    }
+
+    /// Optional final record projection for display/export parity.
+    fn row_to_record(
+        &self, row: AdminView,
+        _input: &DataTableInput, _ctx: &DataTableContext,
+    ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let mut record = AdminTableAdapter::row_to_map(row)?;
         record.remove("password");
         record.remove("deleted_at");
-        // ...transform abilities...
-        Ok(())
+        Ok(record)
     }
 }`}</code>
                 </pre>
+                <p>
+                    Query and CSV export now go through the same filter and mapping pipeline. Keep display/export
+                    transformations on the typed row or in <code>row_to_record</code> so query results and CSV
+                    output stay aligned.
+                </p>
 
                 <h3>Step 2B: Extra Summary Payload (Scaffold sample)</h3>
                 <p>
@@ -316,7 +332,7 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
 #[derive(Debug, Serialize)]
 struct AdminDatatableSummary {
     total_admin_counts: i64,
-    total_filtered: i64, // compatibility alias
+    total_filtered: i64, // secondary total field for summary consumers
     developer_count: i64,
     superadmin_count: i64,
     admin_count: i64,
@@ -392,8 +408,9 @@ crate::internal::datatables::v1::admin::mount_scoped_datatable_routes(state.clon
   ├─ 4. filter_query loop    → non-f-* params via your hook
   ├─ 5. filters()            → catch-all custom query logic
   ├─ 6. sort + paginate
-  ├─ 7. fetch rows
-  ├─ 8. mappings()           → per-row JSON transform
+  ├─ 7. fetch typed rows
+  ├─ 8. map_row()            → typed row transform
+  ├─ 9. row_to_record()      → optional JSON projection
   │
   └─ Response (records + diagnostics + meta)`}</code>
                 </pre>
@@ -528,6 +545,68 @@ crate::internal::datatables::v1::admin::mount_scoped_datatable_routes(state.clon
                         If you need both, use footer metrics for quick per-page context and a
                         dedicated backend summary payload for business totals.
                     </li>
+                </ul>
+
+                <h2>Typed mapping and export parity</h2>
+                <p>
+                    Query and CSV export should go through the same filter and mapping pipeline. Keep typed row
+                    changes in <code>map_row</code> and final JSON/CSV projection changes in <code>row_to_record</code>.
+                </p>
+                <ul>
+                    <li><code>map_row</code>: mutate the typed row before record materialization.</li>
+                    <li><code>row_to_record</code>: final record projection for query response and CSV export.</li>
+                    <li>Do not keep one display mapping path and a separate raw export path.</li>
+                </ul>
+
+                <h2>Frontend export column control</h2>
+                <p>
+                    The React datatable sends visible export headers to the backend, so the page-level column definition is the export SSOT as well.
+                </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-tsx">{`columns={[
+  { key: 'actions', label: 'Actions', exportIgnore: true },
+  { key: 'title', label: 'Title' },
+  {
+    key: 'is_system',
+    label: 'System',
+    exportColumn: 'is_system_explained',
+    render: (row) => row.is_system_explained,
+  },
+]}
+exportIgnoreColumns={['id']}`}</code>
+                </pre>
+                <p>
+                    Use <code>exportColumn</code> when the visible UI field should export a different backend field, and use <code>exportIgnore</code> or <code>exportIgnoreColumns</code> for action columns or page-specific exclusions.
+                </p>
+
+                <h2>Generated vs custom datatables</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Use the generated path when</th>
+                            <th>Use a custom runtime when</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Filters and sorting are mostly column-driven.</td>
+                            <td>The source table is not an app schema model or the query shape is unusually custom.</td>
+                        </tr>
+                        <tr>
+                            <td>You can express access rules with generated query hooks.</td>
+                            <td>You need special joins, summary-only rows, or a framework-owned source without an app schema contract.</td>
+                        </tr>
+                        <tr>
+                            <td>You want generator-owned row/view types and table adapters.</td>
+                            <td>You still need the datatable contract surface, but the runtime query cannot come from a normal generated adapter.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h2>Recipe handoff</h2>
+                <ul>
+                    <li><a href="#/cookbook/add-admin-datatable">Add an Admin DataTable</a> for the step-by-step starter recipe.</li>
+                    <li><a href="#/cookbook/build-end-to-end-flow">Build an End-to-End Flow</a> for a full vertical slice using the same pieces together.</li>
                 </ul>
 
                 <h2>Curl Quick Check</h2>

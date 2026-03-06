@@ -247,7 +247,7 @@ make gen          # Code generation + type generation
 
 1. Rust contract structs derive `ts_rs::TS` with `#[ts(export, export_to = "{portal}/types/")]`
 2. `app/build.rs` auto-discovers contract/datatable TS types from `app/src/contracts/api/v1/**` and `app/src/contracts/datatable/**`
-3. Shared TS schema is owned by `generated::ts_exports::ts_export_files()` (compatibility bridge that includes framework API/datatable/platform shapes plus generated enums/locales)
+3. Shared TS schema is owned by `generated::ts_exports::ts_export_files()` (the shared TS export registry that includes framework API/datatable/platform shapes plus generated enums/locales)
 4. `app/src/bin/export-types.rs` orchestrates output only: merges discovered app contracts + generated shared registry, then writes `frontend/src/**`
 5. Per-portal `types/index.ts` and shared `types/index.ts` barrels are emitted automatically
 

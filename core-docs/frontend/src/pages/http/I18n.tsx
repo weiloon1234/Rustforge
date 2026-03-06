@@ -2,114 +2,118 @@ export function I18n() {
     return (
         <div className="space-y-10">
             <div className="space-y-4">
-                <h1 className="text-4xl font-extrabold text-gray-900">
-                    Internationalization (i18n)
-                </h1>
+                <h1 className="text-4xl font-extrabold text-gray-900">Internationalization</h1>
                 <p className="text-xl text-gray-500">
-                    Support multiple languages using automatic locale detection.
+                    Locale resolution, translation catalogs, and frontend/runtime locale handoff.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
-                <h2>Overview</h2>
+                <h2>Where the SSOT lives</h2>
+                <ul>
+                    <li>
+                        Supported/default locales: <code>app/configs.toml</code>
+                    </li>
+                    <li>
+                        Translation catalogs: <code>i18n/*.json</code>
+                    </li>
+                    <li>
+                        Request locale resolution: <code>core-i18n</code> middleware
+                    </li>
+                    <li>
+                        Frontend runtime locale state: shared locale runtime/store in the starter frontend
+                    </li>
+                </ul>
+
+                <h2>Locale resolution order</h2>
                 <p>
-                    The framework provides built-in i18n support. User locale is
-                    automatically detected from the <code>Accept-Language</code> HTTP
-                    header.
+                    Backend locale resolution is explicit:
                 </p>
+                <ol>
+                    <li><code>X-Locale</code> header</li>
+                    <li><code>Accept-Language</code> header</li>
+                    <li>configured default locale</li>
+                </ol>
                 <p>
-                    Translation catalogs are <strong>project-level assets</strong>. In starter
-                    layout, keep them in <code>i18n/</code> at project root.
+                    Supported locales are matched against configured values, including language-tag normalization
+                    such as <code>zh-CN -&gt; zh</code>.
                 </p>
 
-                <div className="bg-blue-50 border-l-4 border-blue-400 p-4 my-6">
-                    <h4 className="text-blue-900 font-bold mb-2">Automatic Detection</h4>
-                    <p className="text-sm text-blue-700">
-                        Every request automatically extracts the user's preferred language
-                        from the <code>Accept-Language</code> header. No configuration needed!
-                    </p>
-                </div>
-
-                <div className="bg-green-50 border-l-4 border-green-400 p-4 my-6">
-                    <h4 className="text-green-900 font-bold mb-2">
-                        💡 Better DX: English as Key
-                    </h4>
-                    <p className="text-sm text-green-700">
-                        Use <strong>English text directly as the translation key</strong>.
-                        This means:
-                    </p>
-                    <ul className="text-sm text-green-700 mt-2 space-y-1 list-disc pl-5">
-                        <li>
-                            ✅ No need for <code>en.json</code> - English is the fallback
-                        </li>
-                        <li>✅ Only non-English languages need translation files</li>
-                        <li>✅ Less boilerplate, faster development</li>
-                    </ul>
-                </div>
-
-                <h3 className="mt-6">✅ Correct: English Text as Key</h3>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`use core_i18n::t;
-use core_web::error::AppError;
-use core_web::response::ApiResponse;
-
-// ✅ English text is the key - no en.json needed!
-Err(AppError::BadRequest(t("Username is already taken")))
-Ok(ApiResponse::success(data, &t("Profile updated successfully")))`}</code>
+                <h2>Config example</h2>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-toml">{`[languages]
+default_locale = "en"
+supported_locales = ["en", "zh"]
+default_timezone = "+08:00"`}</code>
                 </pre>
 
-                <h2 className="mt-10">Translation Files</h2>
+                <h2>Translation catalog ownership</h2>
                 <p>
-                    Only create translation files for <strong>non-English</strong> languages
-                    in <code>i18n/</code>:
+                    Translation catalogs are project-owned assets. Keep keys grouped and maintained in
+                    <code> i18n/en.json</code>, <code>i18n/zh.json</code>, and any other supported locale files.
+                    Do not treat English as an implicit non-file fallback policy for the starter.
                 </p>
-
-                <h3 className="mt-6">zh.json - Chinese translations</h3>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`{
-  "Username is already taken": "用户名已被占用",
-  "Invalid email address": "无效的电子邮件地址",
-  "Profile updated successfully": "个人资料更新成功"
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-json">{`{
+  "Validation failed": "Validation failed",
+  "admin.read": "Read Admins",
+  "admin.manage": "Manage Admins"
 }`}</code>
                 </pre>
 
-                <h2 className="mt-10">Testing Different Languages</h2>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`# English (default)
-curl http://localhost:3000/api/users/123
-# Response: "Profile updated successfully"
+                <h2>Backend usage</h2>
+                <p>
+                    Use <code>core_i18n::t()</code> or <code>t_args()</code> from Rust. Keep user-facing strings in
+                    translation catalogs rather than scattering hardcoded response text across handlers/workflows.
+                </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`use core_i18n::t;
 
-# Chinese
-curl -H "Accept-Language: zh-CN" http://localhost:3000/api/users/123
-# Response: "个人资料更新成功"`}</code>
+return Err(AppError::Validation {
+    message: t("Validation failed"),
+    errors,
+});`}</code>
                 </pre>
 
-                <div className="bg-gray-50 border-l-4 border-gray-400 p-4 mt-8">
-                    <h4 className="font-bold text-gray-900 mb-2">Summary</h4>
-                    <ul className="text-sm text-gray-700 space-y-1">
-                        <li>
-                            ✅ Locale auto-detected from <code>Accept-Language</code> header
-                        </li>
-                        <li>
-                            ✅ Use <code>t("key")</code> instead of hardcoded strings
-                        </li>
-                        <li>
-                            ✅ Translation files: <code>{'i18n/{lang}.json'}</code>
-                        </li>
-                        <li>
-                            ✅ Test with <code>-H "Accept-Language: zh-CN"</code>
-                        </li>
-                    </ul>
-                </div>
-
-                <h2 className="mt-10">Database Content Translation</h2>
+                <h2>Frontend/runtime behavior</h2>
                 <p>
-                    For translating database content (like Article titles), use the <strong>Localized Fields</strong> feature in Active Record.
-                    <br />
-                    <a href="#/active-record" className="text-orange-600 hover:text-orange-800 font-medium">
-                        View Active Record Docs →
-                    </a>
+                    The starter frontend sends <code>X-Locale</code> on API requests and keeps locale state on the
+                    client. Runtime bootstrap can inject available locales and other locale-adjacent platform data.
                 </p>
+                <ul>
+                    <li>Pre-login locale changes are frontend-only.</li>
+                    <li>
+                        After login, authenticated account locale should override local pre-login choice when the app
+                        account model says so.
+                    </li>
+                    <li>
+                        Frontend should use generated/shared locale types instead of handwritten locale unions where possible.
+                    </li>
+                </ul>
+
+                <h2>Database content vs UI translations</h2>
+                <p>
+                    Use translation catalogs for UI/system text. Use schema-localized fields for model content such as
+                    article titles and summaries.
+                </p>
+                <ul>
+                    <li>
+                        UI/system text: <code>i18n/*.json</code>
+                    </li>
+                    <li>
+                        Database content: localized model fields and generated localized types
+                    </li>
+                </ul>
+
+                <h2>Cross-links</h2>
+                <ul>
+                    <li>
+                        <a href="#/feature-localized-relations">Localized &amp; Relationships</a> for translated model content.
+                    </li>
+                    <li>
+                        <a href="#/requests">Requests &amp; Validation</a> for request-side locale and bootstrap interactions.
+                    </li>
+                </ul>
             </div>
         </div>
     )

@@ -10,7 +10,7 @@ export function Chapter9ProductionHardening() {
         <div className="space-y-10">
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">
-                    Chapter 9: Production Hardening Recipe
+                    Recipe: Production Hardening
                 </h1>
                 <p className="text-xl text-gray-500">
                     Harden auth, datatable export, and async delivery paths for predictable behavior in production.

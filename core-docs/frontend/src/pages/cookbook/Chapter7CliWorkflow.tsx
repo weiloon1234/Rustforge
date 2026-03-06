@@ -10,7 +10,7 @@ export function Chapter7CliWorkflow() {
         <div className="space-y-10">
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">
-                    Chapter 7: CLI Workflow Recipe (Artisan-style)
+                    Recipe: Add a Console Workflow
                 </h1>
                 <p className="text-xl text-gray-500">
                     Operate migrations, seeds, route introspection, and project commands from one console entrypoint.

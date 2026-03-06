@@ -10,7 +10,7 @@ export function Chapter2AdminAuth() {
         <div className="space-y-10">
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">
-                    Chapter 2B: Admin Auth + DTO Async Validation Patterns
+                    Recipe: Add Admin Auth and Permission Gates
                 </h1>
                 <p className="text-xl text-gray-500">
                     Build admin login/me/logout/password flows with typed guard identity and permission-aware routes.
@@ -41,7 +41,11 @@ export function Chapter2AdminAuth() {
 
                 <h3>Pattern summary</h3>
                 <ul>
-                    <li>Login endpoint returns PAT and scopes.</li>
+                    <li>Login endpoint returns session tokens and scopes snapshot.</li>
+                    <li>
+                        Frontend should hydrate the full account via <code>/me</code> immediately after login so
+                        locale, admin type, and UI permission state come from the canonical account payload.
+                    </li>
                     <li>
                         Protected endpoints use typed auth extractor (<code>AuthUser&lt;AdminGuard&gt;</code>).
                     </li>

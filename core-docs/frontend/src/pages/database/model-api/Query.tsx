@@ -6,84 +6,119 @@ export function ModelApiQuery() {
             <div className="space-y-3">
                 <h1 className="text-4xl font-extrabold text-gray-900">`XxxQuery`</h1>
                 <p className="text-xl text-gray-500">
-                    Typed-first fluent query builder with explicit unsafe escape hatch.
+                    Typed query builder generated from schema SSOT, with a narrow raw escape hatch only when the typed surface is not enough.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
-                <h2>Typed Filters</h2>
+                <h2>What `XxxQuery` is for</h2>
+                <p>
+                    Use <code>XxxQuery</code> for read paths, existence checks, aggregates, scoped mutation targets, and relation-aware fetches. The generated API follows the model schema, including the real primary key type. Do not assume every model uses <code>i64</code> IDs.
+                </p>
+
+                <h2>Where the surface comes from</h2>
+                <ul>
+                    <li><strong>Schema SSOT:</strong> <code>app/schemas/*.toml</code> defines fields, enums, relations, soft delete, localized/meta/attachment features, and primary key type.</li>
+                    <li><strong>Generator:</strong> db-gen emits field-typed query methods, terminal readers, relation helpers, and datatable adapters.</li>
+                    <li><strong>App code:</strong> handlers and workflows consume <code>XxxQuery</code>; they should not reimplement query strings for normal cases.</li>
+                </ul>
+
+                <h2>Main query surface</h2>
                 <MethodTable
                     rows={[
                         {
                             method: 'where_<field>(op, value)',
                             returns: 'Self',
-                            notes: 'Field-typed filter generated from schema field list.',
+                            notes: 'Field-typed predicate generated from schema field list and field type.',
                         },
                         {
-                            method: 'where_key(id)',
+                            method: 'where_key(id) / where_key_in(&[ids])',
                             returns: 'Self',
-                            notes: 'Typed alias for PK equality.',
-                        },
-                        {
-                            method: 'where_key_in(&[ids])',
-                            returns: 'Self',
-                            notes: 'Typed alias for PK IN list.',
+                            notes: 'Primary-key filters using the schema-defined PK type, not a hardcoded numeric assumption.',
                         },
                         {
                             method: 'where_col(col, op, value)',
                             returns: 'Self',
-                            notes: 'Column-enum based filtering.',
-                        },
-                        {
-                            method: 'where_in / where_not_in',
-                            returns: 'Self',
-                            notes: 'List filters with binds; no raw interpolation.',
+                            notes: 'Column-enum based filtering when the field-specific helper is not the right fit.',
                         },
                         {
                             method: 'where_group / or_where_group',
                             returns: 'Self',
-                            notes: 'Nested boolean groups.',
+                            notes: 'Nested boolean grouping without falling back to string-built SQL.',
+                        },
+                        {
+                            method: 'order_by / latest / oldest / limit / offset',
+                            returns: 'Self',
+                            notes: 'Typed ordering and pagination-building helpers.',
+                        },
+                        {
+                            method: 'with_<relation>() / where_has_<relation>(...)',
+                            returns: 'Self',
+                            notes: 'Relation-aware query helpers generated from schema relations.',
                         },
                     ]}
                 />
 
-                <h2>Read Operations</h2>
+                <h2>Terminal readers</h2>
                 <MethodTable
                     rows={[
-                        { method: 'get()', returns: 'Result<Vec<XxxView>>', notes: 'Fetch list.' },
+                        {
+                            method: 'get() / get_with_relations()',
+                            returns: 'Result<Vec<XxxView>> / Result<Vec<XxxWithRelations>>',
+                            notes: 'Normal list readers. Relation preload uses generated relation metadata rather than handwritten joins.',
+                        },
                         {
                             method: 'first() / first_or_fail()',
                             returns: 'Result<Option<XxxView>> / Result<XxxView>',
-                            notes: 'First row helpers.',
+                            notes: 'Single-row readers for workflows and handlers.',
                         },
                         {
                             method: 'find(id) / find_or_fail(id)',
                             returns: 'Result<Option<XxxView>> / Result<XxxView>',
-                            notes: 'PK helpers.',
+                            notes: 'Primary-key lookup helpers that respect the actual PK type.',
                         },
                         {
-                            method: 'exists()',
-                            returns: 'Result<bool>',
-                            notes: 'Existence check.',
+                            method: 'exists() / count() / pluck_ids()',
+                            returns: 'Result<bool> / Result<i64> / Result<Vec<PkType>>',
+                            notes: 'Fast terminal checks and ID reads without dropping to raw SQL.',
                         },
                         {
                             method: 'paginate(page, per_page)',
                             returns: 'Result<Page<XxxView>>',
-                            notes: 'Offset pagination.',
+                            notes: 'Offset pagination with the same filtering/order pipeline as normal reads.',
+                        },
+                        {
+                            method: 'sum / avg / min_val / max_val',
+                            returns: 'Result<Option<T>>',
+                            notes: 'Typed aggregate readers for reporting and summary flows.',
                         },
                     ]}
                 />
 
+                <h2>Usage example</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-rust">{`let q = article
     .query()
     .where_status(Op::Eq, ArticleStatus::Published)
-    .where_key_in(&[1001_i64, 1002_i64])
+    .where_has_author(|author| author.where_is_active(Op::Eq, true))
     .latest();
 
 let first = q.clone().first_or_fail().await?;
-let page = q.paginate(1, 20).await?;`}</code>
+let page = q.clone().paginate(1, 20).await?;
+let rows = q.with_author().get_with_relations().await?;`}</code>
                 </pre>
+
+                <h2>Customization boundary</h2>
+                <p>
+                    If the query shape is still normal model work, keep it on <code>XxxQuery</code>. If app code needs computed values, add them on <a href="#/model-api-view"><code>XxxView</code> extensions</a>. Use <a href="#/model-api-unsafe">Unsafe SQL</a> only when the typed relation, filter, and aggregate surface is genuinely insufficient.
+                </p>
+
+                <h2>Cross-links</h2>
+                <ul>
+                    <li><a href="#/schema">Schema Definition</a> for relation and field generation inputs.</li>
+                    <li><a href="#/db-gen">Code Generation</a> for generator ownership and manual extension boundaries.</li>
+                    <li><a href="#/model-api-relations">Relations &amp; Joins</a> for relation-aware query helpers.</li>
+                </ul>
             </div>
         </div>
     )

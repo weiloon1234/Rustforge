@@ -161,17 +161,56 @@ export function ValidationRules() {
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">Validation Rules</h1>
                 <p className="text-xl text-gray-500">
-                    Framework-provided validation rules for sync checks, derive attributes, and
-                    async DB checks.
+                    Framework-provided sync, derive, and async validation rules, with contract-first usage as the default path.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
+                <h2>Default approach</h2>
+                <p>
+                    The default framework path is <code>#[rustforge_contract]</code> plus <code>#[rf(...)]</code>.
+                    Raw <code>validator</code> and <code>schemars</code> attributes remain available, but they are
+                    the lower-level escape hatch, not the primary style to copy into app code.
+                </p>
+
+                <h2>Common contract patterns</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Need</th>
+                            <th>Recommended shape</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Required field</td>
+                            <td><code>String</code> + <code>#[rf(...)]</code></td>
+                            <td>Use for create/full DTOs where the field must be present.</td>
+                        </tr>
+                        <tr>
+                            <td>Nullable field</td>
+                            <td><code>Option&lt;T&gt;</code> + field rules</td>
+                            <td>Missing and explicit <code>null</code> collapse together.</td>
+                        </tr>
+                        <tr>
+                            <td>Partial update field</td>
+                            <td><code>Patch&lt;T&gt;</code> + field rules</td>
+                            <td>Preserves omitted vs null vs concrete value.</td>
+                        </tr>
+                        <tr>
+                            <td>Reusable project rule</td>
+                            <td>wrapper type + <code>#[rf(nested)]</code></td>
+                            <td>Keep repeated field logic in one type instead of copying rule lists.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
                 <h2>Rule Index</h2>
                 <p>
                     Click <strong>Sample</strong> in any row to jump to runnable DTO examples.
-                    Most samples below intentionally use the raw <code>validator</code> +{' '}
-                    <code>schemars</code> style so you can see the underlying behavior directly.
+                    Some samples use raw <code>validator</code> + <code>schemars</code> so the underlying behavior
+                    stays visible, but prefer the contract macro style for real app DTOs.
                 </p>
 
                 <div className="not-prose overflow-x-auto">
@@ -215,7 +254,35 @@ export function ValidationRules() {
                     </table>
                 </div>
 
-                <h2>Schemars and OpenAPI</h2>
+                <h2>Contract semantics first</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Shape</th>
+                            <th>Meaning</th>
+                            <th>Use for</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>String</code></td>
+                            <td>Required value</td>
+                            <td>Create/full inputs</td>
+                        </tr>
+                        <tr>
+                            <td><code>Option&lt;T&gt;</code></td>
+                            <td>Nullable value</td>
+                            <td>Create/full inputs with optional fields</td>
+                        </tr>
+                        <tr>
+                            <td><code>Patch&lt;T&gt;</code></td>
+                            <td>Missing vs null vs value</td>
+                            <td>PATCH/update inputs</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h2>Rustforge contract macro, validator, and OpenAPI</h2>
                 <p>
                     Runtime validation and OpenAPI schema are separate layers:
                 </p>
@@ -236,8 +303,7 @@ export function ValidationRules() {
                 </p>
                 <p>
                     Project-specific reusable rules should use wrapper types (for example{' '}
-                    <code>UsernameString</code>) as the single source of truth for runtime
-                    validation + OpenAPI schema.
+                    <code>UsernameString</code>) as the single source of truth for runtime validation + OpenAPI schema.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use core_web::contracts::rustforge_string_rule_type;
@@ -265,7 +331,7 @@ pub struct AdminLoginInput {
                     schema hints.
                 </p>
 
-                <h3>Rustforge Contract Macro (default)</h3>
+                <h3>Contract macro (default)</h3>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use core_web::contracts::rustforge_contract;
 
@@ -278,6 +344,16 @@ pub struct AdminCreateInput {
     #[rf(email)]
     #[rf(length(min = 5, max = 120))]
     pub email: Option<String>,
+}`}</code>
+                </pre>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`use core_web::{contracts::rustforge_contract, Patch};
+
+#[rustforge_contract]
+pub struct AdminUpdateInput {
+    #[serde(default)]
+    #[rf(email)]
+    pub email: Patch<String>,
 }`}</code>
                 </pre>
                 <p>
@@ -309,10 +385,9 @@ pub struct ExampleInput {
                     for one specific rule without affecting other rules on the same field.
                 </p>
                 <p>
-                    For update routes where async unique checks must ignore the current row ID from
-                    a path parameter, keep the path ID as the source of truth and inject it into a
-                    hidden DTO field (for example <code>__target_id</code>) before calling{' '}
-                    <code>validate_async</code>.
+                    For update routes where async unique checks must ignore the current row ID from a path parameter,
+                    keep the path ID as the source of truth and inject it into a hidden DTO field before calling
+                    <code> validate_async</code>.
                 </p>
 
                 <h2>Samples</h2>

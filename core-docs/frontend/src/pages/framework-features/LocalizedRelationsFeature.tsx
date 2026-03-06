@@ -9,22 +9,21 @@ export function LocalizedRelationsFeature() {
     return (
         <div className="space-y-10">
             <div className="space-y-4">
-                <h1 className="text-4xl font-extrabold text-gray-900">
-                    Feature: Localized + Relationships
-                </h1>
+                <h1 className="text-4xl font-extrabold text-gray-900">Localized &amp; Relationships</h1>
                 <p className="text-xl text-gray-500">
-                    Multilingual fields and relation-aware query/model helpers.
+                    Localized field storage, locale-aware view hydration, and typed relation helpers generated from schema.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
-                <h2>Scaffold Now (verified)</h2>
+                <h2>Where the SSOT lives</h2>
                 <p>
-                    Scaffold baseline does not include article module by default. The schema and
-                    relation examples here are <strong>Concept Extension (optional)</strong>.
+                    Both localized fields and relations are declared in <code>app/schemas/*.toml</code>. Generation
+                    owns the typed insert/update/query/view APIs from those declarations. App code should not rebuild
+                    the same relation or locale semantics manually.
                 </p>
 
-                <h2>Schema</h2>
+                <h2>Schema example</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-toml">{`[model.article]
 fields = [
@@ -35,34 +34,30 @@ fields = [
   "updated_at:datetime"
 ]
 
-# localized fields
 localized = ["title", "summary"]
 
-# relations
 relations = [
   "author:belongs_to:User:author_id:id",
   "comments:has_many:Comment:article_id:id"
 ]`}</code>
                 </pre>
 
-                <h2>Localized Field APIs</h2>
+                <h2>Localized runtime surface</h2>
                 <ul>
                     <li>
-                        On insert/update: <code>set_&lt;field&gt;_lang(Locale, value)</code> and{' '}
-                        <code>set_&lt;field&gt;_langs(LocalizedText)</code>.
+                        Insert/update helpers: <code>set_&lt;field&gt;_lang(...)</code> and{' '}
+                        <code>set_&lt;field&gt;_langs(...)</code>
                     </li>
                     <li>
-                        On view: <code>title: Option&lt;String&gt;</code> and{' '}
-                        <code>title_translations: Option&lt;LocalizedText&gt;</code> (same pattern for
-                        other localized fields).
+                        View hydration: locale-specific field value plus full translations payload
                     </li>
                     <li>
-                        View hydration reads locale from framework i18n context and also keeps full
-                        translations.
+                        Shared TS/runtime support: localized types are exported from Rust so the frontend uses the
+                        same shape
                     </li>
                 </ul>
 
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use crate::generated::localized::{Locale, LocalizedText};
 
 let article = article_model
@@ -76,54 +71,31 @@ let article = article_model
     .save()
     .await?;
 
-// Hydrated from current request locale + full translations
 println!("title = {:?}", article.title);
 println!("title translations = {:?}", article.title_translations);`}</code>
                 </pre>
 
-                <h2>Relationship APIs</h2>
-                <h3>Model Loaders (batch/eager map style)</h3>
+                <h2>Locale-aware view behavior</h2>
+                <p>
+                    View hydration reads the current locale context and still keeps the full translation bag. That
+                    means the app-facing model can expose a direct localized value for common use and retain the full
+                    multi-locale data for editors or admin UI.
+                </p>
+
+                <h2>Relation runtime surface</h2>
                 <ul>
                     <li>
-                        <code>load_&lt;has_many_relation&gt;(&amp;[XxxView]) -&gt; HashMap&lt;id,
-                            Vec&lt;TargetRow&gt;&gt;</code>
+                        Query predicates such as <code>where_has_*</code> and <code>where_doesnt_have_*</code>
                     </li>
                     <li>
-                        <code>load_&lt;belongs_to_relation&gt;(&amp;[XxxView]) -&gt; HashMap&lt;id,
-                            Option&lt;TargetRow&gt;&gt;</code>
+                        Batch loaders and relation-aware retrieval like <code>get_with_relations()</code>
+                    </li>
+                    <li>
+                        Count helpers such as <code>with_counts()</code> for has-many relations
                     </li>
                 </ul>
 
-                <h3>Query Relation Filters</h3>
-                <ul>
-                    <li>
-                        <code>where_has_&lt;relation&gt;(scope)</code>
-                    </li>
-                    <li>
-                        <code>where_doesnt_have_&lt;relation&gt;(scope)</code>
-                    </li>
-                    <li>
-                        <code>or_where_has_&lt;relation&gt;(scope)</code>
-                    </li>
-                </ul>
-
-                <h3>Relation-Aware Retrieval</h3>
-                <ul>
-                    <li>
-                        <code>get_with_relations()</code> returning{' '}
-                        <code>Vec&lt;XxxWithRelations&gt;</code>
-                    </li>
-                    <li>
-                        <code>paginate_with_relations(page, per_page)</code> returning{' '}
-                        <code>Page&lt;XxxWithRelations&gt;</code>
-                    </li>
-                    <li>
-                        <code>with_counts(&amp;[XxxRel])</code> returning relation count maps for
-                        has-many relations
-                    </li>
-                </ul>
-
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`use core_db::common::sql::Op;
 
 let rows = article_model
@@ -136,22 +108,30 @@ for item in rows {
     println!("article id = {}", item.row.id);
     println!("author = {:?}", item.author);
     println!("comments count = {}", item.comments.len());
-}
-
-let (articles, counts) = article_model
-    .query()
-    .with_counts(&[ArticleRel::Comments])
-    .await?;
-
-let comment_counts = counts.get("comments");`}</code>
+}`}</code>
                 </pre>
 
-                <h2>Typed-First Notes</h2>
-                <p>
-                    Localized and relation methods are generated from schema names, so you keep
-                    compile-time safety and avoid stringly-typed relation building for common
-                    patterns.
-                </p>
+                <h2>Typed-first rules</h2>
+                <ul>
+                    <li>Declare localized fields and relations in schema, not as ad-hoc workflow conventions.</li>
+                    <li>Use generated relation helpers before reaching for manual SQL joins.</li>
+                    <li>
+                        Keep localized values in Rust/TS shared types instead of duplicating translation bag shapes.
+                    </li>
+                </ul>
+
+                <h2>Cross-links</h2>
+                <ul>
+                    <li>
+                        <a href="#/model-api-relations">Relations &amp; Joins</a> for lower-level relation query API details.
+                    </li>
+                    <li>
+                        <a href="#/i18n">Internationalization</a> for locale resolution and transport behavior.
+                    </li>
+                    <li>
+                        <a href="#/cookbook/build-crud-admin-resource">Build a CRUD Admin Resource</a> for a starter recipe.
+                    </li>
+                </ul>
             </div>
         </div>
     )

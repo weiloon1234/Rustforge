@@ -168,3 +168,12 @@ make framework-docs-build
 ```
 
 Publishes framework docs to `public/framework-documentation/`.
+
+Framework feature/API/cookbook documentation is owned by Rustforge `core-docs`.
+Starter-local operational guides stay under `docs/` in this project template. Start with `docs/README.md` for the starter-local index.
+
+Use this split deliberately:
+
+- `public/framework-documentation/`: canonical framework reference
+- `docs/README.md`: starter-local docs index
+- `docs/`: project/starter-specific guides and playbooks

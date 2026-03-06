@@ -2,34 +2,43 @@ export function ModelApiFeatures() {
     return (
         <div className="space-y-8">
             <div className="space-y-3">
-                <h1 className="text-4xl font-extrabold text-gray-900">Meta, Attachments, Localized</h1>
+                <h1 className="text-4xl font-extrabold text-gray-900">Framework Features on Models</h1>
                 <p className="text-xl text-gray-500">
-                    Dedicated framework model features available from generated APIs.
+                    Localized, meta, and attachment features are schema-owned model capabilities with generated read/write APIs, not ad hoc side tables app code should manage manually.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
-                <h2>Meta (JSONB)</h2>
+                <h2>Why these features live on the model API</h2>
                 <p>
-                    Keep storage flexible in JSONB while exposing typed readers/writers from schema.
+                    These features are framework-owned storage patterns. The schema declares them once, db-gen emits the Rust model API, and app code consumes them through <code>XxxView</code>, <code>XxxInsert</code>, and <code>XxxUpdate</code>. That keeps the model surface SSOT instead of splitting feature logic across repositories and raw queries.
+                </p>
+
+                <h2>Meta</h2>
+                <p>
+                    Meta keeps flexible storage in JSON while still emitting typed accessors and writers when the schema declares known keys.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-toml">{`meta = [
   "seo_title:string",
   "priority:i32",
-  "extra:ExtraMeta", # strongly typed shape
-  "debug_blob:json"  # dynamic payload
+  "extra:ExtraMeta",
+  "debug_blob:json"
 ]`}</code>
                 </pre>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`let extra = view.meta_extra()?; // Option<ExtraMeta>
-let debug = view.meta_debug_blob_as::<serde_json::Value>()?;
+                    <code className="language-rust">{`let priority = view.meta_priority;
+let extra = view.meta_extra()?;
+let payload = view.meta_debug_blob_as::<serde_json::Value>()?;
 
-let insert = article.insert().set_meta_extra(&payload)?;
-let update = article.update().set_meta_extra(&payload)?;`}</code>
+article.insert().set_meta_extra(&payload)?;
+article.update().set_meta_priority(10).save().await?;`}</code>
                 </pre>
 
                 <h2>Attachments</h2>
+                <p>
+                    Attachment declarations generate typed write helpers and app-facing URL fields. App code should not own the attachment side tables directly in normal flows.
+                </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-toml">{`attachment = ["cover:image"]
 attachments = ["gallery:image"]`}</code>
@@ -42,10 +51,12 @@ let cover_url = view.cover_url.clone();
 let gallery_urls = view.gallery_urls.clone();`}</code>
                 </pre>
 
-                <h2>Localized + Relations</h2>
+                <h2>Localized</h2>
+                <p>
+                    Localized fields generate locale-aware write helpers and a stable app-facing localized text shape. The current locale is applied when hydrating view-facing values, while the full localized structure remains available when the model surface exposes it.
+                </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-toml">{`localized = ["title", "body"]
-relations = ["author:belongs_to:User:author_id:id"]`}</code>
+                    <code className="language-toml">{`localized = ["title", "body"]`}</code>
                 </pre>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-rust">{`let row = article
@@ -53,10 +64,22 @@ relations = ["author:belongs_to:User:author_id:id"]`}</code>
     .set_title_lang(localized::Locale::En, "Hello")
     .set_title_lang(localized::Locale::Zh, "你好")
     .save()
-    .await?;
-
-let rows = article.query().with_author().get_with_relations().await?;`}</code>
+    .await?;`}</code>
                 </pre>
+
+                <h2>How to extend safely</h2>
+                <ul>
+                    <li>Add computed app-facing helpers on <a href="#/model-api-view"><code>XxxView</code> extensions</a>.</li>
+                    <li>Keep schema-owned feature declarations in schema TOML.</li>
+                    <li>Use generated insert/update/query APIs for normal reads and writes; do not fork these features into handwritten repositories unless there is a real gap.</li>
+                </ul>
+
+                <h2>Cross-links</h2>
+                <ul>
+                    <li><a href="#/attachments">Attachments</a> for the framework-level attachment runtime surface.</li>
+                    <li><a href="#/meta">Meta</a> for the framework-level meta feature documentation.</li>
+                    <li><a href="#/localized-relations">Localized Relations</a> for locale-aware relation behavior.</li>
+                </ul>
             </div>
         </div>
     )

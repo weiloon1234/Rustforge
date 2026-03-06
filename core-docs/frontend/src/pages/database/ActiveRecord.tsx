@@ -176,7 +176,7 @@ model.query()
     .where_in(ArticleCol::Id, &[1, 2, 3, 4, 5])
     .get().await?;
 
-// Raw WHERE (explicit special-case path)
+// Raw WHERE (explicit raw escape hatch)
 use core_db::common::sql::RawClause;
 
 model.query()

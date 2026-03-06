@@ -6,65 +6,81 @@ export function ModelApiFacade() {
             <div className="space-y-3">
                 <h1 className="text-4xl font-extrabold text-gray-900">`Xxx` Facade</h1>
                 <p className="text-xl text-gray-500">
-                    Primary entry type generated per schema model (for example <code>Article</code>).
+                    Primary generated model entrypoint. It is the stable way app code reaches typed query, insert, and update builders.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
+                <h2>What the facade is for</h2>
                 <p>
-                    The default generated entrypoint is now <code>Xxx</code>, not{' '}
-                    <code>XxxModel</code>. This keeps the API easy to remember while retaining
-                    strongly typed builders.
+                    Every schema model gets an <code>Xxx</code> facade. App code should start from this type instead of constructing ad hoc repositories or handwritten SQL helpers for normal model work. The facade carries the DB connection and optional runtime context such as attachment base URL.
                 </p>
 
+                <h2>Where it sits in the SSOT ladder</h2>
+                <ul>
+                    <li><strong>Schema SSOT:</strong> fields, relations, PK type, and framework features come from schema TOML.</li>
+                    <li><strong>Generated facade:</strong> <code>Xxx</code> is the generated model entrypoint for those capabilities.</li>
+                    <li><strong>Manual app extension:</strong> computed values belong on <a href="#/model-api-view"><code>XxxView</code> extensions</a>, not on a forked facade.</li>
+                </ul>
+
+                <h2>Main facade methods</h2>
                 <MethodTable
                     rows={[
                         {
                             method: 'new(db, base_url)',
                             returns: 'Xxx',
-                            notes: 'Create facade with DbConn and optional base URL.',
+                            notes: 'Construct the model facade with a DB handle and optional attachment/CDN base URL.',
                         },
                         {
                             method: 'query()',
                             returns: 'XxxQuery',
-                            notes: 'Typed query/read builder.',
+                            notes: 'Typed read/query builder generated from schema fields and relations.',
                         },
                         {
                             method: 'insert()',
                             returns: 'XxxInsert',
-                            notes: 'Typed create builder.',
+                            notes: 'Typed create builder for normal model writes.',
                         },
                         {
                             method: 'update()',
                             returns: 'XxxUpdate',
-                            notes: 'Typed update builder.',
+                            notes: 'Typed scoped mutation builder for normal update flows.',
                         },
                         {
-                            method: 'find(id)',
-                            returns: 'Result<Option<XxxView>>',
-                            notes: 'Find by primary key.',
+                            method: 'find(id) / find_or_fail(id)',
+                            returns: 'Result<Option<XxxView>> / Result<XxxView>',
+                            notes: 'Primary-key lookup helpers using the actual schema PK type.',
                         },
                         {
                             method: 'delete(id) / restore(id)',
                             returns: 'Result<u64>',
-                            notes: 'Delete or restore (restore only when soft-delete enabled).',
+                            notes: 'Convenience mutation helpers. Restore exists only for soft-delete models.',
                         },
                     ]}
                 />
 
+                <h2>Usage example</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-rust">{`use models::generated::models::Article;
 
 let article = Article::new(&state.db, Some(state.cdn_base.clone()));
 
-let one = article.find(1001).await?;
-let rows = article.query().latest().limit(20).get().await?;`}</code>
+let one = article.find_or_fail(article_id).await?;
+let rows = article.query().latest().limit(20).get().await?;
+let created = article.insert().set_title("Hello".to_string()).save().await?;`}</code>
                 </pre>
 
+                <h2>Practical rule</h2>
                 <p>
-                    Keep this facade as your daily entrypoint. Use the submenu pages for builder
-                    details.
+                    Treat <code>Xxx</code> as the model boundary and the generated builders as the standard API. Reach for separate repositories only when you are intentionally building a higher-level domain service, not because the generated model facade is supposed to be bypassed by default.
                 </p>
+
+                <h2>Cross-links</h2>
+                <ul>
+                    <li><a href="#/model-api-query">`XxxQuery`</a> for read/query behavior.</li>
+                    <li><a href="#/model-api-insert">`XxxInsert`</a> for create behavior.</li>
+                    <li><a href="#/model-api-update">`XxxUpdate`</a> for mutation behavior.</li>
+                </ul>
             </div>
         </div>
     )

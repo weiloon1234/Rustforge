@@ -10,7 +10,7 @@ export function Chapter1CrudApiServer() {
         <div className="space-y-10">
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">
-                    Chapter 1: CRUD API Server (Portal + Typed AuthZ)
+                    Recipe: Build a CRUD Admin Resource
                 </h1>
                 <p className="text-xl text-gray-500">
                     Start from scaffold admin domain, then extend to new CRUD modules without breaking SSOT.

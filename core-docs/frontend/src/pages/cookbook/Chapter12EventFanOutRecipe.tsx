@@ -10,7 +10,7 @@ export function Chapter12EventFanOutRecipe() {
         <div className="space-y-10">
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">
-                    Chapter 12: Event Fan-out Recipe
+                    Recipe: Fan-out Events
                 </h1>
                 <p className="text-xl text-gray-500">
                     Fan out one domain event into jobs, notifications, and realtime channels with controlled failure domains.

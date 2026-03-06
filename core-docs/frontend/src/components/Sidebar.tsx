@@ -1,127 +1,11 @@
 import { useRouter } from '@/hooks/useRouter'
 import { cn } from '@/lib/utils'
+import { docsSections } from '@/docsRegistry'
 
 interface SidebarProps {
     isOpen: boolean
     onClose: () => void
 }
-
-const sections = [
-    {
-        title: 'Getting Started',
-        items: [
-            { title: 'Introduction', href: '#/' },
-            { title: 'Installation', href: '#/installation' },
-            { title: 'Quick Start', href: '#/quick-start' },
-            { title: 'Directory Structure', href: '#/directory-structure' },
-        ],
-    },
-    {
-        title: 'Core Architecture',
-        items: [
-            { title: 'Bootstrap', href: '#/bootstrap' },
-            { title: 'Configuration', href: '#/configuration' },
-            { title: 'CLI Commands', href: '#/cli' },
-        ],
-    },
-    {
-        title: 'Cookbook',
-        items: [
-            { title: 'Overview', href: '#/cookbook' },
-            { title: 'Chapter 1: CRUD API', href: '#/cookbook-chapter-1-crud-api-server' },
-            {
-                title: 'Chapter 2A: DTO + Validation',
-                href: '#/cookbook-chapter-2-validation-dto',
-            },
-            {
-                title: 'Chapter 2B: Admin Auth',
-                href: '#/cookbook-chapter-2-admin-auth',
-            },
-            { title: 'Chapter 3: Jobs Usage', href: '#/cookbook-chapter-3-jobs-usage' },
-            { title: 'Chapter 4: Notifications', href: '#/cookbook-chapter-4-notifications' },
-            { title: 'Chapter 5: WebSocket Channel', href: '#/cookbook-chapter-5-websocket-channel' },
-            {
-                title: 'Chapter 6: WebSocket Auth',
-                href: '#/cookbook-chapter-6-websocket-auth-middleware',
-            },
-            { title: 'Chapter 7: CLI Workflow', href: '#/cookbook-chapter-7-cli-workflow' },
-            { title: 'Chapter 8: End-to-End', href: '#/cookbook-chapter-8-end-to-end-flow' },
-            {
-                title: 'Chapter 9: Hardening',
-                href: '#/cookbook-chapter-9-production-hardening',
-            },
-            { title: 'Chapter 10: Caching', href: '#/cookbook-chapter-10-caching' },
-            { title: 'Chapter 11: Testing', href: '#/cookbook-chapter-11-testing' },
-            {
-                title: 'Chapter 12: Event Fan-Out',
-                href: '#/cookbook-chapter-12-event-fanout',
-            },
-        ],
-    },
-    {
-        title: 'Framework Features',
-        items: [
-            { title: 'Overview', href: '#/framework-features' },
-            { title: 'Meta', href: '#/feature-meta' },
-            { title: 'Attachments', href: '#/feature-attachments' },
-            { title: 'Localized + Relationships', href: '#/feature-localized-relations' },
-            { title: 'Realtime / WebSocket', href: '#/feature-realtime' },
-            { title: 'Realtime Protocol + Runbook', href: '#/feature-realtime-protocol' },
-        ],
-    },
-    {
-        title: 'DataTable',
-        items: [{ title: 'AutoDataTable', href: '#/feature-autodatatable' }],
-    },
-    {
-        title: 'Database & Models',
-        items: [
-            { title: 'Schema Definition', href: '#/schema' },
-            { title: 'Code Generation', href: '#/db-gen' },
-            { title: 'Model API Overview', href: '#/model-api' },
-            { title: 'Xxx (Facade)', href: '#/model-api-facade' },
-            { title: 'XxxQuery', href: '#/model-api-query' },
-            { title: 'XxxInsert', href: '#/model-api-insert' },
-            { title: 'XxxUpdate', href: '#/model-api-update' },
-            { title: 'XxxView', href: '#/model-api-view' },
-            { title: 'XxxCol / Filtering', href: '#/model-api-columns' },
-            { title: 'Relations / Joins', href: '#/model-api-relations' },
-            { title: 'Unsafe SQL Escape', href: '#/model-api-unsafe' },
-            { title: 'Collections', href: '#/model-api-collections' },
-            { title: 'Meta / Attach / Localized', href: '#/model-api-features' },
-            { title: 'ActiveRecord', href: '#/active-record' },
-            { title: 'Migrations', href: '#/migrations' },
-        ],
-    },
-    {
-        title: 'HTTP & API',
-        items: [
-            { title: 'Routing', href: '#/routing' },
-            { title: 'Requests & Validation', href: '#/requests' },
-            { title: 'Validation Rules', href: '#/validation-rules' },
-            { title: 'Responses', href: '#/responses' },
-            { title: 'OpenAPI', href: '#/openapi' },
-            { title: 'Internationalization', href: '#/i18n' },
-            { title: 'HTTP & Webhook Logs', href: '#/http-log' },
-        ],
-    },
-    {
-        title: 'Security',
-        items: [
-            { title: 'Guards & Auth', href: '#/auth' },
-            { title: 'Permissions & AuthZ', href: '#/permissions' },
-        ],
-    },
-    {
-        title: 'Async & Jobs',
-        items: [
-            { title: 'Job Queue', href: '#/jobs' },
-            { title: 'Notifications', href: '#/notifications' },
-            { title: 'Cron Scheduler', href: '#/scheduler' },
-            { title: 'Caching', href: '#/caching' },
-        ],
-    },
-]
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
     const { isActive } = useRouter()
@@ -141,7 +25,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 </div>
 
                 <nav className="p-4 space-y-8">
-                    {sections.map((section) => (
+                    {docsSections.map((section) => (
                         <div key={section.title}>
                             <h4 className="mb-2 px-2 text-sm font-semibold text-gray-900 uppercase tracking-wider">
                                 {section.title}

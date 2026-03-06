@@ -10,7 +10,7 @@ export function Chapter2ValidationDto() {
         <div className="space-y-10">
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">
-                    Chapter 2A: Request/Response DTO + Validation
+                    Recipe: Add Validation Contracts
                 </h1>
                 <p className="text-xl text-gray-500">
                     Keep contract DTOs as SSOT for runtime validation, OpenAPI schema, and TypeScript export.

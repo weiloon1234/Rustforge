@@ -4,15 +4,19 @@ export function Guards() {
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">Guards &amp; Auth</h1>
                 <p className="text-xl text-gray-500">
-                    Guard-based authentication with PAT-only scopes and refresh rotation.
+                    Guard-based authentication, PAT session lifecycle, and account hydration boundaries.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
-                <h2>1) Guard Configuration</h2>
+                <h2>Auth SSOT</h2>
+                <p>
+                    Guard configuration lives in <code>app/configs.toml</code>. Generated guard types,
+                    token issue helpers, and auth extractors should stay aligned with that config instead of
+                    repeating guard names across the codebase.
+                </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-toml">{`# app/configs.toml
-[auth]
+                    <code className="language-toml">{`[auth]
 default = "admin"
 
 [auth.guards.admin]
@@ -20,94 +24,113 @@ provider = "admin"
 ttl_min = 30
 refresh_ttl_days = 30`}</code>
                 </pre>
+
+                <h2>Generated/runtime boundary</h2>
+                <ul>
+                    <li>
+                        db-gen emits guard types into <code>generated/src/guards</code>.
+                    </li>
+                    <li>
+                        <code>AppApiState</code> implements <code>core_web::auth::AuthState</code> so
+                        auth helpers know which database pool to use.
+                    </li>
+                    <li>
+                        Protected routes should rely on generated guard types and typed auth extractors such as
+                        <code>AuthUser&lt;AdminGuard&gt;</code>.
+                    </li>
+                </ul>
+
+                <h2>Issue and refresh sessions</h2>
                 <p>
-                    Guard structs are generated into <code>generated/src/guards</code> by db-gen.
-                </p>
-
-                <h2>2) AuthState Contract</h2>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`impl core_web::auth::AuthState for AppApiState {
-    fn auth_db(&self) -> &sqlx::PgPool {
-        &self.db
-    }
-}`}</code>
-                </pre>
-
-                <h2>3) Guard Middleware</h2>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
-                    <code className="language-rust">{`use axum::{extract::{Request, State}, middleware::Next, response::Response};
-use core_web::error::AppError;
-use generated::guards::AdminGuard;
-
-pub async fn require_admin(
-    state: State<AppApiState>,
-    request: Request,
-    next: Next,
-) -> Result<Response, AppError> {
-    core_web::auth::require_auth::<AdminGuard, AppApiState>(state, request, next).await
-}`}</code>
-                </pre>
-
-                <h2>4) PAT Scope Model</h2>
-                <p>
-                    Runtime permissions come from <code>personal_access_tokens.abilities</code> only.
-                    Scopes are snapshot at issue/refresh time.
+                    Runtime abilities are stored on <code>personal_access_tokens.abilities</code> and are snapshotted
+                    when sessions are issued or refreshed. There is no request-time permission-table join.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
-                    <code className="language-rust">{`use core_web::auth::{issue_guard_session, TokenScopeGrant};
+                    <code className="language-rust">{`use core_web::auth::{issue_guard_session, refresh_guard_session, TokenScopeGrant};
 
-let session = issue_guard_session::<AdminGuard>(
+let issued = issue_guard_session::<AdminGuard>(
     &db,
     &settings.auth,
     admin.id,
     "admin-session",
     TokenScopeGrant::AuthOnly,
-).await?;`}</code>
-                </pre>
+).await?;
 
-                <h2>5) Refresh Rotation</h2>
-                <p>
-                    Refresh tokens are one-time-use. Reuse is rejected and session family can be revoked.
-                </p>
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
-                    <code className="language-rust">{`use core_web::auth::{
-    extract_refresh_token_for_client,
-    refresh_guard_session,
-    AuthClientType,
-};
-
-let refresh = extract_refresh_token_for_client(
-    &headers,
-    "admin",
-    AuthClientType::Web,
-    None,
-).ok_or_else(|| AppError::BadRequest("Missing refresh token".to_string()))?;
-
-let session = refresh_guard_session::<AdminGuard>(
+let refreshed = refresh_guard_session::<AdminGuard>(
     &db,
     &settings.auth,
-    &refresh,
+    &refresh_token,
     "admin-session",
 ).await?;`}</code>
                 </pre>
 
-                <h2>6) Typed Permission Checks</h2>
+                <h2>Protected route pattern</h2>
+                <p>
+                    Prefer permission-aware route helpers for business endpoints. They keep runtime auth and OpenAPI
+                    metadata aligned in one declaration.
+                </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
-                    <code className="language-rust">{`// Route-level (runtime + OpenAPI):
-core_web::openapi::with_permission_check_post(
-    create,
-    generated::guards::AdminGuard,
-    core_web::authz::PermissionMode::Any,
-    [generated::permissions::Permission::ArticleManage],
-);
+                    <code className="language-rust">{`use core_web::{
+    authz::PermissionMode,
+    openapi::{with_permission_check_get, ApiRouter},
+};
+use generated::{guards::AdminGuard, permissions::Permission};
 
-// Handler/workflow fallback:
-core_web::authz::ensure_permissions(
-    &auth,
-    core_web::authz::PermissionMode::Any,
-    &[generated::permissions::Permission::ArticleManage],
-)?;`}</code>
+pub fn router(state: AppApiState) -> ApiRouter<AppApiState> {
+    ApiRouter::new()
+        .api_route(
+            "/me",
+            with_permission_check_get(me, AdminGuard, PermissionMode::Any, [Permission::AdminRead]),
+        )
+        .with_state(state)
+}`}</code>
                 </pre>
+
+                <h2>Login vs account hydration</h2>
+                <p>
+                    Treat login and account hydration as two separate concerns:
+                </p>
+                <ul>
+                    <li>
+                        <strong>Login:</strong> issue/refresh session tokens and return the token-scoped abilities snapshot.
+                    </li>
+                    <li>
+                        <strong><code>/me</code>:</strong> hydrate the canonical account payload used by the frontend
+                        for locale, admin type, and UI permission state.
+                    </li>
+                </ul>
+                <p>
+                    The frontend should call <code>/me</code> immediately after login rather than assuming the login
+                    payload is the full account model.
+                </p>
+
+                <h2>Typed permission checks</h2>
+                <p>
+                    Keep guard/auth concerns separate from permission matching, but expose typed permission helpers
+                    on top of the authenticated account model where it improves DX.
+                </p>
+                <ul>
+                    <li>
+                        Backend: use <code>ensure_permissions</code>, route helpers, or app-facing permission extension traits.
+                    </li>
+                    <li>
+                        Frontend: keep raw <code>string[]</code> scopes because wildcard matching works on the
+                        stored scope strings, but gate UI through typed store helpers.
+                    </li>
+                </ul>
+
+                <h2>Cross-links</h2>
+                <ul>
+                    <li>
+                        <a href="#/permissions">Permissions &amp; AuthZ</a> for matcher rules and delegation policy.
+                    </li>
+                    <li>
+                        <a href="#/openapi">OpenAPI</a> for the guard/permission metadata emitted on routes.
+                    </li>
+                    <li>
+                        <a href="#/cookbook/add-admin-auth-permission-gates">Add Admin Auth &amp; Permission Gates</a> for the starter recipe.
+                    </li>
+                </ul>
             </div>
         </div>
     )

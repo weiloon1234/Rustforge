@@ -3,6 +3,14 @@
 Rustforge is a framework-only Rust backend workspace.
 It provides reusable infrastructure crates. Domain/application code should live in a separate starter/project repository.
 
+## Documentation Surfaces
+
+- Framework SSOT: `core-docs/` mounted at `/framework-documentation`
+- Operational overview: this `README.md`
+- Starter/project-local guides: `scaffold/template/docs/`
+
+Do not treat these as parallel manuals. The framework docs app is the canonical feature/API/cookbook reference.
+
 ## What Each Folder Does
 
 | Folder | Purpose | Consumer-side bootstrap |
@@ -147,6 +155,8 @@ make framework-docs-build
 1. `FRAMEWORK_DOCS_DIST_DIR` (if set)
 2. `PUBLIC_PATH + FRAMEWORK_DOCS_PATH` (starter default)
 3. Rustforge crate-local `core-docs/frontend/dist`
+
+Starter-local guides remain under `scaffold/template/docs/` and should be used only for project-specific setup or migration playbooks.
 
 ## Framework Development
 

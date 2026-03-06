@@ -4,16 +4,17 @@ export function ModelApiView() {
     return (
         <div className="space-y-8">
             <div className="space-y-3">
-                <h1 className="text-4xl font-extrabold text-gray-900">`XxxView`</h1>
+                <h1 className="text-4xl font-extrabold text-gray-900">`XxxView` &amp; Extensions</h1>
                 <p className="text-xl text-gray-500">
-                    Hydrated read model returned by query/find/save flows.
+                    Hydrated app-facing read model plus the intended extension point for computed helpers.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
                 <p>
-                    <code>XxxView</code> contains DB fields plus framework enrichments:
-                    localized values, meta bag, and attachments URLs.
+                    <code>XxxView</code> is the stable app-facing model. It already includes hydrated framework
+                    features such as localized values, meta bags, attachments, and generated helper methods.
+                    App-specific computed values should extend <code>XxxView</code>, not the raw DB row type.
                 </p>
 
                 <MethodTable
@@ -26,31 +27,74 @@ export function ModelApiView() {
                         {
                             method: 'update_with(&Xxx)',
                             returns: 'XxxUpdate',
-                            notes: 'Use existing facade context.',
+                            notes: 'Use existing facade/model context.',
                         },
                         {
                             method: 'to_json()',
                             returns: 'XxxJson',
-                            notes: 'Projection respecting hidden/computed settings.',
+                            notes: 'Projection that respects hidden/computed/generated settings.',
                         },
                         {
                             method: 'meta_<field>()',
                             returns: 'Option<T> or Result<Option<T>>',
-                            notes: 'Typed meta readers.',
+                            notes: 'Typed meta readers for declared schema keys.',
                         },
                         {
-                            method: 'meta_<json>_as<U>()',
-                            returns: 'Result<Option<U>>',
-                            notes: 'Fallback for dynamic JSON-shaped fields.',
+                            method: 'foo_explained',
+                            returns: 'String or Option<String>',
+                            notes: 'Generated explained field for enum-backed app-facing outputs where applicable.',
                         },
                     ]}
                 />
 
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`let view = article.query().find_or_fail(1001).await?;
+                <h2>Use `XxxView` as the extension surface</h2>
+                <p>
+                    Put app-specific helpers in <code>generated/src/extensions.rs</code>. This keeps DB row shapes,
+                    generated code, and manual app semantics separated cleanly.
+                </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
+                    <code className="language-rust">{`pub trait AdminViewComputedExt {
+    fn identity(&self) -> String;
+}
 
-let featured = view.meta_is_featured().unwrap_or(false);
-let extra = view.meta_extra()?; // for meta = ["extra:ExtraMeta"]`}</code>
+impl AdminViewComputedExt for AdminView {
+    fn identity(&self) -> String {
+        admin_identity(
+            Some(self.username.as_str()),
+            Some(self.name.as_str()),
+            self.email.as_deref(),
+            Some(self.id),
+        )
+    }
+}`}</code>
+                </pre>
+
+                <h2>What not to extend</h2>
+                <ul>
+                    <li>
+                        <code>XxxRow</code>: raw DB/internal shape, not the stable app model.
+                    </li>
+                    <li>
+                        <code>XxxJson</code>: output projection, not the primary place for business helpers.
+                    </li>
+                    <li>
+                        Handler-local mapping code for every request: move reusable logic into view extensions instead.
+                    </li>
+                </ul>
+
+                <h2>Starter docs handoff</h2>
+                <p>
+                    For the starter-side cookbook version of this pattern, see
+                    <code> scaffold/template/docs/computed-model-values.md</code>.
+                </p>
+
+                <h2>Example</h2>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
+                    <code className="language-rust">{`let admin = Admin::new(db, None).query().find_or_fail(1001).await?;
+
+let display_name = admin.identity();
+let featured = admin.meta_is_featured().unwrap_or(false);
+let explained = admin.status_explained.clone();`}</code>
                 </pre>
             </div>
         </div>

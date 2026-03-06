@@ -2,61 +2,34 @@ export function RealtimeProtocolStateMachineFeature() {
     return (
         <div className="space-y-8">
             <div className="space-y-3">
-                <h1 className="text-4xl font-extrabold text-gray-900">
-                    Realtime Protocol / State Machine
-                </h1>
+                <h1 className="text-4xl font-extrabold text-gray-900">Realtime Protocol &amp; Runbook</h1>
                 <p className="text-xl text-gray-500">
-                    Wire-level contract and production operations checklist for native WebSocket
-                    realtime.
+                    Wire-level websocket contract, delivery semantics, and operational failure handling.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
-                <h2>Protocol Contract</h2>
-                <p>Client to server operations:</p>
+                <h2>Protocol contract</h2>
+                <p>Client-to-server operations:</p>
                 <ul>
-                    <li>
-                        <code>auth</code>: authenticate token payload
-                    </li>
-                    <li>
-                        <code>subscribe</code>: subscribe by <code>channel</code> + optional <code>room</code>
-                    </li>
-                    <li>
-                        <code>unsubscribe</code>: stop subscription
-                    </li>
-                    <li>
-                        <code>ack</code>: acknowledge a <code>delivery_id</code> for checkpoint
-                    </li>
-                    <li>
-                        <code>ping</code>: heartbeat
-                    </li>
+                    <li><code>auth</code></li>
+                    <li><code>subscribe</code></li>
+                    <li><code>unsubscribe</code></li>
+                    <li><code>ack</code></li>
+                    <li><code>ping</code></li>
                 </ul>
-                <p>Server to client operations:</p>
+                <p>Server-to-client operations:</p>
                 <ul>
-                    <li>
-                        <code>auth_ok</code>
-                    </li>
-                    <li>
-                        <code>event</code>
-                    </li>
-                    <li>
-                        <code>replay_gap</code>
-                    </li>
-                    <li>
-                        <code>presence</code>
-                    </li>
-                    <li>
-                        <code>ack_ok</code>
-                    </li>
-                    <li>
-                        <code>error</code>
-                    </li>
-                    <li>
-                        <code>pong</code>
-                    </li>
+                    <li><code>auth_ok</code></li>
+                    <li><code>event</code></li>
+                    <li><code>replay_gap</code></li>
+                    <li><code>presence</code></li>
+                    <li><code>ack_ok</code></li>
+                    <li><code>error</code></li>
+                    <li><code>pong</code></li>
                 </ul>
 
-                <h3>Event Envelope</h3>
+                <h2>Event envelope</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-json">{`{
   "op": "event",
@@ -69,11 +42,11 @@ export function RealtimeProtocolStateMachineFeature() {
 }`}</code>
                 </pre>
                 <p>
-                    Timestamp contract is <code>sent_at_unix_ms</code> only. Legacy
-                    <code>sent_at_unix</code> is removed.
+                    The timestamp contract is <code>sent_at_unix_ms</code>. The protocol should document only the
+                    current envelope, not older timestamp layouts.
                 </p>
 
-                <h2>Connection State Machine</h2>
+                <h2>Connection state machine</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-mermaid">{`stateDiagram-v2
     [*] --> CONNECTED
@@ -89,94 +62,52 @@ export function RealtimeProtocolStateMachineFeature() {
     CLOSED --> [*]`}</code>
                 </pre>
 
-                <h2>Durable Replay Rules</h2>
+                <h2>Delivery modes and replay</h2>
                 <ul>
                     <li>
-                        Durable mode uses Redis Stream with <code>delivery_id</code>.
+                        <strong>at_most_once:</strong> fire-and-forget websocket delivery without replay.
                     </li>
                     <li>
-                        Client resume options:
-                        <code>subscribe.since_id</code> (explicit cursor) or checkpoint from prior
-                        <code>ack</code>.
+                        <strong>durable:</strong> Redis Stream backed delivery with <code>delivery_id</code> and resume support.
                     </li>
                     <li>
-                        If cursor is outside retained window, server emits <code>replay_gap</code>
-                        then replays from earliest retained entries.
+                        Client resume can use <code>since_id</code> or prior ack checkpoint.
                     </li>
                     <li>
-                        Retention is controlled by
-                        <code>REALTIME_STREAM_MAX_LEN</code> and
-                        <code>REALTIME_STREAM_RETENTION_SECS</code>.
+                        If the requested cursor is outside retention, the server emits <code>replay_gap</code>.
                     </li>
                 </ul>
 
-                <h2>Production Checklist</h2>
+                <h2>Production runbook</h2>
                 <h3>Security</h3>
                 <ul>
-                    <li>
-                        Keep <code>REALTIME_REQUIRE_AUTH=true</code> in production.
-                    </li>
-                    <li>
-                        Enforce channel guard and app policy checks for subscribe/publish.
-                    </li>
-                    <li>
-                        Rotate PATs and keep refresh endpoint workflow app-defined.
-                    </li>
-                    <li>
-                        Use TLS and avoid token in query string.
-                    </li>
+                    <li>Keep <code>REALTIME_REQUIRE_AUTH=true</code> in production.</li>
+                    <li>Do not place access tokens in query strings.</li>
+                    <li>Enforce channel policy in app code, not only on the client.</li>
                 </ul>
 
                 <h3>Scaling</h3>
                 <ul>
-                    <li>
-                        Run dedicated <code>websocket-server</code> instances behind LB (starter
-                        binary: <code>./bin/websocket-server</code>).
-                    </li>
-                    <li>
-                        Use Redis capacity planning for Pub/Sub + durable stream storage.
-                    </li>
-                    <li>
-                        Tune <code>REALTIME_SEND_QUEUE_CAPACITY</code> to avoid memory spikes.
-                    </li>
-                    <li>
-                        Watch connection/message rate limits and room cardinality.
-                    </li>
+                    <li>Run dedicated websocket-server instances behind a load balancer.</li>
+                    <li>Plan Redis capacity for pub/sub and durable stream retention.</li>
+                    <li>Tune send queue capacity to avoid slow-consumer memory spikes.</li>
                 </ul>
 
-                <h3>Incident Runbook</h3>
+                <h3>Failure handling</h3>
                 <ul>
-                    <li>
-                        Check <code>/realtime/metrics.prom</code> for
-                        replay-gap, queue-dropped, and slow-consumer trends.
-                    </li>
-                    <li>
-                        If replay gaps spike, review stream retention controls and Redis memory.
-                    </li>
-                    <li>
-                        If slow-consumer disconnects spike, adjust frontend consumption strategy and
-                        queue/rate settings.
-                    </li>
-                    <li>
-                        Use a custom websocket benchmark script in CI/perf jobs for regression detection.
-                        Scaffold does not include a default realtime bench command.
-                    </li>
+                    <li>Watch <code>/realtime/metrics.prom</code> for replay-gap and queue-drop trends.</li>
+                    <li>If replay gaps spike, review retention settings and Redis memory pressure.</li>
+                    <li>If slow-consumer disconnects spike, fix client consumption strategy first.</li>
+                    <li>On <code>replay_gap</code>, clients should trigger a full HTTP state refresh.</li>
                 </ul>
 
-                <h3>Frontend Reconnect Strategy</h3>
+                <h2>Cross-links</h2>
                 <ul>
                     <li>
-                        Persist latest <code>delivery_id</code> locally.
+                        <a href="#/feature-realtime">Realtime / WebSocket</a> for the framework/app responsibility split.
                     </li>
                     <li>
-                        Reconnect with exponential backoff and jitter.
-                    </li>
-                    <li>
-                        On reconnect: <code>auth</code> then <code>subscribe</code> with
-                        <code>since_id</code>.
-                    </li>
-                    <li>
-                        If <code>replay_gap</code> arrives, trigger full-state refresh from HTTP API.
+                        <a href="#/cookbook/build-end-to-end-flow">Build an End-to-End Flow</a> for the combined API/jobs/realtime recipe.
                     </li>
                 </ul>
             </div>
