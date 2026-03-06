@@ -107,7 +107,7 @@ Both dev servers proxy `/api` to the Rust API on port 3000.
 
 ```bash
 ./console db seed                         # run all seeders
-./console db seed --name AdminBootstrap   # run a specific seeder
+./console db seed --name AdminBootstrap   # run one seeder (suffix optional: AdminBootstrapSeeder also works)
 ```
 
 ## Production Deployment

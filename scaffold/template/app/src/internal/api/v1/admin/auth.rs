@@ -2,6 +2,7 @@ use axum::{
     extract::{FromRequestParts, State},
     http::request::Parts,
     middleware::from_fn_with_state,
+    Json,
 };
 use core_i18n::t;
 use core_web::{
@@ -9,6 +10,7 @@ use core_web::{
     contracts::ContractJson,
     error::AppError,
     extract::request_headers::RequestHeaders,
+    extract::validation::transform_validation_errors,
     openapi::{
         aide::axum::routing::{get_with, patch_with, post_with},
         ApiRouter,
@@ -21,6 +23,7 @@ use generated::guards::AdminGuard;
 use std::ops::Deref;
 use time::Duration;
 use tower_cookies::{cookie::SameSite, Cookie, Cookies};
+use validator::Validate;
 
 use crate::{
     contracts::api::v1::admin::auth::{
@@ -196,9 +199,9 @@ async fn me(auth: AuthUser<AdminGuard>) -> Result<ApiResponse<AdminMeOutput>, Ap
 async fn profile_update(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
-    req: ContractJson<AdminProfileUpdateInput>,
+    Json(req): Json<AdminProfileUpdateInput>,
 ) -> Result<ApiResponse<AdminProfileUpdateOutput>, AppError> {
-    let req = req.0;
+    let req = validate_profile_update_input(req)?;
     let admin = workflow::profile_update(&state, auth.user.id, req).await?;
     let identity = admin.identity();
     Ok(ApiResponse::success(
@@ -239,6 +242,19 @@ async fn password_update(
         AdminPasswordUpdateOutput { updated: true },
         &t("Password updated successfully"),
     ))
+}
+
+fn validate_profile_update_input(
+    req: AdminProfileUpdateInput,
+) -> Result<AdminProfileUpdateInput, AppError> {
+    let req = req.normalize();
+    if let Err(e) = req.validate() {
+        return Err(AppError::Validation {
+            message: t("Validation failed"),
+            errors: transform_validation_errors(e),
+        });
+    }
+    Ok(req)
 }
 
 fn to_auth_output(

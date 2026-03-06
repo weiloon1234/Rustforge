@@ -91,7 +91,8 @@ pub async fn invalidate_bootstrap_country_cache(state: &AppApiState) -> Result<(
 }
 
 fn country_view_to_runtime(view: core_db::generated::models::CountryView) -> Country {
-    let currencies = serde_json::from_value::<Vec<CountryCurrency>>(view.currencies).unwrap_or_default();
+    let currencies =
+        serde_json::from_value::<Vec<CountryCurrency>>(view.currencies).unwrap_or_default();
 
     Country {
         iso2: view.iso2,

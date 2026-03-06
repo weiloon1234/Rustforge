@@ -2,6 +2,7 @@
 
 use core_web::contracts::{rustforge_contract, rustforge_string_rule_type};
 use core_web::extract::AsyncValidate;
+use core_web::Patch;
 use schemars::schema_for;
 use validator::Validate;
 
@@ -149,7 +150,7 @@ rustforge_string_rule_type! {
         #[validate(custom(function = "validate_username_wrapper"))]
         #[rf(length(min = 3, max = 64))]
         #[rf(alpha_dash)]
-        #[rf(openapi(description = "Lowercase username using letters, numbers, _ and -.", example = "admin_user"))]
+        #[rf(openapi(description = "Lowercase username using letters, numbers, _ and -.", example = "demo_user"))]
     }
 }
 
@@ -202,7 +203,7 @@ struct SchemaRuleInput {
 
 #[rustforge_contract]
 struct AsyncRuleInput {
-    #[rf(async_unique(table = "admin", column = "username"))]
+    #[rf(async_unique(table = "demo_users", column = "username"))]
     username: String,
 }
 
@@ -212,7 +213,7 @@ struct AsyncRuleAdvancedInput {
     tenant_id: i64,
     username: String,
     #[rf(async_unique(
-        table = "admin",
+        table = "demo_users",
         column = "username",
         ignore(column = "id", field = "id"),
         where_eq(column = "tenant_id", field = "tenant_id"),
@@ -221,13 +222,34 @@ struct AsyncRuleAdvancedInput {
     scoped_username: String,
 }
 
+#[rustforge_contract]
+struct PatchEmailInput {
+    #[serde(default)]
+    #[rf(email)]
+    email: Patch<String>,
+}
+
+#[rustforge_contract]
+struct PatchNestedInput {
+    #[serde(default)]
+    #[rf(nested)]
+    username: Patch<UsernameString>,
+}
+
+#[rustforge_contract]
+struct PatchAsyncRuleInput {
+    #[serde(default)]
+    #[rf(async_unique(table = "demo_users", column = "username"))]
+    username: Patch<String>,
+}
+
 #[test]
 fn rustforge_string_rule_type_wrapper_works() {
     let ok = WrapperDemoInput {
-        username: UsernameString::from("admin_user".to_string()),
+        username: UsernameString::from("demo_user".to_string()),
     };
     assert!(ok.validate().is_ok());
-    assert_eq!(ok.username.as_str(), "admin_user");
+    assert_eq!(ok.username.as_str(), "demo_user");
 
     let bad = WrapperDemoInput {
         username: UsernameString::from("Bad Name".to_string()),
@@ -251,13 +273,13 @@ fn rustforge_string_rule_type_wrapper_works() {
 fn rustforge_contract_contains_and_does_not_contain_work() {
     let ok = ContainsDemoInput {
         email_like: "hello@example.com".to_string(),
-        username: "admin_user".to_string(),
+        username: "demo_user".to_string(),
     };
     assert!(ok.validate().is_ok());
 
     let bad = ContainsDemoInput {
         email_like: "hello.example.com".to_string(),
-        username: "admin user".to_string(),
+        username: "demo user".to_string(),
     };
     let err = bad
         .validate()
@@ -382,7 +404,7 @@ fn rustforge_contract_async_rule_impl_is_generated() {
         .and_then(|m| m.description.as_ref())
         .cloned()
         .unwrap_or_default();
-    assert!(desc.contains("Must be unique in `admin.username`"));
+    assert!(desc.contains("Must be unique in `demo_users.username`"));
     assert!(username.extensions.contains_key("x-rf-rules"));
 }
 
@@ -411,6 +433,72 @@ fn rustforge_contract_async_rule_modifiers_compile_and_schema_exists() {
         .and_then(|m| m.description.as_ref())
         .cloned()
         .unwrap_or_default();
-    assert!(desc.contains("Must be unique in `admin.username`"));
+    assert!(desc.contains("Must be unique in `demo_users.username`"));
     assert!(field.extensions.contains_key("x-rf-rules"));
+}
+
+#[test]
+fn patch_deserialize_validate_and_schema_work() {
+    let missing: PatchEmailInput = serde_json::from_value(serde_json::json!({})).expect("missing");
+    assert!(matches!(missing.email, Patch::Missing));
+    assert!(missing.validate().is_ok());
+
+    let null_email: PatchEmailInput =
+        serde_json::from_value(serde_json::json!({ "email": null })).expect("null");
+    assert!(matches!(null_email.email, Patch::Null));
+    assert!(null_email.validate().is_ok());
+
+    let value_email: PatchEmailInput =
+        serde_json::from_value(serde_json::json!({ "email": "demo@example.com" })).expect("value");
+    assert!(matches!(value_email.email, Patch::Value(_)));
+    assert!(value_email.validate().is_ok());
+
+    let bad_email: PatchEmailInput =
+        serde_json::from_value(serde_json::json!({ "email": "not-an-email" }))
+            .expect("bad email payload");
+    let err = bad_email
+        .validate()
+        .expect_err("invalid patch email should fail");
+    assert!(format!("{err:?}").contains("email"));
+
+    let root = schema_for!(PatchEmailInput);
+    let props = &root
+        .schema
+        .object
+        .as_ref()
+        .expect("object schema")
+        .properties;
+    let email = match props.get("email").expect("email property") {
+        schemars::schema::Schema::Object(obj) => obj,
+        _ => panic!("email should be object schema"),
+    };
+    let text = serde_json::to_string(email).expect("schema text");
+    assert!(text.contains("null"));
+}
+
+#[test]
+fn patch_nested_validation_only_runs_for_present_values() {
+    let missing = PatchNestedInput {
+        username: Patch::Missing,
+    };
+    assert!(missing.validate().is_ok());
+
+    let null_value = PatchNestedInput {
+        username: Patch::Null,
+    };
+    assert!(null_value.validate().is_ok());
+
+    let bad = PatchNestedInput {
+        username: Patch::Value(UsernameString::from("Bad Name".to_string())),
+    };
+    let err = bad.validate().expect_err("nested patch value should fail");
+    assert!(format!("{err:?}").contains("username"));
+}
+
+#[test]
+fn patch_async_rule_impl_is_generated() {
+    fn assert_async_validate<T: AsyncValidate>() {}
+    assert_async_validate::<PatchAsyncRuleInput>();
+
+    assert_eq!(<Patch<String> as ts_rs::TS>::inline(), "string | null");
 }

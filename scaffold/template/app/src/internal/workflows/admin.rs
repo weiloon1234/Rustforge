@@ -1,6 +1,6 @@
 use core_db::common::sql::{generate_snowflake_i64, DbConn, Op};
 use core_i18n::t;
-use core_web::{auth::AuthUser, error::AppError};
+use core_web::{auth::AuthUser, error::AppError, Patch};
 use generated::{
     guards::AdminGuard,
     models::{Admin, AdminType, AdminView},
@@ -37,7 +37,7 @@ pub async fn create(
         .set_admin_type(AdminType::Admin)
         .set_abilities(permissions_to_json(&abilities));
 
-    if let Some(email) = normalize_optional_email(req.email) {
+    if let Some(email) = req.email.as_deref().and_then(normalize_email_value) {
         insert = insert.set_email(Some(email));
     }
 
@@ -81,9 +81,21 @@ pub async fn update(
         touched = true;
     }
 
-    if let Some(email) = normalize_optional_email(req.email) {
-        update = update.set_email(Some(email));
-        touched = true;
+    match req.email {
+        Patch::Missing => {}
+        Patch::Null => {
+            if existing.email.is_some() {
+                update = update.set_email(None);
+                touched = true;
+            }
+        }
+        Patch::Value(email) => {
+            let normalized = normalize_email_value(&email);
+            if existing.email != normalized {
+                update = update.set_email(normalized);
+                touched = true;
+            }
+        }
     }
 
     if let Some(abilities) = req.abilities {
@@ -135,9 +147,8 @@ pub async fn remove(
     Ok(())
 }
 
-fn normalize_optional_email(email: Option<String>) -> Option<String> {
-    email
-        .as_deref()
+fn normalize_email_value(email: &str) -> Option<String> {
+    Some(email)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_ascii_lowercase)

@@ -33,7 +33,7 @@ pub enum MigrateCommands {
 pub enum DbCommands {
     /// Seed the database
     Seed {
-        /// Optional name of the seeder to run (e.g. UserSeeder)
+        /// Optional name of the seeder to run (e.g. User or UserSeeder)
         #[arg(long)]
         name: Option<String>,
     },

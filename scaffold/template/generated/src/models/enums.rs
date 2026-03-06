@@ -7,14 +7,16 @@ pub struct SchemaEnumTsMeta {
     pub variants: &'static [&'static str],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub enum AdminType {
     #[serde(rename = "developer")]
     Developer,
     #[serde(rename = "superadmin")]
     SuperAdmin,
     #[serde(rename = "admin")]
-    Admin
+    Admin,
 }
 
 impl Default for AdminType {
@@ -116,7 +118,10 @@ impl AdminType {
 
 // sqlx support for TEXT storage
 impl sqlx::Encode<'_, sqlx::Postgres> for AdminType {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
         let s = match self {
             Self::Developer => "developer",
             Self::SuperAdmin => "superadmin",
@@ -156,8 +161,9 @@ impl From<AdminType> for core_db::common::sql::BindValue {
     }
 }
 
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[repr(i16)]
 pub enum ContentPageSystemFlag {
     #[serde(rename = "0")]
@@ -262,7 +268,10 @@ impl ContentPageSystemFlag {
 
 // sqlx support for integer storage
 impl sqlx::Encode<'_, sqlx::Postgres> for ContentPageSystemFlag {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
         <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
     }
 }
@@ -291,13 +300,14 @@ impl From<ContentPageSystemFlag> for core_db::common::sql::BindValue {
     }
 }
 
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub enum CountryStatus {
     #[serde(rename = "enabled")]
     Enabled,
     #[serde(rename = "disabled")]
-    Disabled
+    Disabled,
 }
 
 impl Default for CountryStatus {
@@ -395,7 +405,10 @@ impl CountryStatus {
 
 // sqlx support for TEXT storage
 impl sqlx::Encode<'_, sqlx::Postgres> for CountryStatus {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
         let s = match self {
             Self::Enabled => "enabled",
             Self::Disabled => "disabled",
@@ -432,13 +445,14 @@ impl From<CountryStatus> for core_db::common::sql::BindValue {
     }
 }
 
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub enum PersonalAccessTokenKind {
     #[serde(rename = "access")]
     Access,
     #[serde(rename = "refresh")]
-    Refresh
+    Refresh,
 }
 
 impl Default for PersonalAccessTokenKind {
@@ -536,7 +550,10 @@ impl PersonalAccessTokenKind {
 
 // sqlx support for TEXT storage
 impl sqlx::Encode<'_, sqlx::Postgres> for PersonalAccessTokenKind {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
         let s = match self {
             Self::Access => "access",
             Self::Refresh => "refresh",
@@ -573,10 +590,21 @@ impl From<PersonalAccessTokenKind> for core_db::common::sql::BindValue {
     }
 }
 
-
 pub const SCHEMA_ENUM_TS_META: &[SchemaEnumTsMeta] = &[
-    SchemaEnumTsMeta { name: "AdminType", variants: &["developer", "superadmin", "admin"] },
-    SchemaEnumTsMeta { name: "ContentPageSystemFlag", variants: &["0", "1"] },
-    SchemaEnumTsMeta { name: "CountryStatus", variants: &["enabled", "disabled"] },
-    SchemaEnumTsMeta { name: "PersonalAccessTokenKind", variants: &["access", "refresh"] },
+    SchemaEnumTsMeta {
+        name: "AdminType",
+        variants: &["developer", "superadmin", "admin"],
+    },
+    SchemaEnumTsMeta {
+        name: "ContentPageSystemFlag",
+        variants: &["0", "1"],
+    },
+    SchemaEnumTsMeta {
+        name: "CountryStatus",
+        variants: &["enabled", "disabled"],
+    },
+    SchemaEnumTsMeta {
+        name: "PersonalAccessTokenKind",
+        variants: &["access", "refresh"],
+    },
 ];

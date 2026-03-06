@@ -97,6 +97,11 @@ Do not mount per-model datatable routes manually outside the admin catalog wirin
 Validation input wrappers:
 - Use `ContractJson<T>` for sync validations.
 - Use `AsyncContractJson<T>` when async DB rules are involved.
+- Use `Option<T>` for nullable create/full-input fields.
+- Use `core_web::Patch<T>` for update fields when omitted vs `null` vs value must be different:
+  - `Missing` = no change
+  - `Null` = clear value
+  - `Value(T)` = set/update value
 
 ## Recipe: Create Validation Rules
 
@@ -105,6 +110,7 @@ Validation input wrappers:
 - Put helper in `src/validation/{domain}.rs`.
 - Return `Result<(), validator::ValidationError>`.
 - Attach in contract via validation attributes.
+- For PATCH inputs, prefer normalizing `Patch<String>` in the contract before validation instead of treating empty string as a nullable sentinel.
 
 ### Async/DB rule
 
@@ -237,6 +243,8 @@ All user-facing strings must go through translation keys.
 
 ```bash
 ./console db seed
+./console db seed --name Countries          # specific seeder
+./console db seed --name CountriesSeeder    # same target; `Seeder` suffix is optional
 ```
 
 ## Minimal Delivery Checklist

@@ -363,7 +363,11 @@ fn apply_country_filters<'db>(
     }
 
     if let Some(region) = filters.region.as_deref().and_then(to_non_empty) {
-        query = query.where_col(CountryCol::Region, Op::ILike, format!("%{}%", region.trim()));
+        query = query.where_col(
+            CountryCol::Region,
+            Op::ILike,
+            format!("%{}%", region.trim()),
+        );
     }
 
     query

@@ -7,7 +7,10 @@ const FRAMEWORK_SCHEMA_FILES: &[(&str, &str)] = &[
         "auth_tokens.toml",
         include_str!("framework-schemas/auth_tokens.toml"),
     ),
-    ("country.toml", include_str!("framework-schemas/country.toml")),
+    (
+        "country.toml",
+        include_str!("framework-schemas/country.toml"),
+    ),
     (
         "http_logs.toml",
         include_str!("framework-schemas/http_logs.toml"),
@@ -38,7 +41,8 @@ fn main() {
     let (cfgs, _) =
         db_gen::config::load(configs_path.to_str().unwrap()).expect("Failed to load configs");
 
-    let schema = load_layered_schema(schemas_dir.as_path()).expect("Failed to load layered schemas");
+    let schema =
+        load_layered_schema(schemas_dir.as_path()).expect("Failed to load layered schemas");
     let permissions = db_gen::load_permissions(permissions_path.to_str().unwrap())
         .expect("Failed to load permissions");
 

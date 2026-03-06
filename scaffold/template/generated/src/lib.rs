@@ -1,10 +1,12 @@
 #![allow(dead_code)]
 // AUTO-GENERATED FILE — DO NOT EDIT
-pub mod models;
 pub mod guards;
-pub mod permissions;
 pub mod localized;
+pub mod models;
+pub mod permissions;
 pub use localized::*;
 pub mod extensions;
 pub mod ts_exports;
-pub mod generated { pub use crate::*; }
+pub mod generated {
+    pub use crate::*;
+}

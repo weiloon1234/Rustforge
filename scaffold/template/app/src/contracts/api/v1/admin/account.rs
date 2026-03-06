@@ -1,6 +1,7 @@
 use crate::contracts::types::username::UsernameString;
 use core_web::contracts::rustforge_contract;
 use core_web::ids::SnowflakeId;
+use core_web::Patch;
 use generated::{
     extensions::admin::types::AdminViewComputedExt, models::AdminType, permissions::Permission,
 };
@@ -43,7 +44,7 @@ pub struct UpdateAdminInput {
     pub username: Option<UsernameString>,
     #[serde(default)]
     #[rf(email)]
-    pub email: Option<String>,
+    pub email: Patch<String>,
     #[serde(default)]
     #[rf(length(min = 1, max = 120))]
     pub name: Option<String>,
@@ -54,12 +55,7 @@ pub struct UpdateAdminInput {
     pub abilities: Option<Vec<Permission>>,
 }
 
-impl UpdateAdminInput {
-    pub fn with_target_id(mut self, id: i64) -> Self {
-        self.__target_id = id;
-        self
-    }
-
+impl CreateAdminInput {
     pub fn normalize(mut self) -> Self {
         self.email = self.email.and_then(|value| {
             let trimmed = value.trim();
@@ -69,6 +65,18 @@ impl UpdateAdminInput {
                 Some(trimmed.to_string())
             }
         });
+        self
+    }
+}
+
+impl UpdateAdminInput {
+    pub fn with_target_id(mut self, id: i64) -> Self {
+        self.__target_id = id;
+        self
+    }
+
+    pub fn normalize(mut self) -> Self {
+        self.email = normalize_email_patch(self.email);
         self.password = self.password.and_then(|value| {
             let trimmed = value.trim();
             if trimmed.is_empty() {
@@ -78,6 +86,21 @@ impl UpdateAdminInput {
             }
         });
         self
+    }
+}
+
+fn normalize_email_patch(email: Patch<String>) -> Patch<String> {
+    match email {
+        Patch::Missing => Patch::Missing,
+        Patch::Null => Patch::Null,
+        Patch::Value(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                Patch::Null
+            } else {
+                Patch::Value(trimmed.to_string())
+            }
+        }
     }
 }
 

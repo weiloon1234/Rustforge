@@ -2,6 +2,34 @@ use crate::boot::{init_app, BootContext};
 use anyhow::Result;
 use clap::Parser;
 
+fn normalize_seeder_match_key(value: &str) -> String {
+    let normalized: String = value
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect();
+
+    normalized
+        .strip_suffix("seeder")
+        .unwrap_or(&normalized)
+        .to_string()
+}
+
+fn seeder_matches_requested_name(seeder_name: &str, requested_name: &str) -> bool {
+    let requested = normalize_seeder_match_key(requested_name);
+    !requested.is_empty() && normalize_seeder_match_key(seeder_name) == requested
+}
+
+fn format_available_seeders(seeders: &[Box<dyn core_db::seeder::Seeder>]) -> String {
+    let names: Vec<&str> = seeders.iter().map(|seeder| seeder.name()).collect();
+    if names.is_empty() {
+        "none registered".to_string()
+    } else {
+        names.join(", ")
+    }
+}
+
 /// Trait for a project-specific CLI command enum.
 #[async_trait::async_trait]
 pub trait ProjectCommand: clap::Subcommand + Sized + Send {
@@ -69,11 +97,11 @@ where
                     if let Some(registrar) = register_seeders {
                         let mut seeders: Vec<Box<dyn core_db::seeder::Seeder>> = Vec::new();
                         registrar(&mut seeders);
+                        let mut matched = false;
 
-                        for seeder in seeders {
+                        for seeder in &seeders {
                             if let Some(target_name) = &name {
-                                // Specific execution: Only run if matches name (ignore default flag)
-                                if !seeder.name().eq_ignore_ascii_case(target_name) {
+                                if !seeder_matches_requested_name(seeder.name(), target_name) {
                                     continue;
                                 }
                             } else {
@@ -83,8 +111,19 @@ where
                                 }
                             }
 
+                            matched = true;
                             tracing::info!("Running Seeder: {}", seeder.name());
                             seeder.run(&ctx.db).await?;
+                        }
+
+                        if let Some(target_name) = &name {
+                            if !matched {
+                                anyhow::bail!(
+                                    "Seeder '{}' was not found. Available seeders: {}",
+                                    target_name,
+                                    format_available_seeders(&seeders)
+                                );
+                            }
                         }
                     }
                     tracing::info!("Database Seeding Completed.");
@@ -99,4 +138,46 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_seeder_match_key, seeder_matches_requested_name};
+
+    #[test]
+    fn seeder_match_normalization_accepts_suffix_and_common_separators() {
+        assert_eq!(
+            normalize_seeder_match_key("AdminBootstrapSeeder"),
+            "adminbootstrap"
+        );
+        assert_eq!(
+            normalize_seeder_match_key("admin_bootstrap"),
+            "adminbootstrap"
+        );
+        assert_eq!(
+            normalize_seeder_match_key("admin-bootstrap"),
+            "adminbootstrap"
+        );
+        assert_eq!(
+            normalize_seeder_match_key(" admin bootstrap "),
+            "adminbootstrap"
+        );
+    }
+
+    #[test]
+    fn seeder_matcher_accepts_short_and_full_names_case_insensitively() {
+        assert!(seeder_matches_requested_name(
+            "AdminBootstrapSeeder",
+            "AdminBootstrap"
+        ));
+        assert!(seeder_matches_requested_name(
+            "AdminBootstrapSeeder",
+            "admin_bootstrap_seeder"
+        ));
+        assert!(seeder_matches_requested_name(
+            "CountriesSeeder",
+            "countries"
+        ));
+        assert!(!seeder_matches_requested_name("CountriesSeeder", "admins"));
+    }
 }

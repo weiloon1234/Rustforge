@@ -6,6 +6,7 @@ use core_i18n::t;
 use core_web::{
     auth::{self, IssuedTokenPair, TokenScopeGrant},
     error::AppError,
+    Patch,
 };
 use generated::{
     guards::AdminGuard,
@@ -118,10 +119,18 @@ pub async fn profile_update(
         .where_id(Op::Eq, admin_id)
         .set_name(req.name.trim().to_string());
 
-    if let Some(email) = req.email {
-        let email = email.trim().to_ascii_lowercase();
-        if !email.is_empty() {
-            update = update.set_email(Some(email));
+    match req.email {
+        Patch::Missing => {}
+        Patch::Null => {
+            update = update.set_email(None);
+        }
+        Patch::Value(email) => {
+            let email = email.trim().to_ascii_lowercase();
+            if email.is_empty() {
+                update = update.set_email(None);
+            } else {
+                update = update.set_email(Some(email));
+            }
         }
     }
 

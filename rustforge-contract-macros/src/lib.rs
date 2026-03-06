@@ -180,7 +180,11 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
                 field_ident,
                 idx
             );
-            helper_fns.push(generate_regex_wrapper_fn(&helper_ident, pattern));
+            helper_fns.push(generate_regex_wrapper_fn(
+                &helper_ident,
+                pattern,
+                field_kind,
+            ));
             let (msg, code) = rf_cfg.message_code_for("regex");
             generated_validate_attrs.push(build_validate_custom_fn_attr(
                 &helper_ident,
@@ -255,8 +259,25 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
                     ensure_string_like(field_kind, &field_ident, &builtin.key)?;
                     let path: Path = syn::parse_str(path_str)?;
                     let (msg, code) = rf_cfg.message_code_for(&builtin.key);
-                    generated_validate_attrs
-                        .push(build_validate_custom_path_attr(&path, &msg, &code)?);
+                    if matches!(field_kind, FieldKind::PatchString) {
+                        let helper_ident = format_ident!(
+                            "__rf_contract_{}_{}_{}_{}",
+                            struct_ident.to_string().to_lowercase(),
+                            field_ident,
+                            builtin.key,
+                            rule_i
+                        );
+                        helper_fns
+                            .push(generate_custom_path_patch_wrapper_fn(&helper_ident, &path));
+                        generated_validate_attrs.push(build_validate_custom_fn_attr(
+                            &helper_ident,
+                            &msg,
+                            &code,
+                        )?);
+                    } else {
+                        generated_validate_attrs
+                            .push(build_validate_custom_path_attr(&path, &msg, &code)?);
+                    }
                 }
                 BuiltinRuleKind::PhoneNumberByIso2Field => {
                     let field_name = builtin.field.as_ref().ok_or_else(|| {
@@ -291,6 +312,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
                         &helper_ident,
                         true,
                         &builtin.values,
+                        field_kind,
                     ));
                     let (msg, code) = rf_cfg.message_code_for(&builtin.key);
                     generated_validate_attrs.push(build_validate_custom_fn_attr(
@@ -318,6 +340,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
                         &helper_ident,
                         false,
                         &builtin.values,
+                        field_kind,
                     ));
                     let (msg, code) = rf_cfg.message_code_for(&builtin.key);
                     generated_validate_attrs.push(build_validate_custom_fn_attr(
@@ -345,6 +368,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
                         &helper_ident,
                         &builtin.key,
                         &format,
+                        field_kind,
                     ));
                     let (msg, code) = rf_cfg.message_code_for(&builtin.key);
                     generated_validate_attrs.push(build_validate_custom_fn_attr(
@@ -402,7 +426,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
             field_rule_extensions.push(RuleExtensionSpec::async_db(async_rule));
             async_validate_blocks.push(generate_async_db_rule_block(
                 &field_ident,
-                option_inner_type(&field_ty).is_some(),
+                classify_optional_like(&field_ty),
                 async_rule,
                 &rf_cfg,
             ));
@@ -910,47 +934,90 @@ fn build_schemars_format_attr(fmt: &str) -> syn::Result<Attribute> {
     mk_attr(quote! { #[schemars(format = #fmt)] })
 }
 
-fn generate_regex_wrapper_fn(ident: &Ident, pattern: &str) -> TokenStream2 {
-    quote! {
-        fn #ident(value: &str) -> Result<(), ::validator::ValidationError> {
-            ::core_web::rules::regex_pattern(value, #pattern)
-        }
-    }
+fn generate_regex_wrapper_fn(ident: &Ident, pattern: &str, field_kind: FieldKind) -> TokenStream2 {
+    generate_string_rule_wrapper_fn(
+        ident,
+        field_kind,
+        quote! { ::core_web::rules::regex_pattern(value, #pattern) },
+    )
 }
 
-fn generate_values_wrapper_fn(ident: &Ident, allow_list: bool, values: &[String]) -> TokenStream2 {
+fn generate_values_wrapper_fn(
+    ident: &Ident,
+    allow_list: bool,
+    values: &[String],
+    field_kind: FieldKind,
+) -> TokenStream2 {
     let values_lits = values.iter().map(|v| quote! { #v });
     if allow_list {
-        quote! {
-            fn #ident(value: &str) -> Result<(), ::validator::ValidationError> {
-                ::core_web::rules::one_of(value, &[#(#values_lits),*])
-            }
-        }
+        generate_string_rule_wrapper_fn(
+            ident,
+            field_kind,
+            quote! { ::core_web::rules::one_of(value, &[#(#values_lits),*]) },
+        )
     } else {
-        quote! {
-            fn #ident(value: &str) -> Result<(), ::validator::ValidationError> {
-                ::core_web::rules::none_of(value, &[#(#values_lits),*])
-            }
-        }
+        generate_string_rule_wrapper_fn(
+            ident,
+            field_kind,
+            quote! { ::core_web::rules::none_of(value, &[#(#values_lits),*]) },
+        )
     }
 }
 
-fn generate_date_wrapper_fn(ident: &Ident, key: &str, format: &str) -> TokenStream2 {
+fn generate_date_wrapper_fn(
+    ident: &Ident,
+    key: &str,
+    format: &str,
+    field_kind: FieldKind,
+) -> TokenStream2 {
     let call = if key == "date" {
         quote! { ::core_web::rules::date(value, #format) }
     } else {
         quote! { ::core_web::rules::datetime(value, #format) }
     };
+    generate_string_rule_wrapper_fn(ident, field_kind, call)
+}
+
+fn generate_string_rule_wrapper_fn(
+    ident: &Ident,
+    field_kind: FieldKind,
+    inner_call: TokenStream2,
+) -> TokenStream2 {
+    match field_kind {
+        FieldKind::PatchString => quote! {
+            fn #ident(value: &::core_web::Patch<String>) -> Result<(), ::validator::ValidationError> {
+                if let Some(value) = value.as_value() {
+                    let value = value.as_str();
+                    #inner_call
+                } else {
+                    Ok(())
+                }
+            }
+        },
+        FieldKind::String | FieldKind::OptionString => quote! {
+            fn #ident(value: &str) -> Result<(), ::validator::ValidationError> {
+                #inner_call
+            }
+        },
+        FieldKind::Other => quote! {},
+    }
+}
+
+fn generate_custom_path_patch_wrapper_fn(ident: &Ident, path: &Path) -> TokenStream2 {
     quote! {
-        fn #ident(value: &str) -> Result<(), ::validator::ValidationError> {
-            #call
+        fn #ident(value: &::core_web::Patch<String>) -> Result<(), ::validator::ValidationError> {
+            if let Some(value) = value.as_value() {
+                #path(value.as_str())
+            } else {
+                Ok(())
+            }
         }
     }
 }
 
 fn generate_async_db_rule_block(
     field_ident: &Ident,
-    is_option: bool,
+    optional_kind: OptionalLikeKind,
     rule: &AsyncDbRuleUse,
     rf_cfg: &FieldRfConfig,
 ) -> TokenStream2 {
@@ -997,17 +1064,21 @@ fn generate_async_db_rule_block(
         }
     };
 
-    if is_option {
-        quote! {
+    match optional_kind {
+        OptionalLikeKind::Option => quote! {
             if let Some(value) = &self.#field_ident {
                 #body
             }
-        }
-    } else {
-        quote! {
+        },
+        OptionalLikeKind::Patch => quote! {
+            if let Some(value) = self.#field_ident.as_value() {
+                #body
+            }
+        },
+        OptionalLikeKind::Required => quote! {
             let value = &self.#field_ident;
             #body
-        }
+        },
     }
 }
 
@@ -1969,6 +2040,7 @@ fn doc_comment_description(field: &Field) -> Option<String> {
 enum FieldKind {
     String,
     OptionString,
+    PatchString,
     Other,
 }
 
@@ -1981,7 +2053,29 @@ fn classify_field_kind(ty: &syn::Type) -> FieldKind {
             return FieldKind::OptionString;
         }
     }
+    if let Some(inner) = patch_inner_type(ty) {
+        if is_string_type(inner) {
+            return FieldKind::PatchString;
+        }
+    }
     FieldKind::Other
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OptionalLikeKind {
+    Required,
+    Option,
+    Patch,
+}
+
+fn classify_optional_like(ty: &syn::Type) -> OptionalLikeKind {
+    if option_inner_type(ty).is_some() {
+        OptionalLikeKind::Option
+    } else if patch_inner_type(ty).is_some() {
+        OptionalLikeKind::Patch
+    } else {
+        OptionalLikeKind::Required
+    }
 }
 
 fn option_inner_type<'a>(ty: &'a syn::Type) -> Option<&'a syn::Type> {
@@ -1990,6 +2084,24 @@ fn option_inner_type<'a>(ty: &'a syn::Type) -> Option<&'a syn::Type> {
     };
     let segment = type_path.path.segments.last()?;
     if segment.ident != "Option" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    let first = args.args.first()?;
+    let syn::GenericArgument::Type(inner) = first else {
+        return None;
+    };
+    Some(inner)
+}
+
+fn patch_inner_type<'a>(ty: &'a syn::Type) -> Option<&'a syn::Type> {
+    let syn::Type::Path(type_path) = ty else {
+        return None;
+    };
+    let segment = type_path.path.segments.last()?;
+    if segment.ident != "Patch" {
         return None;
     }
     let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
@@ -2015,13 +2127,16 @@ fn is_string_type(ty: &syn::Type) -> bool {
 }
 
 fn ensure_string_like(field_kind: FieldKind, field_ident: &Ident, rule: &str) -> syn::Result<()> {
-    if matches!(field_kind, FieldKind::String | FieldKind::OptionString) {
+    if matches!(
+        field_kind,
+        FieldKind::String | FieldKind::OptionString | FieldKind::PatchString
+    ) {
         Ok(())
     } else {
         Err(syn::Error::new_spanned(
             field_ident,
             format!(
-                "rf {} currently supports String or Option<String> fields only",
+                "rf {} currently supports String, Option<String>, or Patch<String> fields only",
                 rule
             ),
         ))

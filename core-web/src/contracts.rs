@@ -3,6 +3,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use validator::Validate;
 
 use crate::extract::{AsyncValidatedJson, ValidatedJson};
+pub use crate::Patch;
 pub use rustforge_contract_macros::rustforge_contract;
 
 /// Generate a transparent `String` newtype wrapper for reusable request-contract semantics.

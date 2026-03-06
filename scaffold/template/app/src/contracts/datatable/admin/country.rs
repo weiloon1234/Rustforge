@@ -1,8 +1,8 @@
+use core_db::platform::countries::CountryStatus;
 use core_web::datatable::{
     DataTableFilterFieldDto, DataTableFilterFieldType, DataTableFilterOptionDto,
     DataTableGenericEmailExportRequest, DataTableGenericQueryRequest, DataTableScopedContract,
 };
-use core_db::platform::countries::CountryStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

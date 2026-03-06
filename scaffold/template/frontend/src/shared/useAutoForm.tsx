@@ -261,6 +261,11 @@ function appendFormDataValue(formData: FormData, key: string, value: unknown): v
   }
 }
 
+function shouldSerializeEmptyAsNull(field: FieldDef): boolean {
+  if (field.required) return false;
+  return field.type !== "checkbox" && field.type !== "file" && field.type !== "files";
+}
+
 export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFormResult {
   const {
     url,
@@ -338,7 +343,17 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
       }
 
       const value = values[field.name] ?? "";
-      payload[field.name] = field.type === "checkbox" ? (value ? "1" : "0") : value;
+      if (field.type === "checkbox") {
+        payload[field.name] = value ? "1" : "0";
+        continue;
+      }
+
+      if (shouldSerializeEmptyAsNull(field) && value.trim() === "") {
+        payload[field.name] = null;
+        continue;
+      }
+
+      payload[field.name] = value;
     }
 
     let requestBody: Record<string, unknown> | FormData = payload;
@@ -356,10 +371,9 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
     } catch (err) {
       const axiosErr = err as AxiosError<{ message?: string; errors?: Record<string, string[]> }>;
       const body = axiosErr.response?.data;
-      const status = axiosErr.response?.status;
       if (body) {
         const message = body.message ?? "Something went wrong";
-        setGeneralError(status ? `[HTTP ${status}] ${message}` : message);
+        setGeneralError(message);
         if (body.errors) {
           const mapped: Record<string, string[]> = {};
           for (const [key, msgs] of Object.entries(body.errors)) {
@@ -372,8 +386,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
           setFieldErrors(mapped);
         }
       } else {
-        const message = axiosErr.message || "Something went wrong";
-        setGeneralError(status ? `[HTTP ${status}] ${message}` : message);
+        setGeneralError(axiosErr.message || "Something went wrong");
       }
       onError?.(err);
     } finally {
