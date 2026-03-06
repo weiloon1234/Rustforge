@@ -67,10 +67,7 @@ fn main() {
             .display()
             .to_string()
             .replace('\\', "\\\\");
-        let _ = writeln!(
-            out,
-            "    #[path = \"{module_path}\"] pub mod {module};"
-        );
+        let _ = writeln!(out, "    #[path = \"{module_path}\"] pub mod {module};");
         let _ = writeln!(out, "    pub use {module}::*;");
     }
     out.push_str("}\n");

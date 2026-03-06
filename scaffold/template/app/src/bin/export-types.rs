@@ -22,6 +22,8 @@ struct TsFile {
     definitions: Vec<String>,
     /// Contract-facing enums referenced by the definitions.
     enums: BTreeSet<String>,
+    /// Shared framework TS types referenced by the definitions.
+    shared_types: BTreeSet<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -52,12 +54,14 @@ fn main() {
     // Determine which contract-facing enums are actually referenced by DTOs.
     let known_contract_types = collect_declared_contract_types(&files);
     for ts_file in &mut files {
-        ts_file.enums = detect_enum_references(
+        let (enums, shared_types) = detect_type_references(
             ts_file.rel_path.as_str(),
             &ts_file.definitions,
             &known_contract_types,
             &known_contract_enum_names,
         );
+        ts_file.enums = enums;
+        ts_file.shared_types = shared_types;
     }
 
     // Write ts-rs generated files
@@ -119,6 +123,7 @@ fn load_discovered_ts_files() -> Vec<TsFile> {
             rel_path,
             definitions,
             enums: BTreeSet::new(),
+            shared_types: BTreeSet::new(),
         });
     }
     files.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
@@ -313,9 +318,15 @@ fn assemble(f: &TsFile) -> String {
     let mut out = String::from(header);
     let portal = portal_from_rel_path(&f.rel_path)
         .unwrap_or_else(|| panic!("invalid TS export path (missing portal): {}", f.rel_path));
+    for import in shared_import_lines(&f.shared_types) {
+        out.push_str(&import);
+        out.push('\n');
+    }
     if let Some(import) = enum_import_line(portal, &f.enums) {
         out.push_str(&import);
         out.push('\n');
+        out.push('\n');
+    } else if !f.shared_types.is_empty() {
         out.push('\n');
     } else {
         out.push('\n');
@@ -396,12 +407,12 @@ fn collect_declared_contract_types(files: &[TsFile]) -> BTreeSet<String> {
     declared
 }
 
-fn detect_enum_references(
+fn detect_type_references(
     rel_path: &str,
     definitions: &[String],
     known_contract_types: &BTreeSet<String>,
     known_contract_enums: &BTreeSet<String>,
-) -> BTreeSet<String> {
+) -> (BTreeSet<String>, BTreeSet<String>) {
     let mut used_identifiers = BTreeSet::new();
     for def in definitions {
         collect_used_type_identifiers(def, &mut used_identifiers);
@@ -413,8 +424,11 @@ fn detect_enum_references(
     for builtin in ts_builtins() {
         used_identifiers.remove(*builtin);
     }
+    let mut shared_types = BTreeSet::new();
     for shared in ts_shared_types() {
-        used_identifiers.remove(*shared);
+        if used_identifiers.remove(*shared) {
+            shared_types.insert((*shared).to_string());
+        }
     }
 
     let mut enums = BTreeSet::new();
@@ -435,7 +449,7 @@ fn detect_enum_references(
         );
     }
 
-    enums
+    (enums, shared_types)
 }
 
 fn collect_used_type_identifiers(definition: &str, out: &mut BTreeSet<String>) {
@@ -549,6 +563,7 @@ fn ts_builtins() -> &'static [&'static str] {
 fn ts_shared_types() -> &'static [&'static str] {
     &[
         "ApiResponse",
+        "ApiErrorResponse",
         "Attachment",
         "AttachmentInput",
         "AttachmentMap",
@@ -597,6 +612,72 @@ fn enum_import_line(portal: &str, enums: &BTreeSet<String>) -> Option<String> {
         r#"import type {{ {} }} from "@{}/types/enums";"#,
         joined, portal
     ))
+}
+
+fn shared_import_lines(shared_types: &BTreeSet<String>) -> Vec<String> {
+    if shared_types.is_empty() {
+        return Vec::new();
+    }
+
+    let mut by_module: BTreeMap<&'static str, BTreeSet<String>> = BTreeMap::new();
+    for shared_type in shared_types {
+        let module = shared_type_module(shared_type).unwrap_or_else(|| {
+            panic!("missing shared type module mapping for `{shared_type}`");
+        });
+        by_module
+            .entry(module)
+            .or_default()
+            .insert(shared_type.clone());
+    }
+
+    let mut lines = Vec::new();
+    for (module, types) in by_module {
+        let joined = types.into_iter().collect::<Vec<_>>().join(", ");
+        lines.push(format!(
+            r#"import type {{ {} }} from "@shared/types/{}";"#,
+            joined, module
+        ));
+    }
+    lines
+}
+
+fn shared_type_module(shared_type: &str) -> Option<&'static str> {
+    match shared_type {
+        "ApiResponse" | "ApiErrorResponse" => Some("api"),
+        "DataTablePaginationMode"
+        | "DataTableSortDirection"
+        | "DataTableQueryRequestBase"
+        | "DataTableEmailExportRequestBase"
+        | "DataTableFilterFieldType"
+        | "DataTableFilterOptionDto"
+        | "DataTableFilterFieldDto"
+        | "DataTableColumnMetaDto"
+        | "DataTableRelationColumnMetaDto"
+        | "DataTableDefaultsDto"
+        | "DataTableDiagnosticsDto"
+        | "DataTableMetaDto"
+        | "DataTableQueryResponse"
+        | "DataTableEmailExportState"
+        | "DataTableEmailExportStatusDto"
+        | "DataTableEmailExportQueuedDto"
+        | "DataTableExportStatusResponseDto" => Some("datatable"),
+        "Attachment"
+        | "AttachmentInput"
+        | "AttachmentMap"
+        | "AttachmentUploadDto"
+        | "CountryCurrency"
+        | "CountryRuntime"
+        | "CountryStatus"
+        | "JsonObject"
+        | "JsonPrimitive"
+        | "JsonValue"
+        | "LocaleCode"
+        | "LocalizedMap"
+        | "LocalizedText"
+        | "MetaMap"
+        | "MetaRecord" => Some("platform"),
+        _ => None,
+    }
 }
 
 fn write_file(path: &Path, content: &str) {

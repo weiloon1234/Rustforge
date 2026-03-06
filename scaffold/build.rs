@@ -7,11 +7,32 @@ fn main() {
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let template_dir = manifest_dir.join("template");
-    cleanup_generated_dirs(&template_dir);
-    cleanup_public_generated_assets(&template_dir);
+    validate_template_is_clean(&template_dir);
 }
 
-fn cleanup_generated_dirs(root: &Path) {
+fn validate_template_is_clean(root: &Path) {
+    let mut issues = Vec::new();
+    collect_forbidden_dirs(root, &mut issues);
+    collect_generated_public_entries(&root.join("public"), &mut issues);
+
+    if issues.is_empty() {
+        return;
+    }
+
+    let mut message = String::from(
+        "scaffold/template contains generated artifacts and cannot be packaged as source.\n\
+         Remove them explicitly, then rebuild.\n\
+         Suggested command: make scaffold-template-clean\n\nDetected paths:\n",
+    );
+    for issue in issues {
+        message.push_str(" - ");
+        message.push_str(&issue);
+        message.push('\n');
+    }
+    panic!("{message}");
+}
+
+fn collect_forbidden_dirs(root: &Path, issues: &mut Vec<String>) {
     let forbidden = ["target", "node_modules", ".next", "dist"];
     let mut stack = vec![root.to_path_buf()];
 
@@ -32,17 +53,7 @@ fn cleanup_generated_dirs(root: &Path) {
                 .and_then(|n| n.to_str())
                 .unwrap_or_default();
             if forbidden.iter().any(|f| f == &name) {
-                fs::remove_dir_all(&path).unwrap_or_else(|error| {
-                    panic!(
-                        "failed to remove generated scaffold template directory {}: {}",
-                        path.display(),
-                        error
-                    )
-                });
-                println!(
-                    "cargo:warning=Removed generated scaffold template directory: {}",
-                    path.display()
-                );
+                issues.push(path.display().to_string());
                 continue;
             }
 
@@ -51,13 +62,12 @@ fn cleanup_generated_dirs(root: &Path) {
     }
 }
 
-fn cleanup_public_generated_assets(root: &Path) {
-    let public_dir = root.join("public");
+fn collect_generated_public_entries(public_dir: &Path, issues: &mut Vec<String>) {
     if !public_dir.is_dir() {
         return;
     }
 
-    let mut stack = vec![public_dir.clone()];
+    let mut stack = vec![public_dir.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let entries = match fs::read_dir(&dir) {
             Ok(entries) => entries,
@@ -67,6 +77,7 @@ fn cleanup_public_generated_assets(root: &Path) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
+                issues.push(path.display().to_string());
                 stack.push(path);
                 continue;
             }
@@ -79,61 +90,7 @@ fn cleanup_public_generated_assets(root: &Path) {
                 continue;
             }
 
-            fs::remove_file(&path).unwrap_or_else(|error| {
-                panic!(
-                    "failed to remove generated scaffold public asset {}: {}",
-                    path.display(),
-                    error
-                )
-            });
-            println!(
-                "cargo:warning=Removed generated scaffold public asset: {}",
-                path.display()
-            );
+            issues.push(path.display().to_string());
         }
     }
-
-    cleanup_empty_public_dirs(&public_dir);
-}
-
-fn cleanup_empty_public_dirs(dir: &Path) -> bool {
-    let mut is_empty = true;
-
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(_) => return false,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            let child_empty = cleanup_empty_public_dirs(&path);
-            if child_empty {
-                fs::remove_dir(&path).unwrap_or_else(|error| {
-                    panic!(
-                        "failed to remove empty generated scaffold public directory {}: {}",
-                        path.display(),
-                        error
-                    )
-                });
-                println!(
-                    "cargo:warning=Removed empty generated scaffold public directory: {}",
-                    path.display()
-                );
-            } else {
-                is_empty = false;
-            }
-            continue;
-        }
-
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default();
-        if name != ".gitkeep" {
-            is_empty = false;
-        }
-    }
-
-    is_empty
 }

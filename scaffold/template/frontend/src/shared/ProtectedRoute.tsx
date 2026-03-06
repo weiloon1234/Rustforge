@@ -3,8 +3,8 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 import type { AuthState, Account } from "@shared/createAuthStore";
 import type { StoreApi, UseBoundStore } from "zustand";
 
-interface Props {
-  useAuthStore: UseBoundStore<StoreApi<AuthState<Account>>>;
+interface Props<A extends Account = Account> {
+  useAuthStore: UseBoundStore<StoreApi<AuthState<A>>>;
   loginPath?: string;
 }
 
@@ -26,7 +26,10 @@ interface Props {
  * </Route>
  * ```
  */
-export function ProtectedRoute({ useAuthStore, loginPath = "/login" }: Props) {
+export function ProtectedRoute<A extends Account = Account>({
+  useAuthStore,
+  loginPath = "/login",
+}: Props<A>) {
   const token = useAuthStore((s) => s.token);
   const isInitialized = useAuthStore((s) => s.isInitialized);
   const initSession = useAuthStore((s) => s.initSession);

@@ -6,6 +6,7 @@ Design rules:
 1. Keep it simple.
 2. Keep a single source of truth.
 3. Do not edit generated outputs directly.
+4. Do not suppress non-unused warnings; fix root causes instead.
 
 ## SSOT Files
 
@@ -15,6 +16,16 @@ Design rules:
 - `../i18n/*.json` — translation keys and values.
 
 Generated outputs are produced from these inputs (plus build-time codegen) and can be overwritten.
+
+## Warning Policy
+
+- Allowed suppression scope is only unused-family lints:
+  - `dead_code`
+  - `unused_imports`
+  - `unused_variables`
+  - `unused_mut`
+- Any other lint suppression (for example `non_camel_case_types`) is not allowed; fix the implementation instead.
+- Do not use crate/dependency features that hide warnings (for example `ts-rs` `no-serde-warnings`).
 
 ## Runtime Layers
 

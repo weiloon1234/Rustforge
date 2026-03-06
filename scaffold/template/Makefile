@@ -131,8 +131,10 @@ framework-docs-build:
 	@echo "Published framework docs assets to $(FRAMEWORK_DOCS_DIR)"
 
 .PHONY: check
-check:
+check: ensure-frontend-deps
 	cargo check --workspace
+	npm --prefix frontend run typecheck
+	npm --prefix frontend run build
 
 .PHONY: gen-types
 gen-types:

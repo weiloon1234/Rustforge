@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use core_web::contracts::{rustforge_contract, rustforge_string_rule_type};
 use core_web::extract::AsyncValidate;
 use schemars::schema_for;

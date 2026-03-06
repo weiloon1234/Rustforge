@@ -218,11 +218,8 @@ pub struct DataTableFilterFieldDto {
     #[ts(rename = "type")]
     pub field_type: DataTableFilterFieldType,
     pub label: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub placeholder: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub options: Option<Vec<DataTableFilterOptionDto>>,
 }
 
@@ -309,14 +306,10 @@ pub enum DataTableEmailExportState {
 pub struct DataTableEmailExportStatusDto {
     pub state: DataTableEmailExportState,
     pub recipients: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub link_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub updated_at_unix: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub sent_at_unix: Option<i64>,
 }
 
@@ -385,15 +378,10 @@ pub struct DataTableExportStatusResponseDto {
     pub job_id: String,
     pub model_key: String,
     pub csv_state: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub csv_error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub csv_file_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub csv_content_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub csv_total_records: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<DataTableEmailExportStatusDto>,
 }
 

@@ -2066,15 +2066,35 @@ mod tests {
     use crate::AuthResolver;
     use axum::http::{HeaderMap, HeaderValue};
     use core_config::{
-        AppSettings, AuthSettings, CdnSettings, DataTableUnknownFilterMode, DbSettings,
-        GuardConfig, HttpLogSettings, MailSettings, MiddlewareSettings, RealtimeChannelConfig,
-        RealtimeDeliveryMode, RealtimeSettings, RedisSettings, S3Settings, ServerSettings,
-        Settings, WorkerSettings,
+        AppSettings, AuthSettings, CdnSettings, CorsSettings, DataTableUnknownFilterMode,
+        DbSettings, GuardConfig, HttpLogSettings, MailSettings, MiddlewareSettings,
+        RealtimeChannelConfig, RealtimeDeliveryMode, RealtimeSettings, RedisSettings, S3Settings,
+        ServerSettings, Settings, WorkerSettings,
     };
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
     use uuid::Uuid;
+
+    fn test_app_settings() -> AppSettings {
+        AppSettings {
+            name: "realtime-test".to_string(),
+            env: "test".to_string(),
+            key: "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_string(),
+            enable_docs: false,
+            docs_path: "/framework-documentation".to_string(),
+            enable_openapi_docs: false,
+            openapi_docs_path: "/openapi".to_string(),
+            openapi_json_path: "/openapi.json".to_string(),
+            default_per_page: 30,
+            datatable_unknown_filter_mode: DataTableUnknownFilterMode::Ignore,
+            datatable_export_link_ttl_secs: 604_800,
+        }
+    }
+
+    fn test_cors_settings() -> CorsSettings {
+        CorsSettings::default()
+    }
 
     fn test_settings(redis_url: &str, send_queue_capacity: usize) -> Arc<Settings> {
         let mut channels = HashMap::new();
@@ -2099,18 +2119,7 @@ mod tests {
             },
         );
         Arc::new(Settings {
-            app: AppSettings {
-                name: "realtime-test".to_string(),
-                env: "test".to_string(),
-                key: "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_string(),
-                enable_docs: false,
-                docs_path: "/framework-documentation".to_string(),
-                enable_openapi_docs: false,
-                openapi_docs_path: "/openapi".to_string(),
-                openapi_json_path: "/openapi.json".to_string(),
-                default_per_page: 30,
-                datatable_unknown_filter_mode: DataTableUnknownFilterMode::Ignore,
-            },
+            app: test_app_settings(),
             server: ServerSettings {
                 host: "127.0.0.1".to_string(),
                 port: 0,
@@ -2193,6 +2202,7 @@ mod tests {
                 client_enabled: false,
                 retention_days: 7,
             },
+            cors: test_cors_settings(),
         })
     }
 

@@ -72,7 +72,14 @@ make dev-user         # Vite user portal only (port 5173)
 make dev-admin        # Vite admin portal only (port 5174)
 make dev-api          # Rust API only (cargo-watch, port 3000)
 make build-frontend   # Clean build all portals → public/
+make check            # Rust check + frontend typecheck + frontend build (warnings fail)
 ```
+
+## Warning Policy
+
+- Frontend warnings are treated as failures in production build.
+- Do not silence warnings with ignores/suppression comments unless it is an unused-family case and explicitly justified.
+- Keep Vite/Rollup output warning-free; fix warning sources instead of bypassing them.
 
 ## Routing (React Router)
 

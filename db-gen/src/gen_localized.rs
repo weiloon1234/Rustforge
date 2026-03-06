@@ -116,7 +116,9 @@ pub fn generate_localized(
         out.push_str("    fields: &[&str],\n");
         out.push_str(") -> Result<core_db::platform::localized::types::LocalizedMap> {\n");
         out.push_str("    if ids.is_empty() || fields.is_empty() {\n");
-        out.push_str("        return Ok(core_db::platform::localized::types::LocalizedMap::default());\n");
+        out.push_str(
+            "        return Ok(core_db::platform::localized::types::LocalizedMap::default());\n",
+        );
         out.push_str("    }\n");
         out.push_str("    let owner_ids: Vec<i64> = ids.to_vec();\n");
         out.push_str(
@@ -268,7 +270,9 @@ pub fn generate_localized(
         out.push_str("    field: &str,\n");
         out.push_str("    value: &core_db::platform::attachments::types::AttachmentInput,\n");
         out.push_str(") -> Result<()> {\n");
-        out.push_str("    clear_attachment_field(db.clone(), owner_type, owner_id, field).await?;\n");
+        out.push_str(
+            "    clear_attachment_field(db.clone(), owner_type, owner_id, field).await?;\n",
+        );
         out.push_str("    add_attachments(db, owner_type, owner_id, field, std::slice::from_ref(value)).await\n");
         out.push_str("}\n\n");
 
@@ -299,7 +303,9 @@ pub fn generate_localized(
         out.push_str("    fields: &[&str],\n");
         out.push_str(") -> Result<core_db::platform::attachments::types::AttachmentMap> {\n");
         out.push_str("    if ids.is_empty() || fields.is_empty() {\n");
-        out.push_str("        return Ok(core_db::platform::attachments::types::AttachmentMap::default());\n");
+        out.push_str(
+            "        return Ok(core_db::platform::attachments::types::AttachmentMap::default());\n",
+        );
         out.push_str("    }\n");
         out.push_str("    let owner_ids: Vec<i64> = ids.to_vec();\n");
         out.push_str(

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect } from "react";
 import type { ModalEntry, ModalSize } from "@shared/useModalStore";
 import { Button } from "@shared/components/Button";
 

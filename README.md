@@ -157,3 +157,10 @@ make check
 make test
 make docs-build
 ```
+
+Scaffold template artifacts are now cleaned explicitly (not during `cargo build`).
+If scaffold builds fail due generated files under `scaffold/template/`, run:
+
+```bash
+make scaffold-template-clean
+```

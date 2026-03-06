@@ -21,7 +21,7 @@ uuid = { version = "1", features = ["serde", "v4"] }
 time = { version = "0.3", features = ["serde"] }
 tower-cookies = "0.11"
 tower-http = { version = "0.6", features = ["fs"] }
-ts-rs = { version = "10", features = ["serde-compat", "no-serde-warnings"] }
+ts-rs = { version = "10", features = ["serde-compat"] }
 
 bootstrap = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 core-config = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }

@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Bold, Italic, List, ListOrdered, Undo2, Redo2 } from "lucide-react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import type { AnyExtension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -114,7 +115,7 @@ export function TiptapInput({
   const canUseImageUpload = !!imageUpload && !!(imageFolder ?? "").trim();
 
   const extensions = useMemo(() => {
-    const nextExtensions = [
+    const nextExtensions: AnyExtension[] = [
       StarterKit.configure({
         heading: { levels: [2, 3] },
       }),

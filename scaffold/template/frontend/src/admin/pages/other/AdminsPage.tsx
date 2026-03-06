@@ -25,9 +25,9 @@ import type { DataTablePostCallEvent } from "@shared/components";
 import { api } from "@admin/api";
 
 const TYPE_COLORS: Record<AdminType, string> = {
-  [ADMIN_TYPE.DEVELOPER]: "bg-purple-100 text-purple-700",
-  [ADMIN_TYPE.SUPERADMIN]: "bg-amber-100 text-amber-700",
-  [ADMIN_TYPE.ADMIN]: "bg-blue-100 text-blue-700",
+  developer: "bg-purple-100 text-purple-700",
+  superadmin: "bg-amber-100 text-amber-700",
+  admin: "bg-blue-100 text-blue-700",
 };
 
 const ADMIN_PERMISSION_META = PERMISSION_META.filter(

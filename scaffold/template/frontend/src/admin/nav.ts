@@ -1,8 +1,6 @@
 import {
-  FileText,
   LayoutDashboard,
   List,
-  Users,
   Settings,
   type LucideIcon,
 } from "lucide-react";

@@ -151,8 +151,8 @@ function normalizeFilePreview(value: AutoFormDefaultValue): FilePreviewItem | nu
       size: value.size,
     };
   }
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
+  if (typeof value === "object" && !Array.isArray(value)) {
+    const record = value as unknown as Record<string, unknown>;
     const url = typeof record.url === "string" && record.url.trim().length > 0 ? record.url : undefined;
     const nameFromRecord = typeof record.name === "string" && record.name.trim().length > 0 ? record.name : undefined;
     const mimeType = typeof record.mimeType === "string" && record.mimeType.trim().length > 0 ? record.mimeType : undefined;

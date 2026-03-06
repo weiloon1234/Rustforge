@@ -49,4 +49,4 @@ aide = { version = "0.14.1", features = ["axum", "macros", "redoc", "axum-json",
 schemars = { version = "0.8.21", features = ["uuid1", "chrono"] }
 core-mailer = { path = "../core-mailer" }
 regex = "1.10"
-ts-rs = { version = "10", features = ["serde-compat", "no-serde-warnings"] }
+ts-rs = { version = "10", features = ["serde-compat"] }

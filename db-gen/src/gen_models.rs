@@ -5028,86 +5028,15 @@ fn render_model(
             }
         };
 
-    writeln!(out, "pub struct {table_adapter_ident};").unwrap();
-    writeln!(out, "impl {table_adapter_ident} {{").unwrap();
-    writeln!(
-        out,
-        "    fn parse_col(name: &str) -> Option<{col_ident}> {{"
-    )
-    .unwrap();
-    writeln!(out, "        match name {{").unwrap();
-    for f in &db_fields {
+        writeln!(out, "pub struct {table_adapter_ident};").unwrap();
+        writeln!(out, "impl {table_adapter_ident} {{").unwrap();
         writeln!(
             out,
-            "            \"{name}\" => Some({col_ident}::{variant}),",
-            name = f.name,
-            variant = to_title_case(&f.name)
+            "    fn parse_col(name: &str) -> Option<{col_ident}> {{"
         )
         .unwrap();
-    }
-    writeln!(out, "            _ => None,").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    fn parse_locale_field_for_relation(relation: &str, column: &str) -> Option<&'static str> {{"
-    )
-    .unwrap();
-    writeln!(out, "        match (relation, column) {{").unwrap();
-    for rel_path in &relation_paths {
-        let rel_key = rel_path.path.join("__");
-        let target_cfg = schema
-            .models
-            .get(&rel_path.target_model)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Relation path '{}' target model not found",
-                    rel_path.target_model
-                )
-            });
-        let target_localized_fields: Vec<String> = target_cfg
-            .localized
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| to_snake(&s))
-            .collect();
-        for tf in &target_localized_fields {
-            writeln!(
-                out,
-                "            (\"{rel}\", \"{col}\") => Some(\"{col}\"),",
-                rel = rel_key,
-                col = tf
-            )
-            .unwrap();
-        }
-    }
-    writeln!(out, "            _ => None,").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    fn parse_locale_field(name: &str) -> Option<&'static str> {{"
-    )
-    .unwrap();
-    writeln!(out, "        match name {{").unwrap();
-    for f in &localized_fields {
-        writeln!(out, "            \"{f}\" => Some(\"{f}\"),").unwrap();
-    }
-    writeln!(out, "            _ => None,").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    fn parse_like_col(name: &str) -> Option<{col_ident}> {{"
-    )
-    .unwrap();
-    writeln!(out, "        match name {{").unwrap();
-    for f in &db_fields {
-        if f.ty.contains("String") {
+        writeln!(out, "        match name {{").unwrap();
+        for f in &db_fields {
             writeln!(
                 out,
                 "            \"{name}\" => Some({col_ident}::{variant}),",
@@ -5116,38 +5045,109 @@ fn render_model(
             )
             .unwrap();
         }
-    }
-    writeln!(out, "            _ => None,").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
+        writeln!(out, "            _ => None,").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "    }}").unwrap();
 
-    let parse_bind_expr = |ty: &str, raw: &str| -> String {
-        match ty {
-            "String" => format!("Some({raw}.trim().to_string().into())"),
-            "bool" => format!("{raw}.trim().parse::<bool>().ok().map(Into::into)"),
-            "i8" => format!("{raw}.trim().parse::<i8>().ok().map(|v| (v as i64).into())"),
-            "i16" => format!("{raw}.trim().parse::<i16>().ok().map(Into::into)"),
-            "i32" => format!("{raw}.trim().parse::<i32>().ok().map(Into::into)"),
-            "i64" => format!("{raw}.trim().parse::<i64>().ok().map(Into::into)"),
-            "u8" => format!("{raw}.trim().parse::<u8>().ok().map(|v| (v as i64).into())"),
-            "u16" => format!("{raw}.trim().parse::<u16>().ok().map(|v| (v as i64).into())"),
-            "u32" => format!("{raw}.trim().parse::<u32>().ok().map(|v| (v as i64).into())"),
-            "u64" => format!("{raw}.trim().parse::<u64>().ok().map(|v| (v as i64).into())"),
-            "f32" => format!("{raw}.trim().parse::<f32>().ok().map(|v| (v as f64).into())"),
-            "f64" => format!("{raw}.trim().parse::<f64>().ok().map(Into::into)"),
-            "uuid::Uuid" => format!("uuid::Uuid::parse_str({raw}.trim()).ok().map(Into::into)"),
-            "time::OffsetDateTime" => {
-                format!("Self::parse_datetime({raw}.trim(), false).map(Into::into)")
+        writeln!(
+        out,
+        "    fn parse_locale_field_for_relation(relation: &str, column: &str) -> Option<&'static str> {{"
+    )
+    .unwrap();
+        writeln!(out, "        match (relation, column) {{").unwrap();
+        for rel_path in &relation_paths {
+            let rel_key = rel_path.path.join("__");
+            let target_cfg = schema
+                .models
+                .get(&rel_path.target_model)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Relation path '{}' target model not found",
+                        rel_path.target_model
+                    )
+                });
+            let target_localized_fields: Vec<String> = target_cfg
+                .localized
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| to_snake(&s))
+                .collect();
+            for tf in &target_localized_fields {
+                writeln!(
+                    out,
+                    "            (\"{rel}\", \"{col}\") => Some(\"{col}\"),",
+                    rel = rel_key,
+                    col = tf
+                )
+                .unwrap();
             }
-            "Option<time::OffsetDateTime>" => {
-                format!("Self::parse_datetime({raw}.trim(), false).map(Into::into)")
-            }
-            _ => format!("Some(Self::parse_bind({raw}.trim()))"),
         }
-    };
+        writeln!(out, "            _ => None,").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "    }}").unwrap();
 
-    let cursor_value_expr = |ty: &str, field_name: &str| -> Option<String> {
-        match ty {
+        writeln!(
+            out,
+            "    fn parse_locale_field(name: &str) -> Option<&'static str> {{"
+        )
+        .unwrap();
+        writeln!(out, "        match name {{").unwrap();
+        for f in &localized_fields {
+            writeln!(out, "            \"{f}\" => Some(\"{f}\"),").unwrap();
+        }
+        writeln!(out, "            _ => None,").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "    }}").unwrap();
+
+        writeln!(
+            out,
+            "    fn parse_like_col(name: &str) -> Option<{col_ident}> {{"
+        )
+        .unwrap();
+        writeln!(out, "        match name {{").unwrap();
+        for f in &db_fields {
+            if f.ty.contains("String") {
+                writeln!(
+                    out,
+                    "            \"{name}\" => Some({col_ident}::{variant}),",
+                    name = f.name,
+                    variant = to_title_case(&f.name)
+                )
+                .unwrap();
+            }
+        }
+        writeln!(out, "            _ => None,").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "    }}").unwrap();
+
+        let parse_bind_expr = |ty: &str, raw: &str| -> String {
+            match ty {
+                "String" => format!("Some({raw}.trim().to_string().into())"),
+                "bool" => format!("{raw}.trim().parse::<bool>().ok().map(Into::into)"),
+                "i8" => format!("{raw}.trim().parse::<i8>().ok().map(|v| (v as i64).into())"),
+                "i16" => format!("{raw}.trim().parse::<i16>().ok().map(Into::into)"),
+                "i32" => format!("{raw}.trim().parse::<i32>().ok().map(Into::into)"),
+                "i64" => format!("{raw}.trim().parse::<i64>().ok().map(Into::into)"),
+                "u8" => format!("{raw}.trim().parse::<u8>().ok().map(|v| (v as i64).into())"),
+                "u16" => format!("{raw}.trim().parse::<u16>().ok().map(|v| (v as i64).into())"),
+                "u32" => format!("{raw}.trim().parse::<u32>().ok().map(|v| (v as i64).into())"),
+                "u64" => format!("{raw}.trim().parse::<u64>().ok().map(|v| (v as i64).into())"),
+                "f32" => format!("{raw}.trim().parse::<f32>().ok().map(|v| (v as f64).into())"),
+                "f64" => format!("{raw}.trim().parse::<f64>().ok().map(Into::into)"),
+                "uuid::Uuid" => format!("uuid::Uuid::parse_str({raw}.trim()).ok().map(Into::into)"),
+                "time::OffsetDateTime" => {
+                    format!("Self::parse_datetime({raw}.trim(), false).map(Into::into)")
+                }
+                "Option<time::OffsetDateTime>" => {
+                    format!("Self::parse_datetime({raw}.trim(), false).map(Into::into)")
+                }
+                _ => format!("Some(Self::parse_bind({raw}.trim()))"),
+            }
+        };
+
+        let cursor_value_expr = |ty: &str, field_name: &str| -> Option<String> {
+            match ty {
             "String" => Some(format!("Some(row.{field_name}.clone())")),
             "bool" | "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" | "f32"
             | "f64" | "uuid::Uuid" => Some(format!("Some(row.{field_name}.to_string())")),
@@ -5164,200 +5164,200 @@ fn render_model(
             )),
             _ => None,
         }
-    };
+        };
 
-    writeln!(
-        out,
-        "    fn parse_bind_for_col(name: &str, raw: &str) -> Option<BindValue> {{"
-    )
-    .unwrap();
-    writeln!(out, "        match name {{").unwrap();
-    for f in &db_fields {
         writeln!(
             out,
-            "            \"{name}\" => {expr},",
-            name = f.name,
-            expr = parse_bind_expr(&f.ty, "raw")
+            "    fn parse_bind_for_col(name: &str, raw: &str) -> Option<BindValue> {{"
         )
         .unwrap();
-    }
-    writeln!(out, "            _ => None,").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
+        writeln!(out, "        match name {{").unwrap();
+        for f in &db_fields {
+            writeln!(
+                out,
+                "            \"{name}\" => {expr},",
+                name = f.name,
+                expr = parse_bind_expr(&f.ty, "raw")
+            )
+            .unwrap();
+        }
+        writeln!(out, "            _ => None,").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "    }}").unwrap();
 
-    writeln!(
+        writeln!(
         out,
         "    fn parse_bind_for_relation(relation: &str, column: &str, raw: &str) -> Option<BindValue> {{"
     )
     .unwrap();
-    writeln!(out, "        match (relation, column) {{").unwrap();
-    for rel_path in &relation_paths {
-        let rel_key = rel_path.path.join("__");
-        let target_cfg = schema
-            .models
-            .get(&rel_path.target_model)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Relation path '{}' target model not found",
-                    rel_path.target_model
+        writeln!(out, "        match (relation, column) {{").unwrap();
+        for rel_path in &relation_paths {
+            let rel_key = rel_path.path.join("__");
+            let target_cfg = schema
+                .models
+                .get(&rel_path.target_model)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Relation path '{}' target model not found",
+                        rel_path.target_model
+                    )
+                });
+            let target_pk = target_cfg.pk.clone().unwrap_or_else(|| "id".to_string());
+            let target_fields = parse_fields(target_cfg, &target_pk);
+            for tf in &target_fields {
+                writeln!(
+                    out,
+                    "            (\"{rel}\", \"{col}\") => {expr},",
+                    rel = rel_key,
+                    col = tf.name,
+                    expr = parse_bind_expr(&tf.ty, "raw")
                 )
-            });
-        let target_pk = target_cfg.pk.clone().unwrap_or_else(|| "id".to_string());
-        let target_fields = parse_fields(target_cfg, &target_pk);
-        for tf in &target_fields {
-            writeln!(
-                out,
-                "            (\"{rel}\", \"{col}\") => {expr},",
-                rel = rel_key,
-                col = tf.name,
-                expr = parse_bind_expr(&tf.ty, "raw")
-            )
-            .unwrap();
+                .unwrap();
+            }
         }
-    }
-    writeln!(out, "            _ => None,").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
+        writeln!(out, "            _ => None,").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "    }}").unwrap();
 
-    writeln!(out, "    fn parse_bind(raw: &str) -> BindValue {{").unwrap();
-    writeln!(out, "        let trimmed = raw.trim();").unwrap();
-    writeln!(
+        writeln!(out, "    fn parse_bind(raw: &str) -> BindValue {{").unwrap();
+        writeln!(out, "        let trimmed = raw.trim();").unwrap();
+        writeln!(
         out,
         "        let lower = trimmed.to_ascii_lowercase(); if lower == \"true\" {{ return true.into(); }} if lower == \"false\" {{ return false.into(); }}"
     )
     .unwrap();
-    writeln!(
-        out,
-        "        if let Ok(v) = trimmed.parse::<i64>() {{ return v.into(); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if let Ok(v) = trimmed.parse::<f64>() {{ return v.into(); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if let Ok(v) = uuid::Uuid::parse_str(trimmed) {{ return v.into(); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if let Some(v) = Self::parse_datetime(trimmed, false) {{ return v.into(); }}"
-    )
-    .unwrap();
-    writeln!(out, "        trimmed.to_string().into()").unwrap();
-    writeln!(out, "    }}").unwrap();
+        writeln!(
+            out,
+            "        if let Ok(v) = trimmed.parse::<i64>() {{ return v.into(); }}"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        if let Ok(v) = trimmed.parse::<f64>() {{ return v.into(); }}"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        if let Ok(v) = uuid::Uuid::parse_str(trimmed) {{ return v.into(); }}"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        if let Some(v) = Self::parse_datetime(trimmed, false) {{ return v.into(); }}"
+        )
+        .unwrap();
+        writeln!(out, "        trimmed.to_string().into()").unwrap();
+        writeln!(out, "    }}").unwrap();
 
-    writeln!(
-        out,
-        "    fn parse_datetime(raw: &str, end_of_day: bool) -> Option<time::OffsetDateTime> {{"
-    )
-    .unwrap();
-    writeln!(out, "        let trimmed = raw.trim();").unwrap();
-    writeln!(
+        writeln!(
+            out,
+            "    fn parse_datetime(raw: &str, end_of_day: bool) -> Option<time::OffsetDateTime> {{"
+        )
+        .unwrap();
+        writeln!(out, "        let trimmed = raw.trim();").unwrap();
+        writeln!(
         out,
         "        if let Ok(dt) = time::OffsetDateTime::parse(trimmed, &time::format_description::well_known::Rfc3339) {{ return Some(dt); }}"
     )
     .unwrap();
-    writeln!(out, "        if trimmed.len() == 10 {{").unwrap();
-    writeln!(
+        writeln!(out, "        if trimmed.len() == 10 {{").unwrap();
+        writeln!(
         out,
         "            let date = time::Date::parse(trimmed, &time::macros::format_description!(\"[year]-[month]-[day]\")).ok()?;"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "            let t = if end_of_day {{ time::Time::from_hms(23, 59, 59).ok()? }} else {{ time::Time::MIDNIGHT }};"
     )
     .unwrap();
-    writeln!(
-        out,
-        "            return Some(date.with_time(t).assume_offset(time::UtcOffset::UTC));"
-    )
-    .unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        None").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out, "}}").unwrap();
+        writeln!(
+            out,
+            "            return Some(date.with_time(t).assume_offset(time::UtcOffset::UTC));"
+        )
+        .unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "        None").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(out, "}}").unwrap();
 
-    writeln!(
-        out,
-        "impl GeneratedTableAdapter for {table_adapter_ident} {{"
-    )
-    .unwrap();
-    writeln!(out, "    type Query<'db> = {query_ident}<'db>;").unwrap();
-    writeln!(out, "    type Row = {view_ident};").unwrap();
-    writeln!(
-        out,
-        "    fn model_key(&self) -> &'static str {{ \"{model_title}\" }}"
-    )
-    .unwrap();
-    writeln!(
+        writeln!(
+            out,
+            "impl GeneratedTableAdapter for {table_adapter_ident} {{"
+        )
+        .unwrap();
+        writeln!(out, "    type Query<'db> = {query_ident}<'db>;").unwrap();
+        writeln!(out, "    type Row = {view_ident};").unwrap();
+        writeln!(
+            out,
+            "    fn model_key(&self) -> &'static str {{ \"{model_title}\" }}"
+        )
+        .unwrap();
+        writeln!(
         out,
         "    fn sortable_columns(&self) -> &'static [&'static str] {{ &[{sortable_cols_lit}] }}"
     )
-    .unwrap();
-    writeln!(
+        .unwrap();
+        writeln!(
         out,
         "    fn timestamp_columns(&self) -> &'static [&'static str] {{ &[{timestamp_cols_lit}] }}"
     )
-    .unwrap();
-    writeln!(
-        out,
-        "    fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {{"
-    )
-    .unwrap();
-    writeln!(out, "        &[").unwrap();
-    for f in &db_fields {
-        let ops = column_filter_ops_lit(f);
-        let label = crate::schema::to_label(&f.name);
-        let sortable = !f.ty.contains("serde_json");
+        .unwrap();
         writeln!(
+            out,
+            "    fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {{"
+        )
+        .unwrap();
+        writeln!(out, "        &[").unwrap();
+        for f in &db_fields {
+            let ops = column_filter_ops_lit(f);
+            let label = crate::schema::to_label(&f.name);
+            let sortable = !f.ty.contains("serde_json");
+            writeln!(
             out,
             "            DataTableColumnDescriptor {{ name: \"{name}\", label: \"{label}\", data_type: \"{ty}\", sortable: {sortable}, localized: false, filter_ops: {ops} }},",
             name = f.name,
             ty = f.ty,
         )
         .unwrap();
-    }
-    for f in &localized_fields {
-        let label = crate::schema::to_label(f);
-        writeln!(
+        }
+        for f in &localized_fields {
+            let label = crate::schema::to_label(f);
+            writeln!(
             out,
             "            DataTableColumnDescriptor {{ name: \"{name}\", label: \"{label}\", data_type: \"String\", sortable: false, localized: true, filter_ops: &[\"locale_eq\", \"locale_like\"] }},",
             name = f,
         )
         .unwrap();
-    }
-    writeln!(out, "        ]").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
+        }
+        writeln!(out, "        ]").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
         out,
         "    fn relation_column_descriptors(&self) -> &'static [DataTableRelationColumnDescriptor] {{"
     )
     .unwrap();
-    writeln!(out, "        &[").unwrap();
-    for rel_path in &relation_paths {
-        let rel_key = rel_path.path.join("__");
-        let target_cfg = schema
-            .models
-            .get(&rel_path.target_model)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Relation path '{}' target model not found",
-                    rel_path.target_model
-                )
-            });
-        let target_pk = target_cfg.pk.clone().unwrap_or_else(|| "id".to_string());
-        let target_fields = parse_fields(target_cfg, &target_pk);
-        for tf in &target_fields {
-            let ops = if tf.ty.contains("String") {
-                "&[\"has_eq\", \"has_like\"]"
-            } else {
-                "&[\"has_eq\"]"
-            };
-            writeln!(
+        writeln!(out, "        &[").unwrap();
+        for rel_path in &relation_paths {
+            let rel_key = rel_path.path.join("__");
+            let target_cfg = schema
+                .models
+                .get(&rel_path.target_model)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Relation path '{}' target model not found",
+                        rel_path.target_model
+                    )
+                });
+            let target_pk = target_cfg.pk.clone().unwrap_or_else(|| "id".to_string());
+            let target_fields = parse_fields(target_cfg, &target_pk);
+            for tf in &target_fields {
+                let ops = if tf.ty.contains("String") {
+                    "&[\"has_eq\", \"has_like\"]"
+                } else {
+                    "&[\"has_eq\"]"
+                };
+                writeln!(
                 out,
                 "            DataTableRelationColumnDescriptor {{ relation: \"{relation}\", column: \"{column}\", data_type: \"{ty}\", filter_ops: {ops} }},",
                 relation = rel_key,
@@ -5365,176 +5365,395 @@ fn render_model(
                 ty = tf.ty
             )
             .unwrap();
-        }
-        let target_localized_fields: Vec<String> = target_cfg
-            .localized
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| to_snake(&s))
-            .collect();
-        for tf in &target_localized_fields {
-            writeln!(
+            }
+            let target_localized_fields: Vec<String> = target_cfg
+                .localized
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| to_snake(&s))
+                .collect();
+            for tf in &target_localized_fields {
+                writeln!(
                 out,
                 "            DataTableRelationColumnDescriptor {{ relation: \"{relation}\", column: \"{column}\", data_type: \"String\", filter_ops: &[\"locale_has_eq\", \"locale_has_like\"] }},",
                 relation = rel_key,
                 column = tf
             )
             .unwrap();
+            }
         }
-    }
-    writeln!(out, "        ]").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn filter_patterns(&self) -> &'static [&'static str] {{"
-    )
-    .unwrap();
-    writeln!(out, "        &[").unwrap();
-    writeln!(out, "            \"f-<col>\",").unwrap();
-    writeln!(out, "            \"f-like-<col>\",").unwrap();
-    writeln!(out, "            \"f-gte-<col>\",").unwrap();
-    writeln!(out, "            \"f-lte-<col>\",").unwrap();
-    writeln!(out, "            \"f-date-from-<col>\",").unwrap();
-    writeln!(out, "            \"f-date-to-<col>\",").unwrap();
-    writeln!(out, "            \"f-like-any-<col1|col2|...>\",").unwrap();
-    writeln!(out, "            \"f-any-<col1|col2|...>\",").unwrap();
-    writeln!(out, "            \"f-has-<relation>-<col>\",").unwrap();
-    writeln!(out, "            \"f-has-like-<relation>-<col>\",").unwrap();
-    if !localized_fields.is_empty() {
-        writeln!(out, "            \"f-locale-<col>\",").unwrap();
-        writeln!(out, "            \"f-locale-like-<col>\",").unwrap();
-    }
-    let has_relation_locale = relation_paths.iter().any(|rel_path| {
-        let Some(target_cfg) = schema.models.get(&rel_path.target_model) else {
-            return false;
-        };
-        !target_cfg.localized.clone().unwrap_or_default().is_empty()
-    });
-    if has_relation_locale {
-        writeln!(out, "            \"f-locale-has-<relation>-<col>\",").unwrap();
-        writeln!(out, "            \"f-locale-has-like-<relation>-<col>\",").unwrap();
-    }
-    writeln!(out, "        ]").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
+        writeln!(out, "        ]").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
+            out,
+            "    fn filter_patterns(&self) -> &'static [&'static str] {{"
+        )
+        .unwrap();
+        writeln!(out, "        &[").unwrap();
+        writeln!(out, "            \"f-<col>\",").unwrap();
+        writeln!(out, "            \"f-like-<col>\",").unwrap();
+        writeln!(out, "            \"f-gte-<col>\",").unwrap();
+        writeln!(out, "            \"f-lte-<col>\",").unwrap();
+        writeln!(out, "            \"f-date-from-<col>\",").unwrap();
+        writeln!(out, "            \"f-date-to-<col>\",").unwrap();
+        writeln!(out, "            \"f-like-any-<col1|col2|...>\",").unwrap();
+        writeln!(out, "            \"f-any-<col1|col2|...>\",").unwrap();
+        writeln!(out, "            \"f-has-<relation>-<col>\",").unwrap();
+        writeln!(out, "            \"f-has-like-<relation>-<col>\",").unwrap();
+        if !localized_fields.is_empty() {
+            writeln!(out, "            \"f-locale-<col>\",").unwrap();
+            writeln!(out, "            \"f-locale-like-<col>\",").unwrap();
+        }
+        let has_relation_locale = relation_paths.iter().any(|rel_path| {
+            let Some(target_cfg) = schema.models.get(&rel_path.target_model) else {
+                return false;
+            };
+            !target_cfg.localized.clone().unwrap_or_default().is_empty()
+        });
+        if has_relation_locale {
+            writeln!(out, "            \"f-locale-has-<relation>-<col>\",").unwrap();
+            writeln!(out, "            \"f-locale-has-like-<relation>-<col>\",").unwrap();
+        }
+        writeln!(out, "        ]").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
         out,
         "    fn apply_auto_filter<'db>(&self, query: {query_ident}<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<{query_ident}<'db>>> where Self: 'db {{"
     )
     .unwrap();
-    writeln!(out, "        let trimmed = value.trim();").unwrap();
-    writeln!(
-        out,
-        "        if trimmed.is_empty() {{ return Ok(Some(query)); }}"
-    )
-    .unwrap();
-    writeln!(out, "        match filter {{").unwrap();
-    writeln!(out, "            ParsedFilter::Eq {{ column }} => {{").unwrap();
-    writeln!(
+        writeln!(out, "        let trimmed = value.trim();").unwrap();
+        writeln!(
+            out,
+            "        if trimmed.is_empty() {{ return Ok(Some(query)); }}"
+        )
+        .unwrap();
+        writeln!(out, "        match filter {{").unwrap();
+        writeln!(out, "            ParsedFilter::Eq {{ column }} => {{").unwrap();
+        writeln!(
         out,
         "                let Some(col) = Self::parse_col(column.as_str()) else {{ return Ok(None); }};"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "                let Some(bind) = Self::parse_bind_for_col(column.as_str(), trimmed) else {{ return Ok(None); }};"
     )
     .unwrap();
-    writeln!(
-        out,
-        "                Ok(Some(query.where_col(col, Op::Eq, bind)))"
-    )
-    .unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "            ParsedFilter::Like {{ column }} => {{").unwrap();
-    writeln!(
+        writeln!(
+            out,
+            "                Ok(Some(query.where_col(col, Op::Eq, bind)))"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "            ParsedFilter::Like {{ column }} => {{").unwrap();
+        writeln!(
         out,
         "                let Some(col) = Self::parse_like_col(column.as_str()) else {{ return Ok(None); }};"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "                Ok(Some(query.where_col(col, Op::Like, format!(\"%{{}}%\", trimmed))))"
     )
-    .unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "            ParsedFilter::Gte {{ column }} => {{").unwrap();
-    writeln!(
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "            ParsedFilter::Gte {{ column }} => {{").unwrap();
+        writeln!(
         out,
         "                let Some(col) = Self::parse_col(column.as_str()) else {{ return Ok(None); }};"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "                let Some(bind) = Self::parse_bind_for_col(column.as_str(), trimmed) else {{ return Ok(None); }};"
     )
     .unwrap();
-    writeln!(
-        out,
-        "                Ok(Some(query.where_col(col, Op::Ge, bind)))"
-    )
-    .unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "            ParsedFilter::Lte {{ column }} => {{").unwrap();
-    writeln!(
+        writeln!(
+            out,
+            "                Ok(Some(query.where_col(col, Op::Ge, bind)))"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "            ParsedFilter::Lte {{ column }} => {{").unwrap();
+        writeln!(
         out,
         "                let Some(col) = Self::parse_col(column.as_str()) else {{ return Ok(None); }};"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "                let Some(bind) = Self::parse_bind_for_col(column.as_str(), trimmed) else {{ return Ok(None); }};"
     )
     .unwrap();
-    writeln!(
-        out,
-        "                Ok(Some(query.where_col(col, Op::Le, bind)))"
-    )
-    .unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "            ParsedFilter::DateFrom {{ column }} => {{").unwrap();
-    writeln!(
+        writeln!(
+            out,
+            "                Ok(Some(query.where_col(col, Op::Le, bind)))"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "            ParsedFilter::DateFrom {{ column }} => {{").unwrap();
+        writeln!(
         out,
         "                let Some(col) = Self::parse_col(column.as_str()) else {{ return Ok(None); }};"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "                let Some(ts) = Self::parse_datetime(trimmed, false) else {{ return Ok(None); }};"
     )
     .unwrap();
-    writeln!(
-        out,
-        "                Ok(Some(query.where_col(col, Op::Ge, ts)))"
-    )
-    .unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "            ParsedFilter::DateTo {{ column }} => {{").unwrap();
-    writeln!(
+        writeln!(
+            out,
+            "                Ok(Some(query.where_col(col, Op::Ge, ts)))"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "            ParsedFilter::DateTo {{ column }} => {{").unwrap();
+        writeln!(
         out,
         "                let Some(col) = Self::parse_col(column.as_str()) else {{ return Ok(None); }};"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "                let Some(ts) = Self::parse_datetime(trimmed, true) else {{ return Ok(None); }};"
     )
     .unwrap();
-    writeln!(
-        out,
-        "                Ok(Some(query.where_col(col, Op::Le, ts)))"
-    )
-    .unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "            ParsedFilter::LocaleEq {{ column }} => {{").unwrap();
-    if localized_fields.is_empty() {
-        writeln!(out, "                Ok(None)").unwrap();
-    } else {
         writeln!(
+            out,
+            "                Ok(Some(query.where_col(col, Op::Le, ts)))"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "            ParsedFilter::LocaleEq {{ column }} => {{").unwrap();
+        if localized_fields.is_empty() {
+            writeln!(out, "                Ok(None)").unwrap();
+        } else {
+            writeln!(
             out,
             "                let Some(field) = Self::parse_locale_field(column.as_str()) else {{ return Ok(None); }};"
         )
         .unwrap();
+            writeln!(
+                out,
+                "                let locale = core_i18n::current_locale().to_string();"
+            )
+            .unwrap();
+            writeln!(
+            out,
+            "                let clause = \"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {table}.{pk} AND l.field = ? AND l.locale = ? AND l.value = ?)\".to_string();",
+        )
+        .unwrap();
+            writeln!(
+            out,
+            "                Ok(Some(query.where_exists(clause, vec![localized::{model_snake_upper}_OWNER_TYPE.to_string(), field.to_string(), locale, trimmed.to_string()])))",
+        )
+        .unwrap();
+        }
+        writeln!(out, "            }}").unwrap();
+        writeln!(
+            out,
+            "            ParsedFilter::LocaleLike {{ column }} => {{"
+        )
+        .unwrap();
+        if localized_fields.is_empty() {
+            writeln!(out, "                Ok(None)").unwrap();
+        } else {
+            writeln!(
+            out,
+            "                let Some(field) = Self::parse_locale_field(column.as_str()) else {{ return Ok(None); }};"
+        )
+        .unwrap();
+            writeln!(
+                out,
+                "                let locale = core_i18n::current_locale().to_string();"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                let pattern = format!(\"%{{}}%\", trimmed);"
+            )
+            .unwrap();
+            writeln!(
+            out,
+            "                let clause = \"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {table}.{pk} AND l.field = ? AND l.locale = ? AND l.value LIKE ?)\".to_string();",
+        )
+        .unwrap();
+            writeln!(
+            out,
+            "                Ok(Some(query.where_exists(clause, vec![localized::{model_snake_upper}_OWNER_TYPE.to_string(), field.to_string(), locale, pattern])))",
+        )
+        .unwrap();
+        }
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "            ParsedFilter::LikeAny {{ columns }} => {{").unwrap();
+        writeln!(out, "                let mut applied = false;").unwrap();
+        writeln!(
+            out,
+            "                let pattern = format!(\"%{{}}%\", trimmed);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                let next = query.where_group(|group| {{"
+        )
+        .unwrap();
+        writeln!(out, "                    let mut q = group;").unwrap();
+        writeln!(out, "                    for column in columns {{").unwrap();
+        writeln!(
+            out,
+            "                        if let Some(col) = Self::parse_like_col(column.as_str()) {{"
+        )
+        .unwrap();
+        writeln!(
+        out,
+        "                            if applied {{ q = q.or_where_col(col, Op::Like, pattern.clone()); }} else {{ q = q.where_col(col, Op::Like, pattern.clone()); applied = true; }}"
+    )
+    .unwrap();
+        writeln!(out, "                        }}").unwrap();
+        writeln!(out, "                    }}").unwrap();
+        writeln!(out, "                    q").unwrap();
+        writeln!(out, "                }});").unwrap();
+        writeln!(
+            out,
+            "                if applied {{ Ok(Some(next)) }} else {{ Ok(None) }}"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "            ParsedFilter::Any {{ columns }} => {{").unwrap();
+        writeln!(out, "                let mut applied = false;").unwrap();
+        writeln!(
+            out,
+            "                let next = query.where_group(|group| {{"
+        )
+        .unwrap();
+        writeln!(out, "                    let mut q = group;").unwrap();
+        writeln!(out, "                    for column in columns {{").unwrap();
+        writeln!(
+            out,
+            "                        if let Some(col) = Self::parse_col(column.as_str()) {{"
+        )
+        .unwrap();
+        writeln!(
+        out,
+        "                            if let Some(bind) = Self::parse_bind_for_col(column.as_str(), trimmed) {{ if applied {{ q = q.or_where_col(col, Op::Eq, bind.clone()); }} else {{ q = q.where_col(col, Op::Eq, bind.clone()); applied = true; }} }}"
+    )
+    .unwrap();
+        writeln!(out, "                        }}").unwrap();
+        writeln!(out, "                    }}").unwrap();
+        writeln!(out, "                    q").unwrap();
+        writeln!(out, "                }});").unwrap();
+        writeln!(
+            out,
+            "                if applied {{ Ok(Some(next)) }} else {{ Ok(None) }}"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(
+            out,
+            "            ParsedFilter::Has {{ relation, column }} => {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                match (relation.as_str(), column.as_str()) {{"
+        )
+        .unwrap();
+        for rel_path in &relation_paths {
+            let rel_key = rel_path.path.join("__");
+            let target_title = to_title_case(&rel_path.target_model);
+            let target_col_ident = format!("{}Col", target_title);
+            let target_cfg = schema
+                .models
+                .get(&rel_path.target_model)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Relation path '{}' target model not found",
+                        rel_path.target_model
+                    )
+                });
+            let target_pk = target_cfg.pk.clone().unwrap_or_else(|| "id".to_string());
+            let target_fields = parse_fields(target_cfg, &target_pk);
+            for tf in &target_fields {
+                let leaf_expr = format!(
+                    "{{var}}.where_col({target_col_ident}::{target_variant}, Op::Eq, bind)",
+                    target_variant = to_title_case(&tf.name)
+                );
+                let has_expr = build_nested_where_has_expr(&rel_path.path, &leaf_expr, "query");
+                writeln!(
+                out,
+                "                    (\"{rel_name}\", \"{col}\") => {{ let Some(bind) = Self::parse_bind_for_relation(\"{rel_name}\", \"{col}\", trimmed) else {{ return Ok(None); }}; Ok(Some({has_expr})) }},",
+                rel_name = rel_key,
+                col = tf.name,
+            )
+            .unwrap();
+            }
+        }
+        writeln!(out, "                    _ => Ok(None),").unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(
+            out,
+            "            ParsedFilter::HasLike {{ relation, column }} => {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                let pattern = format!(\"%{{}}%\", trimmed);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                match (relation.as_str(), column.as_str()) {{"
+        )
+        .unwrap();
+        for rel_path in &relation_paths {
+            let rel_key = rel_path.path.join("__");
+            let target_title = to_title_case(&rel_path.target_model);
+            let target_col_ident = format!("{}Col", target_title);
+            let target_cfg = schema
+                .models
+                .get(&rel_path.target_model)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Relation path '{}' target model not found",
+                        rel_path.target_model
+                    )
+                });
+            let target_pk = target_cfg.pk.clone().unwrap_or_else(|| "id".to_string());
+            let target_fields = parse_fields(target_cfg, &target_pk);
+            for tf in &target_fields {
+                if tf.ty.contains("String") {
+                    let leaf_expr = format!(
+                    "{{var}}.where_col({target_col_ident}::{target_variant}, Op::Like, pattern.clone())",
+                    target_variant = to_title_case(&tf.name)
+                );
+                    let has_like_expr =
+                        build_nested_where_has_expr(&rel_path.path, &leaf_expr, "query");
+                    writeln!(
+                    out,
+                    "                    (\"{rel_name}\", \"{col}\") => Ok(Some({has_like_expr})),",
+                    rel_name = rel_key,
+                    col = tf.name,
+                )
+                    .unwrap();
+                }
+            }
+        }
+        writeln!(out, "                    _ => Ok(None),").unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(
+            out,
+            "            ParsedFilter::LocaleHas {{ relation, column }} => {{"
+        )
+        .unwrap();
+        writeln!(
+        out,
+        "                let Some(field) = Self::parse_locale_field_for_relation(relation.as_str(), column.as_str()) else {{ return Ok(None); }};"
+    )
+    .unwrap();
         writeln!(
             out,
             "                let locale = core_i18n::current_locale().to_string();"
@@ -5542,29 +5761,68 @@ fn render_model(
         .unwrap();
         writeln!(
             out,
-            "                let clause = \"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {table}.{pk} AND l.field = ? AND l.locale = ? AND l.value = ?)\".to_string();",
+            "                match (relation.as_str(), column.as_str()) {{"
+        )
+        .unwrap();
+        for rel_path in &relation_paths {
+            let rel_key = rel_path.path.join("__");
+            let target_cfg = schema
+                .models
+                .get(&rel_path.target_model)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Relation path '{}' target model not found",
+                        rel_path.target_model
+                    )
+                });
+            let target_table = target_cfg
+                .table
+                .as_ref()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| to_snake(&rel_path.target_model));
+            let target_pk = target_cfg
+                .pk
+                .as_ref()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "id".to_string());
+            let target_localized_fields: Vec<String> = target_cfg
+                .localized
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| to_snake(&s))
+                .collect();
+            let target_owner_const = format!(
+                "{}_OWNER_TYPE",
+                to_snake(&rel_path.target_model).to_uppercase()
+            );
+            for tf in &target_localized_fields {
+                let leaf_expr = format!(
+                "{{var}}.where_exists(\"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {target_table}.{target_pk} AND l.field = ? AND l.locale = ? AND l.value = ?)\".to_string(), vec![localized::{target_owner_const}.to_string(), field.to_string(), locale.clone(), trimmed.to_string()])"
+            );
+                let has_expr = build_nested_where_has_expr(&rel_path.path, &leaf_expr, "query");
+                writeln!(
+                    out,
+                    "                    (\"{rel}\", \"{col}\") => Ok(Some({has_expr})),",
+                    rel = rel_key,
+                    col = tf,
+                )
+                .unwrap();
+            }
+        }
+        writeln!(out, "                    _ => Ok(None),").unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(
+            out,
+            "            ParsedFilter::LocaleHasLike {{ relation, column }} => {{"
         )
         .unwrap();
         writeln!(
-            out,
-            "                Ok(Some(query.where_exists(clause, vec![localized::{model_snake_upper}_OWNER_TYPE.to_string(), field.to_string(), locale, trimmed.to_string()])))",
-        )
-        .unwrap();
-    }
-    writeln!(out, "            }}").unwrap();
-    writeln!(
         out,
-        "            ParsedFilter::LocaleLike {{ column }} => {{"
+        "                let Some(field) = Self::parse_locale_field_for_relation(relation.as_str(), column.as_str()) else {{ return Ok(None); }};"
     )
     .unwrap();
-    if localized_fields.is_empty() {
-        writeln!(out, "                Ok(None)").unwrap();
-    } else {
-        writeln!(
-            out,
-            "                let Some(field) = Self::parse_locale_field(column.as_str()) else {{ return Ok(None); }};"
-        )
-        .unwrap();
         writeln!(
             out,
             "                let locale = core_i18n::current_locale().to_string();"
@@ -5577,689 +5835,431 @@ fn render_model(
         .unwrap();
         writeln!(
             out,
-            "                let clause = \"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {table}.{pk} AND l.field = ? AND l.locale = ? AND l.value LIKE ?)\".to_string();",
+            "                match (relation.as_str(), column.as_str()) {{"
         )
         .unwrap();
-        writeln!(
-            out,
-            "                Ok(Some(query.where_exists(clause, vec![localized::{model_snake_upper}_OWNER_TYPE.to_string(), field.to_string(), locale, pattern])))",
-        )
-        .unwrap();
-    }
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "            ParsedFilter::LikeAny {{ columns }} => {{").unwrap();
-    writeln!(out, "                let mut applied = false;").unwrap();
-    writeln!(
-        out,
-        "                let pattern = format!(\"%{{}}%\", trimmed);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                let next = query.where_group(|group| {{"
-    )
-    .unwrap();
-    writeln!(out, "                    let mut q = group;").unwrap();
-    writeln!(out, "                    for column in columns {{").unwrap();
-    writeln!(
-        out,
-        "                        if let Some(col) = Self::parse_like_col(column.as_str()) {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                            if applied {{ q = q.or_where_col(col, Op::Like, pattern.clone()); }} else {{ q = q.where_col(col, Op::Like, pattern.clone()); applied = true; }}"
-    )
-    .unwrap();
-    writeln!(out, "                        }}").unwrap();
-    writeln!(out, "                    }}").unwrap();
-    writeln!(out, "                    q").unwrap();
-    writeln!(out, "                }});").unwrap();
-    writeln!(
-        out,
-        "                if applied {{ Ok(Some(next)) }} else {{ Ok(None) }}"
-    )
-    .unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "            ParsedFilter::Any {{ columns }} => {{").unwrap();
-    writeln!(out, "                let mut applied = false;").unwrap();
-    writeln!(
-        out,
-        "                let next = query.where_group(|group| {{"
-    )
-    .unwrap();
-    writeln!(out, "                    let mut q = group;").unwrap();
-    writeln!(out, "                    for column in columns {{").unwrap();
-    writeln!(
-        out,
-        "                        if let Some(col) = Self::parse_col(column.as_str()) {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                            if let Some(bind) = Self::parse_bind_for_col(column.as_str(), trimmed) {{ if applied {{ q = q.or_where_col(col, Op::Eq, bind.clone()); }} else {{ q = q.where_col(col, Op::Eq, bind.clone()); applied = true; }} }}"
-    )
-    .unwrap();
-    writeln!(out, "                        }}").unwrap();
-    writeln!(out, "                    }}").unwrap();
-    writeln!(out, "                    q").unwrap();
-    writeln!(out, "                }});").unwrap();
-    writeln!(
-        out,
-        "                if applied {{ Ok(Some(next)) }} else {{ Ok(None) }}"
-    )
-    .unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(
-        out,
-        "            ParsedFilter::Has {{ relation, column }} => {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                match (relation.as_str(), column.as_str()) {{"
-    )
-    .unwrap();
-    for rel_path in &relation_paths {
-        let rel_key = rel_path.path.join("__");
-        let target_title = to_title_case(&rel_path.target_model);
-        let target_col_ident = format!("{}Col", target_title);
-        let target_cfg = schema
-            .models
-            .get(&rel_path.target_model)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Relation path '{}' target model not found",
-                    rel_path.target_model
-                )
-            });
-        let target_pk = target_cfg.pk.clone().unwrap_or_else(|| "id".to_string());
-        let target_fields = parse_fields(target_cfg, &target_pk);
-        for tf in &target_fields {
-            let leaf_expr = format!(
-                "{{var}}.where_col({target_col_ident}::{target_variant}, Op::Eq, bind)",
-                target_variant = to_title_case(&tf.name)
+        for rel_path in &relation_paths {
+            let rel_key = rel_path.path.join("__");
+            let target_cfg = schema
+                .models
+                .get(&rel_path.target_model)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Relation path '{}' target model not found",
+                        rel_path.target_model
+                    )
+                });
+            let target_table = target_cfg
+                .table
+                .as_ref()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| to_snake(&rel_path.target_model));
+            let target_pk = target_cfg
+                .pk
+                .as_ref()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "id".to_string());
+            let target_localized_fields: Vec<String> = target_cfg
+                .localized
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| to_snake(&s))
+                .collect();
+            let target_owner_const = format!(
+                "{}_OWNER_TYPE",
+                to_snake(&rel_path.target_model).to_uppercase()
             );
-            let has_expr = build_nested_where_has_expr(&rel_path.path, &leaf_expr, "query");
-            writeln!(
-                out,
-                "                    (\"{rel_name}\", \"{col}\") => {{ let Some(bind) = Self::parse_bind_for_relation(\"{rel_name}\", \"{col}\", trimmed) else {{ return Ok(None); }}; Ok(Some({has_expr})) }},",
-                rel_name = rel_key,
-                col = tf.name,
-            )
-            .unwrap();
-        }
-    }
-    writeln!(out, "                    _ => Ok(None),").unwrap();
-    writeln!(out, "                }}").unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(
-        out,
-        "            ParsedFilter::HasLike {{ relation, column }} => {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                let pattern = format!(\"%{{}}%\", trimmed);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                match (relation.as_str(), column.as_str()) {{"
-    )
-    .unwrap();
-    for rel_path in &relation_paths {
-        let rel_key = rel_path.path.join("__");
-        let target_title = to_title_case(&rel_path.target_model);
-        let target_col_ident = format!("{}Col", target_title);
-        let target_cfg = schema
-            .models
-            .get(&rel_path.target_model)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Relation path '{}' target model not found",
-                    rel_path.target_model
-                )
-            });
-        let target_pk = target_cfg.pk.clone().unwrap_or_else(|| "id".to_string());
-        let target_fields = parse_fields(target_cfg, &target_pk);
-        for tf in &target_fields {
-            if tf.ty.contains("String") {
+            for tf in &target_localized_fields {
                 let leaf_expr = format!(
-                    "{{var}}.where_col({target_col_ident}::{target_variant}, Op::Like, pattern.clone())",
-                    target_variant = to_title_case(&tf.name)
-                );
-                let has_like_expr =
-                    build_nested_where_has_expr(&rel_path.path, &leaf_expr, "query");
+                "{{var}}.where_exists(\"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {target_table}.{target_pk} AND l.field = ? AND l.locale = ? AND l.value LIKE ?)\".to_string(), vec![localized::{target_owner_const}.to_string(), field.to_string(), locale.clone(), pattern.clone()])"
+            );
+                let has_expr = build_nested_where_has_expr(&rel_path.path, &leaf_expr, "query");
                 writeln!(
                     out,
-                    "                    (\"{rel_name}\", \"{col}\") => Ok(Some({has_like_expr})),",
-                    rel_name = rel_key,
-                    col = tf.name,
+                    "                    (\"{rel}\", \"{col}\") => Ok(Some({has_expr})),",
+                    rel = rel_key,
+                    col = tf,
                 )
                 .unwrap();
             }
         }
-    }
-    writeln!(out, "                    _ => Ok(None),").unwrap();
-    writeln!(out, "                }}").unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(
-        out,
-        "            ParsedFilter::LocaleHas {{ relation, column }} => {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                let Some(field) = Self::parse_locale_field_for_relation(relation.as_str(), column.as_str()) else {{ return Ok(None); }};"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                let locale = core_i18n::current_locale().to_string();"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                match (relation.as_str(), column.as_str()) {{"
-    )
-    .unwrap();
-    for rel_path in &relation_paths {
-        let rel_key = rel_path.path.join("__");
-        let target_cfg = schema
-            .models
-            .get(&rel_path.target_model)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Relation path '{}' target model not found",
-                    rel_path.target_model
-                )
-            });
-        let target_table = target_cfg
-            .table
-            .as_ref()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| to_snake(&rel_path.target_model));
-        let target_pk = target_cfg
-            .pk
-            .as_ref()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "id".to_string());
-        let target_localized_fields: Vec<String> = target_cfg
-            .localized
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| to_snake(&s))
-            .collect();
-        let target_owner_const = format!(
-            "{}_OWNER_TYPE",
-            to_snake(&rel_path.target_model).to_uppercase()
-        );
-        for tf in &target_localized_fields {
-            let leaf_expr = format!(
-                "{{var}}.where_exists(\"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {target_table}.{target_pk} AND l.field = ? AND l.locale = ? AND l.value = ?)\".to_string(), vec![localized::{target_owner_const}.to_string(), field.to_string(), locale.clone(), trimmed.to_string()])"
-            );
-            let has_expr = build_nested_where_has_expr(&rel_path.path, &leaf_expr, "query");
-            writeln!(
-                out,
-                "                    (\"{rel}\", \"{col}\") => Ok(Some({has_expr})),",
-                rel = rel_key,
-                col = tf,
-            )
-            .unwrap();
-        }
-    }
-    writeln!(out, "                    _ => Ok(None),").unwrap();
-    writeln!(out, "                }}").unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(
-        out,
-        "            ParsedFilter::LocaleHasLike {{ relation, column }} => {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                let Some(field) = Self::parse_locale_field_for_relation(relation.as_str(), column.as_str()) else {{ return Ok(None); }};"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                let locale = core_i18n::current_locale().to_string();"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                let pattern = format!(\"%{{}}%\", trimmed);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                match (relation.as_str(), column.as_str()) {{"
-    )
-    .unwrap();
-    for rel_path in &relation_paths {
-        let rel_key = rel_path.path.join("__");
-        let target_cfg = schema
-            .models
-            .get(&rel_path.target_model)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Relation path '{}' target model not found",
-                    rel_path.target_model
-                )
-            });
-        let target_table = target_cfg
-            .table
-            .as_ref()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| to_snake(&rel_path.target_model));
-        let target_pk = target_cfg
-            .pk
-            .as_ref()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "id".to_string());
-        let target_localized_fields: Vec<String> = target_cfg
-            .localized
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| to_snake(&s))
-            .collect();
-        let target_owner_const = format!(
-            "{}_OWNER_TYPE",
-            to_snake(&rel_path.target_model).to_uppercase()
-        );
-        for tf in &target_localized_fields {
-            let leaf_expr = format!(
-                "{{var}}.where_exists(\"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {target_table}.{target_pk} AND l.field = ? AND l.locale = ? AND l.value LIKE ?)\".to_string(), vec![localized::{target_owner_const}.to_string(), field.to_string(), locale.clone(), pattern.clone()])"
-            );
-            let has_expr = build_nested_where_has_expr(&rel_path.path, &leaf_expr, "query");
-            writeln!(
-                out,
-                "                    (\"{rel}\", \"{col}\") => Ok(Some({has_expr})),",
-                rel = rel_key,
-                col = tf,
-            )
-            .unwrap();
-        }
-    }
-    writeln!(out, "                    _ => Ok(None),").unwrap();
-    writeln!(out, "                }}").unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
+        writeln!(out, "                    _ => Ok(None),").unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "    }}").unwrap();
 
-    writeln!(
+        writeln!(
         out,
         "    fn apply_sort<'db>(&self, query: {query_ident}<'db>, column: &str, dir: SortDirection) -> anyhow::Result<{query_ident}<'db>> where Self: 'db {{"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "        let dir = match dir {{ SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc }};"
     )
     .unwrap();
-    writeln!(out, "        let next = match column {{").unwrap();
-    for f in &db_fields {
-        writeln!(
-            out,
-            "            \"{name}\" => query.order_by({col_ident}::{variant}, dir),",
-            name = f.name,
-            variant = to_title_case(&f.name)
-        )
-        .unwrap();
-    }
-    writeln!(out, "            _ => query,").unwrap();
-    writeln!(out, "        }};").unwrap();
-    writeln!(out, "        Ok(next)").unwrap();
-    writeln!(out, "    }}").unwrap();
+        writeln!(out, "        let next = match column {{").unwrap();
+        for f in &db_fields {
+            writeln!(
+                out,
+                "            \"{name}\" => query.order_by({col_ident}::{variant}, dir),",
+                name = f.name,
+                variant = to_title_case(&f.name)
+            )
+            .unwrap();
+        }
+        writeln!(out, "            _ => query,").unwrap();
+        writeln!(out, "        }};").unwrap();
+        writeln!(out, "        Ok(next)").unwrap();
+        writeln!(out, "    }}").unwrap();
 
-    writeln!(
+        writeln!(
         out,
         "    fn apply_cursor<'db>(&self, query: {query_ident}<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<{query_ident}<'db>>> where Self: 'db {{"
     )
     .unwrap();
-    writeln!(
-        out,
-        "        let Some(col) = Self::parse_col(column) else {{ return Ok(None); }};"
-    )
-    .unwrap();
-    writeln!(
+        writeln!(
+            out,
+            "        let Some(col) = Self::parse_col(column) else {{ return Ok(None); }};"
+        )
+        .unwrap();
+        writeln!(
         out,
         "        let Some(bind) = Self::parse_bind_for_col(column, cursor) else {{ return Ok(None); }};"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "        let op = match dir {{ SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt }};"
     )
     .unwrap();
-    writeln!(out, "        Ok(Some(query.where_col(col, op, bind)))").unwrap();
-    writeln!(out, "    }}").unwrap();
+        writeln!(out, "        Ok(Some(query.where_col(col, op, bind)))").unwrap();
+        writeln!(out, "    }}").unwrap();
 
-    writeln!(
-        out,
-        "    fn cursor_from_row(&self, row: &{view_ident}, column: &str) -> Option<String> {{"
-    )
-    .unwrap();
-    writeln!(out, "        match column {{").unwrap();
-    for f in &db_fields {
-        let Some(expr) = cursor_value_expr(&f.ty, &f.name) else {
-            continue;
-        };
         writeln!(
             out,
-            "            \"{name}\" => {expr},",
-            name = f.name,
-            expr = expr
+            "    fn cursor_from_row(&self, row: &{view_ident}, column: &str) -> Option<String> {{"
         )
         .unwrap();
-    }
-    writeln!(out, "            _ => None,").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
+        writeln!(out, "        match column {{").unwrap();
+        for f in &db_fields {
+            let Some(expr) = cursor_value_expr(&f.ty, &f.name) else {
+                continue;
+            };
+            writeln!(
+                out,
+                "            \"{name}\" => {expr},",
+                name = f.name,
+                expr = expr
+            )
+            .unwrap();
+        }
+        writeln!(out, "            _ => None,").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "    }}").unwrap();
 
-    writeln!(
+        writeln!(
         out,
         "    fn count<'db>(&self, query: {query_ident}<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {{"
     )
     .unwrap();
-    writeln!(
-        out,
-        "        Box::pin(async move {{ query.count().await }})"
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
+        writeln!(
+            out,
+            "        Box::pin(async move {{ query.count().await }})"
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
 
-    writeln!(
+        writeln!(
         out,
         "    fn fetch_page<'db>(&self, query: {query_ident}<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<{view_ident}>>> where Self: 'db {{"
     )
     .unwrap();
-    writeln!(
-        out,
-        "        Box::pin(async move {{ Ok(query.paginate(page, per_page).await?.data) }})"
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out, "}}").unwrap();
+        writeln!(
+            out,
+            "        Box::pin(async move {{ Ok(query.paginate(page, per_page).await?.data) }})"
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(out, "}}").unwrap();
 
-    let data_table_config_ident = format!("{}DataTableConfig", model_title);
-    let data_table_hooks_ident = format!("{}DataTableHooks", model_title);
-    let default_data_table_hooks_ident = format!("{}DefaultDataTableHooks", model_title);
-    let data_table_ident = format!("{}DataTable", model_title);
+        let data_table_config_ident = format!("{}DataTableConfig", model_title);
+        let data_table_hooks_ident = format!("{}DataTableHooks", model_title);
+        let default_data_table_hooks_ident = format!("{}DefaultDataTableHooks", model_title);
+        let data_table_ident = format!("{}DataTable", model_title);
 
-    writeln!(out, "#[derive(Debug, Clone, Copy)]").unwrap();
-    writeln!(out, "pub struct {data_table_config_ident} {{").unwrap();
-    writeln!(out, "    pub default_sorting_column: &'static str,").unwrap();
-    writeln!(out, "    pub default_sorted: SortDirection,").unwrap();
-    writeln!(
-        out,
-        "    pub default_export_ignore_columns: &'static [&'static str],"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    pub default_timestamp_columns: &'static [&'static str],"
-    )
-    .unwrap();
-    writeln!(out, "    pub default_unsortable: &'static [&'static str],").unwrap();
-    writeln!(out, "    pub default_row_per_page: Option<i64>,").unwrap();
-    writeln!(out, "}}").unwrap();
+        writeln!(out, "#[derive(Debug, Clone, Copy)]").unwrap();
+        writeln!(out, "pub struct {data_table_config_ident} {{").unwrap();
+        writeln!(out, "    pub default_sorting_column: &'static str,").unwrap();
+        writeln!(out, "    pub default_sorted: SortDirection,").unwrap();
+        writeln!(
+            out,
+            "    pub default_export_ignore_columns: &'static [&'static str],"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    pub default_timestamp_columns: &'static [&'static str],"
+        )
+        .unwrap();
+        writeln!(out, "    pub default_unsortable: &'static [&'static str],").unwrap();
+        writeln!(out, "    pub default_row_per_page: Option<i64>,").unwrap();
+        writeln!(out, "}}").unwrap();
 
-    writeln!(out, "impl Default for {data_table_config_ident} {{").unwrap();
-    writeln!(out, "    fn default() -> Self {{").unwrap();
-    writeln!(out, "        Self {{").unwrap();
-    writeln!(out, "            default_sorting_column: \"{pk}\",").unwrap();
-    writeln!(out, "            default_sorted: SortDirection::Desc,").unwrap();
-    writeln!(
-        out,
-        "            default_export_ignore_columns: &[\"actions\", \"action\"],"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            default_timestamp_columns: &[{timestamp_cols_lit}],"
-    )
-    .unwrap();
-    writeln!(out, "            default_unsortable: &[],").unwrap();
-    writeln!(out, "            default_row_per_page: None,").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out, "}}").unwrap();
+        writeln!(out, "impl Default for {data_table_config_ident} {{").unwrap();
+        writeln!(out, "    fn default() -> Self {{").unwrap();
+        writeln!(out, "        Self {{").unwrap();
+        writeln!(out, "            default_sorting_column: \"{pk}\",").unwrap();
+        writeln!(out, "            default_sorted: SortDirection::Desc,").unwrap();
+        writeln!(
+            out,
+            "            default_export_ignore_columns: &[\"actions\", \"action\"],"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            default_timestamp_columns: &[{timestamp_cols_lit}],"
+        )
+        .unwrap();
+        writeln!(out, "            default_unsortable: &[],").unwrap();
+        writeln!(out, "            default_row_per_page: None,").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(out, "}}").unwrap();
 
-    writeln!(
-        out,
-        "pub trait {data_table_hooks_ident}: Send + Sync + 'static {{"
-    )
-    .unwrap();
-    writeln!(
+        writeln!(
+            out,
+            "pub trait {data_table_hooks_ident}: Send + Sync + 'static {{"
+        )
+        .unwrap();
+        writeln!(
         out,
         "    fn scope<'db>(&'db self, query: {query_ident}<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> {query_ident}<'db> {{ query }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> {{ Ok(true) }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn filter_query<'db>(&'db self, _query: {query_ident}<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<{query_ident}<'db>>> {{ Ok(None) }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn filters<'db>(&'db self, query: {query_ident}<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<{query_ident}<'db>> {{ Ok(query) }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn map_row(&self, _row: &mut {view_ident}, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> {{ Ok(()) }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn default_row_to_record(&self, row: {view_ident}) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {{"
     )
     .unwrap();
-    writeln!(out, "        let value = serde_json::to_value(row)?;").unwrap();
-    writeln!(
+        writeln!(out, "        let value = serde_json::to_value(row)?;").unwrap();
+        writeln!(
         out,
         "        let mut record = match value {{ serde_json::Value::Object(map) => map, _ => anyhow::bail!(\"Generated row must serialize to a JSON object\"), }};"
     )
     .unwrap();
-    if use_snowflake_id {
-        writeln!(
-            out,
-            "        if let Some(id_value) = record.get(\"{pk}\").cloned() {{"
-        )
-        .unwrap();
-        writeln!(out, "            let id_text = match id_value {{").unwrap();
-        writeln!(
-            out,
-            "                serde_json::Value::Number(number) => number.to_string(),"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                serde_json::Value::String(text) => text,"
-        )
-        .unwrap();
-        writeln!(out, "                other => other.to_string(),").unwrap();
-        writeln!(out, "            }};").unwrap();
-        writeln!(
+        if use_snowflake_id {
+            writeln!(
+                out,
+                "        if let Some(id_value) = record.get(\"{pk}\").cloned() {{"
+            )
+            .unwrap();
+            writeln!(out, "            let id_text = match id_value {{").unwrap();
+            writeln!(
+                out,
+                "                serde_json::Value::Number(number) => number.to_string(),"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                serde_json::Value::String(text) => text,"
+            )
+            .unwrap();
+            writeln!(out, "                other => other.to_string(),").unwrap();
+            writeln!(out, "            }};").unwrap();
+            writeln!(
             out,
             "            record.insert(\"{pk}\".to_string(), serde_json::Value::String(id_text));"
         )
-        .unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(out, "        Ok(record)").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
+            .unwrap();
+            writeln!(out, "        }}").unwrap();
+        }
+        writeln!(out, "        Ok(record)").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
         out,
         "    fn row_to_record(&self, row: {view_ident}, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {{"
     )
     .unwrap();
-    writeln!(out, "        self.default_row_to_record(row)").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
+        writeln!(out, "        self.default_row_to_record(row)").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
         out,
         "    fn summary<'db>(&'db self, _query: {query_ident}<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> {{ Box::pin(async {{ Ok(None) }}) }}"
     )
     .unwrap();
-    writeln!(out, "}}").unwrap();
+        writeln!(out, "}}").unwrap();
 
-    writeln!(out, "#[derive(Default)]").unwrap();
-    writeln!(out, "pub struct {default_data_table_hooks_ident};").unwrap();
-    writeln!(
-        out,
-        "impl {data_table_hooks_ident} for {default_data_table_hooks_ident} {{}}"
-    )
-    .unwrap();
+        writeln!(out, "#[derive(Default)]").unwrap();
+        writeln!(out, "pub struct {default_data_table_hooks_ident};").unwrap();
+        writeln!(
+            out,
+            "impl {data_table_hooks_ident} for {default_data_table_hooks_ident} {{}}"
+        )
+        .unwrap();
 
-    writeln!(
+        writeln!(
         out,
         "pub struct {data_table_ident}<H = {default_data_table_hooks_ident}> where H: {data_table_hooks_ident} {{"
     )
     .unwrap();
-    writeln!(out, "    pub db: sqlx::PgPool,").unwrap();
-    writeln!(out, "    pub hooks: H,").unwrap();
-    writeln!(out, "    pub config: {data_table_config_ident},").unwrap();
-    writeln!(out, "    adapter: {table_adapter_ident},").unwrap();
-    writeln!(out, "}}").unwrap();
+        writeln!(out, "    pub db: sqlx::PgPool,").unwrap();
+        writeln!(out, "    pub hooks: H,").unwrap();
+        writeln!(out, "    pub config: {data_table_config_ident},").unwrap();
+        writeln!(out, "    adapter: {table_adapter_ident},").unwrap();
+        writeln!(out, "}}").unwrap();
 
-    writeln!(
-        out,
-        "impl {data_table_ident}<{default_data_table_hooks_ident}> {{"
-    )
-    .unwrap();
-    writeln!(out, "    pub fn new(db: sqlx::PgPool) -> Self {{").unwrap();
-    writeln!(out, "        Self {{").unwrap();
-    writeln!(out, "            db,").unwrap();
-    writeln!(out, "            hooks: {default_data_table_hooks_ident},").unwrap();
-    writeln!(
-        out,
-        "            config: {data_table_config_ident}::default(),"
-    )
-    .unwrap();
-    writeln!(out, "            adapter: {table_adapter_ident},").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out, "}}").unwrap();
+        writeln!(
+            out,
+            "impl {data_table_ident}<{default_data_table_hooks_ident}> {{"
+        )
+        .unwrap();
+        writeln!(out, "    pub fn new(db: sqlx::PgPool) -> Self {{").unwrap();
+        writeln!(out, "        Self {{").unwrap();
+        writeln!(out, "            db,").unwrap();
+        writeln!(out, "            hooks: {default_data_table_hooks_ident},").unwrap();
+        writeln!(
+            out,
+            "            config: {data_table_config_ident}::default(),"
+        )
+        .unwrap();
+        writeln!(out, "            adapter: {table_adapter_ident},").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(out, "}}").unwrap();
 
-    writeln!(
-        out,
-        "impl<H: {data_table_hooks_ident}> {data_table_ident}<H> {{"
-    )
-    .unwrap();
-    writeln!(
+        writeln!(
+            out,
+            "impl<H: {data_table_hooks_ident}> {data_table_ident}<H> {{"
+        )
+        .unwrap();
+        writeln!(
         out,
         "    pub fn with_hooks<NH: {data_table_hooks_ident}>(self, hooks: NH) -> {data_table_ident}<NH> {{"
     )
     .unwrap();
-    writeln!(out, "        {data_table_ident} {{").unwrap();
-    writeln!(out, "            db: self.db,").unwrap();
-    writeln!(out, "            hooks,").unwrap();
-    writeln!(out, "            config: self.config,").unwrap();
-    writeln!(out, "            adapter: {table_adapter_ident},").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    pub fn with_config(mut self, config: {data_table_config_ident}) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        self.config = config;").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out, "}}").unwrap();
+        writeln!(out, "        {data_table_ident} {{").unwrap();
+        writeln!(out, "            db: self.db,").unwrap();
+        writeln!(out, "            hooks,").unwrap();
+        writeln!(out, "            config: self.config,").unwrap();
+        writeln!(out, "            adapter: {table_adapter_ident},").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
+            out,
+            "    pub fn with_config(mut self, config: {data_table_config_ident}) -> Self {{"
+        )
+        .unwrap();
+        writeln!(out, "        self.config = config;").unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(out, "}}").unwrap();
 
-    writeln!(
-        out,
-        "impl<H: {data_table_hooks_ident}> AutoDataTable for {data_table_ident}<H> {{"
-    )
-    .unwrap();
-    writeln!(out, "    type Adapter = {table_adapter_ident};").unwrap();
-    writeln!(
-        out,
-        "    fn adapter(&self) -> &Self::Adapter {{ &self.adapter }}"
-    )
-    .unwrap();
-    writeln!(
+        writeln!(
+            out,
+            "impl<H: {data_table_hooks_ident}> AutoDataTable for {data_table_ident}<H> {{"
+        )
+        .unwrap();
+        writeln!(out, "    type Adapter = {table_adapter_ident};").unwrap();
+        writeln!(
+            out,
+            "    fn adapter(&self) -> &Self::Adapter {{ &self.adapter }}"
+        )
+        .unwrap();
+        writeln!(
         out,
         "    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> {query_ident}<'db> {{"
     )
     .unwrap();
-    writeln!(
-        out,
-        "        self.hooks.scope({model_ident}::new(&self.db, None).query(), input, ctx)"
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
+        writeln!(
+            out,
+            "        self.hooks.scope({model_ident}::new(&self.db, None).query(), input, ctx)"
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
         out,
         "    fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {{ self.hooks.authorize(input, ctx) }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn filter_query<'db>(&'db self, query: {query_ident}<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<{query_ident}<'db>>> {{ self.hooks.filter_query(query, filter_key, value, input, ctx) }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn filters<'db>(&'db self, query: {query_ident}<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<{query_ident}<'db>> {{ self.hooks.filters(query, input, ctx) }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn map_row(&self, row: &mut {view_ident}, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> {{ self.hooks.map_row(row, input, ctx) }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn row_to_record(&self, row: {view_ident}, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {{ self.hooks.row_to_record(row, input, ctx) }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn summary<'db>(&'db self, query: {query_ident}<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db {{ self.hooks.summary(query, input, ctx) }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn default_sorting_column(&self) -> &'static str {{ self.config.default_sorting_column }}"
     )
     .unwrap();
-    writeln!(
-        out,
-        "    fn default_sorted(&self) -> SortDirection {{ self.config.default_sorted }}"
-    )
-    .unwrap();
-    writeln!(
+        writeln!(
+            out,
+            "    fn default_sorted(&self) -> SortDirection {{ self.config.default_sorted }}"
+        )
+        .unwrap();
+        writeln!(
         out,
         "    fn default_export_ignore_columns(&self) -> &'static [&'static str] {{ self.config.default_export_ignore_columns }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn default_timestamp_columns(&self) -> &'static [&'static str] {{ self.config.default_timestamp_columns }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn default_unsortable(&self) -> &'static [&'static str] {{ self.config.default_unsortable }}"
     )
     .unwrap();
-    writeln!(
+        writeln!(
         out,
         "    fn default_row_per_page(&self, ctx: &DataTableContext) -> i64 {{ self.config.default_row_per_page.unwrap_or(ctx.default_per_page) }}"
     )
     .unwrap();
-    writeln!(out, "}}").unwrap();
+        writeln!(out, "}}").unwrap();
     }
 
     // Implement ActiveRecord for View

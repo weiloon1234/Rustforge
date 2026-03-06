@@ -12,7 +12,7 @@ pub use config::ConfigsFile;
 pub use gen_auth::generate_auth;
 pub use gen_datatables::generate_datatable_skeletons;
 pub use gen_enums::{
-    generate_enums, generate_enums_with_options, generate_enum_with_options, GenerateEnumsOptions,
+    generate_enum_with_options, generate_enums, generate_enums_with_options, GenerateEnumsOptions,
 };
 pub use gen_localized::generate_localized;
 pub use gen_models::{generate_models, generate_models_with_options, GenerateModelsOptions};

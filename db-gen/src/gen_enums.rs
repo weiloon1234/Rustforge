@@ -268,8 +268,7 @@ impl From<{name}> for core_db::common::sql::BindValue {{
         core_db::common::sql::BindValue::String(s.to_string())
     }}
 }}
-"#
-    ,
+"#,
         datatable_filter_options_impl = datatable_filter_options_impl
     )
 }
@@ -480,8 +479,7 @@ impl From<{name}> for core_db::common::sql::BindValue {{
         core_db::common::sql::BindValue::I64(v as i64)
     }}
 }}
-"#
-    ,
+"#,
         datatable_filter_options_impl = datatable_filter_options_impl
     )
 }

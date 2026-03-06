@@ -1,29 +1,38 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import "@shared/i18n";
-import { DataTableApiProvider } from "@shared/components";
-import App from "@admin/App";
-import { api } from "@admin/api";
-import { useAuthStore } from "@admin/stores/auth";
+import { initI18n } from "@shared/i18n";
 import "./app.css";
 
 const EMPTY_SCOPES: string[] = [];
 
-function Root() {
-  const scopes = useAuthStore((state) => state.account?.scopes ?? EMPTY_SCOPES);
+async function start() {
+  await initI18n();
+  const [{ default: App }, { DataTableApiProvider }, { api }, { useAuthStore }] =
+    await Promise.all([
+      import("@admin/App"),
+      import("@shared/components"),
+      import("@admin/api"),
+      import("@admin/stores/auth"),
+    ]);
 
-  return (
-    <DataTableApiProvider api={api} scopes={scopes}>
-      <BrowserRouter basename="/admin">
-        <App />
-      </BrowserRouter>
-    </DataTableApiProvider>
+  function Root() {
+    const scopes = useAuthStore((state) => state.account?.scopes ?? EMPTY_SCOPES);
+
+    return (
+      <DataTableApiProvider api={api} scopes={scopes}>
+        <BrowserRouter basename="/admin">
+          <App />
+        </BrowserRouter>
+      </DataTableApiProvider>
+    );
+  }
+
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <Root />
+    </StrictMode>,
   );
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <Root />
-  </StrictMode>,
-);
+void start();

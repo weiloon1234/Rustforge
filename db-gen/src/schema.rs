@@ -138,8 +138,7 @@ pub fn load(path_str: &str) -> Result<Schema, Box<dyn Error>> {
             models: BTreeMap::new(),
             extra_sections: BTreeMap::new(),
         };
-        let mut entries = fs::read_dir(path)?
-            .collect::<Result<Vec<_>, std::io::Error>>()?;
+        let mut entries = fs::read_dir(path)?.collect::<Result<Vec<_>, std::io::Error>>()?;
         entries.sort_by_key(|entry| entry.file_name());
         for entry in entries {
             let p = entry.path();

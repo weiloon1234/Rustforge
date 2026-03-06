@@ -55,7 +55,7 @@ base64 = "0.22"
 rand = "0.8"
 sha2 = "0.10"
 clap = { version = "4.5.54", features = ["derive", "env"] }
-ts-rs = { version = "10", features = ["serde-compat", "no-serde-warnings"] }
+ts-rs = { version = "10", features = ["serde-compat"] }
 
 [build-dependencies]
 db-gen = { path = "../db-gen" }

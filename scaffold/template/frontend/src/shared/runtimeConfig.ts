@@ -1,5 +1,6 @@
 import {
   DEFAULT_LOCALE,
+  type CountryCurrency,
   type CountryRuntime,
   type CountryStatus,
   type LocaleCode,
@@ -112,19 +113,19 @@ function asCountryRuntime(value: unknown): CountryRuntime | null {
 
   const currencies = Array.isArray(row.currencies)
     ? row.currencies
-        .map((item) => {
+        .map((item): CountryCurrency | null => {
           if (!item || typeof item !== "object" || Array.isArray(item)) return null;
           const currency = item as Record<string, unknown>;
           const code = asStringOrNull(currency.code)?.toUpperCase();
           if (!code) return null;
           return {
             code,
-            name: asStringOrNull(currency.name),
-            symbol: asStringOrNull(currency.symbol),
-            minor_units: asNumberOrNull(currency.minor_units),
+            name: asStringOrNull(currency.name) ?? undefined,
+            symbol: asStringOrNull(currency.symbol) ?? undefined,
+            minor_units: asNumberOrNull(currency.minor_units) ?? undefined,
           };
         })
-        .filter((item): item is CountryRuntime["currencies"][number] => item !== null)
+        .filter((item): item is CountryCurrency => item !== null)
     : [];
 
   return {

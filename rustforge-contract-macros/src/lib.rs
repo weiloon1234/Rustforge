@@ -39,7 +39,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
 
     let struct_ident = item.ident.clone();
     let vis = item.vis.clone();
-    let shadow_ident = format_ident!("__RustforgeContractSchema_{}", struct_ident);
+    let shadow_ident = format_ident!("RustforgeContractSchemaShadowFor{}", struct_ident);
     let (container_rf_cfg, item_attrs_without_rf) = parse_rf_container_attrs(&item.attrs)?;
 
     let auto_inject_set = ["Debug", "Clone", "Deserialize", "Validate", "JsonSchema"];
@@ -563,7 +563,6 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
             #(#original_fields_tokens,)*
         }
 
-        #[allow(non_camel_case_types)]
         #[derive(::schemars::JsonSchema)]
         #(#container_attrs_for_shadow)*
         struct #shadow_ident {

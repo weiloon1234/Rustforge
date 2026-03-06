@@ -32,6 +32,16 @@ fn assert_ok(output: &std::process::Output, context: &str) {
     );
 }
 
+fn run_cargo_check(output: &Path, package: &str) -> std::process::Output {
+    Command::new("cargo")
+        .arg("check")
+        .arg("-p")
+        .arg(package)
+        .current_dir(output)
+        .output()
+        .expect("failed to run cargo check")
+}
+
 #[test]
 fn scaffold_smoke_generation_and_force_behaviour() {
     let out_dir = unique_output_dir();
@@ -55,6 +65,11 @@ fn scaffold_smoke_generation_and_force_behaviour() {
             "expected generated file missing: {rel}"
         );
     }
+
+    assert!(
+        !out_dir.join("Cargo.lock").exists(),
+        "scaffold output should not ship Cargo.lock"
+    );
 
     let env_example =
         fs::read_to_string(out_dir.join(".env.example")).expect("failed to read .env.example");
@@ -160,6 +175,18 @@ fn scaffold_smoke_generation_and_force_behaviour() {
             "deprecated AGENTS artifact should not exist in fresh scaffold output: {rel}"
         );
     }
+
+    let check_generated = run_cargo_check(&out_dir, "generated");
+    assert_ok(
+        &check_generated,
+        "fresh scaffold output should compile generated package",
+    );
+
+    let check_app = run_cargo_check(&out_dir, "app");
+    assert_ok(
+        &check_app,
+        "fresh scaffold output should compile app package",
+    );
 
     let no_force = run_scaffold(&out_dir, false);
     assert!(

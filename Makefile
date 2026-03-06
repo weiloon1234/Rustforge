@@ -10,6 +10,7 @@ help:
 	@echo "  make clippy            cargo clippy --workspace --all-targets --all-features -- -D warnings"
 	@echo "  make docs-build        build framework docs frontend"
 	@echo "  make scaffold-smoke    generate starter scaffold into /tmp/rustforge-starter"
+	@echo "  make scaffold-template-clean remove generated artifacts under scaffold/template"
 	@echo "  make clean             cargo clean"
 
 .PHONY: check
@@ -35,6 +36,15 @@ docs-build:
 .PHONY: scaffold-smoke
 scaffold-smoke:
 	cargo run --manifest-path scaffold/Cargo.toml -- --output /tmp/rustforge-starter --force
+
+.PHONY: scaffold-template-clean
+scaffold-template-clean:
+	@if [ -d scaffold/template ]; then \
+		find scaffold/template -type d \( -name target -o -name node_modules -o -name .next -o -name dist \) -prune -exec rm -rf {} + ; \
+	fi
+	@if [ -d scaffold/template/public ]; then \
+		find scaffold/template/public -mindepth 1 ! -name '.gitkeep' -exec rm -rf {} + ; \
+	fi
 
 .PHONY: clean
 clean:

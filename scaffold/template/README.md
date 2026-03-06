@@ -71,7 +71,7 @@ scripts/                Server install & update scripts
 | `make dev-admin` | Vite admin portal only (port 5174) |
 | `make build-frontend` | Production build all portals into `public/` |
 | `make install-frontend` | `npm install` for frontend |
-| `make check` | `cargo check --workspace` |
+| `make check` | `cargo check --workspace` + frontend `typecheck` + frontend production build (warnings fail) |
 | `make gen` | Rebuild generated code |
 | `make run-api` | Run API server (release) |
 | `make run-ws` | Run WebSocket server |
@@ -152,6 +152,14 @@ All user-facing strings go through `core_i18n::t()`. Translation files live in `
 ### Dependency Pinning
 
 This starter uses git dependencies to Rustforge `main` branch. For production stability, pin to a specific tag in `Cargo.toml`.
+
+Starter scaffold intentionally does **not** ship a `Cargo.lock` file, so new projects resolve against current framework git references instead of stale pinned commits.
+
+When maintaining this template inside the Rustforge framework repository, generated assets under `scaffold/template/` are cleaned explicitly via framework-root command:
+
+```bash
+make scaffold-template-clean
+```
 
 ### Framework Documentation
 

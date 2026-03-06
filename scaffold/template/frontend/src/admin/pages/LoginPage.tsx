@@ -62,7 +62,10 @@ export default function LoginPage() {
           {form}
 
           <Button
-            onClick={submit}
+            type="button"
+            onClick={() => {
+              void submit();
+            }}
             busy={busy}
             variant="primary"
             className="mt-2 w-full"

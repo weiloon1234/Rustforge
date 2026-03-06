@@ -1,9 +1,10 @@
 use anyhow::Context;
 use axum::{routing::get, Router};
 use core_config::{
-    AppSettings, AuthSettings, CdnSettings, DataTableUnknownFilterMode, DbSettings, GuardConfig,
-    HttpLogSettings, MailSettings, MiddlewareSettings, RealtimeChannelConfig, RealtimeDeliveryMode,
-    RealtimeSettings, RedisSettings, S3Settings, ServerSettings, Settings, WorkerSettings,
+    AppSettings, AuthSettings, CdnSettings, CorsSettings, DataTableUnknownFilterMode, DbSettings,
+    GuardConfig, HttpLogSettings, MailSettings, MiddlewareSettings, RealtimeChannelConfig,
+    RealtimeDeliveryMode, RealtimeSettings, RedisSettings, S3Settings, ServerSettings, Settings,
+    WorkerSettings,
 };
 use core_realtime::{
     ws_handler, AllowAllSubscribeAuthorizer, AuthResolver, ChannelPolicy, ChannelPolicyRegistry,
@@ -431,8 +432,8 @@ fn test_settings(
         },
     );
 
-    Arc::new(Settings {
-        app: AppSettings {
+    fn app_settings() -> AppSettings {
+        AppSettings {
             name: "realtime-test".to_string(),
             env: "test".to_string(),
             key: "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_string(),
@@ -443,7 +444,16 @@ fn test_settings(
             openapi_json_path: "/openapi.json".to_string(),
             default_per_page: 30,
             datatable_unknown_filter_mode: DataTableUnknownFilterMode::Ignore,
-        },
+            datatable_export_link_ttl_secs: 604_800,
+        }
+    }
+
+    fn cors_settings() -> CorsSettings {
+        CorsSettings::default()
+    }
+
+    Arc::new(Settings {
+        app: app_settings(),
         server: ServerSettings {
             host: "127.0.0.1".to_string(),
             port: 0,
@@ -526,6 +536,7 @@ fn test_settings(
             client_enabled: false,
             retention_days: 7,
         },
+        cors: cors_settings(),
     })
 }
 

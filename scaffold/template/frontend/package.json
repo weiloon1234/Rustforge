@@ -5,6 +5,7 @@
   "scripts": {
     "dev:user": "vite --config vite.config.user.ts",
     "dev:admin": "vite --config vite.config.admin.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:user": "vite build --config vite.config.user.ts",
     "build:admin": "vite build --config vite.config.admin.ts",
     "build": "rm -rf ../public && npm run build:admin && npm run build:user",

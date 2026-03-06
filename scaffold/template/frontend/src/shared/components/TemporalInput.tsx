@@ -2,6 +2,11 @@ import {
   forwardRef,
   useId,
   useMemo,
+  type FocusEvent,
+  type FocusEventHandler,
+  type KeyboardEvent,
+  type KeyboardEventHandler,
+  type SyntheticEvent,
   type ChangeEvent,
   type InputHTMLAttributes,
 } from "react";
@@ -135,6 +140,24 @@ function TemporalInput({
     onChange(event);
   };
 
+  const handlePickerKeyDown: ((event: KeyboardEvent<HTMLElement>) => void) | undefined = onKeyDown
+    ? (event) => {
+        (onKeyDown as KeyboardEventHandler<HTMLInputElement>)(
+          event as unknown as KeyboardEvent<HTMLInputElement>,
+        );
+      }
+    : undefined;
+  const handlePickerBlur: FocusEventHandler<HTMLElement> | undefined = onBlur
+    ? (event) => {
+        onBlur(event as unknown as FocusEvent<HTMLInputElement>);
+      }
+    : undefined;
+  const handlePickerFocus: FocusEventHandler<HTMLElement> | undefined = onFocus
+    ? (event) => {
+        onFocus(event as unknown as FocusEvent<HTMLInputElement>);
+      }
+    : undefined;
+
   return (
     <div className={`rf-field ${containerClassName ?? ""}`}>
       {label && (
@@ -145,10 +168,11 @@ function TemporalInput({
       <DatePicker
         id={id}
         selected={selected}
-        onChange={(date) =>
+        onChange={(date: Date | null | [Date | null, Date | null]) =>
           emitChange(formatTemporalValue(pickerType, normalizePickerDate(date)))
         }
-        onChangeRaw={(event) => {
+        onChangeRaw={(event?: SyntheticEvent<HTMLElement>) => {
+          if (!event) return;
           const target = event.target;
           if (!(target instanceof HTMLInputElement)) return;
           emitChange(target.value);
@@ -167,9 +191,9 @@ function TemporalInput({
         placeholderText={placeholder}
         disabled={disabled}
         name={name}
-        onBlur={onBlur}
-        onFocus={onFocus}
-        onKeyDown={onKeyDown}
+        onBlur={handlePickerBlur}
+        onFocus={handlePickerFocus}
+        onKeyDown={handlePickerKeyDown}
         required={required}
         autoComplete="off"
         popperPlacement="bottom-start"

@@ -10,9 +10,7 @@ use core_db::{
         auth::token::{generate_token, hash_token},
         sql::{DbConn, Op},
     },
-    generated::models::{
-        PersonalAccessToken, PersonalAccessTokenKind, PersonalAccessTokenView,
-    },
+    generated::models::{PersonalAccessToken, PersonalAccessTokenKind, PersonalAccessTokenView},
 };
 use std::marker::PhantomData;
 use time::{Duration, OffsetDateTime};

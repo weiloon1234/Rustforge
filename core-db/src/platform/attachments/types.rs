@@ -98,7 +98,7 @@ impl AttachmentMap {
 ///
 /// It matches metadata-first upload flows and can also carry an optional `id`
 /// for client-side references when needed.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 pub struct AttachmentUploadDto {
     #[serde(default)]
     #[ts(optional, type = "string")]
@@ -107,8 +107,6 @@ pub struct AttachmentUploadDto {
     #[ts(optional)]
     pub name: Option<String>,
     pub path: String,
-    #[serde(alias = "type")]
-    #[ts(rename = "content_type")]
     pub content_type: String,
     pub size: i64,
     #[serde(default)]
@@ -117,6 +115,46 @@ pub struct AttachmentUploadDto {
     #[serde(default)]
     #[ts(optional)]
     pub height: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AttachmentUploadDtoDe {
+    #[serde(default)]
+    id: Option<Uuid>,
+    #[serde(default)]
+    name: Option<String>,
+    path: String,
+    #[serde(default)]
+    content_type: Option<String>,
+    #[serde(default, rename = "type")]
+    legacy_type: Option<String>,
+    size: i64,
+    #[serde(default)]
+    width: Option<i32>,
+    #[serde(default)]
+    height: Option<i32>,
+}
+
+impl<'de> Deserialize<'de> for AttachmentUploadDto {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = AttachmentUploadDtoDe::deserialize(deserializer)?;
+        let content_type = raw
+            .content_type
+            .or(raw.legacy_type)
+            .ok_or_else(|| serde::de::Error::missing_field("content_type"))?;
+        Ok(Self {
+            id: raw.id,
+            name: raw.name,
+            path: raw.path,
+            content_type,
+            size: raw.size,
+            width: raw.width,
+            height: raw.height,
+        })
+    }
 }
 
 impl AttachmentUploadDto {
