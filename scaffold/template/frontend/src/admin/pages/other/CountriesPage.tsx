@@ -5,7 +5,6 @@ import type { CountryDatatableRow } from "@admin/types";
 import { PERMISSION } from "@admin/types";
 import { api } from "@admin/api";
 import { useAuthStore } from "@admin/stores/auth";
-import { hasPermission } from "@shared/permissions";
 import {
   Button,
   DataTable,
@@ -19,7 +18,6 @@ import {
 
 const COUNTRY_STATUS_ENABLED = "enabled";
 const COUNTRY_STATUS_DISABLED = "disabled";
-const EMPTY_SCOPES: string[] = [];
 
 function statusBadgeClass(status: string): string {
   if (status === COUNTRY_STATUS_ENABLED) {
@@ -110,8 +108,11 @@ function EditCountryStatusForm({
 
 export default function CountriesPage() {
   const { t } = useTranslation();
-  const scopes = useAuthStore((state) => state.account?.scopes ?? EMPTY_SCOPES);
-  const canManage = hasPermission(scopes, PERMISSION.COUNTRY_MANAGE);
+  const account = useAuthStore((state) => state.account);
+  const canManage = useAuthStore.hasPermission(
+    PERMISSION.COUNTRY_MANAGE,
+    account,
+  );
 
   const openEditModal = (row: CountryDatatableRow, refresh: () => void) => {
     const formId = `country-status-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;

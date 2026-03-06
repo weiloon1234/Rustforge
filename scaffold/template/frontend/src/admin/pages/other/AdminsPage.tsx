@@ -27,7 +27,6 @@ import {
 import type { DataTablePostCallEvent } from "@shared/components";
 import { useAuthStore } from "@admin/stores/auth";
 import { api } from "@admin/api";
-import { hasPermission } from "@shared/permissions";
 
 const TYPE_COLORS: Record<AdminType, string> = {
   developer: "bg-purple-100 text-purple-700",
@@ -42,7 +41,6 @@ const RESTRICTED_ADMIN_ASSIGNMENT_PERMISSIONS: readonly Permission[] = [
   PERMISSION.ADMIN_READ,
   PERMISSION.ADMIN_MANAGE,
 ];
-const EMPTY_SCOPES: readonly string[] = [];
 
 const ENABLE_SUMMARY_CARDS = true;
 
@@ -369,7 +367,7 @@ function isPrivilegedAdminType(adminType: AdminType | null | undefined): boolean
 function canManageAdminAccounts(account: AdminMeOutput | null): boolean {
   if (!account) return false;
   if (isPrivilegedAdminType(account.admin_type)) return true;
-  return hasPermission(account.scopes ?? EMPTY_SCOPES, PERMISSION.ADMIN_MANAGE);
+  return useAuthStore.hasPermission(PERMISSION.ADMIN_MANAGE, account);
 }
 
 function resolveAssignableAdminPermissions(
@@ -380,10 +378,9 @@ function resolveAssignableAdminPermissions(
     return ADMIN_PERMISSION_META;
   }
 
-  const scopes = account.scopes ?? EMPTY_SCOPES;
   return ADMIN_PERMISSION_META.filter(
     (meta) =>
-      hasPermission(scopes, meta.key) &&
+      useAuthStore.hasPermission(meta.key, account) &&
       !RESTRICTED_ADMIN_ASSIGNMENT_PERMISSIONS.includes(meta.key),
   );
 }

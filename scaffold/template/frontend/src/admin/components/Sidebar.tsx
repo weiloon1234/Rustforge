@@ -3,16 +3,17 @@ import { ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { navigation, type NavItem } from "@admin/nav";
-import type { AdminType, Permission } from "@admin/types";
-import { hasAnyPermission } from "@shared/permissions";
+import type { AdminMeOutput, AdminType, Permission } from "@admin/types";
 import { useAuthStore } from "@admin/stores/auth";
 import { useNotificationStore } from "@admin/stores/notifications";
 import { Button } from "@shared/components";
 
-const EMPTY_SCOPES: string[] = [];
-
-function hasAccess(scopes: readonly string[], required?: readonly Permission[]): boolean {
-  return hasAnyPermission(scopes, required ?? []);
+function hasAccess(
+  account: AdminMeOutput | null,
+  required?: readonly Permission[],
+): boolean {
+  if (!required || required.length === 0) return true;
+  return useAuthStore.hasAnyPermission(required, account);
 }
 
 function hasAdminTypeAccess(
@@ -77,12 +78,12 @@ function NavLink({
 function ParentNav({
   item,
   collapsed,
-  scopes,
+  account,
   adminType,
 }: {
   item: NavItem;
   collapsed: boolean;
-  scopes: string[];
+  account: AdminMeOutput | null;
   adminType: AdminType | null;
 }) {
   const { t } = useTranslation();
@@ -91,7 +92,7 @@ function ParentNav({
   const getCount = useNotificationStore((s) => s.getCount);
 
   const visibleChildren = (item.children ?? []).filter((c) =>
-    hasAccess(scopes, c.permissions) &&
+    hasAccess(account, c.permissions) &&
     hasAdminTypeAccess(adminType, c.admin_types),
   );
 
@@ -164,16 +165,16 @@ function ParentNav({
 
 export default function Sidebar({ collapsed }: { collapsed: boolean }) {
   const location = useLocation();
-  const scopes = useAuthStore((s) => s.account?.scopes ?? EMPTY_SCOPES);
+  const account = useAuthStore((s) => s.account);
   const adminType = useAuthStore((s) => s.account?.admin_type ?? null);
 
   const visibleItems = navigation.filter((item) => {
-    if (!hasAccess(scopes, item.permissions)) return false;
+    if (!hasAccess(account, item.permissions)) return false;
     if (!hasAdminTypeAccess(adminType, item.admin_types)) return false;
     if (item.children) {
       return item.children.some(
         (c) =>
-          hasAccess(scopes, c.permissions) &&
+          hasAccess(account, c.permissions) &&
           hasAdminTypeAccess(adminType, c.admin_types),
       );
     }
@@ -190,7 +191,7 @@ export default function Sidebar({ collapsed }: { collapsed: boolean }) {
                 key={item.label}
                 item={item}
                 collapsed={collapsed}
-                scopes={scopes}
+                account={account}
                 adminType={adminType}
               />
             );

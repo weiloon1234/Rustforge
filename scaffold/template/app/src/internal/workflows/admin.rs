@@ -2,6 +2,7 @@ use core_db::common::sql::{generate_snowflake_i64, DbConn, Op};
 use core_i18n::t;
 use core_web::{auth::AuthUser, error::AppError, Patch};
 use generated::{
+    extensions::admin::types::AdminViewPermissionExt,
     guards::AdminGuard,
     models::{Admin, AdminType, AdminView},
     permissions::Permission,
@@ -168,28 +169,31 @@ fn ensure_assignable_permissions(
         )));
     }
 
-    let requested = requested
-        .iter()
-        .map(|permission| permission.as_str().to_string())
-        .collect::<Vec<_>>();
-
     if matches!(
         auth.user.admin_type,
         AdminType::Developer | AdminType::SuperAdmin
     ) {
-        return Ok(requested);
+        return Ok(permission_strings(requested));
     }
 
     if requested
         .iter()
-        .all(|permission| auth.has_permission(permission.as_str()))
+        .copied()
+        .all(|permission| auth.user.has_permission(permission))
     {
-        return Ok(requested);
+        return Ok(permission_strings(requested));
     }
 
     Err(AppError::Forbidden(t(
         "Cannot assign permissions you do not have",
     )))
+}
+
+fn permission_strings(values: &[Permission]) -> Vec<String> {
+    values
+        .iter()
+        .map(|permission| permission.as_str().to_string())
+        .collect()
 }
 
 fn permissions_to_json(values: &[String]) -> serde_json::Value {

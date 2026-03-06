@@ -9,7 +9,10 @@ use core_web::{
     openapi::{aide::axum::routing::post_with, ApiRouter},
     response::ApiResponse,
 };
-use generated::{guards::AdminGuard, models::AdminType, permissions::Permission};
+use generated::{
+    extensions::admin::types::AdminViewPermissionExt, guards::AdminGuard,
+    permissions::Permission,
+};
 use uuid::Uuid;
 
 use crate::{
@@ -80,14 +83,7 @@ fn ensure_upload_permission(
     auth: &AuthUser<AdminGuard>,
     required: Permission,
 ) -> Result<(), AppError> {
-    if matches!(
-        auth.user.admin_type,
-        AdminType::Developer | AdminType::SuperAdmin
-    ) {
-        return Ok(());
-    }
-
-    if auth.has_permission(required.as_str()) {
+    if auth.user.has_permission(required) {
         return Ok(());
     }
 
