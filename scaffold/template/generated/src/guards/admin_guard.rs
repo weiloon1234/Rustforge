@@ -2,7 +2,7 @@
 use async_trait::async_trait;
 use core_db::common::sql::{DbConn, Op};
 use core_web::auth::Guard;
-use crate::generated::models::admin::{AdminView, AdminQuery};
+use crate::generated::models::admin::{ AdminView, AdminQuery };
 use crate::generated::models::personal_access_token::{PersonalAccessToken, PersonalAccessTokenView};
 
 /// AdminGuard Guard
@@ -12,12 +12,15 @@ pub struct AdminGuard;
 #[async_trait]
 impl Guard for AdminGuard {
     type User = AdminView;
+
     fn name() -> &'static str {
         "admin"
     }
+
     fn tokenable_type() -> Option<&'static str> {
         Some("admin")
     }
+
     async fn fetch_user<'a>(db: DbConn<'a>, id: &str) -> anyhow::Result<Option<Self::User>> {
         let parsed = match id.trim().parse::<i64>() { Ok(v) => v, Err(_) => return Ok(None), };
         AdminQuery::new(db, None).find(parsed).await

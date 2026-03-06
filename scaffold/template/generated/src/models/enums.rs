@@ -114,7 +114,6 @@ impl AdminType {
     }
 }
 
-// sqlx support for TEXT storage
 impl sqlx::Encode<'_, sqlx::Postgres> for AdminType {
     fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
         let s = match self {
@@ -144,7 +143,6 @@ impl sqlx::Type<sqlx::Postgres> for AdminType {
     }
 }
 
-// For ActiveRecord BindValue
 impl From<AdminType> for core_db::common::sql::BindValue {
     fn from(v: AdminType) -> Self {
         let s = match v {
@@ -260,7 +258,6 @@ impl ContentPageSystemFlag {
     }
 }
 
-// sqlx support for integer storage
 impl sqlx::Encode<'_, sqlx::Postgres> for ContentPageSystemFlag {
     fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
         <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
@@ -284,7 +281,6 @@ impl sqlx::Type<sqlx::Postgres> for ContentPageSystemFlag {
     }
 }
 
-// For ActiveRecord BindValue
 impl From<ContentPageSystemFlag> for core_db::common::sql::BindValue {
     fn from(v: ContentPageSystemFlag) -> Self {
         core_db::common::sql::BindValue::I64(v as i64)
@@ -393,7 +389,6 @@ impl CountryStatus {
     }
 }
 
-// sqlx support for TEXT storage
 impl sqlx::Encode<'_, sqlx::Postgres> for CountryStatus {
     fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
         let s = match self {
@@ -421,7 +416,6 @@ impl sqlx::Type<sqlx::Postgres> for CountryStatus {
     }
 }
 
-// For ActiveRecord BindValue
 impl From<CountryStatus> for core_db::common::sql::BindValue {
     fn from(v: CountryStatus) -> Self {
         let s = match v {
@@ -534,7 +528,6 @@ impl PersonalAccessTokenKind {
     }
 }
 
-// sqlx support for TEXT storage
 impl sqlx::Encode<'_, sqlx::Postgres> for PersonalAccessTokenKind {
     fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
         let s = match self {
@@ -562,7 +555,6 @@ impl sqlx::Type<sqlx::Postgres> for PersonalAccessTokenKind {
     }
 }
 
-// For ActiveRecord BindValue
 impl From<PersonalAccessTokenKind> for core_db::common::sql::BindValue {
     fn from(v: PersonalAccessTokenKind) -> Self {
         let s = match v {
@@ -572,6 +564,7 @@ impl From<PersonalAccessTokenKind> for core_db::common::sql::BindValue {
         core_db::common::sql::BindValue::String(s.to_string())
     }
 }
+
 
 
 pub const SCHEMA_ENUM_TS_META: &[SchemaEnumTsMeta] = &[

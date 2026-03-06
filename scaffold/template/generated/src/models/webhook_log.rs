@@ -11,11 +11,9 @@ use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTa
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{Page, renumber_placeholders};
 use core_db::common::collection::TypedCollectionExt;
-
 const HAS_CREATED_AT: bool = true;
 const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
-
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct WebhookLogRow {
@@ -185,6 +183,8 @@ pub struct WebhookLogQuery<'db> {
     limit: Option<i64>,
     binds: Vec<BindValue>,
 }
+
+
 
 impl<'db> WebhookLogQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
@@ -572,7 +572,6 @@ impl<'db> WebhookLogQuery<'db> {
         current.push_str(&format!(", ({}) AS {}", sql, alias));
         self
     }
-
     pub fn for_update(mut self) -> Self { self.lock_sql = Some("FOR UPDATE"); self }
     pub fn for_update_skip_locked(mut self) -> Self { self.lock_sql = Some("FOR UPDATE SKIP LOCKED"); self }
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
@@ -605,7 +604,9 @@ impl<'db> WebhookLogQuery<'db> {
         self.offset = Some(n);
         self
     }
-    pub async fn get_as<T>(self) -> Result<Vec<T>>
+
+
+pub async fn get_as<T>(self) -> Result<Vec<T>>
     where
         T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Unpin + 'static,
     {
@@ -617,19 +618,20 @@ impl<'db> WebhookLogQuery<'db> {
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
         let table_name = from_sql.unwrap_or_else(|| "webhook_logs".to_string());
-        let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
-        if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
-        if !where_sql.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&where_sql.join(" AND "));
-        }
+        let from_clause = if join_sql.is_empty() {
+            format!("FROM {}", table_name)
+        } else {
+            format!("FROM {} {}", table_name, join_sql.join(" "))
+        };
+        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
+        let mut sql = format!("SELECT {} {}{}", select_clause, from_clause, where_clause);
         if !group_by_sql.is_empty() {
-             sql.push_str(" GROUP BY ");
-             sql.push_str(&group_by_sql.join(", "));
+            sql.push_str(" GROUP BY ");
+            sql.push_str(&group_by_sql.join(", "));
         }
         if !having_sql.is_empty() {
-             sql.push_str(" HAVING ");
-             sql.push_str(&having_sql.join(" AND "));
+            sql.push_str(" HAVING ");
+            sql.push_str(&having_sql.join(" AND "));
         }
         if !order_sql.is_empty() {
             sql.push_str(" ORDER BY ");
@@ -650,7 +652,6 @@ impl<'db> WebhookLogQuery<'db> {
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-
     pub async fn get(self) -> Result<Vec<WebhookLogView>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
@@ -784,15 +785,15 @@ impl<'db> WebhookLogQuery<'db> {
         Ok(count)
     }
 
-    pub async fn exists(self) -> Result<bool> {
-        Ok(self.count().await? > 0)
-    }
-
     pub async fn pluck_ids(self) -> Result<Vec<uuid::Uuid>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds, order_sql, limit, offset  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "webhook_logs".to_string());
-        let from_clause = if join_sql.is_empty() { format!("FROM {}", table_name) } else { format!("FROM {} {}", table_name, join_sql.join(" ")) };
+        let from_clause = if join_sql.is_empty() {
+            format!("FROM {}", table_name)
+        } else {
+            format!("FROM {} {}", table_name, join_sql.join(" "))
+        };
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let order_clause = if order_sql.is_empty() { String::new() } else { format!(" ORDER BY {}", order_sql.join(", ")) };
         let limit_clause = limit.map(|n| format!(" LIMIT {}", n)).unwrap_or_default();
@@ -803,6 +804,10 @@ impl<'db> WebhookLogQuery<'db> {
         for b in join_binds { q = bind_scalar(q, b); }
         let ids = db.fetch_all_scalar(q).await?;
         Ok(ids)
+    }
+
+    pub async fn exists(self) -> Result<bool> {
+        Ok(self.count().await? > 0)
     }
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
@@ -1014,6 +1019,8 @@ impl<'db> WebhookLogQuery<'db> {
     }
 }
 
+
+
 #[doc(hidden)]
 pub struct WebhookLogUnsafeQuery<'db> {
     inner: WebhookLogQuery<'db>,
@@ -1035,6 +1042,7 @@ impl<'db> WebhookLogUnsafeQuery<'db> {
     pub fn done(self) -> WebhookLogQuery<'db> { self.inner }
 }
 
+
 pub struct WebhookLogInsert<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
@@ -1055,7 +1063,9 @@ impl<'db> WebhookLogInsert<'db> {
             conflict_cols: vec![],
         }
     }
-    pub fn set_id(mut self, val: uuid::Uuid) -> Self {
+
+
+pub fn set_id(mut self, val: uuid::Uuid) -> Self {
         self.cols.push(WebhookLogCol::Id);
         self.binds.push(val.into());
         self
@@ -1110,7 +1120,9 @@ impl<'db> WebhookLogInsert<'db> {
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub async fn save(self) -> Result<WebhookLogView> {
+
+
+pub async fn save(self) -> Result<WebhookLogView> {
         let db_conn = self.db.clone();
         match db_conn {
             DbConn::Pool(pool) => {
@@ -1169,6 +1181,7 @@ impl<'db> WebhookLogInsert<'db> {
         Ok(hydrate_view(row, &LocalizedMap::default(), self.base_url.as_deref()))
     }
 }
+
 pub struct WebhookLogUpdate<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
@@ -1188,7 +1201,9 @@ impl<'db> WebhookLogUpdate<'db> {
         }
     }
     pub fn unsafe_sql(self) -> WebhookLogUnsafeUpdate<'db> { WebhookLogUnsafeUpdate::new(self) }
-    pub fn set_id(mut self, val: uuid::Uuid) -> Self {
+
+
+pub fn set_id(mut self, val: uuid::Uuid) -> Self {
         self.sets.push((WebhookLogCol::Id , val.into()));
         self
     }
@@ -1297,7 +1312,9 @@ impl<'db> WebhookLogUpdate<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub async fn save(self) -> Result<u64> {
+
+
+pub async fn save(self) -> Result<u64> {
         if self.sets.is_empty() { anyhow::bail!("update: no columns set"); }
         if self.where_sql.is_empty() { anyhow::bail!("update: no conditions set"); }
         let db_conn = self.db.clone();
@@ -1351,6 +1368,8 @@ impl<'db> WebhookLogUpdate<'db> {
         Ok(res.rows_affected())
     }
 }
+
+
 #[doc(hidden)]
 pub struct WebhookLogUnsafeUpdate<'db> {
     inner: WebhookLogUpdate<'db>,
@@ -1361,6 +1380,7 @@ impl<'db> WebhookLogUnsafeUpdate<'db> {
     pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
     pub fn done(self) -> WebhookLogUpdate<'db> { self.inner }
 }
+
 pub struct WebhookLogTableAdapter;
 impl WebhookLogTableAdapter {
     fn parse_col(name: &str) -> Option<WebhookLogCol> {
@@ -1697,7 +1717,6 @@ impl<H: WebhookLogDataTableHooks> AutoDataTable for WebhookLogDataTable<H> {
     fn default_unsortable(&self) -> &'static [&'static str] { self.config.default_unsortable }
     fn default_row_per_page(&self, ctx: &DataTableContext) -> i64 { self.config.default_row_per_page.unwrap_or(ctx.default_per_page) }
 }
-
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
 impl ActiveRecord for WebhookLogView {
@@ -1706,3 +1725,4 @@ impl ActiveRecord for WebhookLogView {
         WebhookLog::new(db, None).find(id).await.map_err(|e| e.into())
     }
 }
+

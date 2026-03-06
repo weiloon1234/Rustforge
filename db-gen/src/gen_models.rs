@@ -3154,7 +3154,7 @@ fn render_model(
         .collect();
 
     // Parse touch relations
-    let mut touch_targets: Vec<(String, String, String)> = Vec::new(); // (fk_col, target_model_snake, target_model_title)
+    let mut touch_targets: Vec<(String, String, String, String, String)> = Vec::new(); // (fk_col, target_model_snake, target_model_title, target_pk, target_pk_ty)
     if let Some(touches) = &cfg.touch {
         for rel_name in touches {
             if let Some(rel) = relations
@@ -3163,7 +3163,13 @@ fn render_model(
             {
                 let target_snake = to_snake(&rel.target_model);
                 let target_title = to_title_case(&rel.target_model);
-                touch_targets.push((rel.foreign_key.clone(), target_snake, target_title));
+                touch_targets.push((
+                    rel.foreign_key.clone(),
+                    target_snake,
+                    target_title,
+                    rel.target_pk.clone(),
+                    rel.target_pk_ty.clone(),
+                ));
             } else {
                 panic!(
                     "Model '{}' configures touch='{}' but no such belongs_to relation found.",
@@ -4758,7 +4764,7 @@ fn render_model(
         writeln!(out, "        }}").unwrap();
     }
     // touch parent timestamps
-    for (fk, target_snake, target_title) in &touch_targets {
+    for (fk, target_snake, target_title, target_pk, _target_pk_ty) in &touch_targets {
         writeln!(out, "        if let Some(parent_id) = row.{} {{", fk).unwrap();
         writeln!(
             out,
@@ -4768,8 +4774,8 @@ fn render_model(
         .unwrap();
         writeln!(
             out,
-            "                .where_{pk}(Op::Eq, parent_id)",
-            pk = pk
+            "                .where_{target_pk}(Op::Eq, parent_id)",
+            target_pk = target_pk
         )
         .unwrap();
         writeln!(
@@ -5062,7 +5068,7 @@ fn render_model(
     writeln!(out, "        let select_sql = format!(\"SELECT {pk} FROM {table} WHERE {{}}\", self.where_sql.join(\" AND \"));").unwrap();
     writeln!(
         out,
-        "        let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);"
+        "        let mut select_q = sqlx::query_scalar::<_, {parent_pk_ty}>(&select_sql);"
     )
     .unwrap();
     writeln!(
@@ -5114,7 +5120,7 @@ fn render_model(
     if !touch_targets.is_empty() {
         writeln!(out, "        if !target_ids.is_empty() {{").unwrap();
         writeln!(out, "            fn to_params(len: usize) -> String {{ (1..=len).map(|i| format!(\"${{}}\", i)).collect::<Vec<_>>().join(\", \") }}").unwrap();
-        for (fk, target_snake, target_title) in &touch_targets {
+        for (fk, target_snake, target_title, target_pk, target_pk_ty) in &touch_targets {
             writeln!(
                 out,
                 "            let placeholders = to_params(target_ids.len());"
@@ -5123,17 +5129,17 @@ fn render_model(
             writeln!(out, "            let sql = format!(\"SELECT DISTINCT {} FROM {} WHERE {{}} IN ({{}})\", \"{pk}\", placeholders);", fk, table).unwrap();
             writeln!(
                 out,
-                "            let mut q = sqlx::query_scalar::<_, i64>(&sql);"
+                "            let mut q = sqlx::query_scalar::<_, {target_pk_ty}>(&sql);"
             )
             .unwrap();
             writeln!(
                 out,
-                "            for id in &target_ids {{ q = bind_scalar(q, *id); }}"
+                "            for id in &target_ids {{ q = bind_scalar(q, id.clone()); }}"
             )
             .unwrap();
             writeln!(
                 out,
-                "            let parent_ids: Vec<i64> = db.fetch_all_scalar(q).await?;"
+                "            let parent_ids: Vec<{target_pk_ty}> = db.fetch_all_scalar(q).await?;"
             )
             .unwrap();
             writeln!(out, "            for pid in parent_ids {{").unwrap();
@@ -5143,7 +5149,12 @@ fn render_model(
                 target_snake, target_title
             )
             .unwrap();
-            writeln!(out, "                    .where_{pk}(Op::Eq, pid)", pk = pk).unwrap();
+            writeln!(
+                out,
+                "                    .where_{target_pk}(Op::Eq, pid)",
+                target_pk = target_pk
+            )
+            .unwrap();
             writeln!(
                 out,
                 "                    .set_updated_at(time::OffsetDateTime::now_utc())"
@@ -5184,7 +5195,7 @@ fn render_model(
             writeln!(out, "                }}").unwrap();
             writeln!(out, "                if !filtered.is_empty() {{").unwrap();
             writeln!(out, "                    for id in &target_ids {{").unwrap();
-            writeln!(out, "                        localized::upsert_localized_many(db.clone(), localized::{}_OWNER_TYPE, *id, \"{f}\", &filtered).await?;", model_snake.to_uppercase()).unwrap();
+            writeln!(out, "                        localized::upsert_localized_many(db.clone(), localized::{}_OWNER_TYPE, id.clone(), \"{f}\", &filtered).await?;", model_snake.to_uppercase()).unwrap();
             writeln!(out, "                    }}").unwrap();
             writeln!(out, "                }}").unwrap();
             writeln!(out, "            }}").unwrap();
@@ -5194,7 +5205,7 @@ fn render_model(
     if has_meta {
         writeln!(out, "        if res.rows_affected() > 0 && !self.meta.is_empty() && !target_ids.is_empty() {{").unwrap();
         writeln!(out, "            for id in &target_ids {{").unwrap();
-        writeln!(out, "                localized::upsert_meta_many(db.clone(), localized::{model_snake_upper}_OWNER_TYPE, *id, &self.meta).await?;", model_snake_upper = model_snake.to_uppercase()).unwrap();
+        writeln!(out, "                localized::upsert_meta_many(db.clone(), localized::{model_snake_upper}_OWNER_TYPE, id.clone(), &self.meta).await?;", model_snake_upper = model_snake.to_uppercase()).unwrap();
         writeln!(out, "            }}").unwrap();
         writeln!(out, "        }}").unwrap();
     }
@@ -5212,7 +5223,7 @@ fn render_model(
         .unwrap();
         writeln!(
             out,
-            "                    localized::clear_attachment_field(db.clone(), localized::{}_OWNER_TYPE, *id, field).await?;",
+            "                    localized::clear_attachment_field(db.clone(), localized::{}_OWNER_TYPE, id.clone(), field).await?;",
             model_snake_upper
         )
         .unwrap();
@@ -5222,7 +5233,7 @@ fn render_model(
             "                for (field, att) in &self.attachments_single {{"
         )
         .unwrap();
-        writeln!(out, "                    localized::replace_single_attachment(db.clone(), localized::{}_OWNER_TYPE, *id, field, att).await?;", model_snake_upper).unwrap();
+        writeln!(out, "                    localized::replace_single_attachment(db.clone(), localized::{}_OWNER_TYPE, id.clone(), field, att).await?;", model_snake_upper).unwrap();
         writeln!(out, "                }}").unwrap();
         writeln!(
             out,
@@ -5231,7 +5242,7 @@ fn render_model(
         .unwrap();
         writeln!(
             out,
-            "                    localized::add_attachments(db.clone(), localized::{}_OWNER_TYPE, *id, field, list).await?;",
+            "                    localized::add_attachments(db.clone(), localized::{}_OWNER_TYPE, id.clone(), field, list).await?;",
             model_snake_upper
         )
         .unwrap();
@@ -5241,7 +5252,7 @@ fn render_model(
             "                for (field, ids) in &self.attachments_delete_multi {{"
         )
         .unwrap();
-        writeln!(out, "                    localized::delete_attachment_ids(db.clone(), localized::{}_OWNER_TYPE, *id, field, ids).await?;", model_snake_upper).unwrap();
+        writeln!(out, "                    localized::delete_attachment_ids(db.clone(), localized::{}_OWNER_TYPE, id.clone(), field, ids).await?;", model_snake_upper).unwrap();
         writeln!(out, "                }}").unwrap();
         writeln!(out, "            }}").unwrap();
         writeln!(out, "        }}").unwrap();

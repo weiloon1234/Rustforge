@@ -1608,29 +1608,29 @@ pub async fn save(self) -> Result<u64> {
                 }
                 if !filtered.is_empty() {
                     for id in &target_ids {
-                        localized::upsert_localized_many(db.clone(), localized::ARTICLE_OWNER_TYPE, *id, "title", &filtered).await?;
+                        localized::upsert_localized_many(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), "title", &filtered).await?;
                     }
                 }
             }
         }
         if res.rows_affected() > 0 && !self.meta.is_empty() && !target_ids.is_empty() {
             for id in &target_ids {
-                localized::upsert_meta_many(db.clone(), localized::ARTICLE_OWNER_TYPE, *id, &self.meta).await?;
+                localized::upsert_meta_many(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), &self.meta).await?;
             }
         }
         if res.rows_affected() > 0 && !target_ids.is_empty() {
             for id in &target_ids {
                 for field in &self.attachments_clear_single {
-                    localized::clear_attachment_field(db.clone(), localized::ARTICLE_OWNER_TYPE, *id, field).await?;
+                    localized::clear_attachment_field(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), field).await?;
                 }
                 for (field, att) in &self.attachments_single {
-                    localized::replace_single_attachment(db.clone(), localized::ARTICLE_OWNER_TYPE, *id, field, att).await?;
+                    localized::replace_single_attachment(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), field, att).await?;
                 }
                 for (field, list) in &self.attachments_multi {
-                    localized::add_attachments(db.clone(), localized::ARTICLE_OWNER_TYPE, *id, field, list).await?;
+                    localized::add_attachments(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), field, list).await?;
                 }
                 for (field, ids) in &self.attachments_delete_multi {
-                    localized::delete_attachment_ids(db.clone(), localized::ARTICLE_OWNER_TYPE, *id, field, ids).await?;
+                    localized::delete_attachment_ids(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), field, ids).await?;
                 }
             }
         }

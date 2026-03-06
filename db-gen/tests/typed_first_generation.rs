@@ -241,6 +241,72 @@ meta = ["flags:bool", "extra:json"]
 }
 
 #[test]
+fn generated_update_paths_use_primary_key_type_for_target_ids() {
+    let root = temp_dir("uuid_update_targets");
+    let schema_dir = root.join("schemas");
+    let out_dir = root.join("out");
+    fs::create_dir_all(&schema_dir).expect("failed to create schemas dir");
+    fs::create_dir_all(&out_dir).expect("failed to create out dir");
+
+    fs::write(
+        root.join("configs.toml"),
+        r#"
+[languages]
+default = "en"
+supported = ["en"]
+"#,
+    )
+    .expect("failed to write configs");
+
+    fs::write(
+        schema_dir.join("session.toml"),
+        r#"
+[model.session]
+table = "sessions"
+pk = "id"
+id_strategy = "manual"
+fields = [
+  "id:uuid::Uuid",
+  "name:string",
+  "updated_at:datetime"
+]
+meta = ["flag:bool"]
+"#,
+    )
+    .expect("failed to write schema");
+
+    let (cfgs, _) = config::load(
+        root.join("configs.toml")
+            .to_str()
+            .expect("configs path should be valid utf-8"),
+    )
+    .expect("failed to load config");
+    let parsed_schema = schema::load(
+        schema_dir
+            .to_str()
+            .expect("schema path should be valid utf-8"),
+    )
+    .expect("failed to load schema");
+
+    generate_models(&parsed_schema, &cfgs, &out_dir).expect("model generation should succeed");
+
+    let session_rs =
+        fs::read_to_string(out_dir.join("session.rs")).expect("session.rs should exist");
+
+    assert!(session_rs.contains(
+        "let mut select_q = sqlx::query_scalar::<_, uuid::Uuid>(&select_sql);"
+    ));
+    assert!(session_rs.contains(
+        "localized::upsert_meta_many(db.clone(), localized::SESSION_OWNER_TYPE, id.clone(), &self.meta).await?;"
+    ));
+    assert!(!session_rs.contains(
+        "localized::upsert_meta_many(db.clone(), localized::SESSION_OWNER_TYPE, *id, &self.meta).await?;"
+    ));
+
+    fs::remove_dir_all(root).expect("failed to remove temp dir");
+}
+
+#[test]
 fn generated_models_support_custom_meta_shape_without_cast_helper() {
     let root = temp_dir("meta_custom_shape");
     let schema_dir = root.join("schemas");

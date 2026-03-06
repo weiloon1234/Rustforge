@@ -32,6 +32,7 @@ pub enum Permission {
 
 impl ts_rs::TS for Permission {
     type WithoutGenerics = Self;
+
     fn name() -> String { "Permission".to_string() }
     fn inline() -> String { Self::name() }
     fn inline_flattened() -> String { panic!("Permission cannot be flattened") }

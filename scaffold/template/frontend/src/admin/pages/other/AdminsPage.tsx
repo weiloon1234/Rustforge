@@ -54,7 +54,7 @@ function resolvePermissionLabel(
 function TypeBadge({ type }: { type: AdminType }) {
   return (
     <span
-      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${TYPE_COLORS[type] ?? "bg-gray-100 text-gray-700"}`}
+      className={`inline-flex min-h-6 items-center rounded-full px-2 py-0.5 text-xs font-medium ${TYPE_COLORS[type] ?? "bg-gray-100 text-gray-700"}`}
     >
       {type}
     </span>
@@ -65,7 +65,7 @@ function PermissionSummary({ admin }: { admin: AdminDatatableRow }) {
   const { t } = useTranslation();
   if (admin.admin_type !== ADMIN_TYPE.ADMIN || admin.abilities.includes("*")) {
     return (
-      <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+      <span className="inline-flex min-h-6 items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
         {t("All permissions")}
       </span>
     );
@@ -121,15 +121,13 @@ function PermissionSummary({ admin }: { admin: AdminDatatableRow }) {
   };
 
   return (
-    <Button
+    <button
       type="button"
-      variant="plain"
-      size="sm"
-      className="rounded-full bg-gray-100 px-2! py-0.5! text-xs font-medium text-gray-700 hover:bg-gray-200"
+      className="inline-flex min-h-6 items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
       onClick={openPermissionModal}
     >
       {t(":count Permissions", { count: abilities.length })}
-    </Button>
+    </button>
   );
 }
 

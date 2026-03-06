@@ -88,8 +88,8 @@ interface AutoFormConfig {
   tiptapImageUpload?: TiptapImageUploadHandler;
   /** Static key-value pairs merged into every submission (not rendered as form fields). */
   extraPayload?: Record<string, unknown>;
-  onSuccess?: (data: unknown) => void;
-  onError?: (error: unknown) => void;
+  onSuccess?: (data: unknown) => void | Promise<void>;
+  onError?: (error: unknown) => void | Promise<void>;
 }
 
 interface AutoFormErrors {
@@ -367,7 +367,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
 
     try {
       const response = await api[method](url, requestBody);
-      onSuccess?.(response.data?.data ?? response.data);
+      await onSuccess?.(response.data?.data ?? response.data);
     } catch (err) {
       const axiosErr = err as AxiosError<{ message?: string; errors?: Record<string, string[]> }>;
       const body = axiosErr.response?.data;
@@ -388,7 +388,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
       } else {
         setGeneralError(axiosErr.message || "Something went wrong");
       }
-      onError?.(err);
+      await onError?.(err);
     } finally {
       setBusy(false);
     }

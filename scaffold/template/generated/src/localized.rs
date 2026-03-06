@@ -9,8 +9,9 @@ use crate::generated::models::attachment::{Attachment as AttachmentModel, Attach
 use crate::generated::models::localized::{Localized as LocalizedModel, LocalizedCol};
 use crate::generated::models::meta::{Meta as MetaModel, MetaCol};
 use uuid::Uuid;
-
 use core_db::platform::attachments::types::{AttachmentRules, ResizeRule};
+
+
 pub const DEFAULT_LOCALE: &str = "en";
 
 pub const DEFAULT_TIMEZONE: &str = "+08:00";
@@ -430,4 +431,5 @@ pub fn get_attachment_rules(name: &str) -> Option<AttachmentRules> {
         _ => None,
     }
 }
+
 
