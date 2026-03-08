@@ -1667,10 +1667,18 @@ fn render_insert_attachment_setters(
     out
 }
 
+fn is_incrementable_type(ty: &str) -> bool {
+    matches!(
+        ty,
+        "i16" | "i32" | "i64" | "f64" | "rust_decimal::Decimal"
+    )
+}
+
 fn render_update_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> String {
     let mut out = String::new();
     for f in db_fields {
         let fn_name = format!("set_{}", to_snake(&f.name));
+        let col_variant = to_title_case(&f.name);
         if let Some(SpecialType::Hashed) = f.special_type {
             writeln!(
                 out,
@@ -1684,8 +1692,7 @@ fn render_update_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> Stri
             .unwrap();
             writeln!(
                 out,
-                "        self.sets.push(({col_ident}::{} , hashed.into()));",
-                to_title_case(&f.name)
+                "        self.sets.push(({col_ident}::{col_variant}, hashed.into(), SetMode::Assign));",
             )
             .unwrap();
             writeln!(out, "        Ok(self)").unwrap();
@@ -1699,8 +1706,7 @@ fn render_update_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> Stri
             .unwrap();
             writeln!(
                 out,
-                "        self.sets.push(({col_ident}::{} , val.into()));",
-                to_title_case(&f.name)
+                "        self.sets.push(({col_ident}::{col_variant}, val.into(), SetMode::Assign));",
             )
             .unwrap();
             writeln!(out, "        self").unwrap();
@@ -1714,12 +1720,45 @@ fn render_update_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> Stri
             .unwrap();
             writeln!(
                 out,
-                "        self.sets.push(({col_ident}::{} , val.into()));",
-                to_title_case(&f.name)
+                "        self.sets.push(({col_ident}::{col_variant}, val.into(), SetMode::Assign));",
             )
             .unwrap();
             writeln!(out, "        self").unwrap();
             writeln!(out, "    }}").unwrap();
+
+            // Generate increment/decrement for non-optional numeric fields
+            if is_incrementable_type(&f.ty) {
+                let snake = to_snake(&f.name);
+                let inc_fn = format!("increment_{snake}");
+                let dec_fn = format!("decrement_{snake}");
+                writeln!(
+                    out,
+                    "    pub fn {inc_fn}(mut self, val: {typ}) -> Self {{",
+                    typ = f.ty
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "        self.sets.push(({col_ident}::{col_variant}, val.into(), SetMode::Increment));",
+                )
+                .unwrap();
+                writeln!(out, "        self").unwrap();
+                writeln!(out, "    }}").unwrap();
+
+                writeln!(
+                    out,
+                    "    pub fn {dec_fn}(mut self, val: {typ}) -> Self {{",
+                    typ = f.ty
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "        self.sets.push(({col_ident}::{col_variant}, val.into(), SetMode::Decrement));",
+                )
+                .unwrap();
+                writeln!(out, "        self").unwrap();
+                writeln!(out, "    }}").unwrap();
+            }
         }
     }
     out
@@ -3210,13 +3249,13 @@ fn render_model(
     if use_snowflake_id {
         writeln!(
             imports,
-            "use core_db::common::sql::{{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, bind, bind_query, bind_scalar, generate_snowflake_i64, DbConn}};"
+            "use core_db::common::sql::{{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, DbConn}};"
         )
         .unwrap();
     } else {
         writeln!(
             imports,
-            "use core_db::common::sql::{{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, bind, bind_query, bind_scalar, DbConn}};"
+            "use core_db::common::sql::{{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, DbConn}};"
         )
         .unwrap();
     }
@@ -4874,7 +4913,7 @@ fn render_model(
     writeln!(out, "pub struct {update_ident}<'db> {{").unwrap();
     writeln!(out, "    db: DbConn<'db>,").unwrap();
     writeln!(out, "    base_url: Option<String>,").unwrap();
-    writeln!(out, "    sets: Vec<({col_ident}, BindValue)>,").unwrap();
+    writeln!(out, "    sets: Vec<({col_ident}, BindValue, SetMode)>,").unwrap();
     writeln!(out, "    where_sql: Vec<String>,").unwrap();
     writeln!(out, "    binds: Vec<BindValue>,").unwrap();
     if !localized_fields.is_empty() {
@@ -5070,7 +5109,7 @@ fn render_model(
     .unwrap();
     writeln!(
         out,
-        "        let (mut cols, mut set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();"
+        "        let mut cols = Vec::new();\n        let mut set_binds = Vec::new();\n        let mut set_modes = Vec::new();\n        for (col, bind, mode) in self.sets {{ cols.push(col); set_binds.push(bind); set_modes.push(mode); }}"
     )
     .unwrap();
     if has_updated_at {
@@ -5082,6 +5121,7 @@ fn render_model(
         .unwrap();
         writeln!(out, "            cols.push({col_ident}::UpdatedAt);").unwrap();
         writeln!(out, "            set_binds.push(now.into());").unwrap();
+        writeln!(out, "            set_modes.push(SetMode::Assign);").unwrap();
         writeln!(out, "        }}").unwrap();
     }
     writeln!(out, "        // find target ids for localized updates").unwrap();
@@ -5102,10 +5142,40 @@ fn render_model(
     )
     .unwrap();
     writeln!(out, "        let mut parts: Vec<String> = Vec::new();").unwrap();
-    writeln!(out, "        for (i, c) in cols.iter().enumerate() {{").unwrap();
+    writeln!(out, "        for (i, (c, mode)) in cols.iter().zip(set_modes.iter()).enumerate() {{").unwrap();
     writeln!(
         out,
-        "            parts.push(format!(\"{{}} = ${{}}\", c.as_sql(), i + 1));"
+        "            let col = c.as_sql();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            let part = match mode {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "                SetMode::Assign => format!(\"{{}} = ${{}}\", col, i + 1),"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "                SetMode::Increment => format!(\"{{}} = {{}} + ${{}}\", col, col, i + 1),"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "                SetMode::Decrement => format!(\"{{}} = {{}} - ${{}}\", col, col, i + 1),"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            }};"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            parts.push(part);"
     )
     .unwrap();
     writeln!(out, "        }}").unwrap();

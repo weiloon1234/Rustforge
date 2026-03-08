@@ -75,6 +75,17 @@ pub enum BindValue {
     JsonOpt(Option<Value>),
 }
 
+/// Controls how a column is set in an UPDATE statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetMode {
+    /// `col = $N` — replace with the given value.
+    Assign,
+    /// `col = col + $N` — add the given value to the current column value.
+    Increment,
+    /// `col = col - $N` — subtract the given value from the current column value.
+    Decrement,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RawJoinKind {
     Inner,
