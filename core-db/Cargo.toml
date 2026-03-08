@@ -23,7 +23,9 @@ sqlx = { workspace = true, features = [
     "uuid",
     "time",
     "json",
+    "rust_decimal",
 ] }
+rust_decimal = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }

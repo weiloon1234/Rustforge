@@ -1551,6 +1551,17 @@ fn render_meta_setters(meta_fields: &[MetaFieldSpec]) -> String {
                 writeln!(out, "        self").unwrap();
                 writeln!(out, "    }}").unwrap();
             }
+            MetaType::Decimal => {
+                writeln!(out, "    pub fn {fn_name}(mut self, val: rust_decimal::Decimal) -> Self {{").unwrap();
+                writeln!(
+                    out,
+                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val.to_string()));",
+                    name = m.name
+                )
+                .unwrap();
+                writeln!(out, "        self").unwrap();
+                writeln!(out, "    }}").unwrap();
+            }
             MetaType::Json => {
                 writeln!(
                     out,
@@ -3271,6 +3282,7 @@ fn render_model(
         "u64",
         "f32",
         "f64",
+        "rust_decimal::Decimal",
         "bool",
         "String",
         "Vec",
@@ -3526,6 +3538,14 @@ fn render_model(
                     writeln!(
                         out,
                         "    pub fn meta_{name}(&self) -> Option<f64> {{ self.meta.get(\"{name}\").and_then(|v| v.as_f64()) }}",
+                        name = m.name
+                    )
+                    .unwrap();
+                }
+                MetaType::Decimal => {
+                    writeln!(
+                        out,
+                        "    pub fn meta_{name}(&self) -> Option<rust_decimal::Decimal> {{ self.meta.get(\"{name}\").and_then(|v| v.as_str()).and_then(|s| s.parse().ok()) }}",
                         name = m.name
                     )
                     .unwrap();
@@ -5451,6 +5471,7 @@ fn render_model(
                 "u64" => format!("{raw}.trim().parse::<u64>().ok().map(|v| (v as i64).into())"),
                 "f32" => format!("{raw}.trim().parse::<f32>().ok().map(|v| (v as f64).into())"),
                 "f64" => format!("{raw}.trim().parse::<f64>().ok().map(Into::into)"),
+                "rust_decimal::Decimal" => format!("{raw}.trim().parse::<rust_decimal::Decimal>().ok().map(Into::into)"),
                 "uuid::Uuid" => format!("uuid::Uuid::parse_str({raw}.trim()).ok().map(Into::into)"),
                 "time::OffsetDateTime" => {
                     format!("Self::parse_datetime({raw}.trim(), false).map(Into::into)")
@@ -5466,10 +5487,10 @@ fn render_model(
             match ty {
             "String" => Some(format!("Some(row.{field_name}.clone())")),
             "bool" | "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" | "f32"
-            | "f64" | "uuid::Uuid" => Some(format!("Some(row.{field_name}.to_string())")),
+            | "f64" | "rust_decimal::Decimal" | "uuid::Uuid" => Some(format!("Some(row.{field_name}.to_string())")),
             "Option<String>" | "Option<bool>" | "Option<i8>" | "Option<i16>" | "Option<i32>"
             | "Option<i64>" | "Option<u8>" | "Option<u16>" | "Option<u32>" | "Option<u64>"
-            | "Option<f32>" | "Option<f64>" | "Option<uuid::Uuid>" => {
+            | "Option<f32>" | "Option<f64>" | "Option<rust_decimal::Decimal>" | "Option<uuid::Uuid>" => {
                 Some(format!("row.{field_name}.as_ref().map(|v| v.to_string())"))
             }
             "time::OffsetDateTime" => Some(format!(
@@ -5545,6 +5566,11 @@ fn render_model(
         writeln!(
             out,
             "        if let Ok(v) = trimmed.parse::<i64>() {{ return v.into(); }}"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        if let Ok(v) = trimmed.parse::<rust_decimal::Decimal>() {{ return v.into(); }}"
         )
         .unwrap();
         writeln!(

@@ -59,6 +59,8 @@ pub enum BindValue {
     I64Opt(Option<i64>),
     F64(f64),
     F64Opt(Option<f64>),
+    Decimal(rust_decimal::Decimal),
+    DecimalOpt(Option<rust_decimal::Decimal>),
     Bool(bool),
     BoolOpt(Option<bool>),
     String(String),
@@ -267,6 +269,18 @@ impl From<f64> for BindValue {
 impl From<Option<f64>> for BindValue {
     fn from(v: Option<f64>) -> Self {
         BindValue::F64Opt(v)
+    }
+}
+
+impl From<rust_decimal::Decimal> for BindValue {
+    fn from(v: rust_decimal::Decimal) -> Self {
+        BindValue::Decimal(v)
+    }
+}
+
+impl From<Option<rust_decimal::Decimal>> for BindValue {
+    fn from(v: Option<rust_decimal::Decimal>) -> Self {
+        BindValue::DecimalOpt(v)
     }
 }
 
@@ -631,6 +645,8 @@ pub fn bind<'q, T>(q: PgQueryAs<'q, T>, value: BindValue) -> PgQueryAs<'q, T> {
         BindValue::I64Opt(v) => q.bind(v),
         BindValue::F64(v) => q.bind(v),
         BindValue::F64Opt(v) => q.bind(v),
+        BindValue::Decimal(v) => q.bind(v),
+        BindValue::DecimalOpt(v) => q.bind(v),
         BindValue::Bool(v) => q.bind(v),
         BindValue::BoolOpt(v) => q.bind(v),
         BindValue::String(v) => q.bind(v),
@@ -656,6 +672,8 @@ pub fn bind_query<'q>(q: PgQuery<'q>, value: BindValue) -> PgQuery<'q> {
         BindValue::I64Opt(v) => q.bind(v),
         BindValue::F64(v) => q.bind(v),
         BindValue::F64Opt(v) => q.bind(v),
+        BindValue::Decimal(v) => q.bind(v),
+        BindValue::DecimalOpt(v) => q.bind(v),
         BindValue::Bool(v) => q.bind(v),
         BindValue::BoolOpt(v) => q.bind(v),
         BindValue::String(v) => q.bind(v),
@@ -681,6 +699,8 @@ pub fn bind_scalar<'q, T>(q: PgQueryScalar<'q, T>, value: BindValue) -> PgQueryS
         BindValue::I64Opt(v) => q.bind(v),
         BindValue::F64(v) => q.bind(v),
         BindValue::F64Opt(v) => q.bind(v),
+        BindValue::Decimal(v) => q.bind(v),
+        BindValue::DecimalOpt(v) => q.bind(v),
         BindValue::Bool(v) => q.bind(v),
         BindValue::BoolOpt(v) => q.bind(v),
         BindValue::String(v) => q.bind(v),

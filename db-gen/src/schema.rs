@@ -95,6 +95,7 @@ pub enum MetaType {
     I32,
     I64,
     F64,
+    Decimal,
     Json,
     DateTime,
     Custom(String),
@@ -439,6 +440,7 @@ pub fn parse_meta(cfg: &ModelSpec) -> Vec<MetaFieldSpec> {
             "i32" => MetaType::I32,
             "i64" => MetaType::I64,
             "f64" => MetaType::F64,
+            "decimal" => MetaType::Decimal,
             "json" => MetaType::Json,
             "datetime" => MetaType::DateTime,
             _ => {
