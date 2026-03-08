@@ -1,436 +1,599 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #f8fafc;
-  --color-foreground: #0f172a;
-  --color-muted: #64748b;
-  --color-muted-foreground: #94a3b8;
-  --color-surface: #ffffff;
-  --color-surface-hover: #f1f5f9;
-  --color-surface-active: #e2e8f0;
-  --color-primary: #2563eb;
-  --color-primary-hover: #1d4ed8;
-  --color-primary-foreground: #ffffff;
-  --color-border: #e2e8f0;
-  --color-border-hover: #cbd5e1;
-  --color-input: #ffffff;
-  --color-input-border: #d1d5db;
-  --color-input-border-hover: #9ca3af;
-  --color-input-focus: #2563eb;
-  --color-input-placeholder: #9ca3af;
-  --color-input-disabled: #f3f4f6;
-  --color-ring: #2563eb;
-  --color-error: #ef4444;
-  --color-error-muted: #fef2f2;
-  --color-warning: #f59e0b;
-  --color-warning-muted: #fffbeb;
-  --color-success: #22c55e;
-  --color-success-muted: #f0fdf4;
-  --color-info: #3b82f6;
-  --color-info-muted: #eff6ff;
+    --color-background: #0a0a0f;
+    --color-foreground: #e0e0e8;
+    --color-muted: #7a7a8e;
+    --color-muted-foreground: #55556a;
+    --color-surface: #12121a;
+    --color-surface-hover: #1a1a2e;
+    --color-surface-active: #252540;
+    --color-primary: #00f0ff;
+    --color-primary-hover: #00d4e0;
+    --color-primary-foreground: #0a0a0f;
+    --color-border: #1a1a2e;
+    --color-border-hover: #252540;
+    --color-input: #12121a;
+    --color-input-border: #1a1a2e;
+    --color-input-border-hover: #252540;
+    --color-input-focus: #00f0ff;
+    --color-input-placeholder: #55556a;
+    --color-input-disabled: #0e0e16;
+    --color-ring: #00f0ff;
+    --color-error: #ff4466;
+    --color-error-muted: #3a1020;
+    --color-warning: #ffaa00;
+    --color-warning-muted: #3a2800;
+    --color-success: #00ff88;
+    --color-success-muted: #003a20;
+    --color-info: #4488ff;
+    --color-info-muted: #102040;
+    --color-neon-glow: rgba(0, 240, 255, 0.15);
+    --color-neon-glow-strong: rgba(0, 240, 255, 0.3);
 }
 
 @layer components {
-  .rf-field { @apply mb-4; }
-  .rf-label { @apply block mb-1.5 text-sm font-medium text-foreground; }
-  .rf-label-required::after { content: " *"; @apply text-error; }
+    /* Chrome, Safari, Edge, Opera */
+    input::-webkit-outer-spin-button,
+    input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
 
-  .rf-input {
-    @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-foreground
+    /* Firefox */
+    input[type="number"] {
+        appearance: textfield;
+        -moz-appearance: textfield;
+    }
+
+    .rf-field {
+        @apply mb-4;
+    }
+    .rf-label {
+        @apply block mb-1.5 text-sm font-medium text-foreground;
+    }
+    .rf-label-required::after {
+        content: " *";
+        @apply text-error;
+    }
+
+    .rf-input {
+        @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-foreground
       placeholder:text-input-placeholder transition-colors duration-150
       hover:border-input-border-hover focus:outline-none focus:ring-2 focus:ring-ring/40
       focus:border-input-focus disabled:opacity-50 disabled:cursor-not-allowed;
-  }
-  .rf-input-error {
-    @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
-  }
+    }
+    .rf-input-error {
+        @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
+    }
 
-  .rf-picker {
-    @apply relative;
-  }
-  .react-datepicker-wrapper,
-  .react-datepicker__input-container {
-    @apply block w-full;
-  }
-  .rf-picker-input {
-    @apply pr-10;
-  }
-  .rf-picker-icon {
-    @apply pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted;
-  }
-  .rf-picker-popper {
-    z-index: 1200 !important;
-  }
-  .react-datepicker-popper {
-    z-index: 1200 !important;
-  }
-  .rf-picker-calendar {
-    @apply rounded-xl border shadow-xl;
-    background-color: var(--color-surface) !important;
-    border-color: var(--color-border) !important;
-    color: var(--color-foreground) !important;
-    font-family: inherit;
-  }
-  .rf-picker-calendar .react-datepicker {
-    background-color: var(--color-surface) !important;
-    border-color: var(--color-border) !important;
-    color: var(--color-foreground) !important;
-  }
-  .rf-picker-calendar .react-datepicker__header {
-    background-color: var(--color-surface) !important;
-    border-bottom-color: var(--color-border) !important;
-  }
-  .rf-picker-calendar .react-datepicker__current-month,
-  .rf-picker-calendar .react-datepicker-time__header,
-  .rf-picker-calendar .react-datepicker-year-header,
-  .rf-picker-calendar .react-datepicker__day-name {
-    color: var(--color-foreground) !important;
-  }
-  .rf-picker-calendar .react-datepicker__day,
-  .rf-picker-calendar .react-datepicker__time-name,
-  .rf-picker-calendar .react-datepicker__time-list-item {
-    color: var(--color-foreground) !important;
-    background-color: transparent !important;
-  }
-  .rf-picker-calendar .react-datepicker__day:hover,
-  .rf-picker-calendar .react-datepicker__time-list-item:hover,
-  .rf-picker-calendar .react-datepicker__month-text:hover,
-  .rf-picker-calendar .react-datepicker__quarter-text:hover,
-  .rf-picker-calendar .react-datepicker__year-text:hover {
-    background-color: var(--color-surface-hover) !important;
-    color: var(--color-foreground) !important;
-    border-radius: 0.375rem;
-  }
-  .rf-picker-calendar .react-datepicker__day--selected,
-  .rf-picker-calendar .react-datepicker__day--keyboard-selected,
-  .rf-picker-calendar .react-datepicker__month-text--selected,
-  .rf-picker-calendar .react-datepicker__quarter-text--selected,
-  .rf-picker-calendar .react-datepicker__year-text--selected,
-  .rf-picker-calendar .react-datepicker__time-list-item--selected {
-    background-color: var(--color-primary) !important;
-    color: var(--color-primary-foreground) !important;
-    border-radius: 0.375rem;
-  }
-  .rf-picker-calendar .react-datepicker__day--outside-month {
-    color: var(--color-muted) !important;
-  }
-  .rf-picker-calendar .react-datepicker__navigation-icon::before {
-    border-color: var(--color-muted) !important;
-  }
-  .rf-picker-calendar .react-datepicker__triangle {
-    @apply hidden;
-  }
-  .rf-picker-calendar .react-datepicker__time-container,
-  .rf-picker-calendar .react-datepicker__time,
-  .rf-picker-calendar .react-datepicker__time-box,
-  .rf-picker-calendar .react-datepicker__time-list,
-  .rf-picker-calendar .react-datepicker__month-container {
-    background-color: var(--color-surface) !important;
-    border-color: var(--color-border) !important;
-  }
-  .rf-picker-calendar .react-datepicker__time-list {
-    scrollbar-color: var(--color-border) transparent;
-  }
+    .rf-picker {
+        @apply relative;
+    }
+    .react-datepicker-wrapper,
+    .react-datepicker__input-container {
+        @apply block w-full;
+    }
+    .rf-picker-input {
+        @apply pr-10;
+    }
+    .rf-picker-icon {
+        @apply pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted;
+    }
+    .rf-picker-popper {
+        z-index: 1200 !important;
+    }
+    .react-datepicker-popper {
+        z-index: 1200 !important;
+    }
+    .rf-picker-calendar {
+        @apply rounded-xl border shadow-xl;
+        background-color: var(--color-surface) !important;
+        border-color: var(--color-border) !important;
+        color: var(--color-foreground) !important;
+        font-family: inherit;
+    }
+    .rf-picker-calendar .react-datepicker {
+        background-color: var(--color-surface) !important;
+        border-color: var(--color-border) !important;
+        color: var(--color-foreground) !important;
+    }
+    .rf-picker-calendar .react-datepicker__header {
+        background-color: var(--color-surface) !important;
+        border-bottom-color: var(--color-border) !important;
+    }
+    .rf-picker-calendar .react-datepicker__current-month,
+    .rf-picker-calendar .react-datepicker-time__header,
+    .rf-picker-calendar .react-datepicker-year-header,
+    .rf-picker-calendar .react-datepicker__day-name {
+        color: var(--color-foreground) !important;
+    }
+    .rf-picker-calendar .react-datepicker__day,
+    .rf-picker-calendar .react-datepicker__time-name,
+    .rf-picker-calendar .react-datepicker__time-list-item {
+        color: var(--color-foreground) !important;
+        background-color: transparent !important;
+    }
+    .rf-picker-calendar .react-datepicker__day:hover,
+    .rf-picker-calendar .react-datepicker__time-list-item:hover,
+    .rf-picker-calendar .react-datepicker__month-text:hover,
+    .rf-picker-calendar .react-datepicker__quarter-text:hover,
+    .rf-picker-calendar .react-datepicker__year-text:hover {
+        background-color: var(--color-surface-hover) !important;
+        color: var(--color-foreground) !important;
+        border-radius: 0.375rem;
+    }
+    .rf-picker-calendar .react-datepicker__day--selected,
+    .rf-picker-calendar .react-datepicker__day--keyboard-selected,
+    .rf-picker-calendar .react-datepicker__month-text--selected,
+    .rf-picker-calendar .react-datepicker__quarter-text--selected,
+    .rf-picker-calendar .react-datepicker__year-text--selected,
+    .rf-picker-calendar .react-datepicker__time-list-item--selected {
+        background-color: var(--color-primary) !important;
+        color: var(--color-primary-foreground) !important;
+        border-radius: 0.375rem;
+    }
+    .rf-picker-calendar .react-datepicker__day--outside-month {
+        color: var(--color-muted) !important;
+    }
+    .rf-picker-calendar .react-datepicker__navigation-icon::before {
+        border-color: var(--color-muted) !important;
+    }
+    .rf-picker-calendar .react-datepicker__triangle {
+        @apply hidden;
+    }
+    .rf-picker-calendar .react-datepicker__time-container,
+    .rf-picker-calendar .react-datepicker__time,
+    .rf-picker-calendar .react-datepicker__time-box,
+    .rf-picker-calendar .react-datepicker__time-list,
+    .rf-picker-calendar .react-datepicker__month-container {
+        background-color: var(--color-surface) !important;
+        border-color: var(--color-border) !important;
+    }
+    .rf-picker-calendar .react-datepicker__time-list {
+        scrollbar-color: var(--color-border) transparent;
+    }
 
-  .rf-textarea {
-    @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-foreground
+    .rf-textarea {
+        @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-foreground
       placeholder:text-input-placeholder transition-colors duration-150
       hover:border-input-border-hover focus:outline-none focus:ring-2 focus:ring-ring/40
       focus:border-input-focus disabled:opacity-50 disabled:cursor-not-allowed resize-y min-h-20;
-  }
-  .rf-textarea-error {
-    @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
-  }
+    }
+    .rf-textarea-error {
+        @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
+    }
 
-  .rf-rich {
-    @apply rounded-lg border border-input-border bg-input transition-colors duration-150;
-  }
-  .rf-rich:hover {
-    @apply border-input-border-hover;
-  }
-  .rf-rich:focus-within {
-    @apply border-input-focus ring-2 ring-ring/40;
-  }
-  .rf-rich-error {
-    @apply border-error;
-  }
-  .rf-rich-toolbar {
-    @apply flex items-center gap-1 border-b border-input-border px-2 py-1.5;
-  }
-  .rf-rich-btn {
-    @apply inline-flex h-7 w-7 items-center justify-center rounded text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed;
-  }
-  .rf-rich-btn-active {
-    @apply bg-primary text-primary-foreground hover:bg-primary;
-  }
-  .rf-rich-divider {
-    @apply mx-1 h-5 w-px bg-border;
-  }
-  .rf-rich-editor {
-    @apply min-h-32 px-3 py-2 text-sm text-foreground;
-  }
-  .rf-rich-editor .ProseMirror {
-    @apply min-h-28 outline-none;
-  }
-  .rf-rich-editor .ProseMirror p.is-editor-empty:first-child::before {
-    color: var(--color-input-placeholder);
-    content: attr(data-placeholder);
-    float: left;
-    height: 0;
-    pointer-events: none;
-  }
-  .rf-rich-editor .ProseMirror p {
-    @apply mb-2;
-  }
-  .rf-rich-editor .ProseMirror ul {
-    @apply list-disc pl-5;
-  }
-  .rf-rich-editor .ProseMirror ol {
-    @apply list-decimal pl-5;
-  }
-  .rf-rich-editor .ProseMirror h2 {
-    @apply mb-2 mt-3 text-lg font-semibold;
-  }
-  .rf-rich-editor .ProseMirror h3 {
-    @apply mb-2 mt-3 text-base font-semibold;
-  }
-  .rf-rich-editor .ProseMirror blockquote {
-    @apply my-2 border-l-4 border-border pl-3 text-muted;
-  }
-  .rf-rich-editor .ProseMirror code {
-    @apply rounded border border-border bg-surface-hover px-1 py-0.5 font-mono text-xs;
-  }
-  .rf-rich-editor .ProseMirror pre {
-    @apply my-2 overflow-x-auto rounded border border-border bg-surface-hover p-3;
-  }
-  .rf-rich-editor .ProseMirror pre code {
-    @apply block border-0 bg-transparent p-0;
-  }
-  .rf-rich-editor .ProseMirror hr {
-    @apply my-3 border-border;
-  }
-  .rf-rich-editor .ProseMirror a {
-    @apply text-primary underline;
-  }
-  .rf-rich-editor .ProseMirror img {
-    @apply my-2 h-auto max-w-full rounded;
-  }
-  .rf-rich-editor .ProseMirror table {
-    @apply my-2 w-full border-collapse overflow-hidden rounded;
-  }
-  .rf-rich-editor .ProseMirror th,
-  .rf-rich-editor .ProseMirror td {
-    @apply border border-border px-2 py-1 align-top;
-  }
-  .rf-rich-editor .ProseMirror th {
-    @apply bg-surface font-semibold;
-  }
-  .rf-rich-editor .ProseMirror ul[data-type="taskList"] {
-    @apply list-none pl-0;
-  }
-  .rf-rich-editor .ProseMirror ul[data-type="taskList"] > li {
-    @apply my-1 flex items-start gap-2;
-  }
-  .rf-rich-editor .ProseMirror ul[data-type="taskList"] > li > label {
-    @apply mt-0.5 flex items-center;
-  }
-  .rf-rich-editor .ProseMirror ul[data-type="taskList"] > li > div {
-    @apply min-w-0 flex-1;
-  }
-  .rf-rich-editor .ProseMirror ul[data-type="taskList"] > li > div > p {
-    @apply mb-0;
-  }
-  .rf-rich-btn-text {
-    @apply text-[11px] font-semibold leading-none;
-  }
-  .rf-rich-disabled {
-    @apply opacity-60;
-  }
+    .rf-rich {
+        @apply rounded-lg border border-input-border bg-input transition-colors duration-150;
+    }
+    .rf-rich:hover {
+        @apply border-input-border-hover;
+    }
+    .rf-rich:focus-within {
+        @apply border-input-focus ring-2 ring-ring/40;
+    }
+    .rf-rich-error {
+        @apply border-error;
+    }
+    .rf-rich-toolbar {
+        @apply flex items-center gap-1 border-b border-input-border px-2 py-1.5;
+    }
+    .rf-rich-btn {
+        @apply inline-flex h-7 w-7 items-center justify-center rounded text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed;
+    }
+    .rf-rich-btn-active {
+        @apply bg-primary text-primary-foreground hover:bg-primary;
+    }
+    .rf-rich-divider {
+        @apply mx-1 h-5 w-px bg-border;
+    }
+    .rf-rich-editor {
+        @apply min-h-32 px-3 py-2 text-sm text-foreground;
+    }
+    .rf-rich-editor .ProseMirror {
+        @apply min-h-28 outline-none;
+    }
+    .rf-rich-editor .ProseMirror p.is-editor-empty:first-child::before {
+        color: var(--color-input-placeholder);
+        content: attr(data-placeholder);
+        float: left;
+        height: 0;
+        pointer-events: none;
+    }
+    .rf-rich-editor .ProseMirror p {
+        @apply mb-2;
+    }
+    .rf-rich-editor .ProseMirror ul {
+        @apply list-disc pl-5;
+    }
+    .rf-rich-editor .ProseMirror ol {
+        @apply list-decimal pl-5;
+    }
+    .rf-rich-editor .ProseMirror h2 {
+        @apply mb-2 mt-3 text-lg font-semibold;
+    }
+    .rf-rich-editor .ProseMirror h3 {
+        @apply mb-2 mt-3 text-base font-semibold;
+    }
+    .rf-rich-editor .ProseMirror blockquote {
+        @apply my-2 border-l-4 border-border pl-3 text-muted;
+    }
+    .rf-rich-editor .ProseMirror code {
+        @apply rounded border border-border bg-surface-hover px-1 py-0.5 font-mono text-xs;
+    }
+    .rf-rich-editor .ProseMirror pre {
+        @apply my-2 overflow-x-auto rounded border border-border bg-surface-hover p-3;
+    }
+    .rf-rich-editor .ProseMirror pre code {
+        @apply block border-0 bg-transparent p-0;
+    }
+    .rf-rich-editor .ProseMirror hr {
+        @apply my-3 border-border;
+    }
+    .rf-rich-editor .ProseMirror a {
+        @apply text-primary underline;
+    }
+    .rf-rich-editor .ProseMirror img {
+        @apply my-2 h-auto max-w-full rounded;
+    }
+    .rf-rich-editor .ProseMirror table {
+        @apply my-2 w-full border-collapse overflow-hidden rounded;
+    }
+    .rf-rich-editor .ProseMirror th,
+    .rf-rich-editor .ProseMirror td {
+        @apply border border-border px-2 py-1 align-top;
+    }
+    .rf-rich-editor .ProseMirror th {
+        @apply bg-surface font-semibold;
+    }
+    .rf-rich-editor .ProseMirror ul[data-type="taskList"] {
+        @apply list-none pl-0;
+    }
+    .rf-rich-editor .ProseMirror ul[data-type="taskList"] > li {
+        @apply my-1 flex items-start gap-2;
+    }
+    .rf-rich-editor .ProseMirror ul[data-type="taskList"] > li > label {
+        @apply mt-0.5 flex items-center;
+    }
+    .rf-rich-editor .ProseMirror ul[data-type="taskList"] > li > div {
+        @apply min-w-0 flex-1;
+    }
+    .rf-rich-editor .ProseMirror ul[data-type="taskList"] > li > div > p {
+        @apply mb-0;
+    }
+    .rf-rich-btn-text {
+        @apply text-[11px] font-semibold leading-none;
+    }
+    .rf-rich-disabled {
+        @apply opacity-60;
+    }
 
-  .rf-select {
-    @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 pr-10 text-sm text-foreground
+    .rf-select {
+        @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 pr-10 text-sm text-foreground
       transition-colors duration-150 hover:border-input-border-hover focus:outline-none focus:ring-2
       focus:ring-ring/40 focus:border-input-focus disabled:opacity-50 disabled:cursor-not-allowed
       appearance-none bg-no-repeat;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-    background-position: right 0.75rem center;
-    background-size: 1rem;
-  }
-  .rf-select-error {
-    @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
-  }
-  .rf-select-placeholder { @apply text-input-placeholder; }
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237a7a8e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+        background-position: right 0.75rem center;
+        background-size: 1rem;
+    }
+    .rf-select-error {
+        @apply border-error hover:border-error focus:ring-error/40 focus:border-error;
+    }
+    .rf-select-placeholder {
+        @apply text-input-placeholder;
+    }
 
-  .rf-checkbox-wrapper { @apply flex items-center gap-2.5 cursor-pointer; }
-  .rf-checkbox-hidden { @apply sr-only; }
-  .rf-checkbox-box {
-    @apply flex items-center justify-center h-[18px] w-[18px] shrink-0 rounded border-2 border-input-border bg-input
+    .rf-checkbox-wrapper {
+        @apply flex items-center gap-2.5 cursor-pointer;
+    }
+    .rf-checkbox-hidden {
+        @apply sr-only;
+    }
+    .rf-checkbox-box {
+        @apply flex items-center justify-center w-4.5 h-4.5 shrink-0 rounded border-2 border-input-border bg-input
       transition-all duration-150;
-  }
-  .rf-checkbox-icon { @apply h-3 w-3 text-primary-foreground opacity-0 transition-opacity duration-100; }
-  .rf-checkbox-hidden:checked + .rf-checkbox-box {
-    @apply border-primary bg-primary;
-  }
-  .rf-checkbox-hidden:checked + .rf-checkbox-box .rf-checkbox-icon { @apply opacity-100; }
-  .rf-checkbox-hidden:focus-visible + .rf-checkbox-box { @apply ring-2 ring-ring/40; }
-  .rf-checkbox-hidden:disabled + .rf-checkbox-box { @apply opacity-50 cursor-not-allowed; }
-  .rf-checkbox-wrapper:hover .rf-checkbox-box { @apply border-input-border-hover; }
-  .rf-checkbox-hidden:checked + .rf-checkbox-box:hover { @apply border-primary bg-primary; }
-  .rf-checkbox-error { @apply border-error; }
-  .rf-checkbox-label { @apply text-sm text-foreground select-none; }
+    }
+    .rf-checkbox-icon {
+        @apply h-3 w-3 text-primary-foreground opacity-0 transition-opacity duration-100;
+    }
+    .rf-checkbox-hidden:checked + .rf-checkbox-box {
+        @apply border-primary bg-primary;
+    }
+    .rf-checkbox-hidden:checked + .rf-checkbox-box .rf-checkbox-icon {
+        @apply opacity-100;
+    }
+    .rf-checkbox-hidden:focus-visible + .rf-checkbox-box {
+        @apply ring-2 ring-ring/40;
+    }
+    .rf-checkbox-hidden:disabled + .rf-checkbox-box {
+        @apply opacity-50 cursor-not-allowed;
+    }
+    .rf-checkbox-wrapper:hover .rf-checkbox-box {
+        @apply border-input-border-hover;
+    }
+    .rf-checkbox-hidden:checked + .rf-checkbox-box:hover {
+        @apply border-primary bg-primary;
+    }
+    .rf-checkbox-error {
+        @apply border-error;
+    }
+    .rf-checkbox-label {
+        @apply text-sm text-foreground select-none;
+    }
 
-  .rf-checkbox-group { @apply grid gap-x-6 gap-y-1; }
+    .rf-checkbox-group {
+        @apply grid gap-x-6 gap-y-1;
+    }
 
-  .rf-radio-group { @apply flex flex-col gap-2; }
-  .rf-radio-wrapper { @apply flex items-center gap-2.5 cursor-pointer; }
-  .rf-radio-hidden { @apply sr-only; }
-  .rf-radio-circle {
-    @apply flex items-center justify-center h-[18px] w-[18px] shrink-0 rounded-full border-2 border-input-border bg-input
+    .rf-radio-group {
+        @apply flex flex-col gap-2;
+    }
+    .rf-radio-wrapper {
+        @apply flex items-center gap-2.5 cursor-pointer;
+    }
+    .rf-radio-hidden {
+        @apply sr-only;
+    }
+    .rf-radio-circle {
+        @apply flex items-center justify-center w-4.5 h-4.5 shrink-0 rounded-full border-2 border-input-border bg-input
       transition-all duration-150;
-  }
-  .rf-radio-dot {
-    @apply h-2 w-2 rounded-full bg-primary-foreground;
-  }
-  .rf-radio-hidden:checked + .rf-radio-circle {
-    @apply border-primary bg-primary;
-  }
-  .rf-radio-hidden:focus-visible + .rf-radio-circle { @apply ring-2 ring-ring/40; }
-  .rf-radio-hidden:disabled + .rf-radio-circle { @apply opacity-50 cursor-not-allowed; }
-  .rf-radio-wrapper:hover .rf-radio-circle { @apply border-input-border-hover; }
-  .rf-radio-hidden:checked + .rf-radio-circle:hover { @apply border-primary bg-primary; }
-  .rf-radio-error { @apply border-error; }
-  .rf-radio-label { @apply text-sm text-foreground select-none; }
+    }
+    .rf-radio-dot {
+        @apply h-2 w-2 rounded-full bg-primary-foreground;
+    }
+    .rf-radio-hidden:checked + .rf-radio-circle {
+        @apply border-primary bg-primary;
+    }
+    .rf-radio-hidden:focus-visible + .rf-radio-circle {
+        @apply ring-2 ring-ring/40;
+    }
+    .rf-radio-hidden:disabled + .rf-radio-circle {
+        @apply opacity-50 cursor-not-allowed;
+    }
+    .rf-radio-wrapper:hover .rf-radio-circle {
+        @apply border-input-border-hover;
+    }
+    .rf-radio-hidden:checked + .rf-radio-circle:hover {
+        @apply border-primary bg-primary;
+    }
+    .rf-radio-error {
+        @apply border-error;
+    }
+    .rf-radio-label {
+        @apply text-sm text-foreground select-none;
+    }
 
-  .rf-error-message { @apply mt-1 text-xs text-error; }
-  .rf-note { @apply mt-1 text-xs text-muted; }
-  .rf-form-grid { @apply grid grid-cols-2 gap-x-4; }
+    .rf-error-message {
+        @apply mt-1 text-xs text-error;
+    }
+    .rf-note {
+        @apply mt-1 text-xs text-muted;
+    }
+    .rf-form-grid {
+        @apply grid grid-cols-2 gap-x-4;
+    }
 
-  /* ── Button ─────────────────────────────────────── */
-  .rf-btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-transparent font-medium
+    /* ── Button ─────────────────────────────────────── */
+    .rf-btn {
+        @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-transparent font-medium
       whitespace-nowrap transition-colors duration-150 select-none cursor-pointer;
-  }
-  .rf-btn:focus-visible {
-    @apply outline-none ring-2 ring-ring/40;
-  }
-  .rf-btn-size-xs { @apply h-8 min-w-8 px-2 text-xs; }
-  .rf-btn-size-sm { @apply h-8 px-3 text-sm; }
-  .rf-btn-size-md { @apply h-10 px-4 text-sm; }
-  .rf-btn-size-lg { @apply h-11 px-5 text-base; }
-  .rf-btn-icon { @apply aspect-square px-0; }
-  .rf-btn-spinner { @apply h-4 w-4 animate-spin; }
-  .rf-btn[disabled]:not([aria-busy="true"]) {
-    @apply cursor-not-allowed opacity-50;
-  }
-  .rf-btn[aria-busy="true"] {
-    @apply cursor-progress opacity-80;
-  }
-  .rf-btn-variant-primary {
-    @apply border-primary bg-primary text-primary-foreground hover:bg-primary-hover;
-  }
-  .rf-btn-variant-secondary {
-    @apply border-border bg-surface text-foreground hover:bg-surface-hover;
-  }
-  .rf-btn-variant-danger {
-    @apply border-error bg-error text-white hover:bg-error/90;
-  }
-  .rf-btn-variant-warning {
-    @apply border-warning/50 bg-warning-muted text-warning hover:bg-warning-muted/80;
-  }
-  .rf-btn-variant-error {
-    @apply border-error/50 bg-error-muted text-error hover:bg-error-muted/80;
-  }
-  .rf-btn-variant-success {
-    @apply border-success bg-success text-white hover:bg-success/90;
-  }
-  .rf-btn-variant-info {
-    @apply border-info bg-info text-white hover:bg-info/90;
-  }
-  .rf-btn-variant-plain {
-    @apply border-transparent bg-transparent text-muted hover:bg-surface-hover hover:text-foreground;
-  }
+    }
+    .rf-btn:focus-visible {
+        @apply outline-none ring-2 ring-ring/40;
+    }
+    .rf-btn-size-xs {
+        @apply h-8 min-w-8 px-2 text-xs;
+    }
+    .rf-btn-size-sm {
+        @apply h-8 px-3 text-sm;
+    }
+    .rf-btn-size-md {
+        @apply h-10 px-4 text-sm;
+    }
+    .rf-btn-size-lg {
+        @apply h-11 px-5 text-base;
+    }
+    .rf-btn-icon {
+        @apply aspect-square px-0;
+    }
+    .rf-btn-spinner {
+        @apply h-4 w-4 animate-spin;
+    }
+    .rf-btn[disabled]:not([aria-busy="true"]) {
+        @apply cursor-not-allowed opacity-50;
+    }
+    .rf-btn[aria-busy="true"] {
+        @apply cursor-progress opacity-80;
+    }
+    .rf-btn-variant-primary {
+        @apply border-primary bg-primary text-primary-foreground hover:bg-primary-hover;
+    }
+    .rf-btn-variant-secondary {
+        @apply border-border bg-surface text-foreground hover:bg-surface-hover;
+    }
+    .rf-btn-variant-danger {
+        @apply border-error bg-error text-white hover:bg-error/90;
+    }
+    .rf-btn-variant-warning {
+        @apply border-warning/50 bg-warning-muted text-warning hover:bg-warning-muted/80;
+    }
+    .rf-btn-variant-error {
+        @apply border-error/50 bg-error-muted text-error hover:bg-error-muted/80;
+    }
+    .rf-btn-variant-success {
+        @apply border-success bg-success text-white hover:bg-success/90;
+    }
+    .rf-btn-variant-info {
+        @apply border-info bg-info text-white hover:bg-info/90;
+    }
+    .rf-btn-variant-plain {
+        @apply border-transparent bg-transparent text-muted hover:bg-surface-hover hover:text-foreground;
+    }
 
-  /* ── DataTable ─────────────────────────────────── */
-  .rf-dt-shell {
-    @apply overflow-hidden rounded-xl border border-border bg-surface;
-  }
-  .rf-dt-scroll {
-    @apply overflow-auto;
-    max-height: min(58vh, 40rem);
-  }
-  .rf-dt-table {
-    @apply min-w-full w-max text-left text-sm;
-    border-collapse: separate;
-    border-spacing: 0;
-  }
-  .rf-dt-head-row {
-    @apply bg-surface-hover/50;
-  }
-  .rf-dt-th {
-    @apply sticky top-0 z-20 whitespace-nowrap border-b border-border bg-surface-hover/95 px-4 py-3 font-medium text-muted;
-  }
-  .rf-dt-th-index {
-    @apply w-12;
-  }
-  .rf-dt-th-sortable {
-    @apply cursor-pointer select-none;
-  }
-  .rf-dt-row {
-    @apply hover:bg-surface-hover/30;
-  }
-  .rf-dt-td {
-    @apply whitespace-nowrap border-b border-border px-4 py-3 align-middle text-foreground;
-  }
-  .rf-dt-td-index {
-    @apply tabular-nums text-muted;
-  }
-  .rf-dt-empty-cell {
-    @apply px-4 py-8 text-center text-muted;
-  }
-  .rf-dt-foot {
-    @apply bg-surface-hover/20;
-  }
-  .rf-dt-table tbody tr:last-child .rf-dt-td {
-    @apply border-b-0;
-  }
+    /* ── DataTable ─────────────────────────────────── */
+    .rf-dt-shell {
+        @apply overflow-hidden rounded-xl border border-border bg-surface;
+    }
+    .rf-dt-scroll {
+        @apply overflow-auto;
+        max-height: min(58vh, 40rem);
+    }
+    .rf-dt-table {
+        @apply min-w-full w-max text-left text-sm;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+    .rf-dt-head-row {
+        @apply bg-surface-hover/50;
+    }
+    .rf-dt-th {
+        @apply sticky top-0 z-20 whitespace-nowrap border-b border-border bg-surface-hover/95 px-4 py-3 font-medium text-muted;
+    }
+    .rf-dt-th-index {
+        @apply w-12;
+    }
+    .rf-dt-th-sortable {
+        @apply cursor-pointer select-none;
+    }
+    .rf-dt-row {
+        @apply hover:bg-surface-hover/30;
+    }
+    .rf-dt-td {
+        @apply whitespace-nowrap border-b border-border px-4 py-3 align-middle text-foreground;
+    }
+    .rf-dt-td-index {
+        @apply tabular-nums text-muted;
+    }
+    .rf-dt-empty-cell {
+        @apply px-4 py-8 text-center text-muted;
+    }
+    .rf-dt-foot {
+        @apply bg-surface-hover/20;
+    }
+    .rf-dt-table tbody tr:last-child .rf-dt-td {
+        @apply border-b-0;
+    }
 
-  /* ── Modal ──────────────────────────────────────── */
-  .rf-modal-backdrop {
-    @apply fixed inset-0 flex items-center justify-center bg-black/50;
-    animation: rf-fade-in 150ms ease-out;
-  }
-  .rf-modal-panel {
-    @apply w-full flex flex-col rounded-xl bg-surface shadow-xl;
-    max-height: calc(100vh - 2rem);
-    animation: rf-slide-up 150ms ease-out;
-  }
-  .rf-modal-header {
-    @apply flex items-center justify-between shrink-0 px-6 py-4 border-b border-border;
-  }
-  .rf-modal-title { @apply text-lg font-semibold text-foreground; }
-  .rf-modal-close {
-    @apply rounded-lg p-1.5 text-muted transition-colors duration-150
+    /* ── Layout ─────────────────────────────────────── */
+    .rf-header {
+        @apply fixed top-0 left-0 right-0 h-14 bg-surface/95 border-b border-border
+      flex items-center px-4 z-30 backdrop-blur-sm;
+        box-shadow: 0 0 20px var(--color-neon-glow);
+    }
+    .rf-stat-card {
+        @apply rounded-xl bg-surface border border-border p-5;
+        box-shadow: 0 0 15px var(--color-neon-glow);
+    }
+    .rf-badge {
+        @apply inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-xs
+      font-semibold rounded-full bg-primary text-primary-foreground;
+    }
+
+    /* ── User Sidebar (desktop) ────────────────────── */
+    .rf-user-sidebar {
+        @apply fixed left-0 top-14 bottom-0 w-56 bg-surface/95 border-r border-border
+      overflow-y-auto overflow-x-hidden z-20 backdrop-blur-sm;
+        box-shadow: 4px 0 20px var(--color-neon-glow);
+    }
+    .rf-user-sidebar-link {
+        @apply flex items-center gap-3 px-4 py-2.5 text-sm text-muted rounded-lg
+      transition-all duration-150 hover:bg-surface-hover hover:text-foreground whitespace-nowrap;
+    }
+    .rf-user-sidebar-link-active {
+        @apply bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary;
+        box-shadow: inset 3px 0 0 var(--color-primary);
+    }
+
+    /* ── Bottom Nav (mobile) ───────────────────────── */
+    .rf-bottom-nav {
+        @apply fixed bottom-0 left-0 right-0 h-16 bg-surface/95 border-t border-border
+      flex items-stretch z-30 backdrop-blur-sm;
+        box-shadow: 0 -4px 20px var(--color-neon-glow);
+        padding-bottom: env(safe-area-inset-bottom, 0);
+    }
+    .rf-bottom-nav-item {
+        @apply flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium text-muted
+      transition-colors duration-150;
+    }
+    .rf-bottom-nav-item-active {
+        @apply text-primary;
+    }
+    .rf-bottom-nav-item-active svg {
+        filter: drop-shadow(0 0 6px var(--color-neon-glow-strong));
+    }
+
+    /* ── Me Page ───────────────────────────────────── */
+    .rf-me-card {
+        @apply rounded-2xl bg-surface border border-border overflow-hidden;
+        box-shadow: 0 0 12px var(--color-neon-glow);
+    }
+    .rf-me-avatar {
+        @apply flex h-20 w-20 items-center justify-center rounded-full border-2 border-primary/30 bg-surface-hover text-primary;
+        box-shadow: 0 0 24px var(--color-neon-glow-strong);
+    }
+    .rf-me-row {
+        @apply flex items-center justify-between px-4 py-3;
+    }
+    .rf-me-action-row {
+        @apply flex w-full items-center gap-3 px-4 py-3.5 transition-colors duration-150 hover:bg-surface-hover;
+    }
+    .rf-me-action-icon {
+        @apply flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary;
+    }
+
+    /* ── Modal ──────────────────────────────────────── */
+    .rf-modal-backdrop {
+        @apply fixed inset-0 flex items-center justify-center bg-black/50;
+        animation: rf-fade-in 150ms ease-out;
+    }
+    .rf-modal-panel {
+        @apply w-full flex flex-col rounded-xl bg-surface shadow-xl;
+        max-height: calc(100vh - 2rem);
+        animation: rf-slide-up 150ms ease-out;
+    }
+    .rf-modal-header {
+        @apply flex items-center justify-between shrink-0 px-6 py-4 border-b border-border;
+    }
+    .rf-modal-title {
+        @apply text-lg font-semibold text-foreground;
+    }
+    .rf-modal-close {
+        @apply rounded-lg p-1.5 text-muted transition-colors duration-150
       hover:bg-surface-hover hover:text-foreground;
-  }
-  .rf-modal-body { @apply flex-1 overflow-y-auto px-6 py-4; }
-  .rf-modal-footer {
-    @apply flex justify-end gap-3 shrink-0 px-6 py-4 border-t border-border;
-  }
-  .rf-modal-btn-primary {
-    @apply px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground
+    }
+    .rf-modal-body {
+        @apply flex-1 overflow-y-auto px-6 py-4;
+    }
+    .rf-modal-footer {
+        @apply flex justify-end gap-3 shrink-0 px-6 py-4 border-t border-border;
+    }
+    .rf-modal-btn-primary {
+        @apply px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground
       transition-colors duration-150 hover:bg-primary/90;
-  }
-  .rf-modal-btn-secondary {
-    @apply px-4 py-2 text-sm font-medium rounded-lg border border-border text-foreground
+    }
+    .rf-modal-btn-secondary {
+        @apply px-4 py-2 text-sm font-medium rounded-lg border border-border text-foreground
       transition-colors duration-150 hover:bg-surface-hover;
-  }
+    }
 }
 
 @keyframes rf-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
 }
 @keyframes rf-slide-up {
-  from { opacity: 0; transform: translateY(0.5rem); }
-  to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(0.5rem);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }

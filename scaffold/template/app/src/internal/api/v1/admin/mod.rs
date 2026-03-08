@@ -8,7 +8,11 @@ mod auth;
 mod content_page;
 mod content_page_multipart;
 mod country;
+mod hierarchy;
+mod introducer_change;
 mod tiptap_upload;
+mod user;
+mod user_credit;
 
 pub fn router(state: AppApiState) -> ApiRouter {
     ApiRouter::new()
@@ -25,6 +29,10 @@ fn guarded_router(state: AppApiState) -> ApiRouter {
             }),
         )
         .nest("/admins", account::router(state.clone()))
+        .nest("/users", user::router(state.clone()))
+        .nest("/users/hierarchy", hierarchy::router(state.clone()))
+        .nest("/users/credits", user_credit::router(state.clone()))
+        .nest("/introducer_changes", introducer_change::router(state.clone()))
         .nest("/countries", country::router(state.clone()))
         .nest("/content_page", content_page::router(state.clone()))
         .nest("/uploads", tiptap_upload::router(state.clone()))

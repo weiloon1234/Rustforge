@@ -1,0 +1,39 @@
+[CreditType]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "Credit1", value = 1 },
+  { name = "Credit2", value = 2 }
+]
+
+[CreditTransactionType]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "AdminAdd", value = 101 },
+  { name = "AdminDeduct", value = 102 },
+  { name = "TransferIn", value = 201 },
+  { name = "TransferOut", value = 202 },
+  { name = "Withdraw", value = 301 },
+  { name = "WithdrawRefund", value = 302 },
+  { name = "TopUp", value = 401 }
+]
+
+[model.user_credit_transaction]
+table = "user_credit_transactions"
+pk = "id"
+pk_type = "i64"
+id_strategy = "snowflake"
+soft_delete = false
+fields = [
+  "id:i64",
+  "user_id:i64",
+  "credit_type:CreditType",
+  "amount:rust_decimal::Decimal",
+  "transaction_type:CreditTransactionType",
+  "related_key:Option<String>",
+  "params:Option<serde_json::Value>",
+  "remark:Option<String>",
+  "created_at:datetime",
+  "updated_at:datetime"
+]

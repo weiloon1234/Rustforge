@@ -29,7 +29,41 @@ export const CONTENT_PAGE_SYSTEM_FLAGS: ReadonlyArray<ContentPageSystemFlag> = [
   "1",
 ];
 
-export type Permission = "admin.read" | "admin.manage" | "content_page.read" | "content_page.manage" | "country.read" | "country.manage" | "export";
+export type CreditTransactionType = "101" | "102" | "201" | "202" | "301" | "302" | "401";
+
+export const CREDIT_TRANSACTION_TYPE: Readonly<Record<string, CreditTransactionType>> = {
+  _101: "101",
+  _102: "102",
+  _201: "201",
+  _202: "202",
+  _301: "301",
+  _302: "302",
+  _401: "401",
+};
+
+export const CREDIT_TRANSACTION_TYPES: ReadonlyArray<CreditTransactionType> = [
+  "101",
+  "102",
+  "201",
+  "202",
+  "301",
+  "302",
+  "401",
+];
+
+export type CreditType = "1" | "2";
+
+export const CREDIT_TYPE: Readonly<Record<string, CreditType>> = {
+  _1: "1",
+  _2: "2",
+};
+
+export const CREDIT_TYPES: ReadonlyArray<CreditType> = [
+  "1",
+  "2",
+];
+
+export type Permission = "admin.read" | "admin.manage" | "content_page.read" | "content_page.manage" | "country.read" | "country.manage" | "user.read" | "user.manage" | "user.hierarchy" | "user.change_introducer" | "user.credit" | "export";
 
 export interface PermissionMeta {
   key: Permission;
@@ -46,6 +80,11 @@ export const PERMISSION_META: ReadonlyArray<PermissionMeta> = [
   { key: "content_page.manage", guard: "admin", label: "Manage Content Pages", group: "content_page", description: "Update and delete non-system pages." },
   { key: "country.read", guard: "admin", label: "Read Countries", group: "country", description: "View countries and country datatable records." },
   { key: "country.manage", guard: "admin", label: "Manage Countries", group: "country", description: "Update country status." },
+  { key: "user.read", guard: "admin", label: "Read Users", group: "user", description: "View user profiles and datatable records." },
+  { key: "user.manage", guard: "admin", label: "Manage Users", group: "user", description: "Create/update/ban/unban user records." },
+  { key: "user.hierarchy", guard: "admin", label: "View User Hierarchy", group: "user", description: "Browse user referral tree and navigate downlines." },
+  { key: "user.change_introducer", guard: "admin", label: "Change User Introducer", group: "user", description: "Change a user's introducer and view change logs." },
+  { key: "user.credit", guard: "admin", label: "Manage User Credits", group: "user", description: "View credit transactions and adjust user balances." },
   { key: "export", guard: "admin", label: "Export Data", group: "datatable", description: "Export datatable records as CSV." },
 ];
 
@@ -56,6 +95,11 @@ export const PERMISSIONS: ReadonlyArray<Permission> = [
   "content_page.manage",
   "country.read",
   "country.manage",
+  "user.read",
+  "user.manage",
+  "user.hierarchy",
+  "user.change_introducer",
+  "user.credit",
   "export",
 ];
 
@@ -66,6 +110,11 @@ export const PERMISSION: Readonly<Record<string, Permission>> = {
   CONTENT_PAGE_MANAGE: "content_page.manage",
   COUNTRY_READ: "country.read",
   COUNTRY_MANAGE: "country.manage",
+  USER_READ: "user.read",
+  USER_MANAGE: "user.manage",
+  USER_HIERARCHY: "user.hierarchy",
+  USER_CHANGE_INTRODUCER: "user.change_introducer",
+  USER_CREDIT: "user.credit",
   EXPORT: "export",
 };
 
@@ -76,5 +125,22 @@ export const PERMISSION_META_BY_KEY: Readonly<Record<Permission, PermissionMeta>
   "content_page.manage": { key: "content_page.manage", guard: "admin", label: "Manage Content Pages", group: "content_page", description: "Update and delete non-system pages." },
   "country.read": { key: "country.read", guard: "admin", label: "Read Countries", group: "country", description: "View countries and country datatable records." },
   "country.manage": { key: "country.manage", guard: "admin", label: "Manage Countries", group: "country", description: "Update country status." },
+  "user.read": { key: "user.read", guard: "admin", label: "Read Users", group: "user", description: "View user profiles and datatable records." },
+  "user.manage": { key: "user.manage", guard: "admin", label: "Manage Users", group: "user", description: "Create/update/ban/unban user records." },
+  "user.hierarchy": { key: "user.hierarchy", guard: "admin", label: "View User Hierarchy", group: "user", description: "Browse user referral tree and navigate downlines." },
+  "user.change_introducer": { key: "user.change_introducer", guard: "admin", label: "Change User Introducer", group: "user", description: "Change a user's introducer and view change logs." },
+  "user.credit": { key: "user.credit", guard: "admin", label: "Manage User Credits", group: "user", description: "View credit transactions and adjust user balances." },
   "export": { key: "export", guard: "admin", label: "Export Data", group: "datatable", description: "Export datatable records as CSV." },
 };
+
+export type UserBanStatus = "0" | "1";
+
+export const USER_BAN_STATUS: Readonly<Record<string, UserBanStatus>> = {
+  _0: "0",
+  _1: "1",
+};
+
+export const USER_BAN_STATUSES: ReadonlyArray<UserBanStatus> = [
+  "0",
+  "1",
+];

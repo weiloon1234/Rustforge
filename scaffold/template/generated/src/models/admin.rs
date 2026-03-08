@@ -5,7 +5,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, bind, bind_query, bind_scalar, generate_snowflake_i64, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
@@ -1374,7 +1374,7 @@ pub async fn save(self) -> Result<AdminView> {
 pub struct AdminUpdate<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(AdminCol, BindValue)>,
+    sets: Vec<(AdminCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
@@ -1393,52 +1393,60 @@ impl<'db> AdminUpdate<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((AdminCol::Id , val.into()));
+        self.sets.push((AdminCol::Id, val.into(), SetMode::Assign));
+        self
+    }
+    pub fn increment_id(mut self, val: i64) -> Self {
+        self.sets.push((AdminCol::Id, val.into(), SetMode::Increment));
+        self
+    }
+    pub fn decrement_id(mut self, val: i64) -> Self {
+        self.sets.push((AdminCol::Id, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_username(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Username , val.into()));
+        self.sets.push((AdminCol::Username, val.into(), SetMode::Assign));
         self
     }
     pub fn set_email(mut self, val: Option<String>) -> Self {
-        self.sets.push((AdminCol::Email , val.into()));
+        self.sets.push((AdminCol::Email, val.into(), SetMode::Assign));
         self
     }
     pub fn set_locale(mut self, val: Option<String>) -> Self {
-        self.sets.push((AdminCol::Locale , val.into()));
+        self.sets.push((AdminCol::Locale, val.into(), SetMode::Assign));
         self
     }
     pub fn set_password(mut self, val: &str) -> anyhow::Result<Self> {
         let hashed = core_db::common::auth::hash::hash_password(val)?;
-        self.sets.push((AdminCol::Password , hashed.into()));
+        self.sets.push((AdminCol::Password, hashed.into(), SetMode::Assign));
         Ok(self)
     }
     pub fn set_password_raw(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Password , val.into()));
+        self.sets.push((AdminCol::Password, val.into(), SetMode::Assign));
         self
     }
     pub fn set_name(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Name , val.into()));
+        self.sets.push((AdminCol::Name, val.into(), SetMode::Assign));
         self
     }
     pub fn set_admin_type(mut self, val: AdminType) -> Self {
-        self.sets.push((AdminCol::AdminType , val.into()));
+        self.sets.push((AdminCol::AdminType, val.into(), SetMode::Assign));
         self
     }
     pub fn set_abilities(mut self, val: serde_json::Value) -> Self {
-        self.sets.push((AdminCol::Abilities , val.into()));
+        self.sets.push((AdminCol::Abilities, val.into(), SetMode::Assign));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AdminCol::CreatedAt , val.into()));
+        self.sets.push((AdminCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AdminCol::UpdatedAt , val.into()));
+        self.sets.push((AdminCol::UpdatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((AdminCol::DeletedAt , val.into()));
+        self.sets.push((AdminCol::DeletedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
@@ -1551,11 +1559,15 @@ pub async fn save(self) -> Result<u64> {
     }
 
     async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<u64> {
-        let (mut cols, mut set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();
+        let mut cols = Vec::new();
+        let mut set_binds = Vec::new();
+        let mut set_modes = Vec::new();
+        for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
         if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
             cols.push(AdminCol::UpdatedAt);
             set_binds.push(now.into());
+            set_modes.push(SetMode::Assign);
         }
         // find target ids for localized updates
         let select_sql = format!("SELECT id FROM admin WHERE {}", self.where_sql.join(" AND "));
@@ -1563,8 +1575,14 @@ pub async fn save(self) -> Result<u64> {
         for b in &self.binds { select_q = bind_scalar(select_q, b.clone()); }
         let target_ids = db.fetch_all_scalar(select_q).await?;
         let mut parts: Vec<String> = Vec::new();
-        for (i, c) in cols.iter().enumerate() {
-            parts.push(format!("{} = ${}", c.as_sql(), i + 1));
+        for (i, (c, mode)) in cols.iter().zip(set_modes.iter()).enumerate() {
+            let col = c.as_sql();
+            let part = match mode {
+                SetMode::Assign => format!("{} = ${}", col, i + 1),
+                SetMode::Increment => format!("{} = {} + ${}", col, col, i + 1),
+                SetMode::Decrement => format!("{} = {} - ${}", col, col, i + 1),
+            };
+            parts.push(part);
         }
         let offset = parts.len();
         let mut where_sql = self.where_sql;
@@ -1663,6 +1681,7 @@ impl AdminTableAdapter {
         let trimmed = raw.trim();
         let lower = trimmed.to_ascii_lowercase(); if lower == "true" { return true.into(); } if lower == "false" { return false.into(); }
         if let Ok(v) = trimmed.parse::<i64>() { return v.into(); }
+        if let Ok(v) = trimmed.parse::<rust_decimal::Decimal>() { return v.into(); }
         if let Ok(v) = trimmed.parse::<f64>() { return v.into(); }
         if let Ok(v) = uuid::Uuid::parse_str(trimmed) { return v.into(); }
         if let Some(v) = Self::parse_datetime(trimmed, false) { return v.into(); }

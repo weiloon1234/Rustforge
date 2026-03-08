@@ -2,3 +2,8 @@ pub mod admin;
 pub mod admin_auth;
 pub mod content_page;
 pub mod country;
+pub mod introducer_change;
+pub mod user_auth;
+pub mod user_manage;
+pub mod user_credit;
+pub mod user_team;

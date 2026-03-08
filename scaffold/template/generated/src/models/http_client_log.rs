@@ -5,7 +5,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, bind, bind_query, bind_scalar, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
@@ -1209,7 +1209,7 @@ pub async fn save(self) -> Result<HttpClientLogView> {
 pub struct HttpClientLogUpdate<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(HttpClientLogCol, BindValue)>,
+    sets: Vec<(HttpClientLogCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
@@ -1228,43 +1228,43 @@ impl<'db> HttpClientLogUpdate<'db> {
 
 
 pub fn set_id(mut self, val: uuid::Uuid) -> Self {
-        self.sets.push((HttpClientLogCol::Id , val.into()));
+        self.sets.push((HttpClientLogCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn set_request_url(mut self, val: String) -> Self {
-        self.sets.push((HttpClientLogCol::RequestUrl , val.into()));
+        self.sets.push((HttpClientLogCol::RequestUrl, val.into(), SetMode::Assign));
         self
     }
     pub fn set_request_method(mut self, val: String) -> Self {
-        self.sets.push((HttpClientLogCol::RequestMethod , val.into()));
+        self.sets.push((HttpClientLogCol::RequestMethod, val.into(), SetMode::Assign));
         self
     }
     pub fn set_request_headers(mut self, val: Option<serde_json::Value>) -> Self {
-        self.sets.push((HttpClientLogCol::RequestHeaders , val.into()));
+        self.sets.push((HttpClientLogCol::RequestHeaders, val.into(), SetMode::Assign));
         self
     }
     pub fn set_request_body(mut self, val: Option<String>) -> Self {
-        self.sets.push((HttpClientLogCol::RequestBody , val.into()));
+        self.sets.push((HttpClientLogCol::RequestBody, val.into(), SetMode::Assign));
         self
     }
     pub fn set_response_status(mut self, val: Option<i32>) -> Self {
-        self.sets.push((HttpClientLogCol::ResponseStatus , val.into()));
+        self.sets.push((HttpClientLogCol::ResponseStatus, val.into(), SetMode::Assign));
         self
     }
     pub fn set_response_headers(mut self, val: Option<serde_json::Value>) -> Self {
-        self.sets.push((HttpClientLogCol::ResponseHeaders , val.into()));
+        self.sets.push((HttpClientLogCol::ResponseHeaders, val.into(), SetMode::Assign));
         self
     }
     pub fn set_response_body(mut self, val: Option<String>) -> Self {
-        self.sets.push((HttpClientLogCol::ResponseBody , val.into()));
+        self.sets.push((HttpClientLogCol::ResponseBody, val.into(), SetMode::Assign));
         self
     }
     pub fn set_duration_ms(mut self, val: Option<i32>) -> Self {
-        self.sets.push((HttpClientLogCol::DurationMs , val.into()));
+        self.sets.push((HttpClientLogCol::DurationMs, val.into(), SetMode::Assign));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((HttpClientLogCol::CreatedAt , val.into()));
+        self.sets.push((HttpClientLogCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
@@ -1371,15 +1371,24 @@ pub async fn save(self) -> Result<u64> {
     }
 
     async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<u64> {
-        let (mut cols, mut set_binds): (Vec<_>, Vec<_>) = self.sets.into_iter().unzip();
+        let mut cols = Vec::new();
+        let mut set_binds = Vec::new();
+        let mut set_modes = Vec::new();
+        for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
         // find target ids for localized updates
         let select_sql = format!("SELECT id FROM http_client_logs WHERE {}", self.where_sql.join(" AND "));
-        let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
+        let mut select_q = sqlx::query_scalar::<_, uuid::Uuid>(&select_sql);
         for b in &self.binds { select_q = bind_scalar(select_q, b.clone()); }
         let target_ids = db.fetch_all_scalar(select_q).await?;
         let mut parts: Vec<String> = Vec::new();
-        for (i, c) in cols.iter().enumerate() {
-            parts.push(format!("{} = ${}", c.as_sql(), i + 1));
+        for (i, (c, mode)) in cols.iter().zip(set_modes.iter()).enumerate() {
+            let col = c.as_sql();
+            let part = match mode {
+                SetMode::Assign => format!("{} = ${}", col, i + 1),
+                SetMode::Increment => format!("{} = {} + ${}", col, col, i + 1),
+                SetMode::Decrement => format!("{} = {} - ${}", col, col, i + 1),
+            };
+            parts.push(part);
         }
         let offset = parts.len();
         let mut where_sql = self.where_sql;
@@ -1475,6 +1484,7 @@ impl HttpClientLogTableAdapter {
         let trimmed = raw.trim();
         let lower = trimmed.to_ascii_lowercase(); if lower == "true" { return true.into(); } if lower == "false" { return false.into(); }
         if let Ok(v) = trimmed.parse::<i64>() { return v.into(); }
+        if let Ok(v) = trimmed.parse::<rust_decimal::Decimal>() { return v.into(); }
         if let Ok(v) = trimmed.parse::<f64>() { return v.into(); }
         if let Ok(v) = uuid::Uuid::parse_str(trimmed) { return v.into(); }
         if let Some(v) = Self::parse_datetime(trimmed, false) { return v.into(); }

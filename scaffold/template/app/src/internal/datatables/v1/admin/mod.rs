@@ -2,6 +2,9 @@ pub mod account;
 pub mod content_page;
 pub mod country;
 pub mod http_client_log;
+pub mod introducer_change;
+pub mod user;
+pub mod user_credit_transaction;
 pub mod webhook_log;
 
 use std::collections::HashSet;
@@ -20,6 +23,15 @@ use crate::contracts::datatable::admin::{
     http_client_log::{
         ROUTE_PREFIX as HTTP_CLIENT_LOG_ROUTE_PREFIX, SCOPED_KEY as HTTP_CLIENT_LOG_SCOPED_KEY,
     },
+    introducer_change::{
+        ROUTE_PREFIX as INTRODUCER_CHANGE_ROUTE_PREFIX,
+        SCOPED_KEY as INTRODUCER_CHANGE_SCOPED_KEY,
+    },
+    user::{ROUTE_PREFIX as USER_ROUTE_PREFIX, SCOPED_KEY as USER_SCOPED_KEY},
+    user_credit_transaction::{
+        ROUTE_PREFIX as USER_CREDIT_TRANSACTION_ROUTE_PREFIX,
+        SCOPED_KEY as USER_CREDIT_TRANSACTION_SCOPED_KEY,
+    },
     webhook_log::{ROUTE_PREFIX as WEBHOOK_LOG_ROUTE_PREFIX, SCOPED_KEY as WEBHOOK_LOG_SCOPED_KEY},
 };
 use crate::internal::api::state::AppApiState;
@@ -28,6 +40,9 @@ pub use account::{build_admin_summary_output, AdminDataTableAppHooks};
 pub use content_page::ContentPageDataTableAppHooks;
 pub use country::CountryDataTableAppHooks;
 pub use http_client_log::HttpClientLogDataTableAppHooks;
+pub use user::{build_user_summary_output, UserDataTableAppHooks};
+pub use user_credit_transaction::UserCreditTransactionDataTableAppHooks;
+pub use introducer_change::IntroducerChangeDataTableAppHooks;
 pub use webhook_log::WebhookLogDataTableAppHooks;
 
 pub fn authorize_with_optional_export(
@@ -77,6 +92,18 @@ fn http_client_log_routes(state: AppApiState) -> ApiRouter {
     http_client_log::routes(state)
 }
 
+fn user_routes(state: AppApiState) -> ApiRouter {
+    user::routes(state)
+}
+
+fn user_credit_transaction_routes(state: AppApiState) -> ApiRouter {
+    user_credit_transaction::routes(state)
+}
+
+fn introducer_change_routes(state: AppApiState) -> ApiRouter {
+    introducer_change::routes(state)
+}
+
 fn webhook_log_routes(state: AppApiState) -> ApiRouter {
     webhook_log::routes(state)
 }
@@ -111,6 +138,24 @@ pub static ADMIN_SCOPED_DATATABLES: &[ScopedDatatableSpec] = &[
         route_prefix: COUNTRY_ROUTE_PREFIX,
         register: country::register_scoped,
         mount_routes: country_routes,
+    },
+    ScopedDatatableSpec {
+        scoped_key: USER_SCOPED_KEY,
+        route_prefix: USER_ROUTE_PREFIX,
+        register: user::register_scoped,
+        mount_routes: user_routes,
+    },
+    ScopedDatatableSpec {
+        scoped_key: USER_CREDIT_TRANSACTION_SCOPED_KEY,
+        route_prefix: USER_CREDIT_TRANSACTION_ROUTE_PREFIX,
+        register: user_credit_transaction::register_scoped,
+        mount_routes: user_credit_transaction_routes,
+    },
+    ScopedDatatableSpec {
+        scoped_key: INTRODUCER_CHANGE_SCOPED_KEY,
+        route_prefix: INTRODUCER_CHANGE_ROUTE_PREFIX,
+        register: introducer_change::register_scoped,
+        mount_routes: introducer_change_routes,
     },
 ];
 

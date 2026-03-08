@@ -26,6 +26,16 @@ pub enum Permission {
     CountryRead,
     #[serde(rename = "country.manage")]
     CountryManage,
+    #[serde(rename = "user.read")]
+    UserRead,
+    #[serde(rename = "user.manage")]
+    UserManage,
+    #[serde(rename = "user.hierarchy")]
+    UserHierarchy,
+    #[serde(rename = "user.change_introducer")]
+    UserChangeIntroducer,
+    #[serde(rename = "user.credit")]
+    UserCredit,
     #[serde(rename = "export")]
     Export,
 }
@@ -36,7 +46,7 @@ impl ts_rs::TS for Permission {
     fn name() -> String { "Permission".to_string() }
     fn inline() -> String { Self::name() }
     fn inline_flattened() -> String { panic!("Permission cannot be flattened") }
-    fn decl() -> String { "type Permission = \"admin.read\" | \"admin.manage\" | \"content_page.read\" | \"content_page.manage\" | \"country.read\" | \"country.manage\" | \"export\";".to_string() }
+    fn decl() -> String { "type Permission = \"admin.read\" | \"admin.manage\" | \"content_page.read\" | \"content_page.manage\" | \"country.read\" | \"country.manage\" | \"user.read\" | \"user.manage\" | \"user.hierarchy\" | \"user.change_introducer\" | \"user.credit\" | \"export\";".to_string() }
     fn decl_concrete() -> String { Self::decl() }
 }
 
@@ -47,6 +57,11 @@ pub const PERMISSION_META: &[PermissionMeta] = &[
     PermissionMeta { key: "content_page.manage", guard: "admin", label: "Manage Content Pages", group: "content_page", description: "Update and delete non-system pages." },
     PermissionMeta { key: "country.read", guard: "admin", label: "Read Countries", group: "country", description: "View countries and country datatable records." },
     PermissionMeta { key: "country.manage", guard: "admin", label: "Manage Countries", group: "country", description: "Update country status." },
+    PermissionMeta { key: "user.read", guard: "admin", label: "Read Users", group: "user", description: "View user profiles and datatable records." },
+    PermissionMeta { key: "user.manage", guard: "admin", label: "Manage Users", group: "user", description: "Create/update/ban/unban user records." },
+    PermissionMeta { key: "user.hierarchy", guard: "admin", label: "View User Hierarchy", group: "user", description: "Browse user referral tree and navigate downlines." },
+    PermissionMeta { key: "user.change_introducer", guard: "admin", label: "Change User Introducer", group: "user", description: "Change a user's introducer and view change logs." },
+    PermissionMeta { key: "user.credit", guard: "admin", label: "Manage User Credits", group: "user", description: "View credit transactions and adjust user balances." },
     PermissionMeta { key: "export", guard: "admin", label: "Export Data", group: "datatable", description: "Export datatable records as CSV." },
 ];
 
@@ -59,6 +74,11 @@ impl Permission {
             Self::ContentPageManage => "content_page.manage",
             Self::CountryRead => "country.read",
             Self::CountryManage => "country.manage",
+            Self::UserRead => "user.read",
+            Self::UserManage => "user.manage",
+            Self::UserHierarchy => "user.hierarchy",
+            Self::UserChangeIntroducer => "user.change_introducer",
+            Self::UserCredit => "user.credit",
             Self::Export => "export",
         }
     }
@@ -71,6 +91,11 @@ impl Permission {
             "content_page.manage" => Some(Self::ContentPageManage),
             "country.read" => Some(Self::CountryRead),
             "country.manage" => Some(Self::CountryManage),
+            "user.read" => Some(Self::UserRead),
+            "user.manage" => Some(Self::UserManage),
+            "user.hierarchy" => Some(Self::UserHierarchy),
+            "user.change_introducer" => Some(Self::UserChangeIntroducer),
+            "user.credit" => Some(Self::UserCredit),
             "export" => Some(Self::Export),
             _ => None,
         }
@@ -84,6 +109,11 @@ impl Permission {
             Self::ContentPageManage,
             Self::CountryRead,
             Self::CountryManage,
+            Self::UserRead,
+            Self::UserManage,
+            Self::UserHierarchy,
+            Self::UserChangeIntroducer,
+            Self::UserCredit,
             Self::Export,
         ]
     }
@@ -96,6 +126,11 @@ impl Permission {
             Self::ContentPageManage => "admin",
             Self::CountryRead => "admin",
             Self::CountryManage => "admin",
+            Self::UserRead => "admin",
+            Self::UserManage => "admin",
+            Self::UserHierarchy => "admin",
+            Self::UserChangeIntroducer => "admin",
+            Self::UserCredit => "admin",
             Self::Export => "admin",
         }
     }
@@ -108,7 +143,12 @@ impl Permission {
             Self::ContentPageManage => &PERMISSION_META[3],
             Self::CountryRead => &PERMISSION_META[4],
             Self::CountryManage => &PERMISSION_META[5],
-            Self::Export => &PERMISSION_META[6],
+            Self::UserRead => &PERMISSION_META[6],
+            Self::UserManage => &PERMISSION_META[7],
+            Self::UserHierarchy => &PERMISSION_META[8],
+            Self::UserChangeIntroducer => &PERMISSION_META[9],
+            Self::UserCredit => &PERMISSION_META[10],
+            Self::Export => &PERMISSION_META[11],
         }
     }
 

@@ -2,6 +2,7 @@ import {
   LayoutDashboard,
   List,
   Settings,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -68,6 +69,32 @@ export const navigation: NavItem[] = [
         label: "Countries",
         path: "/other/countries",
         permissions: [PERMISSION.COUNTRY_READ, PERMISSION.COUNTRY_MANAGE],
+      },
+    ],
+  },
+  {
+    label: "User",
+    icon: Users,
+    children: [
+      {
+        label: "Manage Users",
+        path: "/user/manage",
+        permissions: [PERMISSION.USER_READ, PERMISSION.USER_MANAGE],
+      },
+      {
+        label: "User Hierarchy",
+        path: "/user/hierarchy",
+        permissions: [PERMISSION.USER_HIERARCHY],
+      },
+      {
+        label: "Credit Transactions",
+        path: "/user/credit-transactions",
+        permissions: [PERMISSION.USER_CREDIT],
+      },
+      {
+        label: "Introducer Changes",
+        path: "/user/introducer-changes",
+        permissions: [PERMISSION.USER_CHANGE_INTRODUCER],
       },
     ],
   },

@@ -22,6 +22,7 @@ validator = { workspace = true }
 time = { workspace = true }
 uuid = { workspace = true }
 ts-rs = { workspace = true }
+rust_decimal = { workspace = true }
 
 [build-dependencies]
 db-gen = { workspace = true }

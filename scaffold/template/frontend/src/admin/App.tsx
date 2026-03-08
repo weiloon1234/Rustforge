@@ -10,6 +10,10 @@ const AdminsPage = lazy(() => import("@admin/pages/other/AdminsPage"));
 const ContentPagesPage = lazy(() => import("@admin/pages/other/ContentPagesPage"));
 const ContentPageEditPage = lazy(() => import("@admin/pages/other/ContentPageEditPage"));
 const CountriesPage = lazy(() => import("@admin/pages/other/CountriesPage"));
+const ManageUsersPage = lazy(() => import("@admin/pages/user/ManageUsersPage"));
+const UserHierarchyPage = lazy(() => import("@admin/pages/user/UserHierarchyPage"));
+const IntroducerChangesPage = lazy(() => import("@admin/pages/user/IntroducerChangesPage"));
+const CreditTransactionsPage = lazy(() => import("@admin/pages/user/CreditTransactionsPage"));
 const HttpClientLogsPage = lazy(() => import("@admin/pages/developer/HttpClientLogsPage"));
 const WebhookLogsPage = lazy(() => import("@admin/pages/developer/WebhookLogsPage"));
 
@@ -33,6 +37,10 @@ export default function App() {
             <Route path="/other/content-pages" element={<ContentPagesPage />} />
             <Route path="/other/content-pages/:id/edit" element={<ContentPageEditPage />} />
             <Route path="/other/countries" element={<CountriesPage />} />
+            <Route path="/user/manage" element={<ManageUsersPage />} />
+            <Route path="/user/hierarchy" element={<UserHierarchyPage />} />
+            <Route path="/user/credit-transactions" element={<CreditTransactionsPage />} />
+            <Route path="/user/introducer-changes" element={<IntroducerChangesPage />} />
             <Route path="/developer/http-client-logs" element={<HttpClientLogsPage />} />
             <Route path="/developer/webhook-logs" element={<WebhookLogsPage />} />
           </Route>

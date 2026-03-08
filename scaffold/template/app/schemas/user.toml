@@ -1,0 +1,35 @@
+[UserBanStatus]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "No", value = 0 },
+  { name = "Yes", value = 1 }
+]
+
+[model.user]
+table = "users"
+pk = "id"
+pk_type = "i64"
+id_strategy = "snowflake"
+soft_delete = false
+fields = [
+  "id:i64",
+  "uuid:string",
+  "username:string",
+  "name:Option<String>",
+  "email:Option<String>",
+  "locale:Option<String>",
+  "password:hashed",
+  "country_iso2:Option<String>",
+  "contact_number:Option<String>",
+  "introducer_user_id:Option<i64>",
+  "ban:UserBanStatus",
+  "credit_1:rust_decimal::Decimal",
+  "credit_2:rust_decimal::Decimal",
+  "created_at:datetime",
+  "updated_at:datetime"
+]
+
+[model.user.relationships]
+introducer = { type = "belongsTo", model = "user", foreign_key = "introducer_user_id" }
+downlines = { type = "hasMany", model = "user", foreign_key = "introducer_user_id" }

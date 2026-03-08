@@ -7,6 +7,6 @@ mod user;
 
 pub fn router(state: AppApiState) -> ApiRouter {
     ApiRouter::new()
-        .nest("/user", user::router())
+        .nest("/user", user::router(state.clone()))
         .nest("/admin", admin::router(state))
 }

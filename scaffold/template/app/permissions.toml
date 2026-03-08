@@ -42,6 +42,41 @@ group = "country"
 description = "Update country status."
 
 [[permissions]]
+key = "user.read"
+guard = "admin"
+label = "Read Users"
+group = "user"
+description = "View user profiles and datatable records."
+
+[[permissions]]
+key = "user.manage"
+guard = "admin"
+label = "Manage Users"
+group = "user"
+description = "Create/update/ban/unban user records."
+
+[[permissions]]
+key = "user.hierarchy"
+guard = "admin"
+label = "View User Hierarchy"
+group = "user"
+description = "Browse user referral tree and navigate downlines."
+
+[[permissions]]
+key = "user.change_introducer"
+guard = "admin"
+label = "Change User Introducer"
+group = "user"
+description = "Change a user's introducer and view change logs."
+
+[[permissions]]
+key = "user.credit"
+guard = "admin"
+label = "Manage User Credits"
+group = "user"
+description = "View credit transactions and adjust user balances."
+
+[[permissions]]
 key = "export"
 guard = "admin"
 label = "Export Data"

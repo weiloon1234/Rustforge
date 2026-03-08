@@ -19,6 +19,11 @@ provider = "admin"
 ttl_min = 120
 refresh_ttl_days = 30
 
+[auth.guards.user]
+provider = "user"
+ttl_min = 120
+refresh_ttl_days = 30
+
 [realtime.channels.public]
 enabled = true
 guard = ""
