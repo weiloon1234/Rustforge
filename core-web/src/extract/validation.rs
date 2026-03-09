@@ -54,8 +54,9 @@ fn flatten_validation_errors(
 
 fn validation_message(error: &ValidationError) -> String {
     // Prefer explicit message if set by the contract macro or custom validator.
+    // Always translate it — the message text is the i18n key.
     if let Some(msg) = &error.message {
-        return msg.to_string();
+        return core_i18n::t(msg);
     }
 
     // Auto-generate a human-readable message from the validator code and params.
@@ -66,14 +67,24 @@ fn validation_message(error: &ValidationError) -> String {
             let max = p.get("max").and_then(|v| v.as_u64());
             let equal = p.get("equal").and_then(|v| v.as_u64());
             if let Some(eq) = equal {
-                return core_i18n::t(&format!("Must be exactly {eq} characters."));
+                return core_i18n::t_args(
+                    "Must be exactly :eq characters.",
+                    &[("eq", &eq.to_string())],
+                );
             }
             match (min, max) {
-                (Some(lo), Some(hi)) => {
-                    core_i18n::t(&format!("Must be between {lo} and {hi} characters."))
-                }
-                (Some(lo), None) => core_i18n::t(&format!("Must be at least {lo} characters.")),
-                (None, Some(hi)) => core_i18n::t(&format!("Must be at most {hi} characters.")),
+                (Some(lo), Some(hi)) => core_i18n::t_args(
+                    "Must be between :lo and :hi characters.",
+                    &[("lo", &lo.to_string()), ("hi", &hi.to_string())],
+                ),
+                (Some(lo), None) => core_i18n::t_args(
+                    "Must be at least :lo characters.",
+                    &[("lo", &lo.to_string())],
+                ),
+                (None, Some(hi)) => core_i18n::t_args(
+                    "Must be at most :hi characters.",
+                    &[("hi", &hi.to_string())],
+                ),
                 _ => core_i18n::t("Invalid length."),
             }
         }
@@ -81,9 +92,18 @@ fn validation_message(error: &ValidationError) -> String {
             let min = p.get("min").and_then(|v| v.as_f64());
             let max = p.get("max").and_then(|v| v.as_f64());
             match (min, max) {
-                (Some(lo), Some(hi)) => core_i18n::t(&format!("Must be between {lo} and {hi}.")),
-                (Some(lo), None) => core_i18n::t(&format!("Must be at least {lo}.")),
-                (None, Some(hi)) => core_i18n::t(&format!("Must be at most {hi}.")),
+                (Some(lo), Some(hi)) => core_i18n::t_args(
+                    "Must be between :lo and :hi.",
+                    &[("lo", &lo.to_string()), ("hi", &hi.to_string())],
+                ),
+                (Some(lo), None) => core_i18n::t_args(
+                    "Must be at least :lo.",
+                    &[("lo", &lo.to_string())],
+                ),
+                (None, Some(hi)) => core_i18n::t_args(
+                    "Must be at most :hi.",
+                    &[("hi", &hi.to_string())],
+                ),
                 _ => core_i18n::t("Out of range."),
             }
         }
