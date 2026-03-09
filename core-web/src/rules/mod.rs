@@ -4,7 +4,9 @@ pub mod meta;
 use anyhow::Result;
 use core_db::{
     common::sql::{DbConn, Op},
-    generated::models::{Country as CountryModel, CountryStatus as GeneratedCountryStatus},
+    generated::models::{
+        Country as CountryModel, CountryIsDefault, CountryStatus as GeneratedCountryStatus,
+    },
     platform::countries::{normalize_country_iso2, Country as CountryRuntime, CountryCurrency},
 };
 use sqlx::Row;
@@ -403,6 +405,7 @@ pub async fn normalize_phone_by_country_iso2(
         .where_iso2(Op::Eq, country_iso2)
         .first()
         .await?
+        .map(|r| r.into_row())
     else {
         return Ok(None);
     };
@@ -442,6 +445,7 @@ fn to_runtime_country(country: core_db::generated::models::CountryView) -> Count
         longitude: country.longitude,
         independent: country.independent,
         status: country.status.as_str().to_string(),
+        is_default: matches!(country.is_default, CountryIsDefault::Yes),
         assignment_status: country.assignment_status,
         un_member: country.un_member,
         flag_emoji: country.flag_emoji,

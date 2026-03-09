@@ -3,6 +3,14 @@ type = "enum"
 storage = "string"
 variants = ["Enabled", "Disabled"]
 
+[CountryIsDefault]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "No", value = 0 },
+  { name = "Yes", value = 1 }
+]
+
 [model.country]
 table = "countries"
 pk = "iso2"
@@ -29,6 +37,7 @@ fields = [
   "longitude:Option<f64>",
   "independent:Option<bool>",
   "status:CountryStatus",
+  "is_default:CountryIsDefault",
   "assignment_status:Option<String>",
   "un_member:Option<bool>",
   "flag_emoji:Option<String>",

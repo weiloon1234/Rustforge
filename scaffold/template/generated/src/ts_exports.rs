@@ -272,6 +272,7 @@ export interface CountryRuntime {
   longitude?: number | null;
   independent?: boolean | null;
   status: CountryStatus;
+  is_default: boolean;
   assignment_status?: string | null;
   un_member?: boolean | null;
   flag_emoji?: string | null;

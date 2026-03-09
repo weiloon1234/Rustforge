@@ -4,12 +4,12 @@
 pub mod enums;
 pub use enums::*;
 pub mod admin;
-pub use admin::{Admin, AdminView, AdminQuery, AdminInsert, AdminUpdate, AdminCol, AdminViewsExt, AdminTableAdapter, AdminDataTable, AdminDataTableConfig, AdminDataTableHooks, AdminDefaultDataTableHooks};
+pub use admin::{Admin, AdminView, AdminWithRelations, AdminQuery, AdminInsert, AdminUpdate, AdminCol, AdminViewsExt, AdminTableAdapter, AdminDataTable, AdminDataTableConfig, AdminDataTableHooks, AdminDefaultDataTableHooks};
 pub mod article;
-pub use article::{Article, ArticleView, ArticleQuery, ArticleInsert, ArticleUpdate, ArticleCol, ArticleViewsExt, ArticleTableAdapter, ArticleDataTable, ArticleDataTableConfig, ArticleDataTableHooks, ArticleDefaultDataTableHooks};
+pub use article::{Article, ArticleView, ArticleWithRelations, ArticleQuery, ArticleInsert, ArticleUpdate, ArticleCol, ArticleViewsExt, ArticleTableAdapter, ArticleDataTable, ArticleDataTableConfig, ArticleDataTableHooks, ArticleDefaultDataTableHooks};
 pub mod profile;
-pub use profile::{Profile, ProfileView, ProfileQuery, ProfileInsert, ProfileUpdate, ProfileCol, ProfileViewsExt, ProfileTableAdapter, ProfileDataTable, ProfileDataTableConfig, ProfileDataTableHooks, ProfileDefaultDataTableHooks};
+pub use profile::{Profile, ProfileView, ProfileWithRelations, ProfileQuery, ProfileInsert, ProfileUpdate, ProfileCol, ProfileViewsExt, ProfileTableAdapter, ProfileDataTable, ProfileDataTableConfig, ProfileDataTableHooks, ProfileDefaultDataTableHooks};
 pub mod user;
-pub use user::{User, UserView, UserQuery, UserInsert, UserUpdate, UserCol, UserViewsExt, UserTableAdapter, UserDataTable, UserDataTableConfig, UserDataTableHooks, UserDefaultDataTableHooks};
+pub use user::{User, UserView, UserWithRelations, UserQuery, UserInsert, UserUpdate, UserCol, UserViewsExt, UserTableAdapter, UserDataTable, UserDataTableConfig, UserDataTableHooks, UserDefaultDataTableHooks};
 pub mod common;
 pub use common::*;

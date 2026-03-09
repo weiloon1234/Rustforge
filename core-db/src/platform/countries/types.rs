@@ -246,6 +246,7 @@ pub struct Country {
     #[ts(optional)]
     pub independent: Option<bool>,
     pub status: String,
+    pub is_default: bool,
     #[ts(optional)]
     pub assignment_status: Option<String>,
     #[ts(optional)]

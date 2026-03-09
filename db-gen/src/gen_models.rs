@@ -218,7 +218,7 @@ fn render_query_relation_filter_methods(relations: &[RelationSpec], table: &str)
         writeln!(out, "        let start_idx = self.binds.len() + 1;").unwrap();
         writeln!(
             out,
-            "        let scoped = scope({target_query}::new(self.db, None));"
+            "        let scoped = scope({target_query}::new(self.db.clone(), None));"
         )
         .unwrap();
         writeln!(
@@ -272,7 +272,7 @@ fn render_query_relation_filter_methods(relations: &[RelationSpec], table: &str)
         writeln!(out, "        let start_idx = self.binds.len() + 1;").unwrap();
         writeln!(
             out,
-            "        let scoped = scope({target_query}::new(self.db, None));"
+            "        let scoped = scope({target_query}::new(self.db.clone(), None));"
         )
         .unwrap();
         writeln!(
@@ -326,7 +326,7 @@ fn render_query_relation_filter_methods(relations: &[RelationSpec], table: &str)
         writeln!(out, "        let start_idx = self.binds.len() + 1;").unwrap();
         writeln!(
             out,
-            "        let scoped = scope({target_query}::new(self.db, None));"
+            "        let scoped = scope({target_query}::new(self.db.clone(), None));"
         )
         .unwrap();
         writeln!(
@@ -1007,11 +1007,12 @@ fn render_lock_methods() -> String {
     out
 }
 
-fn render_find_methods(view_ident: &str, parent_pk_ty: &str, table: &str, pk: &str) -> String {
+fn render_find_methods(model_title: &str, parent_pk_ty: &str, table: &str, pk: &str) -> String {
+    let wr = format!("{model_title}WithRelations");
     let mut out = String::new();
     writeln!(
         out,
-        "    pub async fn first(self) -> Result<Option<{view_ident}>> {{"
+        "    pub async fn first(self) -> Result<Option<{wr}>> {{"
     )
     .unwrap();
     writeln!(out, "        let mut v = self.limit(1).get().await?;").unwrap();
@@ -1019,7 +1020,7 @@ fn render_find_methods(view_ident: &str, parent_pk_ty: &str, table: &str, pk: &s
     writeln!(out, "    }}\n").unwrap();
     writeln!(
         out,
-        "    pub async fn first_or_fail(self) -> Result<{view_ident}> {{"
+        "    pub async fn first_or_fail(self) -> Result<{wr}> {{"
     )
     .unwrap();
     writeln!(
@@ -1030,7 +1031,7 @@ fn render_find_methods(view_ident: &str, parent_pk_ty: &str, table: &str, pk: &s
     writeln!(out, "    }}\n").unwrap();
     writeln!(
         out,
-        "    pub async fn find(self, id: {parent_pk_ty}) -> Result<Option<{view_ident}>> {{"
+        "    pub async fn find(self, id: {parent_pk_ty}) -> Result<Option<{wr}>> {{"
     )
     .unwrap();
     writeln!(
@@ -1042,7 +1043,7 @@ fn render_find_methods(view_ident: &str, parent_pk_ty: &str, table: &str, pk: &s
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    pub async fn find_or_fail(self, id: {parent_pk_ty}) -> Result<{view_ident}> {{"
+        "    pub async fn find_or_fail(self, id: {parent_pk_ty}) -> Result<{wr}> {{"
     )
     .unwrap();
     writeln!(
@@ -1056,11 +1057,12 @@ fn render_find_methods(view_ident: &str, parent_pk_ty: &str, table: &str, pk: &s
 
 fn render_small_terminal_methods(
     query_ident: &str,
-    view_ident: &str,
+    model_title: &str,
     col_ident: &str,
     pk_col_variant: &str,
     has_created_at: bool,
 ) -> String {
+    let view_ident = format!("{model_title}WithRelations");
     let mut out = String::new();
     writeln!(out, "    pub async fn exists(self) -> Result<bool> {{").unwrap();
     writeln!(out, "        Ok(self.count().await? > 0)").unwrap();
@@ -2341,7 +2343,8 @@ fn render_scalar_aggregate_method(
 }
 
 fn render_paginate_method(
-    view_ident: &str,
+    model_title: &str,
+    model_ident: &str,
     row_ident: &str,
     has_soft_delete: bool,
     col_ident: &str,
@@ -2349,6 +2352,7 @@ fn render_paginate_method(
     model_snake: &str,
     pk: &str,
     parent_pk_ty: &str,
+    relations: &[RelationSpec],
     localized_fields: &[String],
     has_meta: bool,
     has_attachments: bool,
@@ -2356,7 +2360,7 @@ fn render_paginate_method(
     let mut out = String::new();
     writeln!(
         out,
-        "    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<{view_ident}>> {{"
+        "    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<{model_title}WithRelations>> {{"
     )
     .unwrap();
     writeln!(
@@ -2442,6 +2446,14 @@ fn render_paginate_method(
     .unwrap();
     writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
     writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
+    if !relations.is_empty() {
+        writeln!(
+            out,
+            "        let m = {model_ident} {{ db: db.clone(), base_url: base_url.clone() }};"
+        )
+        .unwrap();
+        out.push_str(&render_relation_loader_bindings(relations));
+    }
     out.push_str(&render_support_data_loaders(
         model_snake,
         pk,
@@ -2452,15 +2464,31 @@ fn render_paginate_method(
         "rows",
         "db",
     ));
-    out.push_str(&render_view_collection_build(
-        "data",
-        "r",
-        "rows",
-        localized_fields,
-        has_meta,
-        has_attachments,
-        "base_url.as_deref()",
-    ));
+    if !relations.is_empty() {
+        out.push_str(&render_with_relations_collection_build(
+            model_title,
+            relations,
+            pk,
+            "rows",
+            "row",
+            "data",
+            localized_fields,
+            has_meta,
+            has_attachments,
+            "base_url.as_deref()",
+        ));
+    } else {
+        out.push_str(&render_view_collection_build(
+            "data",
+            "r",
+            "rows",
+            localized_fields,
+            has_meta,
+            has_attachments,
+            "base_url.as_deref()",
+        ));
+        writeln!(out, "        let data: Vec<{model_title}WithRelations> = data.into_iter().map(|v| {model_title}WithRelations {{ row: v }}).collect();").unwrap();
+    }
     writeln!(
         out,
         "        Ok(Page {{ data, total, per_page, current_page, last_page }})"
@@ -2470,7 +2498,7 @@ fn render_paginate_method(
     out
 }
 
-fn render_paginate_with_relations_method(
+fn render_get_method(
     model_title: &str,
     model_ident: &str,
     row_ident: &str,
@@ -2488,147 +2516,7 @@ fn render_paginate_with_relations_method(
     let mut out = String::new();
     writeln!(
         out,
-        "    pub async fn paginate_with_relations(self, page: i64, per_page: i64) -> Result<Page<{model_title}WithRelations>> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let page = if page < 1 {{ 1 }} else {{ page }};"
-    )
-    .unwrap();
-    writeln!(out, "        let per_page = resolve_per_page(per_page);").unwrap();
-    writeln!(
-        out,
-        "        let Self {{ db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds {extra}, .. }} = self;",
-        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
-    )
-    .unwrap();
-    out.push_str(&render_scoped_where_setup(has_soft_delete, col_ident));
-    out.push_str(&render_select_clause_setup());
-    out.push_str(&render_from_and_where_clause_setup(table));
-    out.push_str(&render_paginate_count_sql_setup());
-    writeln!(
-        out,
-        "        let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        for b in binds.iter().cloned() {{ count_q = bind_scalar(count_q, b); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        for b in join_binds.iter().cloned() {{ count_q = bind_scalar(count_q, b); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let total: i64 = db.fetch_scalar(count_q).await?;"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let last_page = ((total + per_page - 1) / per_page).max(1);"
-    )
-    .unwrap();
-    writeln!(out, "        let current_page = page.min(last_page);").unwrap();
-    writeln!(
-        out,
-        "        let offset_val = (current_page - 1) * per_page;"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut sql = format!(\"SELECT {{}} {{}}{{}}\", select_clause, from_clause, where_clause);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if !order_sql.is_empty() {{ sql.push_str(\" ORDER BY \"); sql.push_str(&order_sql.join(\", \")); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        sql.push_str(&format!(\" OFFSET {{}}\", offset_val));"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        sql.push_str(&format!(\" LIMIT {{}}\", per_page));"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        for b in binds.iter().cloned() {{ q = bind(q, b); }}"
-    )
-    .unwrap();
-    writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
-    writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-    writeln!(
-        out,
-        "        let m = {model_ident} {{ db: db.clone(), base_url: base_url.clone() }};"
-    )
-    .unwrap();
-    out.push_str(&render_relation_loader_bindings(relations));
-    out.push_str(&render_support_data_loaders(
-        model_snake,
-        pk,
-        parent_pk_ty,
-        localized_fields,
-        has_meta,
-        has_attachments,
-        "rows",
-        "db.clone()",
-    ));
-    out.push_str(&render_with_relations_collection_build(
-        model_title,
-        relations,
-        pk,
-        "rows",
-        "row",
-        "data",
-        localized_fields,
-        has_meta,
-        has_attachments,
-        "base_url.as_deref()",
-    ));
-    writeln!(
-        out,
-        "        Ok(Page {{ data, total, per_page, current_page, last_page }})"
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
-    out
-}
-
-fn render_get_method(
-    view_ident: &str,
-    row_ident: &str,
-    has_soft_delete: bool,
-    col_ident: &str,
-    table: &str,
-    model_snake: &str,
-    pk: &str,
-    parent_pk_ty: &str,
-    localized_fields: &[String],
-    has_meta: bool,
-    has_attachments: bool,
-) -> String {
-    let mut out = String::new();
-    writeln!(
-        out,
-        "    pub async fn get(self) -> Result<Vec<{view_ident}>> {{"
+        "    pub async fn get(self) -> Result<Vec<{model_title}WithRelations>> {{"
     )
     .unwrap();
     writeln!(
@@ -2698,6 +2586,14 @@ fn render_get_method(
     writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
     writeln!(out, "        for b in having_binds {{ q = bind(q, b); }}").unwrap();
     writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
+    if !relations.is_empty() {
+        writeln!(
+            out,
+            "        let m = {model_ident} {{ db: db.clone(), base_url: base_url.clone() }};"
+        )
+        .unwrap();
+        out.push_str(&render_relation_loader_bindings(relations));
+    }
     out.push_str(&render_support_data_loaders(
         model_snake,
         pk,
@@ -2708,125 +2604,32 @@ fn render_get_method(
         "rows",
         "db.clone()",
     ));
-    out.push_str(&render_view_collection_build(
-        "out_vec",
-        "r",
-        "rows",
-        localized_fields,
-        has_meta,
-        has_attachments,
-        "base_url.as_deref()",
-    ));
-    writeln!(out, "        Ok(out_vec)").unwrap();
-    writeln!(out, "    }}\n").unwrap();
-    out
-}
-
-fn render_get_with_relations_method(
-    model_title: &str,
-    model_ident: &str,
-    row_ident: &str,
-    has_soft_delete: bool,
-    col_ident: &str,
-    table: &str,
-    model_snake: &str,
-    pk: &str,
-    parent_pk_ty: &str,
-    relations: &[RelationSpec],
-    localized_fields: &[String],
-    has_meta: bool,
-    has_attachments: bool,
-) -> String {
-    let mut out = String::new();
-    writeln!(
-        out,
-        "    pub async fn get_with_relations(self) -> Result<Vec<{model_title}WithRelations>> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let Self {{ db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds {extra}, .. }} = self;",
-        extra = if has_soft_delete { ", with_deleted, only_deleted" } else { "" }
-    )
-    .unwrap();
-    out.push_str(&render_scoped_where_setup(has_soft_delete, col_ident));
-    out.push_str(&render_select_clause_setup());
-    writeln!(
-        out,
-        "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut sql = format!(\"SELECT {{}} FROM {{}}\", select_clause, table_name);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if !join_sql.is_empty() {{ sql.push(' '); sql.push_str(&join_sql.join(\" \")); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if !where_sql.is_empty() {{ sql.push_str(\" WHERE \"); sql.push_str(&where_sql.join(\" AND \")); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if !order_sql.is_empty() {{ sql.push_str(\" ORDER BY \"); sql.push_str(&order_sql.join(\", \")); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if let Some(off) = offset {{ sql.push_str(\" OFFSET \"); sql.push_str(&off.to_string()); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if let Some(l) = limit {{ sql.push_str(\" LIMIT \"); sql.push_str(&l.to_string()); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
-    )
-    .unwrap();
-    writeln!(out, "        for b in binds {{ q = bind(q, b); }}").unwrap();
-    writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
-    writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-    writeln!(
-        out,
-        "        let m = {model_ident} {{ db: db.clone(), base_url: base_url.clone() }};"
-    )
-    .unwrap();
-    out.push_str(&render_relation_loader_bindings(relations));
-    out.push_str(&render_support_data_loaders(
-        model_snake,
-        pk,
-        parent_pk_ty,
-        localized_fields,
-        has_meta,
-        has_attachments,
-        "rows",
-        "db.clone()",
-    ));
-    out.push_str(&render_with_relations_collection_build(
-        model_title,
-        relations,
-        pk,
-        "rows",
-        "row",
-        "out_vec",
-        localized_fields,
-        has_meta,
-        has_attachments,
-        "base_url.as_deref()",
-    ));
+    if !relations.is_empty() {
+        out.push_str(&render_with_relations_collection_build(
+            model_title,
+            relations,
+            pk,
+            "rows",
+            "r",
+            "out_vec",
+            localized_fields,
+            has_meta,
+            has_attachments,
+            "base_url.as_deref()",
+        ));
+    } else {
+        out.push_str(&render_view_collection_build(
+            "out_vec",
+            "r",
+            "rows",
+            localized_fields,
+            has_meta,
+            has_attachments,
+            "base_url.as_deref()",
+        ));
+        // Wrap views into WithRelations
+        writeln!(out, "        let out_vec: Vec<{model_title}WithRelations> = out_vec.into_iter().map(|v| {model_title}WithRelations {{ row: v }}).collect();").unwrap();
+    }
     writeln!(out, "        Ok(out_vec)").unwrap();
     writeln!(out, "    }}\n").unwrap();
     out
@@ -2911,11 +2714,13 @@ fn render_with_counts_method(
     out
 }
 
-fn render_first_or_create_method(insert_ident: &str, view_ident: &str) -> String {
+fn render_first_or_create_method(insert_ident: &str, model_title: &str, model_ident: &str, pk: &str) -> String {
+    let wr = format!("{model_title}WithRelations");
+    let pk_snake = to_snake(pk);
     let mut out = String::new();
     writeln!(
         out,
-        "    pub async fn first_or_create(self, create: impl FnOnce({insert_ident}<'db>) -> {insert_ident}<'db>) -> Result<{view_ident}> {{"
+        "    pub async fn first_or_create(self, create: impl FnOnce({insert_ident}<'db>) -> {insert_ident}<'db>) -> Result<{wr}> {{"
     )
     .unwrap();
     writeln!(out, "        let db = self.db.clone();").unwrap();
@@ -2929,10 +2734,15 @@ fn render_first_or_create_method(insert_ident: &str, view_ident: &str) -> String
     writeln!(out, "        }}").unwrap();
     writeln!(
         out,
-        "        let insert_builder = create({insert_ident}::new(db, base_url));"
+        "        let insert_builder = create({insert_ident}::new(db.clone(), base_url.clone()));"
     )
     .unwrap();
-    writeln!(out, "        insert_builder.save().await").unwrap();
+    writeln!(out, "        let view = insert_builder.save().await?;").unwrap();
+    writeln!(
+        out,
+        "        {model_ident}::new(db, base_url).query().find(view.{pk_snake}).await.map(|r| r.unwrap())"
+    )
+    .unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
     out
@@ -2941,10 +2751,12 @@ fn render_first_or_create_method(insert_ident: &str, view_ident: &str) -> String
 fn render_update_or_create_method(
     update_ident: &str,
     insert_ident: &str,
-    view_ident: &str,
+    model_title: &str,
     model_ident: &str,
     pk: &str,
 ) -> String {
+    let wr = format!("{model_title}WithRelations");
+    let pk_snake = to_snake(pk);
     let mut out = String::new();
     writeln!(out, "    pub async fn update_or_create(").unwrap();
     writeln!(out, "        self,").unwrap();
@@ -2958,7 +2770,7 @@ fn render_update_or_create_method(
         "        on_create: impl FnOnce({insert_ident}<'db>) -> {insert_ident}<'db>,"
     )
     .unwrap();
-    writeln!(out, "    ) -> Result<{view_ident}> {{").unwrap();
+    writeln!(out, "    ) -> Result<{wr}> {{").unwrap();
     writeln!(out, "        let db = self.db.clone();").unwrap();
     writeln!(out, "        let base_url = self.base_url.clone();").unwrap();
     writeln!(out, "        let where_sql = self.where_sql.clone();").unwrap();
@@ -2983,17 +2795,21 @@ fn render_update_or_create_method(
     writeln!(out, "            update_builder.save().await?;").unwrap();
     writeln!(
         out,
-        "            return {model_ident}::new(db, base_url.clone()).query().find(existing.{pk}).await.map(|r| r.unwrap());",
-        pk = to_snake(pk)
+        "            return {model_ident}::new(db, base_url.clone()).query().find(existing.{pk_snake}.clone()).await.map(|r| r.unwrap());"
     )
     .unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(
         out,
-        "        let insert_builder = on_create({insert_ident}::new(db, base_url));"
+        "        let insert_builder = on_create({insert_ident}::new(db.clone(), base_url.clone()));"
     )
     .unwrap();
-    writeln!(out, "        insert_builder.save().await").unwrap();
+    writeln!(out, "        let view = insert_builder.save().await?;").unwrap();
+    writeln!(
+        out,
+        "        {model_ident}::new(db, base_url).query().find(view.{pk_snake}).await.map(|r| r.unwrap())"
+    )
+    .unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
     out
@@ -3083,6 +2899,7 @@ pub fn generate_models_with_options(
         let mut exports = vec![
             model_title.clone(),
             format!("{model_title}View"),
+            format!("{model_title}WithRelations"),
             format!("{model_title}Query"),
             format!("{model_title}Insert"),
             format!("{model_title}Update"),
@@ -3896,30 +3713,41 @@ fn render_model(
     writeln!(out, "    view").unwrap();
     writeln!(out, "}}\n").unwrap();
 
-    if !relations.is_empty() {
-        writeln!(
-            out,
-            "#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]"
-        )
-        .unwrap();
-        writeln!(out, "#[doc(hidden)]").unwrap();
-        writeln!(out, "pub struct {model_title}WithRelations {{").unwrap();
-        writeln!(out, "    pub row: {view_ident},").unwrap();
-        for rel in &relations {
-            let rel_field = to_snake(&rel.name);
-            let target_title = to_title_case(&rel.target_model);
-            let target_row = format!("{}Row", target_title);
-            match rel.kind {
-                RelationKind::HasMany => {
-                    writeln!(out, "    pub {rel_field}: Vec<{target_row}>,").unwrap();
-                }
-                RelationKind::BelongsTo => {
-                    writeln!(out, "    pub {rel_field}: Option<{target_row}>,").unwrap();
-                }
+    writeln!(
+        out,
+        "#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]"
+    )
+    .unwrap();
+    writeln!(out, "#[doc(hidden)]").unwrap();
+    writeln!(out, "pub struct {model_title}WithRelations {{").unwrap();
+    writeln!(out, "    pub row: {view_ident},").unwrap();
+    for rel in &relations {
+        let rel_field = to_snake(&rel.name);
+        let target_title = to_title_case(&rel.target_model);
+        let target_row = format!("{}Row", target_title);
+        match rel.kind {
+            RelationKind::HasMany => {
+                writeln!(out, "    pub {rel_field}: Vec<{target_row}>,").unwrap();
+            }
+            RelationKind::BelongsTo => {
+                writeln!(out, "    pub {rel_field}: Option<{target_row}>,").unwrap();
             }
         }
-        writeln!(out, "}}\n").unwrap();
     }
+    writeln!(out, "}}\n").unwrap();
+
+    writeln!(out, "impl {model_title}WithRelations {{").unwrap();
+    writeln!(out, "    pub fn into_row(self) -> {view_ident} {{ self.row }}").unwrap();
+    writeln!(out, "}}\n").unwrap();
+
+    writeln!(out, "impl std::ops::Deref for {model_title}WithRelations {{").unwrap();
+    writeln!(out, "    type Target = {view_ident};").unwrap();
+    writeln!(out, "    fn deref(&self) -> &Self::Target {{ &self.row }}").unwrap();
+    writeln!(out, "}}\n").unwrap();
+
+    writeln!(out, "impl std::ops::DerefMut for {model_title}WithRelations {{").unwrap();
+    writeln!(out, "    fn deref_mut(&mut self) -> &mut Self::Target {{ &mut self.row }}").unwrap();
+    writeln!(out, "}}\n").unwrap();
 
     let row_view_json_section = out;
     let mut out = String::new();
@@ -4048,7 +3876,7 @@ fn render_model(
     .unwrap();
     writeln!(
         out,
-        "    pub async fn find(&self, id: {parent_pk_ty}) -> Result<Option<{view_ident}>> {{"
+        "    pub async fn find(&self, id: {parent_pk_ty}) -> Result<Option<{model_title}WithRelations>> {{"
     )
     .unwrap();
     writeln!(out, "        self.query().find(id).await").unwrap();
@@ -4087,7 +3915,7 @@ fn render_model(
         let target_row = format!("{}Row", target_title);
         match rel.kind {
             RelationKind::HasMany => {
-                writeln!(out, "    pub async fn {fn_name}(&self, parents: &[{view_ident}]) -> Result<HashMap<{parent_pk_ty}, Vec<{target_row}>>> {{").unwrap();
+                writeln!(out, "    pub async fn {fn_name}(&self, parents: &[{row_ident}]) -> Result<HashMap<{parent_pk_ty}, Vec<{target_row}>>> {{").unwrap();
                 writeln!(
                     out,
                     "        if parents.is_empty() {{ return Ok(HashMap::new()); }}"
@@ -4116,7 +3944,7 @@ fn render_model(
                 writeln!(out, "    }}").unwrap();
             }
             RelationKind::BelongsTo => {
-                writeln!(out, "    pub async fn {fn_name}(&self, parents: &[{view_ident}]) -> Result<HashMap<{parent_pk_ty}, Option<{target_row}>>> {{").unwrap();
+                writeln!(out, "    pub async fn {fn_name}(&self, parents: &[{row_ident}]) -> Result<HashMap<{parent_pk_ty}, Option<{target_row}>>> {{").unwrap();
                 writeln!(
                     out,
                     "        if parents.is_empty() {{ return Ok(HashMap::new()); }}"
@@ -4318,7 +4146,8 @@ fn render_model(
 
     out.push_str(&render_get_as_method(&table));
     out.push_str(&render_get_method(
-        &view_ident,
+        &model_title,
+        &model_ident,
         &row_ident,
         has_soft_delete,
         &col_ident,
@@ -4326,41 +4155,24 @@ fn render_model(
         &model_snake,
         &pk,
         &parent_pk_ty,
+        &relations,
         &localized_fields,
         has_meta,
         has_attachments,
     ));
 
-    if !relations.is_empty() {
-        out.push_str(&render_get_with_relations_method(
-            &model_title,
-            &model_ident,
-            &row_ident,
-            has_soft_delete,
-            &col_ident,
-            &table,
-            &model_snake,
-            &pk,
-            &parent_pk_ty,
-            &relations,
-            &localized_fields,
-            has_meta,
-            has_attachments,
-        ));
-    }
-
     out.push_str(&render_find_methods(
-        &view_ident,
+        &model_title,
         &parent_pk_ty,
         &table,
         &pk,
     ));
 
-    out.push_str(&render_first_or_create_method(&insert_ident, &view_ident));
+    out.push_str(&render_first_or_create_method(&insert_ident, &model_title, &model_ident, &pk));
     out.push_str(&render_update_or_create_method(
         &update_ident,
         &insert_ident,
-        &view_ident,
+        &model_title,
         &model_ident,
         &pk,
     ));
@@ -4382,7 +4194,7 @@ fn render_model(
     ));
     out.push_str(&render_small_terminal_methods(
         &query_ident,
-        &view_ident,
+        &model_title,
         &col_ident,
         &pk_col_variant,
         has_created_at,
@@ -4428,7 +4240,8 @@ fn render_model(
     ));
 
     out.push_str(&render_paginate_method(
-        &view_ident,
+        &model_title,
+        &model_ident,
         &row_ident,
         has_soft_delete,
         &col_ident,
@@ -4436,28 +4249,11 @@ fn render_model(
         &model_snake,
         &pk,
         &parent_pk_ty,
+        &relations,
         &localized_fields,
         has_meta,
         has_attachments,
     ));
-
-    if !relations.is_empty() {
-        out.push_str(&render_paginate_with_relations_method(
-            &model_title,
-            &model_ident,
-            &row_ident,
-            has_soft_delete,
-            &col_ident,
-            &table,
-            &model_snake,
-            &pk,
-            &parent_pk_ty,
-            &relations,
-            &localized_fields,
-            has_meta,
-            has_attachments,
-        ));
-    }
 
     out.push_str(&render_into_where_parts_method(&col_ident, has_soft_delete));
     out.push_str(&render_delete_method(&table, &col_ident, has_soft_delete, emit_hooks, &row_ident, &to_snake(&pk)));
@@ -5791,7 +5587,8 @@ fn render_model(
         )
         .unwrap();
         writeln!(out, "    type Query<'db> = {query_ident}<'db>;").unwrap();
-        writeln!(out, "    type Row = {view_ident};").unwrap();
+        let wr_ident = format!("{model_title}WithRelations");
+        writeln!(out, "    type Row = {wr_ident};").unwrap();
         writeln!(
             out,
             "    fn model_key(&self) -> &'static str {{ \"{model_title}\" }}"
@@ -6444,7 +6241,7 @@ fn render_model(
 
         writeln!(
             out,
-            "    fn cursor_from_row(&self, row: &{view_ident}, column: &str) -> Option<String> {{"
+            "    fn cursor_from_row(&self, row: &{wr_ident}, column: &str) -> Option<String> {{"
         )
         .unwrap();
         writeln!(out, "        match column {{").unwrap();
@@ -6478,7 +6275,7 @@ fn render_model(
 
         writeln!(
         out,
-        "    fn fetch_page<'db>(&self, query: {query_ident}<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<{view_ident}>>> where Self: 'db {{"
+        "    fn fetch_page<'db>(&self, query: {query_ident}<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<{wr_ident}>>> where Self: 'db {{"
     )
     .unwrap();
         writeln!(
@@ -6560,12 +6357,12 @@ fn render_model(
     .unwrap();
         writeln!(
         out,
-        "    fn map_row(&self, _row: &mut {view_ident}, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> {{ Ok(()) }}"
+        "    fn map_row(&self, _row: &mut {wr_ident}, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> {{ Ok(()) }}"
     )
     .unwrap();
         writeln!(
         out,
-        "    fn default_row_to_record(&self, row: {view_ident}) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {{"
+        "    fn default_row_to_record(&self, row: {wr_ident}) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {{"
     )
     .unwrap();
         writeln!(out, "        let value = serde_json::to_value(row)?;").unwrap();
@@ -6604,7 +6401,7 @@ fn render_model(
         writeln!(out, "    }}").unwrap();
         writeln!(
         out,
-        "    fn row_to_record(&self, row: {view_ident}, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {{"
+        "    fn row_to_record(&self, row: {wr_ident}, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {{"
     )
     .unwrap();
         writeln!(out, "        self.default_row_to_record(row)").unwrap();
@@ -6720,12 +6517,12 @@ fn render_model(
     .unwrap();
         writeln!(
         out,
-        "    fn map_row(&self, row: &mut {view_ident}, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> {{ self.hooks.map_row(row, input, ctx) }}"
+        "    fn map_row(&self, row: &mut {wr_ident}, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> {{ self.hooks.map_row(row, input, ctx) }}"
     )
     .unwrap();
         writeln!(
         out,
-        "    fn row_to_record(&self, row: {view_ident}, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {{ self.hooks.row_to_record(row, input, ctx) }}"
+        "    fn row_to_record(&self, row: {wr_ident}, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {{ self.hooks.row_to_record(row, input, ctx) }}"
     )
     .unwrap();
         writeln!(
@@ -6782,7 +6579,7 @@ fn render_model(
     .unwrap();
     writeln!(
         out,
-        "        {model_ident}::new(db, None).find(id).await.map_err(|e| e.into())"
+        "        {model_ident}::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())"
     )
     .unwrap();
     writeln!(out, "    }}").unwrap();

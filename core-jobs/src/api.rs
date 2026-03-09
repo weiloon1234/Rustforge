@@ -65,13 +65,16 @@ async fn list_failed_jobs(State(state): State<ApiState>) -> impl IntoResponse {
     {
         Ok(rows) => rows
             .into_iter()
-            .map(|row| FailedJobRow {
-                id: row.id,
-                job_name: row.job_name,
-                queue: row.queue,
-                error: row.error,
-                attempts: row.attempts,
-                failed_at: row.failed_at,
+            .map(|row| {
+                let row = row.into_row();
+                FailedJobRow {
+                    id: row.id,
+                    job_name: row.job_name,
+                    queue: row.queue,
+                    error: row.error,
+                    attempts: row.attempts,
+                    failed_at: row.failed_at,
+                }
             })
             .collect::<Vec<_>>(),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -100,7 +103,7 @@ async fn retry_failed_job(
     };
 
     let (queue_name, payload) = match row {
-        Some(r) => (r.queue, r.payload),
+        Some(r) => { let r = r.into_row(); (r.queue, r.payload) },
         None => return (StatusCode::NOT_FOUND, "Job not found").into_response(),
     };
 

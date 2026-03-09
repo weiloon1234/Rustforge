@@ -23,18 +23,19 @@ impl Guard for AdminGuard {
 
     async fn fetch_user<'a>(db: DbConn<'a>, id: &str) -> anyhow::Result<Option<Self::User>> {
         let parsed = match id.trim().parse::<i64>() { Ok(v) => v, Err(_) => return Ok(None), };
-        AdminQuery::new(db, None).find(parsed).await
+        AdminQuery::new(db, None).find(parsed).await.map(|opt| opt.map(|r| r.into_row()))
     }
 }
 
 pub async fn list_tokens<'a>(db: DbConn<'a>, subject_id: &str) -> anyhow::Result<Vec<PersonalAccessTokenView>> {
     let tokenable_type = <AdminGuard as Guard>::tokenable_type().unwrap_or(<AdminGuard as Guard>::name());
-    PersonalAccessToken::new(db, None)
+    let rows = PersonalAccessToken::new(db, None)
         .query()
         .where_tokenable_type(Op::Eq, tokenable_type.to_string())
         .where_tokenable_id(Op::Eq, subject_id.to_string())
         .get()
-        .await
+        .await?;
+    Ok(rows.into_iter().map(|r| r.into_row()).collect())
 }
 
 pub async fn revoke_tokens<'a>(db: DbConn<'a>, subject_id: &str) -> anyhow::Result<u64> {
