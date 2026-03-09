@@ -67,7 +67,6 @@ export default function LoginPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const setToken = useAuthStore((s) => s.setToken);
-  const fetchAccount = useAuthStore((s) => s.fetchAccount);
 
   const { submit, busy, form, errors } = useAutoForm(api, {
     url: "auth/login",
@@ -91,10 +90,9 @@ export default function LoginPage() {
         span: 2,
       },
     ],
-    onSuccess: async (data: unknown) => {
+    onSuccess: (data: unknown) => {
       const result = data as AdminAuthOutput;
       setToken(result.access_token);
-      await fetchAccount();
       navigate("/", { replace: true });
     },
   });

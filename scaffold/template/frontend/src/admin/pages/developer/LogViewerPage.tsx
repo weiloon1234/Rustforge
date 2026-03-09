@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Trash2, RefreshCw, Search, ArrowDown } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Trash2, RefreshCw, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { LogFileEntry } from "@admin/types";
 import { Button, Select, useModalStore } from "@shared/components";
@@ -31,70 +31,49 @@ function levelClass(level: string): string {
   }
 }
 
-function highlightLine(line: string): React.ReactNode {
+const LOG_LEVELS = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"] as const;
+type LogLevel = (typeof LOG_LEVELS)[number];
+
+function getLineLevel(line: string): LogLevel | null {
   const match = line.match(/^\S+\s+(ERROR|WARN|INFO|DEBUG|TRACE)\s/);
-  if (!match) return line;
-  const level = match[1];
+  return match ? (match[1] as LogLevel) : null;
+}
+
+function highlightLine(line: string): React.ReactNode {
+  const level = getLineLevel(line);
+  if (!level) return line;
   return <span className={levelClass(level)}>{line}</span>;
 }
 
 function LogContent({
   content,
   searchQuery,
+  minLevel,
 }: {
   content: string;
   searchQuery: string;
+  minLevel: string;
 }) {
-  const containerRef = useRef<HTMLPreElement>(null);
-  const [autoScroll, setAutoScroll] = useState(true);
-
-  useEffect(() => {
-    if (autoScroll && containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
-    }
-  }, [content, autoScroll]);
-
-  const handleScroll = () => {
-    if (!containerRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
-    setAutoScroll(scrollHeight - scrollTop - clientHeight < 50);
-  };
-
-  const scrollToBottom = () => {
-    if (containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
-      setAutoScroll(true);
-    }
-  };
-
+  const minIdx = LOG_LEVELS.indexOf(minLevel as LogLevel);
   const lines = content.split("\n").reverse();
-  const filteredLines = searchQuery
-    ? lines.filter((line) =>
-        line.toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-    : lines;
+  const filteredLines = lines.filter((line) => {
+    if (minIdx > 0) {
+      const level = getLineLevel(line);
+      if (level && LOG_LEVELS.indexOf(level) < minIdx) return false;
+    }
+    if (searchQuery) {
+      return line.toLowerCase().includes(searchQuery.toLowerCase());
+    }
+    return true;
+  });
 
   return (
-    <div className="relative flex-1 min-h-0">
-      <pre
-        ref={containerRef}
-        onScroll={handleScroll}
-        className="max-h-[calc(100vh-16rem)] overflow-auto rounded-lg border border-border bg-gray-950 p-3 font-mono text-xs leading-5 text-gray-200"
-      >
+    <div className="flex-1 min-h-0">
+      <pre className="max-h-[calc(100vh-16rem)] overflow-auto rounded-lg border border-border bg-gray-950 p-3 font-mono text-xs leading-5 text-gray-200">
         {filteredLines.map((line, i) => (
           <div key={i}>{highlightLine(line) || "\u00A0"}</div>
         ))}
       </pre>
-      {!autoScroll && (
-        <button
-          type="button"
-          onClick={scrollToBottom}
-          className="absolute bottom-4 right-4 rounded-full bg-primary p-2 text-white shadow-lg transition-opacity hover:opacity-80"
-          title="Scroll to bottom"
-        >
-          <ArrowDown size={16} />
-        </button>
-      )}
     </div>
   );
 }
@@ -106,6 +85,7 @@ export default function LogViewerPage() {
   const [content, setContent] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [minLevel, setMinLevel] = useState("");
 
   const token = useAuthStore((s) => s.token);
 
@@ -255,6 +235,14 @@ export default function LogViewerPage() {
           </Button>
         )}
 
+        <Select
+          value={minLevel}
+          onChange={(e) => setMinLevel(e.target.value)}
+          options={LOG_LEVELS.map((l) => ({ value: l, label: l }))}
+          placeholder={t("All levels")}
+          containerClassName="min-w-[8rem]"
+        />
+
         <div className="relative ml-auto">
           <Search
             size={14}
@@ -278,14 +266,19 @@ export default function LogViewerPage() {
           <span>
             {t("Lines")}: {content.split("\n").length.toLocaleString()}
           </span>
-          {searchQuery && (
+          {(searchQuery || minLevel) && (
             <span>
               {t("Showing")}:{" "}
               {content
                 .split("\n")
-                .filter((l) =>
-                  l.toLowerCase().includes(searchQuery.toLowerCase()),
-                )
+                .filter((l) => {
+                  if (minLevel) {
+                    const lvl = getLineLevel(l);
+                    if (lvl && LOG_LEVELS.indexOf(lvl) < LOG_LEVELS.indexOf(minLevel as LogLevel)) return false;
+                  }
+                  if (searchQuery) return l.toLowerCase().includes(searchQuery.toLowerCase());
+                  return true;
+                })
                 .length.toLocaleString()}{" "}
               {t("matches")}
             </span>
@@ -293,7 +286,7 @@ export default function LogViewerPage() {
         </div>
       )}
 
-      <LogContent content={content} searchQuery={searchQuery} />
+      <LogContent content={content} searchQuery={searchQuery} minLevel={minLevel} />
     </div>
   );
 }

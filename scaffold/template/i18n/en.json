@@ -289,6 +289,10 @@
   "New introducer is the same as current": "New introducer is the same as current",
   "Cannot set user as their own introducer": "Cannot set user as their own introducer",
   "Changing introducer would create a cycle": "Changing introducer would create a cycle",
+  "User already has this introducer": "User already has this introducer",
+  "Cannot change introducer: would create a circular hierarchy": "Cannot change introducer: would create a circular hierarchy",
+  "Submit": "Submit",
+  "Submitting\u2026": "Submitting\u2026",
 
   "Credit 1": "Cash Point",
   "Credit 2": "Reward Point",
@@ -361,5 +365,6 @@
   "Delete Log File": "Delete Log File",
   "Are you sure you want to delete": "Are you sure you want to delete",
   "Queries": "Queries",
-  "Path": "Path"
+  "Path": "Path",
+  "All levels": "All levels"
 }

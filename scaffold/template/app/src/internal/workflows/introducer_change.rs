@@ -62,9 +62,6 @@ pub async fn change_introducer(
     let target_user = resolve_user_by_username(state, user_username).await?;
     let new_introducer = resolve_user_by_username(state, new_introducer_username).await?;
 
-    if target_user.introducer_user_id.is_none() {
-        return Err(AppError::BadRequest(t("Cannot change introducer for root user")));
-    }
     if target_user.id == new_introducer.id {
         return Err(AppError::BadRequest(t("Cannot set user as their own introducer")));
     }

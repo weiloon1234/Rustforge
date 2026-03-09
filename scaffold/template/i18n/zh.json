@@ -411,6 +411,10 @@
   "New introducer is the same as current": "新推荐人与当前推荐人相同",
   "Cannot set user as their own introducer": "不能设置用户为自己的推荐人",
   "Changing introducer would create a cycle": "变更推荐人会产生循环",
+  "User already has this introducer": "用户已拥有此推荐人",
+  "Cannot change introducer: would create a circular hierarchy": "无法变更推荐人：会形成循环层级",
+  "Submit": "提交",
+  "Submitting…": "提交中…",
 
   "Credit 1": "现金积分",
   "Credit 2": "奖励积分",
@@ -483,5 +487,6 @@
   "Delete Log File": "删除日志文件",
   "Are you sure you want to delete": "确定要删除",
   "Queries": "查询数",
-  "Path": "路径"
+  "Path": "路径",
+  "All levels": "所有级别"
 }
