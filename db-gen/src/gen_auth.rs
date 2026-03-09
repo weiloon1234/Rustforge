@@ -115,8 +115,9 @@ fn render_guard_modules_section(guards: &[AuthGuardSpec]) -> Result<String, std:
 
 fn render_guard_module_entry(guard: &AuthGuardSpec) -> String {
     format!(
-        "pub mod {file_stem};\npub use {file_stem}::*;",
-        file_stem = guard.file_stem
+        "pub mod {file_stem};\npub use {file_stem}::{struct_name};",
+        file_stem = guard.file_stem,
+        struct_name = guard.struct_name
     )
 }
 
