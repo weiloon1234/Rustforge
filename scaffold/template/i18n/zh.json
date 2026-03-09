@@ -321,6 +321,8 @@
   "Username must be lowercase.": "用户名必须为小写。",
   "The selected value is invalid.": "所选值无效。",
   "The selected value is not allowed.": "所选值不被允许。",
+  "Async validation check failed.": "异步验证检查失败。",
+  ":field has already been taken.": ":field 已被使用。",
   "Home": "首页",
   "History": "历史",
   "Transactions": "交易",

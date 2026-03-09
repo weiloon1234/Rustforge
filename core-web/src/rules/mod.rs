@@ -136,7 +136,7 @@ impl AsyncRule for Unique {
     fn message(&self) -> String {
         self.message
             .clone()
-            .unwrap_or_else(|| format!("{} has already been taken.", self.column))
+            .unwrap_or_else(|| core_i18n::t_args(":field has already been taken.", &[("field", self.column)]))
     }
 }
 
@@ -336,7 +336,7 @@ impl AsyncRule for NotExists {
     fn message(&self) -> String {
         self.message
             .clone()
-            .unwrap_or_else(|| format!("{} has already been taken.", self.column))
+            .unwrap_or_else(|| core_i18n::t_args(":field has already been taken.", &[("field", self.column)]))
     }
 }
 

@@ -52,32 +52,6 @@ export const navigation: NavItem[] = [
     path: "/",
   },
   {
-    label: "Other",
-    icon: Settings,
-    children: [
-      {
-        label: "Admins",
-        path: "/other/admins",
-        permissions: [PERMISSION.ADMIN_READ, PERMISSION.ADMIN_MANAGE],
-      },
-      {
-        label: "Pages",
-        path: "/other/content-pages",
-        permissions: [PERMISSION.CONTENT_PAGE_READ, PERMISSION.CONTENT_PAGE_MANAGE],
-      },
-      {
-        label: "Countries",
-        path: "/other/countries",
-        permissions: [PERMISSION.COUNTRY_READ, PERMISSION.COUNTRY_MANAGE],
-      },
-      {
-        label: "Audit Logs",
-        path: "/other/audit-logs",
-        permissions: [PERMISSION.AUDIT_LOG_READ],
-      },
-    ],
-  },
-  {
     label: "User",
     icon: Users,
     children: [
@@ -100,6 +74,32 @@ export const navigation: NavItem[] = [
         label: "Introducer Changes",
         path: "/user/introducer-changes",
         permissions: [PERMISSION.USER_CHANGE_INTRODUCER],
+      },
+    ],
+  },
+  {
+    label: "Other",
+    icon: Settings,
+    children: [
+      {
+        label: "Admins",
+        path: "/other/admins",
+        permissions: [PERMISSION.ADMIN_READ, PERMISSION.ADMIN_MANAGE],
+      },
+      {
+        label: "Pages",
+        path: "/other/content-pages",
+        permissions: [PERMISSION.CONTENT_PAGE_READ, PERMISSION.CONTENT_PAGE_MANAGE],
+      },
+      {
+        label: "Countries",
+        path: "/other/countries",
+        permissions: [PERMISSION.COUNTRY_READ, PERMISSION.COUNTRY_MANAGE],
+      },
+      {
+        label: "Audit Logs",
+        path: "/other/audit-logs",
+        permissions: [PERMISSION.AUDIT_LOG_READ],
       },
     ],
   },

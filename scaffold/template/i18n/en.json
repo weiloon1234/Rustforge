@@ -199,6 +199,8 @@
   "Username must be lowercase.": "Username must be lowercase.",
   "The selected value is invalid.": "The selected value is invalid.",
   "The selected value is not allowed.": "The selected value is not allowed.",
+  "Async validation check failed.": "Async validation check failed.",
+  ":field has already been taken.": ":field has already been taken.",
   "Home": "Home",
   "History": "History",
   "Transactions": "Transactions",
