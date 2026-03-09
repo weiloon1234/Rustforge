@@ -2151,6 +2151,8 @@ mod tests {
                 url: "postgres://localhost/test".to_string(),
                 max_connections: 1,
                 connect_timeout: Duration::from_secs(1),
+                sql_profiler_enabled: false,
+                sql_profiler_retention_days: 7,
             },
             redis: RedisSettings {
                 url: redis_url.to_string(),
