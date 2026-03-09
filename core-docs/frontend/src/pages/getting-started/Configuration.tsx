@@ -80,6 +80,8 @@ WORKER_SWEEP_INTERVAL=30        # Seconds between queue sweeps
 DATABASE_URL=postgres://...
 DB_MAX_CONNECTIONS=10           # Connection pool size
 DB_CONNECT_TIMEOUT_SECS=5       # Connection timeout
+SQL_PROFILER_ENABLED=false      # Log every SQL query with timing
+SQL_PROFILER_RETENTION_DAYS=7   # Days to keep profiler logs (0 = no cleanup)
 
 # ----------------------------
 # Redis

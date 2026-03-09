@@ -42,6 +42,10 @@ pub struct ModelSpec {
     /// Default: true — set `audit = false` in TOML to opt out.
     #[serde(default = "default_audit")]
     pub audit: bool,
+    /// Whether SQL queries on this model are included in profiler output.
+    /// Default: true — set `profile = false` in TOML to exclude (e.g. profiler tables).
+    #[serde(default = "default_profile")]
+    pub profile: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -210,6 +214,10 @@ const FRAMEWORK_SCHEMA_FILES: &[FrameworkSchemaFile] = &[
         name: "meta.toml",
         content: include_str!("../schemas/meta.toml"),
     },
+    FrameworkSchemaFile {
+        name: "sql_profiler.toml",
+        content: include_str!("../schemas/sql_profiler.toml"),
+    },
 ];
 
 fn load_framework_embedded() -> Result<Schema, Box<dyn Error>> {
@@ -366,6 +374,10 @@ pub fn to_label(s: &str) -> String {
 }
 
 fn default_audit() -> bool {
+    true
+}
+
+fn default_profile() -> bool {
     true
 }
 

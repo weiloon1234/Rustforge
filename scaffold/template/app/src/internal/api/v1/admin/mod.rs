@@ -8,6 +8,7 @@ mod auth;
 mod content_page;
 mod content_page_multipart;
 mod country;
+mod developer_logs;
 mod hierarchy;
 mod introducer_change;
 mod tiptap_upload;
@@ -36,6 +37,7 @@ fn guarded_router(state: AppApiState) -> ApiRouter {
         .nest("/countries", country::router(state.clone()))
         .nest("/content_page", content_page::router(state.clone()))
         .nest("/uploads", tiptap_upload::router(state.clone()))
+        .nest("/developer/logs", developer_logs::router(state.clone()))
         .merge(datatable::router(state.clone()))
         .layer(from_fn_with_state(
             state,

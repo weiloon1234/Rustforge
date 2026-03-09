@@ -4,6 +4,8 @@ pub mod content_page;
 pub mod country;
 pub mod http_client_log;
 pub mod introducer_change;
+pub mod sql_profiler_query;
+pub mod sql_profiler_request;
 pub mod user;
 pub mod user_credit_transaction;
 pub mod webhook_log;
@@ -29,6 +31,14 @@ use crate::contracts::datatable::admin::{
         ROUTE_PREFIX as INTRODUCER_CHANGE_ROUTE_PREFIX,
         SCOPED_KEY as INTRODUCER_CHANGE_SCOPED_KEY,
     },
+    sql_profiler_query::{
+        ROUTE_PREFIX as SQL_PROFILER_QUERY_ROUTE_PREFIX,
+        SCOPED_KEY as SQL_PROFILER_QUERY_SCOPED_KEY,
+    },
+    sql_profiler_request::{
+        ROUTE_PREFIX as SQL_PROFILER_REQUEST_ROUTE_PREFIX,
+        SCOPED_KEY as SQL_PROFILER_REQUEST_SCOPED_KEY,
+    },
     user::{ROUTE_PREFIX as USER_ROUTE_PREFIX, SCOPED_KEY as USER_SCOPED_KEY},
     user_credit_transaction::{
         ROUTE_PREFIX as USER_CREDIT_TRANSACTION_ROUTE_PREFIX,
@@ -46,6 +56,8 @@ pub use http_client_log::HttpClientLogDataTableAppHooks;
 pub use user::{build_user_summary_output, UserDataTableAppHooks};
 pub use user_credit_transaction::UserCreditTransactionDataTableAppHooks;
 pub use introducer_change::IntroducerChangeDataTableAppHooks;
+pub use sql_profiler_query::SqlProfilerQueryDataTableAppHooks;
+pub use sql_profiler_request::SqlProfilerRequestDataTableAppHooks;
 pub use webhook_log::WebhookLogDataTableAppHooks;
 
 pub fn authorize_with_optional_export(
@@ -111,6 +123,14 @@ fn introducer_change_routes(state: AppApiState) -> ApiRouter {
     introducer_change::routes(state)
 }
 
+fn sql_profiler_query_routes(state: AppApiState) -> ApiRouter {
+    sql_profiler_query::routes(state)
+}
+
+fn sql_profiler_request_routes(state: AppApiState) -> ApiRouter {
+    sql_profiler_request::routes(state)
+}
+
 fn webhook_log_routes(state: AppApiState) -> ApiRouter {
     webhook_log::routes(state)
 }
@@ -169,6 +189,18 @@ pub static ADMIN_SCOPED_DATATABLES: &[ScopedDatatableSpec] = &[
         route_prefix: INTRODUCER_CHANGE_ROUTE_PREFIX,
         register: introducer_change::register_scoped,
         mount_routes: introducer_change_routes,
+    },
+    ScopedDatatableSpec {
+        scoped_key: SQL_PROFILER_REQUEST_SCOPED_KEY,
+        route_prefix: SQL_PROFILER_REQUEST_ROUTE_PREFIX,
+        register: sql_profiler_request::register_scoped,
+        mount_routes: sql_profiler_request_routes,
+    },
+    ScopedDatatableSpec {
+        scoped_key: SQL_PROFILER_QUERY_SCOPED_KEY,
+        route_prefix: SQL_PROFILER_QUERY_ROUTE_PREFIX,
+        register: sql_profiler_query::register_scoped,
+        mount_routes: sql_profiler_query_routes,
     },
 ];
 

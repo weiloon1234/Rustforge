@@ -68,7 +68,18 @@ where
     }
     .layer(from_fn(core_i18n::middleware::locale_middleware));
 
-    // 5. Apply Standard Middleware (CORS, cookies, compression, timeouts, etc.)
+    // 5. SQL Profiler Middleware (wraps all routes to collect query stats per request)
+    let app_router = if ctx.settings.db.sql_profiler_enabled {
+        let pool = Arc::new(ctx.db.clone());
+        app_router.layer(axum::middleware::from_fn(move |req, next| {
+            let pool = pool.clone();
+            core_db::common::sql_profiler_middleware::sql_profiler_layer(pool, req, next)
+        }))
+    } else {
+        app_router
+    };
+
+    // 6. Apply Standard Middleware (CORS, cookies, compression, timeouts, etc.)
     let app_router =
         core_web::middleware::stack::apply_standard_middleware(app_router, &ctx.settings);
 

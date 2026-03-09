@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
 use serde_json::Value;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -73,6 +73,35 @@ pub enum BindValue {
     UuidOpt(Option<Uuid>),
     Json(Value),
     JsonOpt(Option<Value>),
+}
+
+impl std::fmt::Display for BindValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::I16(v) => write!(f, "{v}"),
+            Self::I16Opt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::I32(v) => write!(f, "{v}"),
+            Self::I32Opt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::I64(v) => write!(f, "{v}"),
+            Self::I64Opt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::F64(v) => write!(f, "{v}"),
+            Self::F64Opt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::Decimal(v) => write!(f, "{v}"),
+            Self::DecimalOpt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::Bool(v) => write!(f, "{v}"),
+            Self::BoolOpt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::String(v) => write!(f, "'{v}'"),
+            Self::StringOpt(v) => match v { Some(v) => write!(f, "'{v}'"), None => write!(f, "NULL") },
+            Self::StringArray(v) => write!(f, "[{}]", v.iter().map(|s| format!("'{s}'")).collect::<Vec<_>>().join(", ")),
+            Self::StringArrayOpt(v) => match v { Some(v) => write!(f, "[{}]", v.iter().map(|s| format!("'{s}'")).collect::<Vec<_>>().join(", ")), None => write!(f, "NULL") },
+            Self::Time(v) => write!(f, "{}", v.format(&time::format_description::well_known::Rfc3339).unwrap_or_else(|_| format!("{v:?}"))),
+            Self::TimeOpt(v) => match v { Some(v) => write!(f, "{}", v.format(&time::format_description::well_known::Rfc3339).unwrap_or_else(|_| format!("{v:?}"))), None => write!(f, "NULL") },
+            Self::Uuid(v) => write!(f, "{v}"),
+            Self::UuidOpt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::Json(v) => write!(f, "{v}"),
+            Self::JsonOpt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+        }
+    }
 }
 
 /// Controls how a column is set in an UPDATE statement.
@@ -405,6 +434,106 @@ fn count_question_placeholders(sql: &str) -> usize {
     sql.as_bytes().iter().filter(|&&b| b == b'?').count()
 }
 
+// ── SQL Profiler ──────────────────────────────────────────────────────────────
+static SQL_PROFILER_ENABLED: AtomicBool = AtomicBool::new(false);
+
+pub fn init_sql_profiler(enabled: bool) {
+    SQL_PROFILER_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+pub fn is_sql_profiler_enabled() -> bool {
+    SQL_PROFILER_ENABLED.load(Ordering::Relaxed)
+}
+
+pub fn format_duration(d: Duration) -> String {
+    let nanos = d.as_nanos();
+    if nanos < 1_000 {
+        format!("{}ns", nanos)
+    } else if nanos < 1_000_000 {
+        format!("{:.2}us", nanos as f64 / 1_000.0)
+    } else if nanos < 1_000_000_000 {
+        format!("{:.2}ms", nanos as f64 / 1_000_000.0)
+    } else {
+        format!("{:.2}s", nanos as f64 / 1_000_000_000.0)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProfiledQuery {
+    pub table_name: String,
+    pub operation: String,
+    pub sql: String,
+    pub binds: String,
+    pub duration: Duration,
+}
+
+#[derive(Debug)]
+pub struct SqlProfilerCollector {
+    pub request_id: Uuid,
+    pub queries: std::sync::Mutex<Vec<ProfiledQuery>>,
+}
+
+impl Clone for SqlProfilerCollector {
+    fn clone(&self) -> Self {
+        Self {
+            request_id: self.request_id,
+            queries: std::sync::Mutex::new(
+                self.queries.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            ),
+        }
+    }
+}
+
+impl SqlProfilerCollector {
+    pub fn new() -> Self {
+        Self {
+            request_id: Uuid::new_v4(),
+            queries: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn record(&self, query: ProfiledQuery) {
+        if let Ok(mut queries) = self.queries.lock() {
+            queries.push(query);
+        }
+    }
+
+    pub fn finish(self) -> (Uuid, Vec<ProfiledQuery>) {
+        let queries = self.queries.into_inner().unwrap_or_default();
+        (self.request_id, queries)
+    }
+}
+
+tokio::task_local! {
+    pub static PROFILER_COLLECTOR: Arc<SqlProfilerCollector>;
+}
+
+/// Record a query to the current request's collector (if active).
+/// Called from generated profiler code.
+pub fn record_profiled_query(table_name: &str, operation: &str, sql: &str, binds: &str, duration: Duration) {
+    if !is_sql_profiler_enabled() {
+        return;
+    }
+    tracing::info!(
+        "[SQL_PROFILER] {} | {} | {} | {} | binds: [{}]",
+        format_duration(duration),
+        table_name,
+        operation,
+        sql,
+        binds
+    );
+    let _ = PROFILER_COLLECTOR.try_with(|collector| {
+        collector.record(ProfiledQuery {
+            table_name: table_name.to_string(),
+            operation: operation.to_string(),
+            sql: sql.to_string(),
+            binds: binds.to_string(),
+            duration,
+        });
+    });
+}
+
+// ── Snowflake ID ─────────────────────────────────────────────────────────────
 const SNOWFLAKE_EPOCH_MS: u64 = 1_704_067_200_000; // 2024-01-01T00:00:00Z
 const SNOWFLAKE_SEQUENCE_MASK: u64 = (1 << 12) - 1;
 const SNOWFLAKE_NODE_MASK: u64 = (1 << 10) - 1;

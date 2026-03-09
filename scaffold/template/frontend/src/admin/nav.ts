@@ -111,13 +111,26 @@ export const navigation: NavItem[] = [
       {
         label: "HTTP Client Logs",
         path: "/developer/http-client-logs",
-        permissions: [PERMISSION.ADMIN_READ, PERMISSION.ADMIN_MANAGE],
         admin_types: [ADMIN_TYPE.DEVELOPER],
       },
       {
         label: "Webhook Logs",
         path: "/developer/webhook-logs",
-        permissions: [PERMISSION.ADMIN_READ, PERMISSION.ADMIN_MANAGE],
+        admin_types: [ADMIN_TYPE.DEVELOPER],
+      },
+      {
+        label: "SQL Profiler Requests",
+        path: "/developer/sql-profiler-requests",
+        admin_types: [ADMIN_TYPE.DEVELOPER],
+      },
+      {
+        label: "SQL Profiler Queries",
+        path: "/developer/sql-profiler-queries",
+        admin_types: [ADMIN_TYPE.DEVELOPER],
+      },
+      {
+        label: "Log Viewer",
+        path: "/developer/log-viewer",
         admin_types: [ADMIN_TYPE.DEVELOPER],
       },
     ],

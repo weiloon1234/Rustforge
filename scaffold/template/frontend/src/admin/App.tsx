@@ -17,6 +17,9 @@ const CreditTransactionsPage = lazy(() => import("@admin/pages/user/CreditTransa
 const AuditLogsPage = lazy(() => import("@admin/pages/other/AuditLogsPage"));
 const HttpClientLogsPage = lazy(() => import("@admin/pages/developer/HttpClientLogsPage"));
 const WebhookLogsPage = lazy(() => import("@admin/pages/developer/WebhookLogsPage"));
+const SqlProfilerRequestsPage = lazy(() => import("@admin/pages/developer/SqlProfilerRequestsPage"));
+const SqlProfilerQueriesPage = lazy(() => import("@admin/pages/developer/SqlProfilerQueriesPage"));
+const LogViewerPage = lazy(() => import("@admin/pages/developer/LogViewerPage"));
 
 function RouteFallback() {
   return (
@@ -45,6 +48,9 @@ export default function App() {
             <Route path="/user/introducer-changes" element={<IntroducerChangesPage />} />
             <Route path="/developer/http-client-logs" element={<HttpClientLogsPage />} />
             <Route path="/developer/webhook-logs" element={<WebhookLogsPage />} />
+            <Route path="/developer/sql-profiler-requests" element={<SqlProfilerRequestsPage />} />
+            <Route path="/developer/sql-profiler-queries" element={<SqlProfilerQueriesPage />} />
+            <Route path="/developer/log-viewer" element={<LogViewerPage />} />
           </Route>
         </Route>
       </Routes>

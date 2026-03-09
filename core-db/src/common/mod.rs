@@ -5,3 +5,4 @@ pub mod crypt;
 pub mod model_observer;
 pub mod pagination;
 pub mod sql;
+pub mod sql_profiler_middleware;

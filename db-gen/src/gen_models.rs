@@ -1197,6 +1197,125 @@ fn render_small_terminal_methods(
     out
 }
 
+fn render_to_sql_method(has_soft_delete: bool, col_ident: &str, table: &str) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "    pub fn to_sql(&self) -> (String, Vec<BindValue>) {{"
+    )
+    .unwrap();
+    writeln!(out, "        let select_sql = self.select_sql.clone();").unwrap();
+    writeln!(out, "        let from_sql = self.from_sql.clone();").unwrap();
+    writeln!(out, "        let distinct = self.distinct;").unwrap();
+    writeln!(out, "        let distinct_on = self.distinct_on.clone();").unwrap();
+    writeln!(out, "        let lock_sql = self.lock_sql;").unwrap();
+    writeln!(out, "        let join_sql = self.join_sql.clone();").unwrap();
+    writeln!(out, "        let join_binds = self.join_binds.clone();").unwrap();
+    writeln!(out, "        let mut where_sql = self.where_sql.clone();").unwrap();
+    writeln!(out, "        let order_sql = self.order_sql.clone();").unwrap();
+    writeln!(out, "        let group_by_sql = self.group_by_sql.clone();").unwrap();
+    writeln!(out, "        let having_sql = self.having_sql.clone();").unwrap();
+    writeln!(out, "        let having_binds = self.having_binds.clone();").unwrap();
+    writeln!(out, "        let offset = self.offset;").unwrap();
+    writeln!(out, "        let limit = self.limit;").unwrap();
+    writeln!(out, "        let binds = self.binds.clone();").unwrap();
+    if has_soft_delete {
+        writeln!(out, "        let with_deleted = self.with_deleted;").unwrap();
+        writeln!(out, "        let only_deleted = self.only_deleted;").unwrap();
+        writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
+        writeln!(out, "            if only_deleted {{").unwrap();
+        writeln!(
+            out,
+            "                where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));"
+        )
+        .unwrap();
+        writeln!(out, "            }} else if !with_deleted {{").unwrap();
+        writeln!(
+            out,
+            "                where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    // Build select clause
+    writeln!(
+        out,
+        "        let select_clause = match (distinct, distinct_on.as_ref()) {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            (false, None) => select_sql.unwrap_or_else(|| \"*\".to_string()),"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            (true, None) => format!(\"DISTINCT {{}}\", select_sql.unwrap_or_else(|| \"*\".to_string())),"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            (_, Some(col)) => format!(\"DISTINCT ON ({{}}) {{}}\", col, select_sql.unwrap_or_else(|| \"*\".to_string())),"
+    )
+    .unwrap();
+    writeln!(out, "        }};").unwrap();
+    writeln!(
+        out,
+        "        let table_name = from_sql.unwrap_or_else(|| \"{table}\".to_string());"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut sql = format!(\"SELECT {{}} FROM {{}}\", select_clause, table_name);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if !join_sql.is_empty() {{ sql.push(' '); sql.push_str(&join_sql.join(\" \")); }}"
+    )
+    .unwrap();
+    writeln!(out, "        if !where_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" WHERE \");").unwrap();
+    writeln!(out, "            sql.push_str(&where_sql.join(\" AND \"));").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if !group_by_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" GROUP BY \");").unwrap();
+    writeln!(out, "            sql.push_str(&group_by_sql.join(\", \"));").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if !having_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" HAVING \");").unwrap();
+    writeln!(
+        out,
+        "            sql.push_str(&having_sql.join(\" AND \"));"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if !order_sql.is_empty() {{").unwrap();
+    writeln!(out, "            sql.push_str(\" ORDER BY \");").unwrap();
+    writeln!(out, "            sql.push_str(&order_sql.join(\", \"));").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if let Some(off) = offset {{").unwrap();
+    writeln!(out, "            sql.push_str(\" OFFSET \");").unwrap();
+    writeln!(out, "            sql.push_str(&off.to_string());").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if let Some(l) = limit {{").unwrap();
+    writeln!(out, "            sql.push_str(\" LIMIT \");").unwrap();
+    writeln!(out, "            sql.push_str(&l.to_string());").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
+    )
+    .unwrap();
+    writeln!(out, "        let mut all_binds = binds;").unwrap();
+    writeln!(out, "        all_binds.extend(join_binds);").unwrap();
+    writeln!(out, "        all_binds.extend(having_binds);").unwrap();
+    writeln!(out, "        (sql, all_binds)").unwrap();
+    writeln!(out, "    }}\n").unwrap();
+    out
+}
+
 fn render_into_where_parts_method(col_ident: &str, has_soft_delete: bool) -> String {
     let mut out = String::new();
     writeln!(
@@ -1236,7 +1355,7 @@ fn render_into_where_parts_method(col_ident: &str, has_soft_delete: bool) -> Str
     out
 }
 
-fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool, audit: bool, row_ident: &str, pk_snake: &str) -> String {
+fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool, audit: bool, row_ident: &str, pk_snake: &str, skip_profiler: bool) -> String {
     let mut out = String::new();
     writeln!(out, "    pub async fn delete(self) -> Result<u64> {{").unwrap();
     writeln!(out, "        if self.limit.is_some() {{").unwrap();
@@ -1264,6 +1383,7 @@ fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool, aud
         "        if where_sql.is_empty() {{ anyhow::bail!(\"delete(): no conditions set\"); }}"
     )
     .unwrap();
+    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
     // Fetch old rows before delete for audit hooks
     if audit {
         writeln!(out, "        let __observer_active = try_get_observer().is_some();").unwrap();
@@ -1307,6 +1427,9 @@ fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool, aud
         )
         .unwrap();
         writeln!(out, "            }}").unwrap();
+        if !skip_profiler {
+            writeln!(out, "            let __profiler_start = std::time::Instant::now();").unwrap();
+        }
         writeln!(out, "            let mut q = sqlx::query(&sql);").unwrap();
         writeln!(
             out,
@@ -1319,6 +1442,9 @@ fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool, aud
         )
         .unwrap();
         writeln!(out, "            let res = db.execute(q).await?;").unwrap();
+        if !skip_profiler {
+            writeln!(out, "            record_profiled_query(\"{table}\", \"UPDATE\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
+        }
         if audit {
             writeln!(out, "            if !__old_rows_json.is_empty() && res.rows_affected() > 0 {{").unwrap();
             writeln!(out, "                if let Some(observer) = try_get_observer() {{").unwrap();
@@ -1341,9 +1467,11 @@ fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool, aud
     writeln!(out, "            sql.push_str(\" WHERE \");").unwrap();
     writeln!(out, "            sql.push_str(&where_sql.join(\" AND \"));").unwrap();
     writeln!(out, "        }}").unwrap();
+    out.push_str(&render_profiler_start(skip_profiler));
     writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
     writeln!(out, "        for b in binds {{ q = bind_query(q, b); }}").unwrap();
     writeln!(out, "        let res = db.execute(q).await?;").unwrap();
+    out.push_str(&render_profiler_log(table, "DELETE", "&sql", "&__profiler_binds", skip_profiler));
     if audit {
         writeln!(out, "        if !__old_rows_json.is_empty() && res.rows_affected() > 0 {{").unwrap();
         writeln!(out, "            if let Some(observer) = try_get_observer() {{").unwrap();
@@ -1359,7 +1487,7 @@ fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool, aud
     out
 }
 
-fn render_restore_method(table: &str, col_ident: &str) -> String {
+fn render_restore_method(table: &str, col_ident: &str, skip_profiler: bool) -> String {
     let mut out = String::new();
     writeln!(out, "    pub async fn restore(self) -> Result<u64> {{").unwrap();
     writeln!(
@@ -1401,9 +1529,12 @@ fn render_restore_method(table: &str, col_ident: &str) -> String {
     writeln!(out, "            sql.push_str(\" WHERE \");").unwrap();
     writeln!(out, "            sql.push_str(&where_sql.join(\" AND \"));").unwrap();
     writeln!(out, "        }}").unwrap();
+    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+    out.push_str(&render_profiler_start(skip_profiler));
     writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
     writeln!(out, "        for b in binds {{ q = bind_query(q, b); }}").unwrap();
     writeln!(out, "        let res = db.execute(q).await?;").unwrap();
+    out.push_str(&render_profiler_log(table, "UPDATE", "&sql", "&__profiler_binds", skip_profiler));
     writeln!(out, "        Ok(res.rows_affected())").unwrap();
     writeln!(out, "    }}").unwrap();
     out
@@ -2041,6 +2172,27 @@ fn render_with_relations_collection_build(
     out
 }
 
+/// Generate the `let __profiler_start = ...` line.
+/// When `skip` is true (model has `profile = false`), returns empty.
+fn render_profiler_start(skip: bool) -> String {
+    if skip {
+        return String::new();
+    }
+    "        let __profiler_start = std::time::Instant::now();\n".to_string()
+}
+
+/// Generate the profiler log block. `sql_var` is the variable name holding the SQL string,
+/// `binds_expr` is the expression for the bind values to display.
+/// When `skip` is true (model has `profile = false`), returns empty.
+fn render_profiler_log(table: &str, op: &str, sql_var: &str, binds_expr: &str, skip: bool) -> String {
+    if skip {
+        return String::new();
+    }
+    let mut out = String::new();
+    writeln!(out, "        record_profiled_query(\"{table}\", \"{op}\", {sql_var}, {binds_expr}, __profiler_start.elapsed());").unwrap();
+    out
+}
+
 fn render_scoped_where_setup(has_soft_delete: bool, col_ident: &str) -> String {
     let mut out = String::new();
     writeln!(out, "        let mut where_sql = where_sql;").unwrap();
@@ -2202,7 +2354,7 @@ fn render_get_as_method(table: &str) -> String {
     out
 }
 
-fn render_count_method(has_soft_delete: bool, col_ident: &str, table: &str) -> String {
+fn render_count_method(has_soft_delete: bool, col_ident: &str, table: &str, skip_profiler: bool) -> String {
     let mut out = String::new();
     writeln!(out, "    pub async fn count(self) -> Result<i64> {{").unwrap();
     writeln!(
@@ -2223,6 +2375,8 @@ fn render_count_method(has_soft_delete: bool, col_ident: &str, table: &str) -> S
         "        let sql = format!(\"SELECT {{}} {{}}{{}}\", count_expr, from_clause, where_clause);"
     )
     .unwrap();
+    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().chain(join_binds.iter()).map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+    out.push_str(&render_profiler_start(skip_profiler));
     writeln!(
         out,
         "        let mut q = sqlx::query_scalar::<_, i64>(&sql);"
@@ -2235,6 +2389,7 @@ fn render_count_method(has_soft_delete: bool, col_ident: &str, table: &str) -> S
     )
     .unwrap();
     writeln!(out, "        let count = db.fetch_scalar(q).await?;").unwrap();
+    out.push_str(&render_profiler_log(table, "COUNT", "&sql", "&__profiler_binds", skip_profiler));
     writeln!(out, "        Ok(count)").unwrap();
     writeln!(out, "    }}\n").unwrap();
     out
@@ -2246,6 +2401,7 @@ fn render_pluck_ids_method(
     has_soft_delete: bool,
     col_ident: &str,
     table: &str,
+    skip_profiler: bool,
 ) -> String {
     let mut out = String::new();
     writeln!(
@@ -2281,6 +2437,8 @@ fn render_pluck_ids_method(
         "        let sql = format!(\"SELECT {pk} {{}}{{}}{{}}{{}}{{}}\", from_clause, where_clause, order_clause, limit_clause, offset_clause);"
     )
     .unwrap();
+    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().chain(join_binds.iter()).map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+    out.push_str(&render_profiler_start(skip_profiler));
     writeln!(
         out,
         "        let mut q = sqlx::query_scalar::<_, {parent_pk_ty}>(&sql);"
@@ -2293,6 +2451,7 @@ fn render_pluck_ids_method(
     )
     .unwrap();
     writeln!(out, "        let ids = db.fetch_all_scalar(q).await?;").unwrap();
+    out.push_str(&render_profiler_log(table, "SELECT", "&sql", "&__profiler_binds", skip_profiler));
     writeln!(out, "        Ok(ids)").unwrap();
     writeln!(out, "    }}\n").unwrap();
     out
@@ -2305,6 +2464,7 @@ fn render_scalar_aggregate_method(
     has_soft_delete: bool,
     col_ident: &str,
     table: &str,
+    skip_profiler: bool,
 ) -> String {
     let mut out = String::new();
     writeln!(
@@ -2325,6 +2485,8 @@ fn render_scalar_aggregate_method(
         "        let sql = format!(\"SELECT {select_expr} {{}}{{}}\", col.as_sql(), from_clause, where_clause);"
     )
     .unwrap();
+    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().chain(join_binds.iter()).map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+    out.push_str(&render_profiler_start(skip_profiler));
     writeln!(
         out,
         "        let mut q = sqlx::query_scalar::<_, {result_ty}>(&sql);"
@@ -2337,6 +2499,8 @@ fn render_scalar_aggregate_method(
     )
     .unwrap();
     writeln!(out, "        let result = db.fetch_scalar(q).await?;").unwrap();
+    let op = method_name.to_uppercase();
+    out.push_str(&render_profiler_log(table, &op, "&sql", "&__profiler_binds", skip_profiler));
     writeln!(out, "        Ok(result)").unwrap();
     writeln!(out, "    }}\n").unwrap();
     out
@@ -2356,6 +2520,7 @@ fn render_paginate_method(
     localized_fields: &[String],
     has_meta: bool,
     has_attachments: bool,
+    skip_profiler: bool,
 ) -> String {
     let mut out = String::new();
     writeln!(
@@ -2379,6 +2544,8 @@ fn render_paginate_method(
     out.push_str(&render_select_clause_setup());
     out.push_str(&render_from_and_where_clause_setup(table));
     out.push_str(&render_paginate_count_sql_setup());
+    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().chain(join_binds.iter()).map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+    out.push_str(&render_profiler_start(skip_profiler));
     writeln!(
         out,
         "        let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);"
@@ -2399,6 +2566,7 @@ fn render_paginate_method(
         "        let total: i64 = db.fetch_scalar(count_q).await?;"
     )
     .unwrap();
+    out.push_str(&render_profiler_log(table, "COUNT", "&count_sql", "&__profiler_binds", skip_profiler));
     writeln!(
         out,
         "        let last_page = ((total + per_page - 1) / per_page).max(1);"
@@ -2434,6 +2602,7 @@ fn render_paginate_method(
         "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
     )
     .unwrap();
+    out.push_str(&render_profiler_start(skip_profiler));
     writeln!(
         out,
         "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
@@ -2446,6 +2615,7 @@ fn render_paginate_method(
     .unwrap();
     writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
     writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
+    out.push_str(&render_profiler_log(table, "SELECT", "&sql", "&__profiler_binds", skip_profiler));
     if !relations.is_empty() {
         writeln!(
             out,
@@ -2512,6 +2682,7 @@ fn render_get_method(
     localized_fields: &[String],
     has_meta: bool,
     has_attachments: bool,
+    skip_profiler: bool,
 ) -> String {
     let mut out = String::new();
     writeln!(
@@ -2575,6 +2746,8 @@ fn render_get_method(
         "        if let Some(lock) = lock_sql {{ sql.push(' '); sql.push_str(lock); }}"
     )
     .unwrap();
+    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().chain(join_binds.iter()).chain(having_binds.iter()).map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+    out.push_str(&render_profiler_start(skip_profiler));
     writeln!(
         out,
         "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
@@ -2586,6 +2759,7 @@ fn render_get_method(
     writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
     writeln!(out, "        for b in having_binds {{ q = bind(q, b); }}").unwrap();
     writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
+    out.push_str(&render_profiler_log(table, "SELECT", "&sql", "&__profiler_binds", skip_profiler));
     if !relations.is_empty() {
         writeln!(
             out,
@@ -2815,7 +2989,7 @@ fn render_update_or_create_method(
     out
 }
 
-fn render_increment_method(col_ident: &str, table: &str, has_soft_delete: bool) -> String {
+fn render_increment_method(col_ident: &str, table: &str, has_soft_delete: bool, skip_profiler: bool) -> String {
     let mut out = String::new();
     writeln!(
         out,
@@ -2844,9 +3018,12 @@ fn render_increment_method(col_ident: &str, table: &str, has_soft_delete: bool) 
         "        let sql = format!(\"UPDATE {table} SET {{}} = {{}} + {{}} {{}}\", col.as_sql(), col.as_sql(), amount, where_clause);"
     )
     .unwrap();
+    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+    out.push_str(&render_profiler_start(skip_profiler));
     writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
     writeln!(out, "        for b in binds {{ q = bind_query(q, b); }}").unwrap();
     writeln!(out, "        let res = db.execute(q).await?;").unwrap();
+    out.push_str(&render_profiler_log(table, "UPDATE", "&sql", "&__profiler_binds", skip_profiler));
     writeln!(out, "        Ok(res.rows_affected())").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
@@ -3041,6 +3218,8 @@ fn render_model(
     let use_snowflake_id = !cfg.disable_id && id_strategy == "snowflake" && parent_pk_ty == "i64";
     // Emit lifecycle hooks only for audit-enabled models with i64 PKs
     let emit_hooks = cfg.audit && parent_pk_ty == "i64";
+    // Skip profiler instrumentation for models with `profile = false`
+    let skip_profiler = !cfg.profile;
     let has_created_at = fields.iter().any(|f| f.name == "created_at");
     let has_updated_at = fields.iter().any(|f| f.name == "updated_at");
     let has_soft_delete = fields.iter().any(|f| f.name == "deleted_at");
@@ -3101,13 +3280,13 @@ fn render_model(
     if use_snowflake_id {
         writeln!(
             imports,
-            "use core_db::common::sql::{{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, DbConn}};"
+            "use core_db::common::sql::{{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn}};"
         )
         .unwrap();
     } else {
         writeln!(
             imports,
-            "use core_db::common::sql::{{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, DbConn}};"
+            "use core_db::common::sql::{{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn}};"
         )
         .unwrap();
     }
@@ -4159,6 +4338,7 @@ fn render_model(
         &localized_fields,
         has_meta,
         has_attachments,
+        skip_profiler,
     ));
 
     out.push_str(&render_find_methods(
@@ -4180,10 +4360,11 @@ fn render_model(
         &col_ident,
         &table,
         has_soft_delete,
+        skip_profiler,
     ));
     out.push_str(&render_decrement_method(&col_ident));
 
-    out.push_str(&render_count_method(has_soft_delete, &col_ident, &table));
+    out.push_str(&render_count_method(has_soft_delete, &col_ident, &table, skip_profiler));
 
     out.push_str(&render_pluck_ids_method(
         &parent_pk_ty,
@@ -4191,6 +4372,7 @@ fn render_model(
         has_soft_delete,
         &col_ident,
         &table,
+        skip_profiler,
     ));
     out.push_str(&render_small_terminal_methods(
         &query_ident,
@@ -4206,6 +4388,7 @@ fn render_model(
         has_soft_delete,
         &col_ident,
         &table,
+        skip_profiler,
     ));
 
     out.push_str(&render_with_counts_method(
@@ -4221,6 +4404,7 @@ fn render_model(
         has_soft_delete,
         &col_ident,
         &table,
+        skip_profiler,
     ));
     out.push_str(&render_scalar_aggregate_method(
         "min_val",
@@ -4229,6 +4413,7 @@ fn render_model(
         has_soft_delete,
         &col_ident,
         &table,
+        skip_profiler,
     ));
     out.push_str(&render_scalar_aggregate_method(
         "max_val",
@@ -4237,6 +4422,7 @@ fn render_model(
         has_soft_delete,
         &col_ident,
         &table,
+        skip_profiler,
     ));
 
     out.push_str(&render_paginate_method(
@@ -4253,12 +4439,14 @@ fn render_model(
         &localized_fields,
         has_meta,
         has_attachments,
+        skip_profiler,
     ));
 
+    out.push_str(&render_to_sql_method(has_soft_delete, &col_ident, &table));
     out.push_str(&render_into_where_parts_method(&col_ident, has_soft_delete));
-    out.push_str(&render_delete_method(&table, &col_ident, has_soft_delete, emit_hooks, &row_ident, &to_snake(&pk)));
+    out.push_str(&render_delete_method(&table, &col_ident, has_soft_delete, emit_hooks, &row_ident, &to_snake(&pk), skip_profiler));
     if has_soft_delete {
-        out.push_str(&render_restore_method(&table, &col_ident));
+        out.push_str(&render_restore_method(&table, &col_ident, skip_profiler));
     }
     writeln!(out, "}}\n").unwrap();
 
@@ -4625,6 +4813,8 @@ fn render_model(
     writeln!(out, "            }}").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "        sql.push_str(\" RETURNING *\");").unwrap();
+    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+    out.push_str(&render_profiler_start(skip_profiler));
     writeln!(
         out,
         "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
@@ -4634,6 +4824,7 @@ fn render_model(
     writeln!(out, "            q = bind(q, b);").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "        let row = db.fetch_one(q).await?;").unwrap();
+    out.push_str(&render_profiler_log(&table, "INSERT", "&sql", "&__profiler_binds", skip_profiler));
     if !localized_fields.is_empty() {
         writeln!(out, "        if !self.translations.is_empty() {{").unwrap();
         writeln!(
@@ -5128,6 +5319,8 @@ fn render_model(
         }
         writeln!(out, "        }}").unwrap();
     }
+    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ set_binds.iter().chain(binds.iter()).map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+    out.push_str(&render_profiler_start(skip_profiler));
     writeln!(
         out,
         "        for b in &set_binds {{ q = bind_query(q, b.clone()); }}"
@@ -5139,6 +5332,7 @@ fn render_model(
     )
     .unwrap();
     writeln!(out, "        let res = db.execute(q).await?;").unwrap();
+    out.push_str(&render_profiler_log(&table, "UPDATE", "&sql", "&__profiler_binds", skip_profiler));
     if !localized_fields.is_empty() {
         writeln!(out, "        if res.rows_affected() > 0 && !self.translations.is_empty() && !target_ids.is_empty() {{").unwrap();
         writeln!(

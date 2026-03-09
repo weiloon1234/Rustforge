@@ -219,6 +219,37 @@ CREATE INDEX IF NOT EXISTS idx_countries_currencies_gin ON countries USING GIN (
         fs::write(&countries_path, countries_sql).await?;
         println!("Created/Updated: {}", countries_path.display());
 
+        // 9. SQL Profiler
+        let profiler_sql = r#"
+CREATE TABLE IF NOT EXISTS sql_profiler_requests (
+    id UUID PRIMARY KEY,
+    request_method TEXT NOT NULL,
+    request_path TEXT NOT NULL,
+    total_queries INT NOT NULL DEFAULT 0,
+    total_duration_ms DOUBLE PRECISION NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_sql_profiler_requests_created_at ON sql_profiler_requests(created_at);
+CREATE INDEX IF NOT EXISTS idx_sql_profiler_requests_path ON sql_profiler_requests(request_path);
+
+CREATE TABLE IF NOT EXISTS sql_profiler_queries (
+    id BIGINT PRIMARY KEY,
+    request_id UUID NOT NULL REFERENCES sql_profiler_requests(id) ON DELETE CASCADE,
+    table_name TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    sql TEXT NOT NULL,
+    binds TEXT NOT NULL DEFAULT '',
+    duration_us BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_sql_profiler_queries_request_id ON sql_profiler_queries(request_id);
+CREATE INDEX IF NOT EXISTS idx_sql_profiler_queries_table ON sql_profiler_queries(table_name);
+CREATE INDEX IF NOT EXISTS idx_sql_profiler_queries_created_at ON sql_profiler_queries(created_at);
+"#;
+        let profiler_path = migrations_dir.join("0000000000009_sql_profiler.sql");
+        fs::write(&profiler_path, profiler_sql).await?;
+        println!("Created/Updated: {}", profiler_path.display());
+
         Ok(())
     }
 }

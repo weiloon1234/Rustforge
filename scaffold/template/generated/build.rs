@@ -21,6 +21,10 @@ const FRAMEWORK_SCHEMA_FILES: &[(&str, &str)] = &[
         include_str!("framework-schemas/localized.toml"),
     ),
     ("meta.toml", include_str!("framework-schemas/meta.toml")),
+    (
+        "sql_profiler.toml",
+        include_str!("framework-schemas/sql_profiler.toml"),
+    ),
 ];
 
 fn main() {

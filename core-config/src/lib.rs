@@ -256,6 +256,8 @@ pub struct DbSettings {
     pub url: String,
     pub max_connections: u32,
     pub connect_timeout: Duration,
+    pub sql_profiler_enabled: bool,
+    pub sql_profiler_retention_days: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -371,6 +373,8 @@ impl Settings {
             url: get_env_required("DATABASE_URL")?,
             max_connections: get_env_u32("DB_MAX_CONNECTIONS", 10)?,
             connect_timeout: Duration::from_secs(get_env_u64("DB_CONNECT_TIMEOUT_SECS", 5)?),
+            sql_profiler_enabled: get_env_bool("SQL_PROFILER_ENABLED", false)?,
+            sql_profiler_retention_days: get_env_u64("SQL_PROFILER_RETENTION_DAYS", 7)?,
         };
 
         let redis_url = if let Ok(url) = env::var("REDIS_URL") {

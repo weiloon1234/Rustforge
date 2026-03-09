@@ -32,6 +32,7 @@ pub async fn init_app() -> Result<(BootContext, core_web::logging::WorkerGuard)>
 
     // 5. Connect DB
     let db = core_db::infra::db::create_pool(&settings.db).await?;
+    core_db::common::sql::init_sql_profiler(settings.db.sql_profiler_enabled);
 
     // 6. Connect Redis
     let redis = core_db::infra::cache::create_cache(&settings.redis).await?;
