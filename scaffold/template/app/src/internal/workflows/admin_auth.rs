@@ -71,6 +71,7 @@ pub async fn login(
         .first()
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::Unauthorized(t("Invalid credentials")))?;
 
     let valid = verify_password(password, &admin.password).map_err(AppError::from)?;
@@ -143,6 +144,7 @@ pub async fn profile_update(
         .find(admin_id)
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("Admin not found")))
 }
 
@@ -178,6 +180,7 @@ pub async fn password_update(
         .find(admin_id)
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("Admin not found")))?;
 
     let valid = verify_password(&req.current_password, &admin.password).map_err(AppError::from)?;

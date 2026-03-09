@@ -115,6 +115,25 @@ fn hydrate_view(row: HttpClientLogRow, _loc: &LocalizedMap, _base_url: Option<&s
     view
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[doc(hidden)]
+pub struct HttpClientLogWithRelations {
+    pub row: HttpClientLogView,
+}
+
+impl HttpClientLogWithRelations {
+    pub fn into_row(self) -> HttpClientLogView { self.row }
+}
+
+impl std::ops::Deref for HttpClientLogWithRelations {
+    type Target = HttpClientLogView;
+    fn deref(&self) -> &Self::Target { &self.row }
+}
+
+impl std::ops::DerefMut for HttpClientLogWithRelations {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+}
+
 #[derive(Debug, Clone, Copy, JsonSchema)]
 pub enum HttpClientLogCol {
     Id,
@@ -161,7 +180,7 @@ impl<'db> HttpClientLog<'db> {
     pub fn query(&self) -> HttpClientLogQuery<'db> { HttpClientLogQuery::new(self.db.clone(), self.base_url.clone()) }
     pub fn insert(&self) -> HttpClientLogInsert<'db> { HttpClientLogInsert::new(self.db.clone(), self.base_url.clone()) }
     pub fn update(&self) -> HttpClientLogUpdate<'db> { HttpClientLogUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: uuid::Uuid) -> Result<Option<HttpClientLogView>> {
+    pub async fn find(&self, id: uuid::Uuid) -> Result<Option<HttpClientLogWithRelations>> {
         self.query().find(id).await
     }
     pub async fn delete(&self, id: uuid::Uuid) -> Result<u64> {
@@ -671,7 +690,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<HttpClientLogView>> {
+    pub async fn get(self) -> Result<Vec<HttpClientLogWithRelations>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -720,39 +739,41 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for r in rows {
             out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
         }
+        let out_vec: Vec<HttpClientLogWithRelations> = out_vec.into_iter().map(|v| HttpClientLogWithRelations { row: v }).collect();
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<HttpClientLogView>> {
+    pub async fn first(self) -> Result<Option<HttpClientLogWithRelations>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<HttpClientLogView> {
+    pub async fn first_or_fail(self) -> Result<HttpClientLogWithRelations> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("http_client_logs: record not found"))
     }
 
-    pub async fn find(self, id: uuid::Uuid) -> Result<Option<HttpClientLogView>> {
+    pub async fn find(self, id: uuid::Uuid) -> Result<Option<HttpClientLogWithRelations>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<HttpClientLogView> {
+    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<HttpClientLogWithRelations> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("http_client_logs: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(HttpClientLogInsert<'db>) -> HttpClientLogInsert<'db>) -> Result<HttpClientLogView> {
+    pub async fn first_or_create(self, create: impl FnOnce(HttpClientLogInsert<'db>) -> HttpClientLogInsert<'db>) -> Result<HttpClientLogWithRelations> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(HttpClientLogInsert::new(db, base_url));
-        insert_builder.save().await
+        let insert_builder = create(HttpClientLogInsert::new(db.clone(), base_url.clone()));
+        let view = insert_builder.save().await?;
+        HttpClientLog::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
         on_update: impl FnOnce(HttpClientLogUpdate<'db>) -> HttpClientLogUpdate<'db>,
         on_create: impl FnOnce(HttpClientLogInsert<'db>) -> HttpClientLogInsert<'db>,
-    ) -> Result<HttpClientLogView> {
+    ) -> Result<HttpClientLogWithRelations> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
@@ -763,10 +784,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return HttpClientLog::new(db, base_url.clone()).query().find(existing.id).await.map(|r| r.unwrap());
+            return HttpClientLog::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(HttpClientLogInsert::new(db, base_url));
-        insert_builder.save().await
+        let insert_builder = on_create(HttpClientLogInsert::new(db.clone(), base_url.clone()));
+        let view = insert_builder.save().await?;
+        HttpClientLog::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn increment(self, col: HttpClientLogCol, amount: i64) -> Result<u64> {
@@ -831,7 +853,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<HttpClientLogView>) -> Fut,
+        F: FnMut(Vec<HttpClientLogWithRelations>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
@@ -866,7 +888,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<HttpClientLogView> {
+    pub async fn sole(self) -> Result<HttpClientLogWithRelations> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -885,7 +907,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&HttpClientLogView) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&HttpClientLogWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -965,7 +987,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<HttpClientLogView>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<HttpClientLogWithRelations>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1013,6 +1035,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for r in rows {
             data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
         }
+        let data: Vec<HttpClientLogWithRelations> = data.into_iter().map(|v| HttpClientLogWithRelations { row: v }).collect();
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn into_where_parts(self) -> (Vec<String>, Vec<BindValue>) {
@@ -1503,7 +1526,7 @@ impl HttpClientLogTableAdapter {
 }
 impl GeneratedTableAdapter for HttpClientLogTableAdapter {
     type Query<'db> = HttpClientLogQuery<'db>;
-    type Row = HttpClientLogView;
+    type Row = HttpClientLogWithRelations;
     fn model_key(&self) -> &'static str { "HttpClientLog" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "request_url", "request_method", "request_body", "response_status", "response_body", "duration_ms", "created_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at"] }
@@ -1656,7 +1679,7 @@ impl GeneratedTableAdapter for HttpClientLogTableAdapter {
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &HttpClientLogView, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &HttpClientLogWithRelations, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "request_url" => Some(row.request_url.clone()),
@@ -1672,7 +1695,7 @@ impl GeneratedTableAdapter for HttpClientLogTableAdapter {
     fn count<'db>(&self, query: HttpClientLogQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: HttpClientLogQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<HttpClientLogView>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: HttpClientLogQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<HttpClientLogWithRelations>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -1702,13 +1725,13 @@ pub trait HttpClientLogDataTableHooks: Send + Sync + 'static {
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
     fn filter_query<'db>(&'db self, _query: HttpClientLogQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<HttpClientLogQuery<'db>>> { Ok(None) }
     fn filters<'db>(&'db self, query: HttpClientLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<HttpClientLogQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut HttpClientLogView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: HttpClientLogView) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn map_row(&self, _row: &mut HttpClientLogWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: HttpClientLogWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         let value = serde_json::to_value(row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         Ok(record)
     }
-    fn row_to_record(&self, row: HttpClientLogView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: HttpClientLogWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
     fn summary<'db>(&'db self, _query: HttpClientLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
@@ -1755,8 +1778,8 @@ impl<H: HttpClientLogDataTableHooks> AutoDataTable for HttpClientLogDataTable<H>
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
     fn filter_query<'db>(&'db self, query: HttpClientLogQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<HttpClientLogQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
     fn filters<'db>(&'db self, query: HttpClientLogQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<HttpClientLogQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut HttpClientLogView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: HttpClientLogView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn map_row(&self, row: &mut HttpClientLogWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: HttpClientLogWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
     fn summary<'db>(&'db self, query: HttpClientLogQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
@@ -1770,7 +1793,7 @@ use core_db::common::active_record::ActiveRecord;
 impl ActiveRecord for HttpClientLogView {
     type Id = uuid::Uuid;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        HttpClientLog::new(db, None).find(id).await.map_err(|e| e.into())
+        HttpClientLog::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
     }
 }
 

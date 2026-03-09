@@ -38,6 +38,7 @@ pub struct CountryRow {
     pub longitude: Option<f64>,
     pub independent: Option<bool>,
     pub status: CountryStatus,
+    pub is_default: CountryIsDefault,
     pub assignment_status: Option<String>,
     pub un_member: Option<bool>,
     pub flag_emoji: Option<String>,
@@ -71,6 +72,7 @@ pub struct CountryView {
     pub longitude: Option<f64>,
     pub independent: Option<bool>,
     pub status: CountryStatus,
+    pub is_default: CountryIsDefault,
     pub assignment_status: Option<String>,
     pub un_member: Option<bool>,
     pub flag_emoji: Option<String>,
@@ -79,6 +81,7 @@ pub struct CountryView {
     #[schemars(with = "String")]
     pub updated_at: time::OffsetDateTime,
     pub status_explained: String,
+    pub is_default_explained: String,
 }
 
 impl CountryView {
@@ -110,12 +113,14 @@ impl CountryView {
             longitude: self.longitude.clone(),
             independent: self.independent.clone(),
             status: self.status.clone(),
+            is_default: self.is_default.clone(),
             assignment_status: self.assignment_status.clone(),
             un_member: self.un_member.clone(),
             flag_emoji: self.flag_emoji.clone(),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
             status_explained: self.status_explained.clone(),
+            is_default_explained: self.is_default_explained.clone(),
         }
     }
 }
@@ -157,6 +162,7 @@ pub struct CountryJson {
     pub longitude: Option<f64>,
     pub independent: Option<bool>,
     pub status: CountryStatus,
+    pub is_default: CountryIsDefault,
     pub assignment_status: Option<String>,
     pub un_member: Option<bool>,
     pub flag_emoji: Option<String>,
@@ -165,6 +171,7 @@ pub struct CountryJson {
     #[schemars(with = "String")]
     pub updated_at: time::OffsetDateTime,
     pub status_explained: String,
+    pub is_default_explained: String,
 }
 
 fn hydrate_view(row: CountryRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> CountryView {
@@ -189,14 +196,35 @@ fn hydrate_view(row: CountryRow, _loc: &LocalizedMap, _base_url: Option<&str>) -
         longitude: row.longitude,
         independent: row.independent,
         status: row.status,
+        is_default: row.is_default,
         assignment_status: row.assignment_status,
         un_member: row.un_member,
         flag_emoji: row.flag_emoji,
         created_at: row.created_at,
         updated_at: row.updated_at,
         status_explained: row.status.explained_label(),
+        is_default_explained: row.is_default.explained_label(),
     };
     view
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[doc(hidden)]
+pub struct CountryWithRelations {
+    pub row: CountryView,
+}
+
+impl CountryWithRelations {
+    pub fn into_row(self) -> CountryView { self.row }
+}
+
+impl std::ops::Deref for CountryWithRelations {
+    type Target = CountryView;
+    fn deref(&self) -> &Self::Target { &self.row }
+}
+
+impl std::ops::DerefMut for CountryWithRelations {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
@@ -221,6 +249,7 @@ pub enum CountryCol {
     Longitude,
     Independent,
     Status,
+    IsDefault,
     AssignmentStatus,
     UnMember,
     FlagEmoji,
@@ -230,7 +259,7 @@ pub enum CountryCol {
 
 impl CountryCol {
     pub const fn all() -> &'static [CountryCol] {
-        &[CountryCol::Iso2, CountryCol::Iso3, CountryCol::IsoNumeric, CountryCol::Name, CountryCol::OfficialName, CountryCol::Capital, CountryCol::Capitals, CountryCol::Region, CountryCol::Subregion, CountryCol::Currencies, CountryCol::PrimaryCurrencyCode, CountryCol::CallingCode, CountryCol::CallingRoot, CountryCol::CallingSuffixes, CountryCol::Tlds, CountryCol::Timezones, CountryCol::Latitude, CountryCol::Longitude, CountryCol::Independent, CountryCol::Status, CountryCol::AssignmentStatus, CountryCol::UnMember, CountryCol::FlagEmoji, CountryCol::CreatedAt, CountryCol::UpdatedAt]
+        &[CountryCol::Iso2, CountryCol::Iso3, CountryCol::IsoNumeric, CountryCol::Name, CountryCol::OfficialName, CountryCol::Capital, CountryCol::Capitals, CountryCol::Region, CountryCol::Subregion, CountryCol::Currencies, CountryCol::PrimaryCurrencyCode, CountryCol::CallingCode, CountryCol::CallingRoot, CountryCol::CallingSuffixes, CountryCol::Tlds, CountryCol::Timezones, CountryCol::Latitude, CountryCol::Longitude, CountryCol::Independent, CountryCol::Status, CountryCol::IsDefault, CountryCol::AssignmentStatus, CountryCol::UnMember, CountryCol::FlagEmoji, CountryCol::CreatedAt, CountryCol::UpdatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
@@ -254,6 +283,7 @@ impl CountryCol {
             CountryCol::Longitude => "longitude",
             CountryCol::Independent => "independent",
             CountryCol::Status => "status",
+            CountryCol::IsDefault => "is_default",
             CountryCol::AssignmentStatus => "assignment_status",
             CountryCol::UnMember => "un_member",
             CountryCol::FlagEmoji => "flag_emoji",
@@ -275,7 +305,7 @@ impl<'db> Country<'db> {
     pub fn query(&self) -> CountryQuery<'db> { CountryQuery::new(self.db.clone(), self.base_url.clone()) }
     pub fn insert(&self) -> CountryInsert<'db> { CountryInsert::new(self.db.clone(), self.base_url.clone()) }
     pub fn update(&self) -> CountryUpdate<'db> { CountryUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: String) -> Result<Option<CountryView>> {
+    pub async fn find(&self, id: String) -> Result<Option<CountryWithRelations>> {
         self.query().find(id).await
     }
     pub async fn delete(&self, id: String) -> Result<u64> {
@@ -309,7 +339,7 @@ pub struct CountryQuery<'db> {
 
 impl<'db> CountryQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, assignment_status, un_member, flag_emoji, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
+        Self { db, base_url, select_sql: Some("iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, is_default, assignment_status, un_member, flag_emoji, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
     pub fn unsafe_sql(self) -> CountryUnsafeQuery<'db> { CountryUnsafeQuery::new(self) }
     pub fn where_iso2(mut self, op: Op, val: String) -> Self {
@@ -552,6 +582,18 @@ impl<'db> CountryQuery<'db> {
         self.binds.push(val.into());
         self
     }
+    pub fn where_is_default(mut self, op: Op, val: CountryIsDefault) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", CountryCol::IsDefault.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_is_default_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", CountryCol::IsDefault.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
     pub fn where_assignment_status(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", CountryCol::AssignmentStatus.as_sql(), op.as_sql(), idx));
@@ -732,10 +774,10 @@ impl<'db> CountryQuery<'db> {
     }
     pub fn select_cols(mut self, cols: &[CountryCol]) -> Self {
         if cols.is_empty() {
-            self.select_sql = Some("iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, assignment_status, un_member, flag_emoji, created_at, updated_at".to_string());
+            self.select_sql = Some("iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, is_default, assignment_status, un_member, flag_emoji, created_at, updated_at".to_string());
         } else {
             let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, assignment_status, un_member, flag_emoji, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect();
+            let mut list: Vec<String> = "iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, is_default, assignment_status, un_member, flag_emoji, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect();
             for s in &list { seen.insert(s.clone()); }
             for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
             self.select_sql = Some(list.join(", "));
@@ -746,7 +788,7 @@ impl<'db> CountryQuery<'db> {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, assignment_status, un_member, flag_emoji, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect(),
+            _ => "iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, is_default, assignment_status, un_member, flag_emoji, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect(),
         };
         for s in &list { seen.insert(s.clone()); }
         for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
@@ -756,16 +798,16 @@ impl<'db> CountryQuery<'db> {
     fn select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() {
-            self.select_sql = Some("iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, assignment_status, un_member, flag_emoji, created_at, updated_at".to_string());
+            self.select_sql = Some("iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, is_default, assignment_status, un_member, flag_emoji, created_at, updated_at".to_string());
         } else {
-            self.select_sql = Some(format!("iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, assignment_status, un_member, flag_emoji, created_at, updated_at, {}", s));
+            self.select_sql = Some(format!("iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, is_default, assignment_status, un_member, flag_emoji, created_at, updated_at, {}", s));
         }
         self
     }
     fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, assignment_status, un_member, flag_emoji, created_at, updated_at".to_string());
+        let mut base = self.select_sql.take().unwrap_or_else(|| "iso2, iso3, iso_numeric, name, official_name, capital, capitals, region, subregion, currencies, primary_currency_code, calling_code, calling_root, calling_suffixes, tlds, timezones, latitude, longitude, independent, status, is_default, assignment_status, un_member, flag_emoji, created_at, updated_at".to_string());
         if !base.is_empty() { base.push_str(", "); }
         base.push_str(&s);
         self.select_sql = Some(base);
@@ -965,7 +1007,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<CountryView>> {
+    pub async fn get(self) -> Result<Vec<CountryWithRelations>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -1014,39 +1056,41 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for r in rows {
             out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
         }
+        let out_vec: Vec<CountryWithRelations> = out_vec.into_iter().map(|v| CountryWithRelations { row: v }).collect();
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<CountryView>> {
+    pub async fn first(self) -> Result<Option<CountryWithRelations>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<CountryView> {
+    pub async fn first_or_fail(self) -> Result<CountryWithRelations> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("countries: record not found"))
     }
 
-    pub async fn find(self, id: String) -> Result<Option<CountryView>> {
+    pub async fn find(self, id: String) -> Result<Option<CountryWithRelations>> {
         self.where_iso2(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: String) -> Result<CountryView> {
+    pub async fn find_or_fail(self, id: String) -> Result<CountryWithRelations> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("countries: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(CountryInsert<'db>) -> CountryInsert<'db>) -> Result<CountryView> {
+    pub async fn first_or_create(self, create: impl FnOnce(CountryInsert<'db>) -> CountryInsert<'db>) -> Result<CountryWithRelations> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(CountryInsert::new(db, base_url));
-        insert_builder.save().await
+        let insert_builder = create(CountryInsert::new(db.clone(), base_url.clone()));
+        let view = insert_builder.save().await?;
+        Country::new(db, base_url).query().find(view.iso2).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
         on_update: impl FnOnce(CountryUpdate<'db>) -> CountryUpdate<'db>,
         on_create: impl FnOnce(CountryInsert<'db>) -> CountryInsert<'db>,
-    ) -> Result<CountryView> {
+    ) -> Result<CountryWithRelations> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
@@ -1057,10 +1101,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Country::new(db, base_url.clone()).query().find(existing.iso2).await.map(|r| r.unwrap());
+            return Country::new(db, base_url.clone()).query().find(existing.iso2.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(CountryInsert::new(db, base_url));
-        insert_builder.save().await
+        let insert_builder = on_create(CountryInsert::new(db.clone(), base_url.clone()));
+        let view = insert_builder.save().await?;
+        Country::new(db, base_url).query().find(view.iso2).await.map(|r| r.unwrap())
     }
 
     pub async fn increment(self, col: CountryCol, amount: i64) -> Result<u64> {
@@ -1125,7 +1170,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<CountryView>) -> Fut,
+        F: FnMut(Vec<CountryWithRelations>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
@@ -1160,7 +1205,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<CountryView> {
+    pub async fn sole(self) -> Result<CountryWithRelations> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -1179,7 +1224,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&CountryView) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&CountryWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -1259,7 +1304,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<CountryView>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<CountryWithRelations>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1307,6 +1352,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for r in rows {
             data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
         }
+        let data: Vec<CountryWithRelations> = data.into_iter().map(|v| CountryWithRelations { row: v }).collect();
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn into_where_parts(self) -> (Vec<String>, Vec<BindValue>) {
@@ -1475,6 +1521,11 @@ pub fn set_iso2(mut self, val: String) -> Self {
     }
     pub fn set_status(mut self, val: CountryStatus) -> Self {
         self.cols.push(CountryCol::Status);
+        self.binds.push(val.into());
+        self
+    }
+    pub fn set_is_default(mut self, val: CountryIsDefault) -> Self {
+        self.cols.push(CountryCol::IsDefault);
         self.binds.push(val.into());
         self
     }
@@ -1681,6 +1732,10 @@ pub fn set_iso2(mut self, val: String) -> Self {
         self.sets.push((CountryCol::Status, val.into(), SetMode::Assign));
         self
     }
+    pub fn set_is_default(mut self, val: CountryIsDefault) -> Self {
+        self.sets.push((CountryCol::IsDefault, val.into(), SetMode::Assign));
+        self
+    }
     pub fn set_assignment_status(mut self, val: Option<String>) -> Self {
         self.sets.push((CountryCol::AssignmentStatus, val.into(), SetMode::Assign));
         self
@@ -1818,6 +1873,12 @@ pub fn set_iso2(mut self, val: String) -> Self {
     pub fn where_status(mut self, op: Op, val: CountryStatus) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", CountryCol::Status.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_is_default(mut self, op: Op, val: CountryIsDefault) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", CountryCol::IsDefault.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -1978,6 +2039,7 @@ impl CountryTableAdapter {
             "longitude" => Some(CountryCol::Longitude),
             "independent" => Some(CountryCol::Independent),
             "status" => Some(CountryCol::Status),
+            "is_default" => Some(CountryCol::IsDefault),
             "assignment_status" => Some(CountryCol::AssignmentStatus),
             "un_member" => Some(CountryCol::UnMember),
             "flag_emoji" => Some(CountryCol::FlagEmoji),
@@ -2040,6 +2102,7 @@ impl CountryTableAdapter {
             "longitude" => Some(Self::parse_bind(raw.trim())),
             "independent" => Some(Self::parse_bind(raw.trim())),
             "status" => Some(Self::parse_bind(raw.trim())),
+            "is_default" => Some(Self::parse_bind(raw.trim())),
             "assignment_status" => Some(Self::parse_bind(raw.trim())),
             "un_member" => Some(Self::parse_bind(raw.trim())),
             "flag_emoji" => Some(Self::parse_bind(raw.trim())),
@@ -2076,9 +2139,9 @@ impl CountryTableAdapter {
 }
 impl GeneratedTableAdapter for CountryTableAdapter {
     type Query<'db> = CountryQuery<'db>;
-    type Row = CountryView;
+    type Row = CountryWithRelations;
     fn model_key(&self) -> &'static str { "Country" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["iso2", "iso3", "iso_numeric", "name", "official_name", "capital", "capitals", "region", "subregion", "primary_currency_code", "calling_code", "calling_root", "calling_suffixes", "tlds", "timezones", "latitude", "longitude", "independent", "status", "assignment_status", "un_member", "flag_emoji", "created_at", "updated_at"] }
+    fn sortable_columns(&self) -> &'static [&'static str] { &["iso2", "iso3", "iso_numeric", "name", "official_name", "capital", "capitals", "region", "subregion", "primary_currency_code", "calling_code", "calling_root", "calling_suffixes", "tlds", "timezones", "latitude", "longitude", "independent", "status", "is_default", "assignment_status", "un_member", "flag_emoji", "created_at", "updated_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at"] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
         &[
@@ -2102,6 +2165,7 @@ impl GeneratedTableAdapter for CountryTableAdapter {
             DataTableColumnDescriptor { name: "longitude", label: "Longitude", data_type: "Option<f64>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "independent", label: "Independent", data_type: "Option<bool>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "status", label: "Status", data_type: "CountryStatus", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "is_default", label: "Is Default", data_type: "CountryIsDefault", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "assignment_status", label: "Assignment Status", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
             DataTableColumnDescriptor { name: "un_member", label: "Un Member", data_type: "Option<bool>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "flag_emoji", label: "Flag Emoji", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
@@ -2244,6 +2308,7 @@ impl GeneratedTableAdapter for CountryTableAdapter {
             "longitude" => query.order_by(CountryCol::Longitude, dir),
             "independent" => query.order_by(CountryCol::Independent, dir),
             "status" => query.order_by(CountryCol::Status, dir),
+            "is_default" => query.order_by(CountryCol::IsDefault, dir),
             "assignment_status" => query.order_by(CountryCol::AssignmentStatus, dir),
             "un_member" => query.order_by(CountryCol::UnMember, dir),
             "flag_emoji" => query.order_by(CountryCol::FlagEmoji, dir),
@@ -2259,7 +2324,7 @@ impl GeneratedTableAdapter for CountryTableAdapter {
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &CountryView, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &CountryWithRelations, column: &str) -> Option<String> {
         match column {
             "iso2" => Some(row.iso2.clone()),
             "iso3" => Some(row.iso3.clone()),
@@ -2286,7 +2351,7 @@ impl GeneratedTableAdapter for CountryTableAdapter {
     fn count<'db>(&self, query: CountryQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: CountryQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<CountryView>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: CountryQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<CountryWithRelations>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -2316,13 +2381,13 @@ pub trait CountryDataTableHooks: Send + Sync + 'static {
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
     fn filter_query<'db>(&'db self, _query: CountryQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<CountryQuery<'db>>> { Ok(None) }
     fn filters<'db>(&'db self, query: CountryQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<CountryQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut CountryView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: CountryView) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn map_row(&self, _row: &mut CountryWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: CountryWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         let value = serde_json::to_value(row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         Ok(record)
     }
-    fn row_to_record(&self, row: CountryView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: CountryWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
     fn summary<'db>(&'db self, _query: CountryQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
@@ -2369,8 +2434,8 @@ impl<H: CountryDataTableHooks> AutoDataTable for CountryDataTable<H> {
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
     fn filter_query<'db>(&'db self, query: CountryQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<CountryQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
     fn filters<'db>(&'db self, query: CountryQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<CountryQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut CountryView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: CountryView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn map_row(&self, row: &mut CountryWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: CountryWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
     fn summary<'db>(&'db self, query: CountryQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
@@ -2384,7 +2449,7 @@ use core_db::common::active_record::ActiveRecord;
 impl ActiveRecord for CountryView {
     type Id = String;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Country::new(db, None).find(id).await.map_err(|e| e.into())
+        Country::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
     }
 }
 

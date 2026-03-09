@@ -36,7 +36,7 @@ impl ContentPageDataTableHooks for ContentPageDataTableAppHooks {
 
     fn row_to_record(
         &self,
-        row: generated::models::ContentPageView,
+        row: generated::models::ContentPageWithRelations,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {

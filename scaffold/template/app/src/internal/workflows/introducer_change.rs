@@ -18,7 +18,8 @@ async fn would_create_cycle(
         let user = User::new(DbConn::pool(&state.db), None)
             .find(current_id)
             .await
-            .map_err(AppError::from)?;
+            .map_err(AppError::from)?
+            .map(|r| r.into_row());
 
         let Some(user) = user else {
             return Ok(false);
@@ -47,6 +48,7 @@ pub async fn resolve_user_by_username(
         .first()
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("User not found")))
 }
 

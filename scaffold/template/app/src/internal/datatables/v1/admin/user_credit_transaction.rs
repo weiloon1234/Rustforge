@@ -82,11 +82,11 @@ impl UserCreditTransactionDataTableHooks for UserCreditTransactionDataTableAppHo
 
     fn map_row(
         &self,
-        row: &mut UserCreditTransactionView,
+        row: &mut generated::models::UserCreditTransactionWithRelations,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<()> {
-        enrich_transaction_type_explained(row);
+        enrich_transaction_type_explained(&mut *row);
         Ok(())
     }
 }

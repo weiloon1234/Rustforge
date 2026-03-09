@@ -16,6 +16,7 @@ pub async fn detail(state: &AppApiState, id: i64) -> Result<UserView, AppError> 
         .find(id)
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("User not found")))
 }
 
@@ -36,6 +37,7 @@ pub async fn create(state: &AppApiState, req: CreateUserInput) -> Result<UserVie
             .first()
             .await
             .map_err(AppError::from)?
+            .map(|r| r.into_row())
             .ok_or_else(|| AppError::NotFound(t("Introducer not found")))?;
         insert = insert.set_introducer_user_id(Some(introducer.id));
     }
@@ -196,6 +198,7 @@ pub async fn batch_resolve_usernames(
     let mut results = Vec::new();
     for &id in ids {
         if let Ok(Some(user)) = User::new(DbConn::pool(&state.db), None).find(id).await {
+            let user = user.into_row();
             results.push((user.id, user.username, user.name));
         }
     }
@@ -209,7 +212,8 @@ async fn generate_unique_uuid(state: &AppApiState) -> Result<String, AppError> {
             .where_uuid(Op::Eq, uuid.clone())
             .first()
             .await
-            .map_err(AppError::from)?;
+            .map_err(AppError::from)?
+            .map(|r| r.into_row());
         if existing.is_none() {
             return Ok(uuid);
         }

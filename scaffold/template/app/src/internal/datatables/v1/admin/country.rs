@@ -213,16 +213,19 @@ impl GeneratedTableAdapter for CountryTableAdapter {
             let rows = filtered_query.get().await?;
             let out = rows
                 .into_iter()
-                .map(|row| CountryDatatableRow {
-                    id: row.iso2.clone(),
-                    iso2: row.iso2,
-                    iso3: row.iso3,
-                    name: row.name,
-                    region: row.region,
-                    calling_code: row.calling_code,
-                    status: row.status.as_str().to_string(),
-                    is_default: matches!(row.is_default, CountryIsDefault::Yes),
-                    updated_at: format_rfc3339(row.updated_at),
+                .map(|r| {
+                    let row = r.into_row();
+                    CountryDatatableRow {
+                        id: row.iso2.clone(),
+                        iso2: row.iso2,
+                        iso3: row.iso3,
+                        name: row.name,
+                        region: row.region,
+                        calling_code: row.calling_code,
+                        status: row.status.as_str().to_string(),
+                        is_default: matches!(row.is_default, CountryIsDefault::Yes),
+                        updated_at: format_rfc3339(row.updated_at),
+                    }
                 })
                 .collect();
 

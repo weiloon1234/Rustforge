@@ -157,6 +157,146 @@ impl From<AdminType> for core_db::common::sql::BindValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[repr(i16)]
+pub enum AuditAction {
+    #[serde(rename = "1")]
+    Create = 1,
+    #[serde(rename = "2")]
+    Update = 2,
+    #[serde(rename = "3")]
+    Delete = 3,
+}
+
+impl Default for AuditAction {
+    fn default() -> Self {
+        Self::Create
+    }
+}
+
+impl ts_rs::TS for AuditAction {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "AuditAction".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("AuditAction cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type AuditAction = \"1\" | \"2\" | \"3\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl AuditAction {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Create => "1",
+            Self::Update => "2",
+            Self::Delete => "3",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Create => "Create",
+            Self::Update => "Update",
+            Self::Delete => "Delete",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            1 => Some(Self::Create),
+            2 => Some(Self::Update),
+            3 => Some(Self::Delete),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Create => "enum.audit_action.create",
+            Self::Update => "enum.audit_action.update",
+            Self::Delete => "enum.audit_action.delete",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::Create, Self::Update, Self::Delete]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for AuditAction {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for AuditAction {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match num {
+            1 => Ok(Self::Create),
+            2 => Ok(Self::Update),
+            3 => Ok(Self::Delete),
+            _ => Err(format!("Invalid AuditAction: {}", num).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for AuditAction {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<AuditAction> for core_db::common::sql::BindValue {
+    fn from(v: AuditAction) -> Self {
+        core_db::common::sql::BindValue::I64(v as i64)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[repr(i16)]
 pub enum ContentPageSystemFlag {
     #[serde(rename = "0")]
     No = 0,
@@ -283,6 +423,139 @@ impl sqlx::Type<sqlx::Postgres> for ContentPageSystemFlag {
 
 impl From<ContentPageSystemFlag> for core_db::common::sql::BindValue {
     fn from(v: ContentPageSystemFlag) -> Self {
+        core_db::common::sql::BindValue::I64(v as i64)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[repr(i16)]
+pub enum CountryIsDefault {
+    #[serde(rename = "0")]
+    No = 0,
+    #[serde(rename = "1")]
+    Yes = 1,
+}
+
+impl Default for CountryIsDefault {
+    fn default() -> Self {
+        Self::No
+    }
+}
+
+impl ts_rs::TS for CountryIsDefault {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "CountryIsDefault".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("CountryIsDefault cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type CountryIsDefault = \"0\" | \"1\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl CountryIsDefault {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::No => "0",
+            Self::Yes => "1",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::No => "No",
+            Self::Yes => "Yes",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            0 => Some(Self::No),
+            1 => Some(Self::Yes),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::No => "enum.country_is_default.no",
+            Self::Yes => "enum.country_is_default.yes",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::No, Self::Yes]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for CountryIsDefault {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for CountryIsDefault {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match num {
+            0 => Ok(Self::No),
+            1 => Ok(Self::Yes),
+            _ => Err(format!("Invalid CountryIsDefault: {}", num).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for CountryIsDefault {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<CountryIsDefault> for core_db::common::sql::BindValue {
+    fn from(v: CountryIsDefault) -> Self {
         core_db::common::sql::BindValue::I64(v as i64)
     }
 }
@@ -1003,7 +1276,9 @@ impl From<UserBanStatus> for core_db::common::sql::BindValue {
 
 pub const SCHEMA_ENUM_TS_META: &[SchemaEnumTsMeta] = &[
     SchemaEnumTsMeta { name: "AdminType", variants: &["developer", "superadmin", "admin"] },
+    SchemaEnumTsMeta { name: "AuditAction", variants: &["1", "2", "3"] },
     SchemaEnumTsMeta { name: "ContentPageSystemFlag", variants: &["0", "1"] },
+    SchemaEnumTsMeta { name: "CountryIsDefault", variants: &["0", "1"] },
     SchemaEnumTsMeta { name: "CountryStatus", variants: &["enabled", "disabled"] },
     SchemaEnumTsMeta { name: "CreditTransactionType", variants: &["101", "102", "201", "202", "301", "302", "401"] },
     SchemaEnumTsMeta { name: "CreditType", variants: &["1", "2"] },

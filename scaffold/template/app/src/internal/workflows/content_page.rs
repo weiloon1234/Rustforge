@@ -15,6 +15,7 @@ pub async fn detail(state: &AppApiState, id: i64) -> Result<ContentPageView, App
         .find(id)
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("Page not found")))
 }
 

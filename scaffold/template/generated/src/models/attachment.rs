@@ -133,6 +133,25 @@ fn hydrate_view(row: AttachmentRow, _loc: &LocalizedMap, _base_url: Option<&str>
     view
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[doc(hidden)]
+pub struct AttachmentWithRelations {
+    pub row: AttachmentView,
+}
+
+impl AttachmentWithRelations {
+    pub fn into_row(self) -> AttachmentView { self.row }
+}
+
+impl std::ops::Deref for AttachmentWithRelations {
+    type Target = AttachmentView;
+    fn deref(&self) -> &Self::Target { &self.row }
+}
+
+impl std::ops::DerefMut for AttachmentWithRelations {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+}
+
 #[derive(Debug, Clone, Copy, JsonSchema)]
 pub enum AttachmentCol {
     Id,
@@ -183,7 +202,7 @@ impl<'db> Attachment<'db> {
     pub fn query(&self) -> AttachmentQuery<'db> { AttachmentQuery::new(self.db.clone(), self.base_url.clone()) }
     pub fn insert(&self) -> AttachmentInsert<'db> { AttachmentInsert::new(self.db.clone(), self.base_url.clone()) }
     pub fn update(&self) -> AttachmentUpdate<'db> { AttachmentUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: uuid::Uuid) -> Result<Option<AttachmentView>> {
+    pub async fn find(&self, id: uuid::Uuid) -> Result<Option<AttachmentWithRelations>> {
         self.query().find(id).await
     }
     pub async fn delete(&self, id: uuid::Uuid) -> Result<u64> {
@@ -724,7 +743,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<AttachmentView>> {
+    pub async fn get(self) -> Result<Vec<AttachmentWithRelations>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , with_deleted, only_deleted, .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
@@ -780,39 +799,41 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for r in rows {
             out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
         }
+        let out_vec: Vec<AttachmentWithRelations> = out_vec.into_iter().map(|v| AttachmentWithRelations { row: v }).collect();
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<AttachmentView>> {
+    pub async fn first(self) -> Result<Option<AttachmentWithRelations>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<AttachmentView> {
+    pub async fn first_or_fail(self) -> Result<AttachmentWithRelations> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("attachments: record not found"))
     }
 
-    pub async fn find(self, id: uuid::Uuid) -> Result<Option<AttachmentView>> {
+    pub async fn find(self, id: uuid::Uuid) -> Result<Option<AttachmentWithRelations>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<AttachmentView> {
+    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<AttachmentWithRelations> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("attachments: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(AttachmentInsert<'db>) -> AttachmentInsert<'db>) -> Result<AttachmentView> {
+    pub async fn first_or_create(self, create: impl FnOnce(AttachmentInsert<'db>) -> AttachmentInsert<'db>) -> Result<AttachmentWithRelations> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(AttachmentInsert::new(db, base_url));
-        insert_builder.save().await
+        let insert_builder = create(AttachmentInsert::new(db.clone(), base_url.clone()));
+        let view = insert_builder.save().await?;
+        Attachment::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
         on_update: impl FnOnce(AttachmentUpdate<'db>) -> AttachmentUpdate<'db>,
         on_create: impl FnOnce(AttachmentInsert<'db>) -> AttachmentInsert<'db>,
-    ) -> Result<AttachmentView> {
+    ) -> Result<AttachmentWithRelations> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
@@ -823,10 +844,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Attachment::new(db, base_url.clone()).query().find(existing.id).await.map(|r| r.unwrap());
+            return Attachment::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(AttachmentInsert::new(db, base_url));
-        insert_builder.save().await
+        let insert_builder = on_create(AttachmentInsert::new(db.clone(), base_url.clone()));
+        let view = insert_builder.save().await?;
+        Attachment::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn increment(self, col: AttachmentCol, amount: i64) -> Result<u64> {
@@ -908,7 +930,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<AttachmentView>) -> Fut,
+        F: FnMut(Vec<AttachmentWithRelations>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
@@ -943,7 +965,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<AttachmentView> {
+    pub async fn sole(self) -> Result<AttachmentWithRelations> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -962,7 +984,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&AttachmentView) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&AttachmentWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -1070,7 +1092,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<AttachmentView>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<AttachmentWithRelations>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , with_deleted, only_deleted, .. } = self;
@@ -1125,6 +1147,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for r in rows {
             data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
         }
+        let data: Vec<AttachmentWithRelations> = data.into_iter().map(|v| AttachmentWithRelations { row: v }).collect();
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn into_where_parts(self) -> (Vec<String>, Vec<BindValue>) {
@@ -1723,7 +1746,7 @@ impl AttachmentTableAdapter {
 }
 impl GeneratedTableAdapter for AttachmentTableAdapter {
     type Query<'db> = AttachmentQuery<'db>;
-    type Row = AttachmentView;
+    type Row = AttachmentWithRelations;
     fn model_key(&self) -> &'static str { "Attachment" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "owner_type", "owner_id", "field", "path", "content_type", "size", "width", "height", "created_at", "updated_at", "deleted_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at", "deleted_at"] }
@@ -1880,7 +1903,7 @@ impl GeneratedTableAdapter for AttachmentTableAdapter {
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &AttachmentView, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &AttachmentWithRelations, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "owner_type" => Some(row.owner_type.clone()),
@@ -1900,7 +1923,7 @@ impl GeneratedTableAdapter for AttachmentTableAdapter {
     fn count<'db>(&self, query: AttachmentQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: AttachmentQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<AttachmentView>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: AttachmentQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<AttachmentWithRelations>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -1930,13 +1953,13 @@ pub trait AttachmentDataTableHooks: Send + Sync + 'static {
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
     fn filter_query<'db>(&'db self, _query: AttachmentQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<AttachmentQuery<'db>>> { Ok(None) }
     fn filters<'db>(&'db self, query: AttachmentQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<AttachmentQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut AttachmentView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: AttachmentView) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn map_row(&self, _row: &mut AttachmentWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: AttachmentWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         let value = serde_json::to_value(row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         Ok(record)
     }
-    fn row_to_record(&self, row: AttachmentView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: AttachmentWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
     fn summary<'db>(&'db self, _query: AttachmentQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
@@ -1983,8 +2006,8 @@ impl<H: AttachmentDataTableHooks> AutoDataTable for AttachmentDataTable<H> {
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
     fn filter_query<'db>(&'db self, query: AttachmentQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<AttachmentQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
     fn filters<'db>(&'db self, query: AttachmentQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<AttachmentQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut AttachmentView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: AttachmentView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn map_row(&self, row: &mut AttachmentWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: AttachmentWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
     fn summary<'db>(&'db self, query: AttachmentQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
@@ -1998,7 +2021,7 @@ use core_db::common::active_record::ActiveRecord;
 impl ActiveRecord for AttachmentView {
     type Id = uuid::Uuid;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Attachment::new(db, None).find(id).await.map_err(|e| e.into())
+        Attachment::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
     }
 }
 

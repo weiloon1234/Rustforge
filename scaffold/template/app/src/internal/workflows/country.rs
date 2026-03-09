@@ -48,6 +48,7 @@ pub async fn update_status(
         .first()
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("Country not found")))?;
 
     invalidate_bootstrap_country_cache(state).await?;
@@ -72,7 +73,7 @@ pub async fn list_enabled_for_bootstrap(state: &AppApiState) -> Result<Vec<Count
                     .await?;
                 Ok(rows
                     .into_iter()
-                    .map(country_view_to_runtime)
+                    .map(|r| country_view_to_runtime(r.into_row()))
                     .filter(|country| country.status == COUNTRY_STATUS_ENABLED)
                     .collect::<Vec<_>>())
             },
@@ -116,6 +117,7 @@ pub async fn set_default(
         .first()
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("Country not found")))?;
 
     invalidate_bootstrap_country_cache(state).await?;

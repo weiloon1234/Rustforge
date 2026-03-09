@@ -223,7 +223,8 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
 
             let out = rows
                 .into_iter()
-                .map(|row| {
+                .map(|r| {
+                    let row = r.into_row();
                     let admin_username = admin_map
                         .get(&row.admin_id)
                         .cloned()
@@ -255,7 +256,7 @@ async fn batch_resolve_admin_usernames(
     let mut map = HashMap::new();
     for &id in admin_ids {
         if let Ok(Some(admin)) = Admin::new(db, None).find(id).await {
-            map.insert(id, admin.username);
+            map.insert(id, admin.into_row().username);
         }
     }
     map

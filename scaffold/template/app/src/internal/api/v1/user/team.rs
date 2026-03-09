@@ -38,6 +38,7 @@ async fn downlines(
         .find(parent_id)
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("User not found")))?;
 
     let rows = workflow::list_downlines(&state, parent_id).await?;

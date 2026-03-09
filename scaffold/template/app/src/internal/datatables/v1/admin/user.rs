@@ -60,7 +60,7 @@ impl UserDataTableHooks for UserDataTableAppHooks {
 
     fn row_to_record(
         &self,
-        row: generated::models::UserView,
+        row: generated::models::UserWithRelations,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {

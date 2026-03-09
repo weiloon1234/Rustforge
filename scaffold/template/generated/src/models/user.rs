@@ -12,6 +12,7 @@ use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{Page, renumber_placeholders};
 use core_db::common::collection::TypedCollectionExt;
 use super::enums::*;
+use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
 const HAS_UPDATED_AT: bool = true;
 const HAS_SOFT_DELETE: bool = false;
@@ -149,6 +150,25 @@ fn hydrate_view(row: UserRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> U
     view
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[doc(hidden)]
+pub struct UserWithRelations {
+    pub row: UserView,
+}
+
+impl UserWithRelations {
+    pub fn into_row(self) -> UserView { self.row }
+}
+
+impl std::ops::Deref for UserWithRelations {
+    type Target = UserView;
+    fn deref(&self) -> &Self::Target { &self.row }
+}
+
+impl std::ops::DerefMut for UserWithRelations {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+}
+
 #[derive(Debug, Clone, Copy, JsonSchema)]
 pub enum UserCol {
     Id,
@@ -205,7 +225,7 @@ impl<'db> User<'db> {
     pub fn query(&self) -> UserQuery<'db> { UserQuery::new(self.db.clone(), self.base_url.clone()) }
     pub fn insert(&self) -> UserInsert<'db> { UserInsert::new(self.db.clone(), self.base_url.clone()) }
     pub fn update(&self) -> UserUpdate<'db> { UserUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<UserView>> {
+    pub async fn find(&self, id: i64) -> Result<Option<UserWithRelations>> {
         self.query().find(id).await
     }
     pub async fn delete(&self, id: i64) -> Result<u64> {
@@ -775,7 +795,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<UserView>> {
+    pub async fn get(self) -> Result<Vec<UserWithRelations>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -824,39 +844,41 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for r in rows {
             out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
         }
+        let out_vec: Vec<UserWithRelations> = out_vec.into_iter().map(|v| UserWithRelations { row: v }).collect();
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<UserView>> {
+    pub async fn first(self) -> Result<Option<UserWithRelations>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<UserView> {
+    pub async fn first_or_fail(self) -> Result<UserWithRelations> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("users: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<UserView>> {
+    pub async fn find(self, id: i64) -> Result<Option<UserWithRelations>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<UserView> {
+    pub async fn find_or_fail(self, id: i64) -> Result<UserWithRelations> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("users: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(UserInsert<'db>) -> UserInsert<'db>) -> Result<UserView> {
+    pub async fn first_or_create(self, create: impl FnOnce(UserInsert<'db>) -> UserInsert<'db>) -> Result<UserWithRelations> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(UserInsert::new(db, base_url));
-        insert_builder.save().await
+        let insert_builder = create(UserInsert::new(db.clone(), base_url.clone()));
+        let view = insert_builder.save().await?;
+        User::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
         on_update: impl FnOnce(UserUpdate<'db>) -> UserUpdate<'db>,
         on_create: impl FnOnce(UserInsert<'db>) -> UserInsert<'db>,
-    ) -> Result<UserView> {
+    ) -> Result<UserWithRelations> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
@@ -867,10 +889,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return User::new(db, base_url.clone()).query().find(existing.id).await.map(|r| r.unwrap());
+            return User::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(UserInsert::new(db, base_url));
-        insert_builder.save().await
+        let insert_builder = on_create(UserInsert::new(db.clone(), base_url.clone()));
+        let view = insert_builder.save().await?;
+        User::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn increment(self, col: UserCol, amount: i64) -> Result<u64> {
@@ -935,7 +958,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<UserView>) -> Fut,
+        F: FnMut(Vec<UserWithRelations>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
@@ -970,7 +993,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<UserView> {
+    pub async fn sole(self) -> Result<UserWithRelations> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -989,7 +1012,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&UserView) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&UserWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -1069,7 +1092,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<UserView>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<UserWithRelations>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1117,6 +1140,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for r in rows {
             data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
         }
+        let data: Vec<UserWithRelations> = data.into_iter().map(|v| UserWithRelations { row: v }).collect();
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn into_where_parts(self) -> (Vec<String>, Vec<BindValue>) {
@@ -1130,6 +1154,16 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         }
         let Self { db, where_sql, binds, .. } = self;
         if where_sql.is_empty() { anyhow::bail!("delete(): no conditions set"); }
+        let __observer_active = try_get_observer().is_some();
+        let __old_rows_json: Vec<(i64, serde_json::Value)> = if __observer_active {
+            let select_sql = format!("SELECT * FROM users WHERE {}", where_sql.join(" AND "));
+            let mut fq = sqlx::query_as::<_, UserRow>(&select_sql);
+            for b in &binds { fq = bind(fq, b.clone()); }
+            let rows: Vec<UserRow> = db.fetch_all(fq).await.unwrap_or_default();
+            rows.into_iter().map(|r| (r.id, serde_json::to_value(&r).unwrap_or_default())).collect()
+        } else {
+            Vec::new()
+        };
         let mut sql = String::from("DELETE FROM users");
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
@@ -1138,6 +1172,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let mut q = sqlx::query(&sql);
         for b in binds { q = bind_query(q, b); }
         let res = db.execute(q).await?;
+        if !__old_rows_json.is_empty() && res.rows_affected() > 0 {
+            if let Some(observer) = try_get_observer() {
+                for (record_id, old_data) in &__old_rows_json {
+                    let event = ModelEvent { table: "users", record_id: *record_id };
+                    let _ = observer.on_deleted(&event, old_data).await;
+                }
+            }
+        }
         Ok(res.rows_affected())
     }
 }
@@ -1295,9 +1337,24 @@ pub async fn save(self) -> Result<UserView> {
                     .map_err(|_| anyhow::anyhow!("transaction scope still has active handles"))?
                     .into_inner();
                 tx.commit().await?;
+                if let Some(observer) = try_get_observer() {
+                    let event = ModelEvent { table: "users", record_id: view.id };
+                    if let Ok(data) = serde_json::to_value(&view) {
+                        let _ = observer.on_created(&event, &data).await;
+                    }
+                }
                 Ok(view)
             }
-            DbConn::Tx(_) => self.save_with_db(db_conn).await,
+            DbConn::Tx(_) => {
+                let view = self.save_with_db(db_conn).await?;
+                if let Some(observer) = try_get_observer() {
+                    let event = ModelEvent { table: "users", record_id: view.id };
+                    if let Ok(data) = serde_json::to_value(&view) {
+                        let _ = observer.on_created(&event, &data).await;
+                    }
+                }
+                Ok(view)
+            }
         }
     }
 
@@ -1609,6 +1666,17 @@ pub async fn save(self) -> Result<u64> {
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
         for b in &self.binds { select_q = bind_scalar(select_q, b.clone()); }
         let target_ids = db.fetch_all_scalar(select_q).await?;
+        let __observer_active = try_get_observer().is_some();
+        let __old_rows_json: Vec<(i64, serde_json::Value)> = if __observer_active && !target_ids.is_empty() {
+            let phs: Vec<String> = (1..=target_ids.len()).map(|i| format!("${}", i)).collect();
+            let fetch_sql = format!("SELECT * FROM users WHERE id IN ({})", phs.join(", "));
+            let mut fq = sqlx::query_as::<_, UserRow>(&fetch_sql);
+            for id in &target_ids { fq = fq.bind(id); }
+            let rows: Vec<UserRow> = db.fetch_all(fq).await.unwrap_or_default();
+            rows.into_iter().map(|r| (r.id, serde_json::to_value(&r).unwrap_or_default())).collect()
+        } else {
+            Vec::new()
+        };
         let mut parts: Vec<String> = Vec::new();
         for (i, (c, mode)) in cols.iter().zip(set_modes.iter()).enumerate() {
             let col = c.as_sql();
@@ -1637,6 +1705,19 @@ pub async fn save(self) -> Result<u64> {
         for b in &set_binds { q = bind_query(q, b.clone()); }
         for b in &binds { q = bind_query(q, b.clone()); }
         let res = db.execute(q).await?;
+        if !__old_rows_json.is_empty() && res.rows_affected() > 0 {
+            if let Some(observer) = try_get_observer() {
+                for (record_id, old_data) in &__old_rows_json {
+                    let fetch_sql = format!("SELECT * FROM users WHERE id = $1");
+                    if let Ok(Some(new_row)) = db.fetch_optional(sqlx::query_as::<_, UserRow>(&fetch_sql).bind(record_id)).await {
+                        if let Ok(new_data) = serde_json::to_value(&new_row) {
+                            let event = ModelEvent { table: "users", record_id: *record_id };
+                            let _ = observer.on_updated(&event, old_data, &new_data).await;
+                        }
+                    }
+                }
+            }
+        }
         Ok(res.rows_affected())
     }
 }
@@ -1746,7 +1827,7 @@ impl UserTableAdapter {
 }
 impl GeneratedTableAdapter for UserTableAdapter {
     type Query<'db> = UserQuery<'db>;
-    type Row = UserView;
+    type Row = UserWithRelations;
     fn model_key(&self) -> &'static str { "User" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "uuid", "username", "name", "email", "locale", "password", "country_iso2", "contact_number", "introducer_user_id", "ban", "credit_1", "credit_2", "created_at", "updated_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at"] }
@@ -1909,7 +1990,7 @@ impl GeneratedTableAdapter for UserTableAdapter {
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &UserView, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &UserWithRelations, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "uuid" => Some(row.uuid.clone()),
@@ -1931,7 +2012,7 @@ impl GeneratedTableAdapter for UserTableAdapter {
     fn count<'db>(&self, query: UserQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: UserQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<UserView>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: UserQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<UserWithRelations>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -1961,8 +2042,8 @@ pub trait UserDataTableHooks: Send + Sync + 'static {
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
     fn filter_query<'db>(&'db self, _query: UserQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<UserQuery<'db>>> { Ok(None) }
     fn filters<'db>(&'db self, query: UserQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<UserQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut UserView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: UserView) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn map_row(&self, _row: &mut UserWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: UserWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         let value = serde_json::to_value(row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         if let Some(id_value) = record.get("id").cloned() {
@@ -1975,7 +2056,7 @@ pub trait UserDataTableHooks: Send + Sync + 'static {
         }
         Ok(record)
     }
-    fn row_to_record(&self, row: UserView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: UserWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
     fn summary<'db>(&'db self, _query: UserQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
@@ -2022,8 +2103,8 @@ impl<H: UserDataTableHooks> AutoDataTable for UserDataTable<H> {
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
     fn filter_query<'db>(&'db self, query: UserQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<UserQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
     fn filters<'db>(&'db self, query: UserQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<UserQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut UserView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: UserView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn map_row(&self, row: &mut UserWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: UserWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
     fn summary<'db>(&'db self, query: UserQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
@@ -2037,7 +2118,7 @@ use core_db::common::active_record::ActiveRecord;
 impl ActiveRecord for UserView {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        User::new(db, None).find(id).await.map_err(|e| e.into())
+        User::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
     }
 }
 

@@ -18,6 +18,7 @@ pub async fn detail(state: &AppApiState, id: i64) -> Result<AdminView, AppError>
         .find(id)
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("Admin not found")))
 }
 
@@ -161,6 +162,7 @@ pub async fn batch_resolve_names(
     let mut results = Vec::new();
     for &id in ids {
         if let Ok(Some(admin)) = Admin::new(DbConn::pool(&state.db), None).find(id).await {
+            let admin = admin.into_row();
             results.push((admin.id, admin.username, admin.name));
         }
     }

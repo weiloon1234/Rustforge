@@ -29,6 +29,7 @@ pub async fn login(
         .first()
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::Unauthorized(t("Invalid credentials")))?;
 
     let valid = verify_password(password, &user.password).map_err(AppError::from)?;
@@ -63,7 +64,8 @@ pub async fn register(
             .where_uuid(Op::Eq, referral_code.clone())
             .first()
             .await
-            .map_err(AppError::from)?;
+            .map_err(AppError::from)?
+            .map(|r| r.into_row());
         introducer.map(|u| u.id)
     } else {
         None
@@ -99,6 +101,7 @@ pub async fn register(
         .find(id)
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::BadRequest(t("Failed to create user")))?;
 
     let tokens = auth::issue_guard_session::<UserGuard>(
@@ -121,7 +124,8 @@ async fn generate_unique_uuid(state: &AppApiState) -> Result<String, AppError> {
             .where_uuid(Op::Eq, uuid.clone())
             .first()
             .await
-            .map_err(AppError::from)?;
+            .map_err(AppError::from)?
+            .map(|r| r.into_row());
         if existing.is_none() {
             return Ok(uuid);
         }
@@ -137,7 +141,8 @@ pub async fn resolve_referral(
         .where_uuid(Op::Eq, code.to_string())
         .first()
         .await
-        .map_err(AppError::from)?;
+        .map_err(AppError::from)?
+        .map(|r| r.into_row());
     Ok(user.map(|u| (u.username, u.name)))
 }
 
@@ -216,6 +221,7 @@ pub async fn profile_update(
         .find(user_id)
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("User not found")))
 }
 
@@ -251,6 +257,7 @@ pub async fn password_update(
         .find(user_id)
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("User not found")))?;
 
     let valid = verify_password(&req.current_password, &user.password).map_err(AppError::from)?;
@@ -284,6 +291,7 @@ pub async fn fetch_and_check_ban(state: &AppApiState, user_id: i64) -> Result<()
         .find(user_id)
         .await
         .map_err(AppError::from)?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("User not found")))?;
     check_ban(&user)
 }
