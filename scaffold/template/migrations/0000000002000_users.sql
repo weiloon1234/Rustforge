@@ -34,7 +34,7 @@ CREATE TABLE introducer_changes (
     user_id BIGINT NOT NULL REFERENCES users(id),
     from_user_id BIGINT REFERENCES users(id),
     to_user_id BIGINT NOT NULL REFERENCES users(id),
-    admin_id BIGINT NOT NULL REFERENCES admins(id),
+    admin_id BIGINT NOT NULL REFERENCES admin(id),
     remark TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
