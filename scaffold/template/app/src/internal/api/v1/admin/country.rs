@@ -12,7 +12,8 @@ use generated::{guards::AdminGuard, permissions::Permission};
 
 use crate::{
     contracts::api::v1::admin::country::{
-        AdminCountryStatusUpdateInput, AdminCountryStatusUpdateOutput,
+        AdminCountrySetDefaultOutput, AdminCountryStatusUpdateInput,
+        AdminCountryStatusUpdateOutput,
     },
     internal::{api::state::AppApiState, workflows::country as workflow},
 };
@@ -29,7 +30,34 @@ pub fn router(state: AppApiState) -> ApiRouter {
                 |op| op.summary("Update country status").tag("Admin Country"),
             ),
         )
+        .api_route(
+            "/{iso2}/default",
+            with_permission_check_patch_with(
+                set_default,
+                AdminGuard,
+                PermissionMode::Any,
+                [Permission::CountryManage.as_str()],
+                |op| op.summary("Set country as default").tag("Admin Country"),
+            ),
+        )
         .with_state(state)
+}
+
+async fn set_default(
+    State(state): State<AppApiState>,
+    _auth: AuthUser<AdminGuard>,
+    Path(iso2): Path<String>,
+) -> Result<ApiResponse<AdminCountrySetDefaultOutput>, AppError> {
+    let country = workflow::set_default(&state, &iso2).await?;
+
+    Ok(ApiResponse::success(
+        AdminCountrySetDefaultOutput {
+            iso2: country.iso2,
+            is_default: country.is_default,
+            updated_at: country.updated_at,
+        },
+        &t("Country default updated"),
+    ))
 }
 
 async fn update_status(

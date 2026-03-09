@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use core_db::{
     common::sql::DbConn,
-    generated::models::{Country, CountryCol, CountryStatus},
+    generated::models::{Country, CountryCol, CountryIsDefault, CountryStatus},
     platform::countries::{
         default_country_status_for_iso2, load_builtin_country_seed, normalize_country_seed,
     },
@@ -23,6 +23,11 @@ impl Seeder for CountriesSeeder {
                 CountryStatus::from_storage(default_country_status_for_iso2(&seed.iso2))
                     .ok_or_else(|| anyhow::anyhow!("invalid country status for {}", seed.iso2))?;
             let currencies = serde_json::to_value(seed.currencies)?;
+            let is_default = if seed.iso2.eq_ignore_ascii_case("MY") {
+                CountryIsDefault::Yes
+            } else {
+                CountryIsDefault::No
+            };
 
             model
                 .insert()
@@ -46,6 +51,7 @@ impl Seeder for CountriesSeeder {
                 .set_longitude(seed.longitude)
                 .set_independent(seed.independent)
                 .set_status(status)
+                .set_is_default(is_default)
                 .set_assignment_status(seed.assignment_status)
                 .set_un_member(seed.un_member)
                 .set_flag_emoji(seed.flag_emoji)

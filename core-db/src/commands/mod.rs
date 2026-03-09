@@ -234,7 +234,24 @@ pub mod sqlx_tool {
         Add { name: String },
     }
 
+    fn ensure_sqlx_installed() -> anyhow::Result<()> {
+        match Command::new("sqlx").arg("--version").output() {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                anyhow::bail!(
+                    "sqlx-cli is not installed.\n\n\
+                     Install it with:\n\
+                     \n    cargo install sqlx-cli --no-default-features --features postgres\n\n\
+                     Or run: make install-tools"
+                );
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
     pub fn handle(cmd: MigrateCommand) -> anyhow::Result<()> {
+        ensure_sqlx_installed()?;
+
         let migrations_dir = super::migrations_dir();
         let migrations_dir = migrations_dir.to_string_lossy().to_string();
 

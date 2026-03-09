@@ -4,7 +4,6 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAutoForm } from "@shared/useAutoForm";
 import { Button, TextInput } from "@shared/components";
-import { ContactInput, type ContactInputValue } from "@shared/components/ContactInput";
 import { useAuthStore } from "@user/stores/auth";
 import { api } from "@user/api";
 import type { UserAuthOutput } from "@user/types/user-auth";
@@ -37,7 +36,7 @@ function RegisterLocaleSelector() {
   };
 
   return (
-    <div className="w-full rounded-2xl border border-border/70 bg-background/55 p-1.5 shadow-[inset_0_1px_0_rgba(0,240,255,0.03)] sm:max-w-[220px]">
+    <div className="w-full rounded-2xl border border-border/70 bg-background/55 p-1.5 shadow-[inset_0_1px_0_rgba(0,240,255,0.03)] sm:max-w-55">
       <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">
         {t("Language")}
       </p>
@@ -70,11 +69,6 @@ export default function RegisterPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const setToken = useAuthStore((s) => s.setToken);
-
-  const [contact, setContact] = useState<ContactInputValue>({
-    country_iso2: "",
-    phone_number: "",
-  });
 
   // Referral code — read from URL ?ref= param
   const [referralCode, setReferralCode] = useState(() => {
@@ -116,8 +110,6 @@ export default function RegisterPage() {
     extraPayload: {
       client_type: "web",
       referral_code: referralCode || undefined,
-      country_iso2: contact.country_iso2 || undefined,
-      contact_number: contact.phone_number || undefined,
     },
     fields: [
       {
@@ -156,6 +148,11 @@ export default function RegisterPage() {
         placeholder: t("Enter email"),
         required: false,
       },
+      {
+        name: "contact",
+        type: "contact",
+        span: 2,
+      },
     ],
     onSuccess: async (data: unknown) => {
       const result = data as UserAuthOutput;
@@ -171,7 +168,7 @@ export default function RegisterPage() {
       <div className="pointer-events-none absolute -left-12 bottom-6 h-64 w-64 rounded-full bg-info/8 blur-3xl" />
 
       <div className="relative mx-auto flex min-h-[calc(100vh-3rem)] max-w-5xl items-center justify-center">
-        <div className="w-full max-w-[640px] overflow-hidden rounded-[28px] border border-border/70 bg-surface/85 shadow-[0_30px_90px_rgba(0,240,255,0.08)] backdrop-blur">
+        <div className="w-full max-w-160 overflow-hidden rounded-[28px] border border-border/70 bg-surface/85 shadow-[0_30px_90px_rgba(0,240,255,0.08)] backdrop-blur">
           <div className="border-b border-border/70 bg-[linear-gradient(180deg,rgba(0,240,255,0.02),rgba(0,0,0,0))] p-6 sm:p-8">
             <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
               <div className="max-w-xs">
@@ -199,19 +196,6 @@ export default function RegisterPage() {
               )}
 
               {form}
-
-              <ContactInput
-                value={contact}
-                onChange={setContact}
-                required={false}
-                countryRequired={false}
-                phoneRequired={false}
-                countryError={errors.fields?.country_iso2?.[0]}
-                countryErrors={errors.fields?.country_iso2}
-                phoneError={errors.fields?.contact_number?.[0]}
-                phoneErrors={errors.fields?.contact_number}
-                containerClassName="mb-4"
-              />
 
               {/* Referral Code — manual field */}
               <div className="mb-4">

@@ -4,7 +4,6 @@ import { Eye } from "lucide-react";
 import type {
   AuditLogDatatableRow,
   AuditLogDatatableSummaryOutput,
-  AdminBatchResolveOutput,
   AuditAction,
 } from "@admin/types";
 import type { ApiResponse } from "@shared/types";
@@ -86,11 +85,7 @@ export default function AuditLogsPage() {
   const { t } = useTranslation();
   const [summary, setSummary] =
     useState<AuditLogDatatableSummaryOutput | null>(null);
-  const [adminMap, setAdminMap] = useState<Map<string, string>>(new Map());
   const summaryRequestId = useRef(0);
-
-  const resolveAdminName = (adminId: string): string =>
-    adminMap.get(adminId) ?? adminId;
 
   const openDetailModal = (log: AuditLogDatatableRow) => {
     useModalStore.getState().open({
@@ -123,7 +118,7 @@ export default function AuditLogsPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">
                 {t("Admin")}
               </p>
-              <p>{resolveAdminName(log.admin_id)}</p>
+              <p>{log.admin_username}</p>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">
@@ -178,29 +173,6 @@ export default function AuditLogsPage() {
         if (summaryRequestId.current !== requestId) return;
         setSummary(null);
       });
-
-    // Batch resolve admin IDs
-    const rows = event.response?.records ?? [];
-    const uniqueIds = [
-      ...new Set(rows.map((r: AuditLogDatatableRow) => r.admin_id).filter(Boolean)),
-    ];
-    const unknownIds = uniqueIds.filter((id: string) => !adminMap.has(id));
-    if (unknownIds.length > 0) {
-      void api
-        .post<ApiResponse<AdminBatchResolveOutput>>("admins/batch_resolve", {
-          ids: unknownIds.map(Number),
-        })
-        .then((res) => {
-          setAdminMap((prev) => {
-            const next = new Map(prev);
-            for (const entry of res.data.data.entries) {
-              next.set(entry.id, entry.name || entry.username);
-            }
-            return next;
-          });
-        })
-        .catch(() => {});
-    }
   };
 
   return (
@@ -280,9 +252,9 @@ export default function AuditLogsPage() {
           render: (log) => log.record_id,
         },
         {
-          key: "admin_id",
+          key: "admin_username",
           label: t("Admin"),
-          render: (log) => resolveAdminName(log.admin_id),
+          render: (log) => log.admin_username,
         },
         {
           key: "created_at",

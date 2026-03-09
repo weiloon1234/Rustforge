@@ -17,6 +17,7 @@ import {
   type TiptapPreset,
 } from "@shared/components/TiptapInput";
 import { FileInput, type FilePreviewItem } from "@shared/components/FileInput";
+import { ContactInput } from "@shared/components/ContactInput";
 
 type InputFieldType =
   | "text"
@@ -79,6 +80,19 @@ type FieldDef =
       accept?: string;
       accepts?: string;
       maxFiles?: number;
+    }
+  | {
+      name: string;
+      type: "contact";
+      label?: string;
+      span?: 1 | 2;
+      required?: boolean;
+      notes?: string;
+      disabled?: boolean;
+      /** Payload key for country ISO2 (default: "country_iso2") */
+      countryName?: string;
+      /** Payload key for phone number (default: "contact_number") */
+      phoneName?: string;
     };
 
 interface AutoFormConfig {
@@ -180,6 +194,13 @@ function buildDefaults(fields: FieldDef[], defaults?: Record<string, AutoFormDef
     if (field.type === "checkboxGroup") {
       const raw = defaults?.[field.name];
       values[field.name] = Array.isArray(raw) ? JSON.stringify(raw) : (typeof raw === "string" ? raw : "[]");
+      continue;
+    }
+    if (field.type === "contact") {
+      const cKey = field.countryName ?? "country_iso2";
+      const pKey = field.phoneName ?? "contact_number";
+      values[cKey] = toTextDefault(defaults?.[cKey]);
+      values[pKey] = toTextDefault(defaults?.[pKey]);
       continue;
     }
     values[field.name] = toTextDefault(defaults?.[field.name]);
@@ -346,6 +367,16 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
         const selected = fileValues[field.name] ?? [];
         if (selected.length === 0) continue;
         payload[field.name] = field.type === "file" && !field.multiple ? selected[0] : selected;
+        continue;
+      }
+
+      if (field.type === "contact") {
+        const cKey = field.countryName ?? "country_iso2";
+        const pKey = field.phoneName ?? "contact_number";
+        const cVal = (values[cKey] ?? "").trim();
+        const pVal = (values[pKey] ?? "").trim();
+        payload[cKey] = cVal === "" ? null : cVal;
+        payload[pKey] = pVal === "" ? null : pVal;
         continue;
       }
 
@@ -567,6 +598,32 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
                   />
                 </div>
               );
+
+            case "contact": {
+              const cKey = field.countryName ?? "country_iso2";
+              const pKey = field.phoneName ?? "contact_number";
+              return (
+                <div key={field.name} style={style}>
+                  <ContactInput
+                    label={field.label}
+                    countryName={cKey}
+                    phoneName={pKey}
+                    value={{
+                      country_iso2: values[cKey] ?? "",
+                      phone_number: values[pKey] ?? "",
+                    }}
+                    onChange={(v) => {
+                      setValue(cKey, v.country_iso2);
+                      setValue(pKey, v.phone_number);
+                    }}
+                    countryErrors={fieldErrors[cKey]}
+                    phoneErrors={fieldErrors[pKey]}
+                    required={field.required}
+                    disabled={field.disabled}
+                  />
+                </div>
+              );
+            }
 
             case "file":
             case "files":

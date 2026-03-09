@@ -93,13 +93,13 @@ export default function UserHierarchyPage() {
           {t("User Hierarchy")}
         </h1>
         <p className="text-sm text-muted">
-          {t("Browse user referral hierarchy")}
+          {t("Browse user referral tree")}
         </p>
       </div>
 
       {/* Search Bar */}
       <div className="flex items-end gap-3">
-        <div className="w-full max-w-sm">
+        <div className="w-full max-w-sm [&_.rf-field]:mb-0">
           <TextInput
             label={t("Username")}
             type="text"

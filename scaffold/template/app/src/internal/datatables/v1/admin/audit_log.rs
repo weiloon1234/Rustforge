@@ -1,33 +1,270 @@
-use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
-use core_db::common::sql::Op;
+use std::collections::HashMap;
+
+use core_datatable::{
+    AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput,
+    DataTableRegistry, GeneratedTableAdapter, SortDirection,
+};
+use core_db::common::sql::{DbConn, Op, OrderDir};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
 use generated::models::{
-    AuditAction, AuditLog, AuditLogCol, AuditLogDataTable, AuditLogDataTableHooks, AuditLogQuery,
+    Admin, AuditAction, AuditLog, AuditLogCol, AuditLogQuery,
 };
 use generated::permissions::Permission;
 
 use crate::contracts::datatable::admin::audit_log::{
-    AdminAuditLogDataTableContract, AuditLogDatatableSummaryOutput, ROUTE_PREFIX, SCOPED_KEY,
+    AdminAuditLogDataTableContract, AuditLogDatatableRow, AuditLogDatatableSummaryOutput,
+    ROUTE_PREFIX, SCOPED_KEY,
 };
 use crate::internal::datatables::v1::admin::authorize_with_optional_export;
+
+const AUDIT_LOG_SORTABLE_COLUMNS: [&str; 6] = [
+    "id",
+    "admin_id",
+    "action",
+    "table_name",
+    "record_id",
+    "created_at",
+];
+
+const AUDIT_LOG_COLUMN_DESCRIPTORS: [DataTableColumnDescriptor; 9] = [
+    DataTableColumnDescriptor {
+        name: "id",
+        label: "ID",
+        data_type: "string",
+        sortable: true,
+        localized: false,
+        filter_ops: &[],
+    },
+    DataTableColumnDescriptor {
+        name: "admin_id",
+        label: "Admin ID",
+        data_type: "string",
+        sortable: true,
+        localized: false,
+        filter_ops: &[],
+    },
+    DataTableColumnDescriptor {
+        name: "admin_username",
+        label: "Admin",
+        data_type: "string",
+        sortable: false,
+        localized: false,
+        filter_ops: &[],
+    },
+    DataTableColumnDescriptor {
+        name: "action",
+        label: "Action",
+        data_type: "string",
+        sortable: true,
+        localized: false,
+        filter_ops: &["eq"],
+    },
+    DataTableColumnDescriptor {
+        name: "table_name",
+        label: "Table Name",
+        data_type: "string",
+        sortable: true,
+        localized: false,
+        filter_ops: &["eq", "like"],
+    },
+    DataTableColumnDescriptor {
+        name: "record_id",
+        label: "Record ID",
+        data_type: "string",
+        sortable: true,
+        localized: false,
+        filter_ops: &["eq"],
+    },
+    DataTableColumnDescriptor {
+        name: "old_data",
+        label: "Old Data",
+        data_type: "json",
+        sortable: false,
+        localized: false,
+        filter_ops: &[],
+    },
+    DataTableColumnDescriptor {
+        name: "new_data",
+        label: "New Data",
+        data_type: "json",
+        sortable: false,
+        localized: false,
+        filter_ops: &[],
+    },
+    DataTableColumnDescriptor {
+        name: "created_at",
+        label: "Created At",
+        data_type: "datetime",
+        sortable: true,
+        localized: false,
+        filter_ops: &[],
+    },
+];
+
+#[derive(Debug, Clone)]
+pub struct AuditLogQueryState {
+    keyword: Option<String>,
+    table_name: Option<String>,
+    action: Option<AuditAction>,
+    record_id: Option<i64>,
+    date_from: Option<time::OffsetDateTime>,
+    date_to: Option<time::OffsetDateTime>,
+    sorting_column: AuditLogCol,
+    sorting: SortDirection,
+}
+
+impl Default for AuditLogQueryState {
+    fn default() -> Self {
+        Self {
+            keyword: None,
+            table_name: None,
+            action: None,
+            record_id: None,
+            date_from: None,
+            date_to: None,
+            sorting_column: AuditLogCol::Id,
+            sorting: SortDirection::Desc,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AuditLogTableAdapter {
+    db: sqlx::PgPool,
+}
+
+impl GeneratedTableAdapter for AuditLogTableAdapter {
+    type Query<'db> = AuditLogQueryState;
+    type Row = AuditLogDatatableRow;
+
+    fn model_key(&self) -> &'static str {
+        SCOPED_KEY
+    }
+
+    fn sortable_columns(&self) -> &'static [&'static str] {
+        &AUDIT_LOG_SORTABLE_COLUMNS
+    }
+
+    fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
+        &AUDIT_LOG_COLUMN_DESCRIPTORS
+    }
+
+    fn apply_auto_filter<'db>(
+        &self,
+        _query: Self::Query<'db>,
+        _filter: &core_datatable::ParsedFilter,
+        _value: &str,
+    ) -> anyhow::Result<Option<Self::Query<'db>>>
+    where
+        Self: 'db,
+    {
+        Ok(None)
+    }
+
+    fn apply_sort<'db>(
+        &self,
+        mut query: Self::Query<'db>,
+        column: &str,
+        dir: SortDirection,
+    ) -> anyhow::Result<Self::Query<'db>>
+    where
+        Self: 'db,
+    {
+        if let Some(col) = normalize_sort_column(column) {
+            query.sorting_column = col;
+        }
+        query.sorting = dir;
+        Ok(query)
+    }
+
+    fn count<'db>(&self, query: Self::Query<'db>) -> BoxFuture<'db, anyhow::Result<i64>>
+    where
+        Self: 'db,
+    {
+        let db = self.db.clone();
+        Box::pin(async move {
+            let base = AuditLog::new(DbConn::pool(&db), None).query();
+            let filtered = apply_audit_log_filters(base, &query);
+            Ok(filtered.count().await?)
+        })
+    }
+
+    fn fetch_page<'db>(
+        &self,
+        query: Self::Query<'db>,
+        page: i64,
+        per_page: i64,
+    ) -> BoxFuture<'db, anyhow::Result<Vec<Self::Row>>>
+    where
+        Self: 'db,
+    {
+        let db = self.db.clone();
+        Box::pin(async move {
+            let safe_page = page.max(1);
+            let safe_per_page = per_page.max(1);
+            let offset = (safe_page - 1) * safe_per_page;
+
+            let base = AuditLog::new(DbConn::pool(&db), None).query();
+            let filtered = apply_audit_log_filters(base, &query)
+                .order_by(query.sorting_column, to_order_direction(query.sorting))
+                .order_by(AuditLogCol::Id, OrderDir::Desc)
+                .offset(offset)
+                .limit(safe_per_page);
+
+            let rows = filtered.get().await?;
+
+            // Batch resolve admin usernames
+            let admin_ids: Vec<i64> = rows.iter().map(|r| r.admin_id).collect::<std::collections::HashSet<_>>().into_iter().collect();
+            let admin_map = batch_resolve_admin_usernames(&db, &admin_ids).await;
+
+            let out = rows
+                .into_iter()
+                .map(|row| {
+                    let admin_username = admin_map
+                        .get(&row.admin_id)
+                        .cloned()
+                        .unwrap_or_else(|| row.admin_id.to_string());
+                    AuditLogDatatableRow {
+                        id: row.id.into(),
+                        admin_id: row.admin_id,
+                        admin_username,
+                        action: row.action,
+                        action_explained: row.action_explained,
+                        table_name: row.table_name,
+                        record_id: row.record_id,
+                        old_data: row.old_data,
+                        new_data: row.new_data,
+                        created_at: format_rfc3339(row.created_at),
+                    }
+                })
+                .collect();
+
+            Ok(out)
+        })
+    }
+}
+
+async fn batch_resolve_admin_usernames(
+    db: &sqlx::PgPool,
+    admin_ids: &[i64],
+) -> HashMap<i64, String> {
+    let mut map = HashMap::new();
+    for &id in admin_ids {
+        if let Ok(Some(admin)) = Admin::new(db, None).find(id).await {
+            map.insert(id, admin.username);
+        }
+    }
+    map
+}
 
 #[derive(Default, Clone)]
 pub struct AuditLogDataTableAppHooks;
 
-impl AuditLogDataTableHooks for AuditLogDataTableAppHooks {
-    fn scope<'db>(
-        &'db self,
-        query: AuditLogQuery<'db>,
-        _input: &DataTableInput,
-        _ctx: &DataTableContext,
-    ) -> AuditLogQuery<'db> {
-        query
-    }
-
+impl AuditLogDataTableAppHooks {
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {
         let Some(actor) = ctx.actor.as_ref() else {
             return Ok(false);
@@ -40,41 +277,189 @@ impl AuditLogDataTableHooks for AuditLogDataTableAppHooks {
         Ok(authorize_with_optional_export(base_authorized, input, ctx))
     }
 
+    fn filter_query(
+        &self,
+        mut query: AuditLogQueryState,
+        filter_key: &str,
+        value: &str,
+    ) -> Option<AuditLogQueryState> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Some(query);
+        }
+        match filter_key {
+            "q" => {
+                query.keyword = Some(trimmed.to_string());
+                Some(query)
+            }
+            "f-table_name" => {
+                query.table_name = Some(trimmed.to_string());
+                Some(query)
+            }
+            "f-action" => {
+                query.action = AuditAction::from_storage(trimmed);
+                Some(query)
+            }
+            "f-record_id" => {
+                query.record_id = trimmed.parse::<i64>().ok();
+                Some(query)
+            }
+            "f-date-from-created_at" => {
+                query.date_from = parse_datetime(trimmed, false);
+                Some(query)
+            }
+            "f-date-to-created_at" => {
+                query.date_to = parse_datetime(trimmed, true);
+                Some(query)
+            }
+            _ => None,
+        }
+    }
+}
+
+pub struct AuditLogDataTable {
+    adapter: AuditLogTableAdapter,
+    hooks: AuditLogDataTableAppHooks,
+}
+
+impl AuditLogDataTable {
+    fn new(db: sqlx::PgPool) -> Self {
+        Self {
+            adapter: AuditLogTableAdapter { db },
+            hooks: AuditLogDataTableAppHooks,
+        }
+    }
+}
+
+impl AutoDataTable for AuditLogDataTable {
+    type Adapter = AuditLogTableAdapter;
+
+    fn adapter(&self) -> &Self::Adapter {
+        &self.adapter
+    }
+
+    fn base_query<'db>(
+        &'db self,
+        _input: &DataTableInput,
+        _ctx: &DataTableContext,
+    ) -> <Self::Adapter as GeneratedTableAdapter>::Query<'db> {
+        AuditLogQueryState::default()
+    }
+
+    fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {
+        self.hooks.authorize(input, ctx)
+    }
+
     fn filter_query<'db>(
         &'db self,
-        query: AuditLogQuery<'db>,
+        query: <Self::Adapter as GeneratedTableAdapter>::Query<'db>,
         filter_key: &str,
         value: &str,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<Option<AuditLogQuery<'db>>> {
-        match filter_key {
-            "q" => Ok(Some(apply_keyword_filter(query, value))),
-            _ => Ok(None),
-        }
+    ) -> anyhow::Result<Option<<Self::Adapter as GeneratedTableAdapter>::Query<'db>>> {
+        Ok(self.hooks.filter_query(query, filter_key, value))
     }
 
-    fn row_to_record(
-        &self,
-        row: generated::models::AuditLogView,
-        _input: &DataTableInput,
-        _ctx: &DataTableContext,
-    ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        self.default_row_to_record(row)
+    fn default_sorting_column(&self) -> &'static str {
+        "id"
+    }
+
+    fn default_sorted(&self) -> SortDirection {
+        SortDirection::Desc
+    }
+
+    fn default_timestamp_columns(&self) -> &'static [&'static str] {
+        &["created_at"]
     }
 }
 
-fn apply_keyword_filter<'db>(query: AuditLogQuery<'db>, value: &str) -> AuditLogQuery<'db> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return query;
+pub type AppAuditLogDataTable = AuditLogDataTable;
+
+pub fn app_audit_log_datatable(db: sqlx::PgPool) -> AppAuditLogDataTable {
+    AuditLogDataTable::new(db)
+}
+
+pub fn register_scoped(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
+    registry.register_as(SCOPED_KEY, app_audit_log_datatable(db));
+}
+
+pub fn routes<S>(state: S) -> ApiRouter
+where
+    S: DataTableRouteState,
+{
+    routes_for_scoped_contract_with_options(
+        ROUTE_PREFIX,
+        state,
+        AdminAuditLogDataTableContract,
+        DataTableRouteOptions {
+            require_bearer_auth: true,
+        },
+    )
+}
+
+fn apply_audit_log_filters<'db>(
+    mut query: AuditLogQuery<'db>,
+    filters: &AuditLogQueryState,
+) -> AuditLogQuery<'db> {
+    if let Some(keyword) = filters.keyword.as_deref() {
+        let trimmed = keyword.trim();
+        if !trimmed.is_empty() {
+            let pattern = format!("%{trimmed}%");
+            query = query.where_group(|q| {
+                q.where_col(AuditLogCol::OldData, Op::Like, pattern.clone())
+                    .or_where_col(AuditLogCol::NewData, Op::Like, pattern.clone())
+                    .or_where_col(AuditLogCol::TableName, Op::Like, pattern)
+            });
+        }
     }
-    let pattern = format!("%{trimmed}%");
-    query.where_group(|q| {
-        q.where_col(AuditLogCol::OldData, Op::Like, pattern.clone())
-            .or_where_col(AuditLogCol::NewData, Op::Like, pattern.clone())
-            .or_where_col(AuditLogCol::TableName, Op::Like, pattern)
-    })
+
+    if let Some(table_name) = &filters.table_name {
+        query = query.where_col(AuditLogCol::TableName, Op::Eq, table_name.clone());
+    }
+
+    if let Some(action) = filters.action {
+        query = query.where_action(Op::Eq, action);
+    }
+
+    if let Some(record_id) = filters.record_id {
+        query = query.where_record_id(Op::Eq, record_id);
+    }
+
+    if let Some(ts) = filters.date_from {
+        query = query.where_col(AuditLogCol::CreatedAt, Op::Ge, ts);
+    }
+
+    if let Some(ts) = filters.date_to {
+        query = query.where_col(AuditLogCol::CreatedAt, Op::Le, ts);
+    }
+
+    query
+}
+
+fn to_order_direction(direction: SortDirection) -> OrderDir {
+    match direction {
+        SortDirection::Asc => OrderDir::Asc,
+        SortDirection::Desc => OrderDir::Desc,
+    }
+}
+
+fn normalize_sort_column(value: &str) -> Option<AuditLogCol> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "id" => Some(AuditLogCol::Id),
+        "admin_id" => Some(AuditLogCol::AdminId),
+        "action" => Some(AuditLogCol::Action),
+        "table_name" => Some(AuditLogCol::TableName),
+        "record_id" => Some(AuditLogCol::RecordId),
+        "created_at" => Some(AuditLogCol::CreatedAt),
+        _ => None,
+    }
+}
+
+fn format_rfc3339(value: time::OffsetDateTime) -> String {
+    value
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| value.unix_timestamp().to_string())
 }
 
 fn parse_datetime(raw: &str, end_of_day: bool) -> Option<time::OffsetDateTime> {
@@ -100,58 +485,14 @@ fn parse_datetime(raw: &str, end_of_day: bool) -> Option<time::OffsetDateTime> {
     None
 }
 
-fn apply_summary_filters<'db>(
-    mut query: AuditLogQuery<'db>,
-    input: &DataTableInput,
-) -> AuditLogQuery<'db> {
-    for (key, value) in input.filter_entries() {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        match key {
-            "f-table_name" => {
-                query = query.where_col(AuditLogCol::TableName, Op::Eq, trimmed.to_string());
-            }
-            "f-action" => {
-                if let Some(action) = AuditAction::from_storage(trimmed) {
-                    query = query.where_action(Op::Eq, action);
-                }
-            }
-            "f-record_id" => {
-                if let Ok(id) = trimmed.parse::<i64>() {
-                    query = query.where_record_id(Op::Eq, id);
-                }
-            }
-            "f-date-from-created_at" => {
-                if let Some(ts) = parse_datetime(trimmed, false) {
-                    query = query.where_col(AuditLogCol::CreatedAt, Op::Ge, ts);
-                }
-            }
-            "f-date-to-created_at" => {
-                if let Some(ts) = parse_datetime(trimmed, true) {
-                    query = query.where_col(AuditLogCol::CreatedAt, Op::Le, ts);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    for (key, value) in input.custom_filter_entries() {
-        if key == "q" {
-            query = apply_keyword_filter(query, value);
-        }
-    }
-
-    query
-}
-
+// Summary support — reuses filters from the custom adapter
 pub async fn build_audit_log_summary_output(
     db: &sqlx::PgPool,
     input: &DataTableInput,
     _ctx: &DataTableContext,
 ) -> anyhow::Result<AuditLogDatatableSummaryOutput> {
-    let filtered = apply_summary_filters(AuditLog::new(db, None).query(), input);
+    let filters = build_summary_query_state(input);
+    let filtered = apply_audit_log_filters(AuditLog::new(db, None).query(), &filters);
 
     let total_filtered = filtered.clone().count().await?;
     let create_count = filtered
@@ -177,26 +518,21 @@ pub async fn build_audit_log_summary_output(
     })
 }
 
-pub type AppAuditLogDataTable = AuditLogDataTable<AuditLogDataTableAppHooks>;
+fn build_summary_query_state(input: &DataTableInput) -> AuditLogQueryState {
+    let hooks = AuditLogDataTableAppHooks;
+    let mut state = AuditLogQueryState::default();
 
-pub fn app_audit_log_datatable(db: sqlx::PgPool) -> AppAuditLogDataTable {
-    AuditLogDataTable::new(db).with_hooks(AuditLogDataTableAppHooks::default())
-}
+    for (key, value) in input.filter_entries() {
+        if let Some(next) = hooks.filter_query(state.clone(), key, value) {
+            state = next;
+        }
+    }
 
-pub fn register_scoped(registry: &mut DataTableRegistry, db: sqlx::PgPool) {
-    registry.register_as(SCOPED_KEY, app_audit_log_datatable(db));
-}
+    for (key, value) in input.custom_filter_entries() {
+        if let Some(next) = hooks.filter_query(state.clone(), key, value) {
+            state = next;
+        }
+    }
 
-pub fn routes<S>(state: S) -> ApiRouter
-where
-    S: DataTableRouteState,
-{
-    routes_for_scoped_contract_with_options(
-        ROUTE_PREFIX,
-        state,
-        AdminAuditLogDataTableContract,
-        DataTableRouteOptions {
-            require_bearer_auth: true,
-        },
-    )
+    state
 }

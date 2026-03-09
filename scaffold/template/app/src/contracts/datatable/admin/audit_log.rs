@@ -17,6 +17,7 @@ pub struct AuditLogDatatableRow {
     pub id: SnowflakeId,
     #[ts(type = "string")]
     pub admin_id: i64,
+    pub admin_username: String,
     pub action: AuditAction,
     pub action_explained: String,
     pub table_name: String,

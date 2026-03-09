@@ -4,7 +4,9 @@ use core_datatable::{
 };
 use core_db::{
     common::sql::{DbConn, Op, OrderDir},
-    generated::models::{Country as CountryModel, CountryCol, CountryQuery, CountryStatus},
+    generated::models::{
+        Country as CountryModel, CountryCol, CountryIsDefault, CountryQuery, CountryStatus,
+    },
 };
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
@@ -18,17 +20,18 @@ use crate::contracts::datatable::admin::country::{
 };
 use crate::internal::datatables::v1::admin::authorize_with_optional_export;
 
-const COUNTRY_SORTABLE_COLUMNS: [&str; 7] = [
+const COUNTRY_SORTABLE_COLUMNS: [&str; 8] = [
     "iso2",
     "iso3",
     "name",
     "status",
+    "is_default",
     "region",
     "calling_code",
     "updated_at",
 ];
 
-const COUNTRY_COLUMN_DESCRIPTORS: [DataTableColumnDescriptor; 8] = [
+const COUNTRY_COLUMN_DESCRIPTORS: [DataTableColumnDescriptor; 9] = [
     DataTableColumnDescriptor {
         name: "id",
         label: "ID",
@@ -84,6 +87,14 @@ const COUNTRY_COLUMN_DESCRIPTORS: [DataTableColumnDescriptor; 8] = [
         sortable: true,
         localized: false,
         filter_ops: &["eq"],
+    },
+    DataTableColumnDescriptor {
+        name: "is_default",
+        label: "Default",
+        data_type: "boolean",
+        sortable: true,
+        localized: false,
+        filter_ops: &[],
     },
     DataTableColumnDescriptor {
         name: "updated_at",
@@ -210,6 +221,7 @@ impl GeneratedTableAdapter for CountryTableAdapter {
                     region: row.region,
                     calling_code: row.calling_code,
                     status: row.status.as_str().to_string(),
+                    is_default: matches!(row.is_default, CountryIsDefault::Yes),
                     updated_at: format_rfc3339(row.updated_at),
                 })
                 .collect();
@@ -397,6 +409,7 @@ fn normalize_sort_column(value: &str) -> Option<CountryCol> {
         "status" => Some(CountryCol::Status),
         "region" => Some(CountryCol::Region),
         "calling_code" => Some(CountryCol::CallingCode),
+        "is_default" => Some(CountryCol::IsDefault),
         "updated_at" => Some(CountryCol::UpdatedAt),
         _ => None,
     }

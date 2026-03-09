@@ -140,7 +140,12 @@ async fn batch_resolve(
     _auth: AuthUser<AdminGuard>,
     Json(req): Json<AdminBatchResolveInput>,
 ) -> Result<ApiResponse<AdminBatchResolveOutput>, AppError> {
-    let results = workflow::batch_resolve_names(&state, &req.ids).await?;
+    let parsed_ids: Vec<i64> = req
+        .ids
+        .iter()
+        .filter_map(|s| s.parse::<i64>().ok())
+        .collect();
+    let results = workflow::batch_resolve_names(&state, &parsed_ids).await?;
     let entries: Vec<AdminBatchResolveEntry> = results
         .into_iter()
         .map(|(id, username, name)| AdminBatchResolveEntry {

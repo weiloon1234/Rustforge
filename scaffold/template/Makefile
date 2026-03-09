@@ -15,6 +15,7 @@ FRAMEWORK_DOCS_DIR := $(PUBLIC_PATH)/$(FRAMEWORK_DOCS_ROUTE)
 help:
 	@echo "Starter Makefile"
 	@echo "--------------"
+	@echo "  make install-tools       # Install cargo-watch, sqlx-cli"
 	@echo "  make dev                 # Rust API + all Vite portals"
 	@echo "  make dev-api             # Rust API only (cargo-watch)"
 	@echo "  make dev-frontend        # All Vite portals"
@@ -40,6 +41,7 @@ help:
 .PHONY: install-tools
 install-tools:
 	@command -v cargo-watch >/dev/null 2>&1 || cargo install cargo-watch
+	@command -v sqlx >/dev/null 2>&1 || cargo install sqlx-cli --no-default-features --features postgres
 
 .PHONY: install-frontend
 install-frontend:

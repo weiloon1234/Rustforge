@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Pencil } from "lucide-react";
+import { Pencil, Star } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { CountryDatatableRow } from "@admin/types";
 import { PERMISSION } from "@admin/types";
@@ -8,6 +8,7 @@ import { useAuthStore } from "@admin/stores/auth";
 import {
   Button,
   DataTable,
+  alertConfirm,
   alertError,
   alertSuccess,
   formatDateTime,
@@ -103,6 +104,29 @@ export default function CountriesPage() {
     account,
   );
 
+  const handleSetDefault = async (row: CountryDatatableRow, refresh: () => void) => {
+    await alertConfirm({
+      title: t("Set Default"),
+      message: t("Are you sure you want to set :name as the default country?", {
+        name: `${row.name} (${row.iso2})`,
+      }),
+      confirmText: t("Set Default"),
+      callback: async (result) => {
+        if (!result.isConfirmed) return;
+        try {
+          await api.patch(`countries/${row.iso2}/default`);
+          alertSuccess({ title: t("Success"), message: t("Country default updated") });
+          refresh();
+        } catch (error) {
+          alertError({
+            title: t("Error"),
+            message: normalizeErrorMessage(error, t("Failed to set default country.")),
+          });
+        }
+      },
+    });
+  };
+
   const openEditModal = (row: CountryDatatableRow, refresh: () => void) => {
     const formId = `country-status-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let modalId = "";
@@ -151,19 +175,43 @@ export default function CountriesPage() {
           sortable: false,
           render: (row, ctx) =>
             canManage ? (
-              <Button
-                type="button"
-                onClick={() => openEditModal(row, ctx.refresh)}
-                variant="plain"
-                size="sm"
-                iconOnly
-                title={t("Edit")}
-              >
-                <Pencil size={16} />
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  onClick={() => openEditModal(row, ctx.refresh)}
+                  variant="plain"
+                  size="sm"
+                  iconOnly
+                  title={t("Edit")}
+                >
+                  <Pencil size={16} />
+                </Button>
+                {!row.is_default && (
+                  <Button
+                    type="button"
+                    onClick={() => handleSetDefault(row, ctx.refresh)}
+                    variant="plain"
+                    size="sm"
+                    iconOnly
+                    title={t("Set Default")}
+                  >
+                    <Star size={16} />
+                  </Button>
+                )}
+              </div>
             ) : (
               "—"
             ),
+        },
+        {
+          key: "is_default",
+          label: t("Default"),
+          render: (row) =>
+            row.is_default ? (
+              <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                {t("Default")}
+              </span>
+            ) : null,
         },
         {
           key: "status",

@@ -19,10 +19,13 @@ use core_web::{contracts::ContractJson, response::ApiResponse};
 use serde_json::Value;
 
 use generated::guards::AdminGuard;
-use generated::models::AdminDataTableHooks;
+use generated::models::{AdminDataTableHooks, UserDataTableHooks};
 
 use crate::contracts::datatable::admin::account::{
     AdminDatatableSummaryOutput, SCOPED_KEY as ADMIN_ACCOUNT_SCOPED_KEY,
+};
+use crate::contracts::datatable::admin::user::{
+    UserDatatableSummaryOutput, SCOPED_KEY as USER_SCOPED_KEY,
 };
 use crate::internal::api::state::AppApiState;
 
@@ -36,6 +39,14 @@ pub fn router(state: AppApiState) -> ApiRouter {
                 op.summary("Datatable summary")
                     .tag("Admin Account")
                     .description("Returns filtered cross-page summary cards for admin datatable.")
+            }),
+        )
+        .api_route(
+            "/datatable/user/summary",
+            post_with(user_summary, |op| {
+                op.summary("User datatable summary")
+                    .tag("User Management")
+                    .description("Returns filtered cross-page summary cards for user datatable.")
             }),
         )
         .with_state(state);
@@ -102,6 +113,29 @@ impl DataTableRouteState for AppApiState {
             unknown_filter_mode: self.datatable_unknown_filter_mode,
         }
     }
+}
+
+async fn user_summary(
+    State(state): State<AppApiState>,
+    headers: core_web::extract::request_headers::RequestHeaders,
+    req: ContractJson<DataTableGenericQueryRequest>,
+) -> Result<ApiResponse<UserDatatableSummaryOutput>, AppError> {
+    let mut input = req.0.datatable_query_to_input();
+    input.model = Some(USER_SCOPED_KEY.to_string());
+
+    let ctx = state.datatable_context(&headers).await;
+    let hooks = crate::internal::datatables::v1::admin::UserDataTableAppHooks::default();
+    if !hooks.authorize(&input, &ctx)? {
+        return Err(AppError::Forbidden(t(
+            "You are not allowed to query this datatable",
+        )));
+    }
+
+    let summary =
+        crate::internal::datatables::v1::admin::build_user_summary_output(&state.db, &input, &ctx)
+            .await?;
+
+    Ok(ApiResponse::success(summary, &t("datatable summary")))
 }
 
 async fn build_admin_actor(db: &sqlx::PgPool, headers: &HeaderMap) -> Option<DataTableActor> {

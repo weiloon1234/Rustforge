@@ -269,6 +269,59 @@
         @apply opacity-60;
     }
 
+    /* ── ContactInput (joined country+phone) ────────── */
+    .rf-contact-input-group {
+        @apply flex items-center rounded-lg border border-input-border bg-input
+      transition-colors duration-150 hover:border-input-border-hover;
+    }
+    .rf-contact-input-group:focus-within {
+        @apply border-input-focus ring-2 ring-ring/40;
+    }
+    .rf-contact-input-group-error {
+        @apply border-error hover:border-error;
+    }
+    .rf-contact-input-group-error:focus-within {
+        @apply ring-error/40 border-error;
+    }
+    .rf-contact-input-group-disabled {
+        @apply opacity-50 cursor-not-allowed;
+    }
+    .rf-contact-country-trigger {
+        @apply flex items-center gap-1.5 px-3 py-2 text-sm cursor-pointer shrink-0
+      hover:bg-surface-hover/50 rounded-l-lg transition-colors duration-150
+      disabled:cursor-not-allowed disabled:opacity-50;
+    }
+    .rf-contact-divider {
+        @apply w-px self-stretch bg-input-border;
+    }
+    .rf-contact-phone-input {
+        @apply flex-1 min-w-0 bg-transparent px-3 py-2 text-sm text-foreground
+      placeholder:text-input-placeholder outline-none disabled:cursor-not-allowed;
+    }
+    .rf-contact-dropdown {
+        @apply absolute left-0 right-0 top-full mt-1 z-50 rounded-lg border border-border
+      bg-surface shadow-xl;
+        max-height: 18rem;
+    }
+    .rf-contact-dropdown-search-wrapper {
+        @apply border-b border-border p-2;
+    }
+    .rf-contact-dropdown-search {
+        @apply w-full rounded-md border border-input-border bg-input px-3 py-1.5 text-sm text-foreground
+      placeholder:text-input-placeholder outline-none focus:border-input-focus focus:ring-1 focus:ring-ring/40;
+    }
+    .rf-contact-dropdown-list {
+        @apply overflow-y-auto;
+        max-height: 13rem;
+    }
+    .rf-contact-dropdown-item {
+        @apply flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground
+      transition-colors duration-100 hover:bg-surface-hover cursor-pointer;
+    }
+    .rf-contact-dropdown-item-active {
+        @apply bg-primary/10 text-primary;
+    }
+
     .rf-select {
         @apply w-full rounded-lg border border-input-border bg-input px-3 py-2 pr-10 text-sm text-foreground
       transition-colors duration-150 hover:border-input-border-hover focus:outline-none focus:ring-2

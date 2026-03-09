@@ -29,6 +29,8 @@ import type { DataTablePostCallEvent } from "@shared/components";
 import { useAuthStore } from "@admin/stores/auth";
 import { api } from "@admin/api";
 
+
+
 function normalizeErrorMessage(error: unknown, fallback: string): string {
   const maybe = error as { response?: { data?: { message?: string } } };
   return maybe?.response?.data?.message ?? fallback;
@@ -145,16 +147,8 @@ function CreateUserForm({
         required: true,
       },
       {
-        name: "country_iso2",
-        type: "text",
-        label: t("Country ISO2"),
-        placeholder: t("Enter country ISO2"),
-      },
-      {
-        name: "contact_number",
-        type: "tel",
-        label: t("Contact Number"),
-        placeholder: t("Enter contact number"),
+        name: "contact",
+        type: "contact",
       },
       {
         name: "introducer_username",
@@ -234,16 +228,8 @@ function EditUserForm({
         notes: t("Leave blank to keep current password"),
       },
       {
-        name: "country_iso2",
-        type: "text",
-        label: t("Country ISO2"),
-        placeholder: t("Enter country ISO2"),
-      },
-      {
-        name: "contact_number",
-        type: "tel",
-        label: t("Contact Number"),
-        placeholder: t("Enter contact number"),
+        name: "contact",
+        type: "contact",
       },
     ],
     defaults: {
@@ -343,7 +329,7 @@ export default function ManageUsersPage() {
       if (introducerIds.length > 0) {
         void api
           .post<ApiResponse<BatchResolveOutput>>("users/batch_resolve", {
-            ids: introducerIds.map(Number),
+            ids: introducerIds,
           })
           .then((res) => {
             const entries = res.data?.data?.entries ?? [];

@@ -20,3 +20,13 @@ pub struct AdminCountryStatusUpdateOutput {
     #[ts(type = "string")]
     pub updated_at: time::OffsetDateTime,
 }
+
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
+pub struct AdminCountrySetDefaultOutput {
+    pub iso2: String,
+    pub is_default: bool,
+    #[schemars(with = "String")]
+    #[ts(type = "string")]
+    pub updated_at: time::OffsetDateTime,
+}

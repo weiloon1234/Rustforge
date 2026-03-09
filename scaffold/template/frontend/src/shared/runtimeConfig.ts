@@ -149,6 +149,7 @@ function asCountryRuntime(value: unknown): CountryRuntime | null {
     longitude: asNumberOrNull(row.longitude),
     independent: asBooleanOrNull(row.independent),
     status,
+    is_default: row.is_default === true,
     assignment_status: asStringOrNull(row.assignment_status),
     un_member: asBooleanOrNull(row.un_member),
     flag_emoji: asStringOrNull(row.flag_emoji),

@@ -1,6 +1,7 @@
 pub mod admin_bootstrap_seeder;
 pub mod content_page_bootstrap_seeder;
 pub mod countries_seeder;
+pub mod user_bootstrap_seeder;
 
 pub fn register_seeders(seeders: &mut Vec<Box<dyn core_db::seeder::Seeder>>) {
     seeders.push(Box::new(countries_seeder::CountriesSeeder));
@@ -8,4 +9,5 @@ pub fn register_seeders(seeders: &mut Vec<Box<dyn core_db::seeder::Seeder>>) {
     seeders.push(Box::new(
         content_page_bootstrap_seeder::ContentPageBootstrapSeeder,
     ));
+    seeders.push(Box::new(user_bootstrap_seeder::UserBootstrapSeeder));
 }

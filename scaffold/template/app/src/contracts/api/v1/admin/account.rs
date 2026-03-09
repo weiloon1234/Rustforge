@@ -159,7 +159,7 @@ pub struct AdminDeleteOutput {
 
 #[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
 pub struct AdminBatchResolveInput {
-    pub ids: Vec<i64>,
+    pub ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]

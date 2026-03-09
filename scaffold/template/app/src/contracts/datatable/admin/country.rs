@@ -20,6 +20,7 @@ pub struct CountryDatatableRow {
     pub region: Option<String>,
     pub calling_code: Option<String>,
     pub status: String,
+    pub is_default: bool,
     pub updated_at: String,
 }
 

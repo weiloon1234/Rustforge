@@ -186,7 +186,7 @@ export default function IntroducerChangesPage() {
     <DataTable<IntroducerChangeDatatableRow>
       url="datatable/introducer_change/query"
       title={t("Introducer Changes")}
-      subtitle={t("View and manage introducer change records")}
+      subtitle={t("View introducer change logs")}
       headerActions={
         canChange
           ? (refresh) => (

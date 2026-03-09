@@ -19,7 +19,7 @@ import {
   alertSuccess,
   alertError,
 } from "@shared/components";
-import { ContactInput, type ContactInputValue } from "@shared/components/ContactInput";
+import { formatPhoneDisplay } from "@shared/countryRuntime";
 import { useAuthStore } from "@user/stores/auth";
 import { api } from "@user/api";
 import { userLocalePersistence } from "@user/locale";
@@ -42,18 +42,9 @@ function ProfileModal({
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
 
-  const [contact, setContact] = useState<ContactInputValue>({
-    country_iso2: account.country_iso2 ?? "",
-    phone_number: account.contact_number ?? "",
-  });
-
   const { submit, busy, form, errors } = useAutoForm(api, {
     url: "auth/profile_update",
     method: "patch",
-    extraPayload: {
-      country_iso2: contact.country_iso2 || null,
-      contact_number: contact.phone_number || null,
-    },
     fields: [
       {
         name: "name",
@@ -69,10 +60,17 @@ function ProfileModal({
         placeholder: t("Enter email"),
         required: false,
       },
+      {
+        name: "contact",
+        type: "contact",
+        span: 2,
+      },
     ],
     defaults: {
       name: account.name ?? "",
       email: account.email ?? "",
+      country_iso2: account.country_iso2 ?? "",
+      contact_number: account.contact_number ?? "",
     },
     onSuccess: (data) => {
       onUpdated(data as UserProfileUpdateOutput);
@@ -96,17 +94,6 @@ function ProfileModal({
         </p>
       )}
       {form}
-      <ContactInput
-        value={contact}
-        onChange={setContact}
-        required={false}
-        countryRequired={false}
-        phoneRequired={false}
-        countryError={errors.fields?.country_iso2?.[0]}
-        countryErrors={errors.fields?.country_iso2}
-        phoneError={errors.fields?.contact_number?.[0]}
-        phoneErrors={errors.fields?.contact_number}
-      />
     </form>
   );
 }
@@ -345,8 +332,7 @@ export default function MePage() {
             <div className="rf-me-row">
               <span className="text-sm text-muted">{t("Phone Number")}</span>
               <span className="text-sm text-foreground">
-                {account.country_iso2 ? `(${account.country_iso2}) ` : ""}
-                {account.contact_number}
+                {formatPhoneDisplay(account.country_iso2, account.contact_number) ?? account.contact_number}
               </span>
             </div>
           )}

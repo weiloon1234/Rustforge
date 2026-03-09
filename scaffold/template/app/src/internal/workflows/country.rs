@@ -1,7 +1,8 @@
 use core_db::{
     common::sql::{DbConn, Op, OrderDir},
     generated::models::{
-        Country as CountryModel, CountryCol, CountryStatus as GeneratedCountryStatus,
+        Country as CountryModel, CountryCol, CountryIsDefault,
+        CountryStatus as GeneratedCountryStatus,
     },
     platform::countries::{
         normalize_country_iso2, normalize_country_status, Country, CountryCurrency,
@@ -82,6 +83,45 @@ pub async fn list_enabled_for_bootstrap(state: &AppApiState) -> Result<Vec<Count
     Ok(countries)
 }
 
+pub async fn set_default(
+    state: &AppApiState,
+    iso2: &str,
+) -> Result<Country, AppError> {
+    let iso2 =
+        normalize_country_iso2(iso2).ok_or_else(|| AppError::NotFound(t("Country not found")))?;
+
+    // Clear all defaults first
+    sqlx::query("UPDATE countries SET is_default = 0, updated_at = NOW()")
+        .execute(&state.db)
+        .await
+        .map_err(AppError::from)?;
+
+    // Set the target as default
+    let affected = CountryModel::new(DbConn::pool(&state.db), None)
+        .update()
+        .where_iso2(Op::Eq, iso2.clone())
+        .set_is_default(CountryIsDefault::Yes)
+        .set_updated_at(time::OffsetDateTime::now_utc())
+        .save()
+        .await
+        .map_err(AppError::from)?;
+
+    if affected == 0 {
+        return Err(AppError::NotFound(t("Country not found")));
+    }
+
+    let updated = CountryModel::new(DbConn::pool(&state.db), None)
+        .query()
+        .where_iso2(Op::Eq, iso2)
+        .first()
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::NotFound(t("Country not found")))?;
+
+    invalidate_bootstrap_country_cache(state).await?;
+    Ok(country_view_to_runtime(updated))
+}
+
 pub async fn invalidate_bootstrap_country_cache(state: &AppApiState) -> Result<(), AppError> {
     state
         .redis
@@ -115,6 +155,7 @@ fn country_view_to_runtime(view: core_db::generated::models::CountryView) -> Cou
         longitude: view.longitude,
         independent: view.independent,
         status: view.status.as_str().to_string(),
+        is_default: matches!(view.is_default, CountryIsDefault::Yes),
         assignment_status: view.assignment_status,
         un_member: view.un_member,
         flag_emoji: view.flag_emoji,

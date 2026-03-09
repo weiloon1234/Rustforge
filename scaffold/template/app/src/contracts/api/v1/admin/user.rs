@@ -13,7 +13,7 @@ use validator::Validate;
 #[ts(export, export_to = "admin/types/")]
 pub struct CreateUserInput {
     #[rf(nested)]
-    #[rf(async_unique(table = "user", column = "username"))]
+    #[rf(async_unique(table = "users", column = "username"))]
     pub username: UsernameString,
     #[serde(default)]
     #[rf(email)]
@@ -40,7 +40,7 @@ pub struct UpdateUserInput {
     #[serde(default)]
     #[rf(nested)]
     #[rf(async_unique(
-        table = "user",
+        table = "users",
         column = "username",
         ignore(column = "id", field = "__target_id")
     ))]
@@ -195,7 +195,7 @@ pub struct UserBanOutput {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct BatchResolveInput {
-    pub ids: Vec<i64>,
+    pub ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
