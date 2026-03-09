@@ -75,12 +75,12 @@ async fn list_logs(
     if dir.exists() {
         let mut entries = tokio::fs::read_dir(&dir)
             .await
-            .map_err(|e| AppError::Internal(format!("Failed to read logs directory: {e}")))?;
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to read logs directory: {e}")))?;
 
         while let Some(entry) = entries
             .next_entry()
             .await
-            .map_err(|e| AppError::Internal(format!("Failed to read directory entry: {e}")))?
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to read directory entry: {e}")))?
         {
             let metadata = entry.metadata().await.ok();
             let Some(meta) = metadata else { continue };
@@ -126,7 +126,7 @@ async fn read_log(
 
     let content = tokio::fs::read_to_string(&path)
         .await
-        .map_err(|e| AppError::Internal(format!("Failed to read log file: {e}")))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to read log file: {e}")))?;
 
     Ok(ApiResponse::success(content, "ok"))
 }
@@ -145,7 +145,7 @@ async fn delete_log(
 
     tokio::fs::remove_file(&path)
         .await
-        .map_err(|e| AppError::Internal(format!("Failed to delete log file: {e}")))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to delete log file: {e}")))?;
 
     Ok(ApiResponse::success(
         LogFileDeleteOutput { deleted: true },
