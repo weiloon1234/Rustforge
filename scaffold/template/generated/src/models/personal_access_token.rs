@@ -156,6 +156,7 @@ fn hydrate_view(row: PersonalAccessTokenRow, _loc: &LocalizedMap, _base_url: Opt
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct PersonalAccessTokenWithRelations {
+    #[serde(flatten)]
     pub row: PersonalAccessTokenView,
 }
 

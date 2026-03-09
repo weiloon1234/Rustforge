@@ -88,6 +88,7 @@ fn hydrate_view(row: OutboxJobRow, _loc: &LocalizedMap, _base_url: Option<&str>)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct OutboxJobWithRelations {
+    #[serde(flatten)]
     pub row: OutboxJobView,
 }
 

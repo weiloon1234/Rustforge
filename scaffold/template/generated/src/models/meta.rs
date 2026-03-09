@@ -90,6 +90,7 @@ fn hydrate_view(row: MetaRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> M
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct MetaWithRelations {
+    #[serde(flatten)]
     pub row: MetaView,
 }
 

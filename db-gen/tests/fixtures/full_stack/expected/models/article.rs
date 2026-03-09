@@ -152,6 +152,7 @@ fn hydrate_view(row: ArticleRow, loc: &LocalizedMap, meta: &MetaMap, attachments
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct ArticleWithRelations {
+    #[serde(flatten)]
     pub row: ArticleView,
     pub author: Option<UserRow>,
 }

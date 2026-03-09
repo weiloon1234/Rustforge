@@ -211,6 +211,7 @@ fn hydrate_view(row: CountryRow, _loc: &LocalizedMap, _base_url: Option<&str>) -
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct CountryWithRelations {
+    #[serde(flatten)]
     pub row: CountryView,
 }
 

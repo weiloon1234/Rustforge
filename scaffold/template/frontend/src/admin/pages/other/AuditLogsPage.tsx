@@ -1,20 +1,15 @@
-import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Eye } from "lucide-react";
 import type {
   AuditLogDatatableRow,
-  AuditLogDatatableSummaryOutput,
   AuditAction,
 } from "@admin/types";
-import type { ApiResponse } from "@shared/types";
 import {
   Button,
   DataTable,
   useModalStore,
   formatDateTime,
 } from "@shared/components";
-import type { DataTablePostCallEvent } from "@shared/components";
-import { api } from "@admin/api";
 
 const ACTION_COLORS: Record<AuditAction, string> = {
   "1": "bg-emerald-100 text-emerald-700",
@@ -83,9 +78,6 @@ function DiffSummary({
 
 export default function AuditLogsPage() {
   const { t } = useTranslation();
-  const [summary, setSummary] =
-    useState<AuditLogDatatableSummaryOutput | null>(null);
-  const summaryRequestId = useRef(0);
 
   const openDetailModal = (log: AuditLogDatatableRow) => {
     useModalStore.getState().open({
@@ -145,76 +137,12 @@ export default function AuditLogsPage() {
     });
   };
 
-  const handleDatatablePostCall = (
-    event: DataTablePostCallEvent<AuditLogDatatableRow>,
-  ) => {
-    if (!event.response || event.error) {
-      setSummary(null);
-      return;
-    }
-
-    // Fetch summary
-    const requestId = ++summaryRequestId.current;
-    const payload: Record<string, unknown> = {
-      base: { include_meta: false },
-      ...event.filters.applied,
-    };
-
-    void api
-      .post<ApiResponse<AuditLogDatatableSummaryOutput>>(
-        "datatable/audit_log/summary",
-        payload,
-      )
-      .then((res) => {
-        if (summaryRequestId.current !== requestId) return;
-        setSummary(res.data.data);
-      })
-      .catch(() => {
-        if (summaryRequestId.current !== requestId) return;
-        setSummary(null);
-      });
-  };
-
   return (
     <DataTable<AuditLogDatatableRow>
       url="datatable/audit_log/query"
       title={t("Audit Logs")}
       subtitle={t("View audit log records")}
       enableAutoRefresh
-      headerContent={
-        summary ? (
-          <div className="grid gap-2 sm:grid-cols-4">
-            <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-              <p className="text-xs text-muted">{t("Filtered Total")}</p>
-              <p className="font-semibold">{summary.total_filtered}</p>
-            </div>
-            <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-              <p className="text-xs text-muted">
-                {t("enum.audit_action.create")}
-              </p>
-              <p className="font-semibold text-emerald-600">
-                {summary.create_count}
-              </p>
-            </div>
-            <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-              <p className="text-xs text-muted">
-                {t("enum.audit_action.update")}
-              </p>
-              <p className="font-semibold text-blue-600">
-                {summary.update_count}
-              </p>
-            </div>
-            <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-              <p className="text-xs text-muted">
-                {t("enum.audit_action.delete")}
-              </p>
-              <p className="font-semibold text-red-600">
-                {summary.delete_count}
-              </p>
-            </div>
-          </div>
-        ) : undefined
-      }
       columns={[
         {
           key: "actions",
@@ -263,7 +191,6 @@ export default function AuditLogsPage() {
           render: (log) => formatDateTime(log.created_at),
         },
       ]}
-      onPostCall={handleDatatablePostCall}
       renderTableFooter={({ records }) => (
         <tr>
           <td colSpan={99} className="px-4 py-2 text-xs text-muted">

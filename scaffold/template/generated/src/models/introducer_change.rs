@@ -113,6 +113,7 @@ fn hydrate_view(row: IntroducerChangeRow, _loc: &LocalizedMap, _base_url: Option
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct IntroducerChangeWithRelations {
+    #[serde(flatten)]
     pub row: IntroducerChangeView,
 }
 

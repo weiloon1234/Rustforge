@@ -30,19 +30,6 @@ pub struct AuditLogDatatableRow {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[ts(export, export_to = "admin/types/")]
-pub struct AuditLogDatatableSummaryOutput {
-    #[ts(type = "number")]
-    pub total_filtered: i64,
-    #[ts(type = "number")]
-    pub create_count: i64,
-    #[ts(type = "number")]
-    pub update_count: i64,
-    #[ts(type = "number")]
-    pub delete_count: i64,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct AdminAuditLogDataTableContract;
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Trash2, RefreshCw, Search, ArrowDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { LogFileEntry } from "@admin/types";
-import { Button, useModalStore } from "@shared/components";
+import { Button, Select, useModalStore } from "@shared/components";
 import { useAuthStore } from "@admin/stores/auth";
 import axios from "axios";
 
@@ -67,7 +67,7 @@ function LogContent({
     }
   };
 
-  const lines = content.split("\n");
+  const lines = content.split("\n").reverse();
   const filteredLines = searchQuery
     ? lines.filter((line) =>
         line.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -75,11 +75,11 @@ function LogContent({
     : lines;
 
   return (
-    <div className="relative flex-1">
+    <div className="relative flex-1 min-h-0">
       <pre
         ref={containerRef}
         onScroll={handleScroll}
-        className="h-full overflow-auto rounded-lg border border-border bg-gray-950 p-3 font-mono text-xs leading-5 text-gray-200"
+        className="max-h-[calc(100vh-16rem)] overflow-auto rounded-lg border border-border bg-gray-950 p-3 font-mono text-xs leading-5 text-gray-200"
       >
         {filteredLines.map((line, i) => (
           <div key={i}>{highlightLine(line) || "\u00A0"}</div>
@@ -217,20 +217,16 @@ export default function LogViewerPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <select
+        <Select
           value={selectedFile}
           onChange={(e) => setSelectedFile(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm"
-        >
-          {files.length === 0 && (
-            <option value="">{t("No log files")}</option>
-          )}
-          {files.map((f) => (
-            <option key={f.filename} value={f.filename}>
-              {f.filename} ({formatBytes(f.size_bytes)})
-            </option>
-          ))}
-        </select>
+          options={files.map((f) => ({
+            value: f.filename,
+            label: `${f.filename} (${formatBytes(f.size_bytes)})`,
+          }))}
+          placeholder={files.length === 0 ? t("No log files") : undefined}
+          containerClassName="min-w-[16rem]"
+        />
 
         <Button
           type="button"

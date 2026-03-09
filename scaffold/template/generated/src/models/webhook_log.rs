@@ -113,6 +113,7 @@ fn hydrate_view(row: WebhookLogRow, _loc: &LocalizedMap, _base_url: Option<&str>
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct WebhookLogWithRelations {
+    #[serde(flatten)]
     pub row: WebhookLogView,
 }
 

@@ -156,6 +156,7 @@ fn hydrate_view(row: ContentPageRow, loc: &LocalizedMap, _base_url: Option<&str>
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct ContentPageWithRelations {
+    #[serde(flatten)]
     pub row: ContentPageView,
 }
 

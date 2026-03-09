@@ -16,7 +16,7 @@ use generated::models::{
 use generated::permissions::Permission;
 
 use crate::contracts::datatable::admin::audit_log::{
-    AdminAuditLogDataTableContract, AuditLogDatatableRow, AuditLogDatatableSummaryOutput,
+    AdminAuditLogDataTableContract, AuditLogDatatableRow,
     ROUTE_PREFIX, SCOPED_KEY,
 };
 use crate::internal::datatables::v1::admin::authorize_with_optional_export;
@@ -484,56 +484,4 @@ fn parse_datetime(raw: &str, end_of_day: bool) -> Option<time::OffsetDateTime> {
         return Some(date.with_time(t).assume_offset(time::UtcOffset::UTC));
     }
     None
-}
-
-// Summary support — reuses filters from the custom adapter
-pub async fn build_audit_log_summary_output(
-    db: &sqlx::PgPool,
-    input: &DataTableInput,
-    _ctx: &DataTableContext,
-) -> anyhow::Result<AuditLogDatatableSummaryOutput> {
-    let filters = build_summary_query_state(input);
-    let filtered = apply_audit_log_filters(AuditLog::new(db, None).query(), &filters);
-
-    let total_filtered = filtered.clone().count().await?;
-    let create_count = filtered
-        .clone()
-        .where_action(Op::Eq, AuditAction::Create)
-        .count()
-        .await?;
-    let update_count = filtered
-        .clone()
-        .where_action(Op::Eq, AuditAction::Update)
-        .count()
-        .await?;
-    let delete_count = filtered
-        .where_action(Op::Eq, AuditAction::Delete)
-        .count()
-        .await?;
-
-    Ok(AuditLogDatatableSummaryOutput {
-        total_filtered,
-        create_count,
-        update_count,
-        delete_count,
-    })
-}
-
-fn build_summary_query_state(input: &DataTableInput) -> AuditLogQueryState {
-    let hooks = AuditLogDataTableAppHooks;
-    let mut state = AuditLogQueryState::default();
-
-    for (key, value) in input.filter_entries() {
-        if let Some(next) = hooks.filter_query(state.clone(), key, value) {
-            state = next;
-        }
-    }
-
-    for (key, value) in input.custom_filter_entries() {
-        if let Some(next) = hooks.filter_query(state.clone(), key, value) {
-            state = next;
-        }
-    }
-
-    state
 }

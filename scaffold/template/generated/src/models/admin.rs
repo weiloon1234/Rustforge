@@ -137,6 +137,7 @@ fn hydrate_view(row: AdminRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct AdminWithRelations {
+    #[serde(flatten)]
     pub row: AdminView,
 }
 

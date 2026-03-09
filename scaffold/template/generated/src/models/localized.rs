@@ -95,6 +95,7 @@ fn hydrate_view(row: LocalizedRow, _loc: &LocalizedMap, _base_url: Option<&str>)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct LocalizedWithRelations {
+    #[serde(flatten)]
     pub row: LocalizedView,
 }
 

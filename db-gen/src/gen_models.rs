@@ -3899,6 +3899,7 @@ fn render_model(
     .unwrap();
     writeln!(out, "#[doc(hidden)]").unwrap();
     writeln!(out, "pub struct {model_title}WithRelations {{").unwrap();
+    writeln!(out, "    #[serde(flatten)]").unwrap();
     writeln!(out, "    pub row: {view_ident},").unwrap();
     for rel in &relations {
         let rel_field = to_snake(&rel.name);

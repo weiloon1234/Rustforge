@@ -108,6 +108,7 @@ fn hydrate_view(row: FailedJobRow, _loc: &LocalizedMap, _base_url: Option<&str>)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct FailedJobWithRelations {
+    #[serde(flatten)]
     pub row: FailedJobView,
 }
 

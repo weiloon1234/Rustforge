@@ -118,6 +118,7 @@ fn hydrate_view(row: HttpClientLogRow, _loc: &LocalizedMap, _base_url: Option<&s
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct HttpClientLogWithRelations {
+    #[serde(flatten)]
     pub row: HttpClientLogView,
 }
 

@@ -132,6 +132,7 @@ fn hydrate_view(row: UserCreditTransactionRow, _loc: &LocalizedMap, _base_url: O
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct UserCreditTransactionWithRelations {
+    #[serde(flatten)]
     pub row: UserCreditTransactionView,
 }
 

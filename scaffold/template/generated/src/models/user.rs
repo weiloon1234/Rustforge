@@ -153,6 +153,7 @@ fn hydrate_view(row: UserRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> U
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct UserWithRelations {
+    #[serde(flatten)]
     pub row: UserView,
 }
 

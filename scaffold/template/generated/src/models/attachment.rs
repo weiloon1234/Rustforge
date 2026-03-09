@@ -136,6 +136,7 @@ fn hydrate_view(row: AttachmentRow, _loc: &LocalizedMap, _base_url: Option<&str>
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
 pub struct AttachmentWithRelations {
+    #[serde(flatten)]
     pub row: AttachmentView,
 }
 
