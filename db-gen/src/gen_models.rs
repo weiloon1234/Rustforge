@@ -1234,7 +1234,7 @@ fn render_into_where_parts_method(col_ident: &str, has_soft_delete: bool) -> Str
     out
 }
 
-fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool) -> String {
+fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool, audit: bool, row_ident: &str, pk_snake: &str) -> String {
     let mut out = String::new();
     writeln!(out, "    pub async fn delete(self) -> Result<u64> {{").unwrap();
     writeln!(out, "        if self.limit.is_some() {{").unwrap();
@@ -1262,6 +1262,19 @@ fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool) -> 
         "        if where_sql.is_empty() {{ anyhow::bail!(\"delete(): no conditions set\"); }}"
     )
     .unwrap();
+    // Fetch old rows before delete for audit hooks
+    if audit {
+        writeln!(out, "        let __observer_active = try_get_observer().is_some();").unwrap();
+        writeln!(out, "        let __old_rows_json: Vec<(i64, serde_json::Value)> = if __observer_active {{").unwrap();
+        writeln!(out, "            let select_sql = format!(\"SELECT * FROM {table} WHERE {{}}\", where_sql.join(\" AND \"));").unwrap();
+        writeln!(out, "            let mut fq = sqlx::query_as::<_, {row_ident}>(&select_sql);").unwrap();
+        writeln!(out, "            for b in &binds {{ fq = bind(fq, b.clone()); }}").unwrap();
+        writeln!(out, "            let rows: Vec<{row_ident}> = db.fetch_all(fq).await.unwrap_or_default();").unwrap();
+        writeln!(out, "            rows.into_iter().map(|r| (r.{pk_snake}, serde_json::to_value(&r).unwrap_or_default())).collect()").unwrap();
+        writeln!(out, "        }} else {{").unwrap();
+        writeln!(out, "            Vec::new()").unwrap();
+        writeln!(out, "        }};").unwrap();
+    }
     if has_soft_delete {
         writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
         writeln!(out, "            let mut where_sql = where_sql;").unwrap();
@@ -1304,6 +1317,16 @@ fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool) -> 
         )
         .unwrap();
         writeln!(out, "            let res = db.execute(q).await?;").unwrap();
+        if audit {
+            writeln!(out, "            if !__old_rows_json.is_empty() && res.rows_affected() > 0 {{").unwrap();
+            writeln!(out, "                if let Some(observer) = try_get_observer() {{").unwrap();
+            writeln!(out, "                    for (record_id, old_data) in &__old_rows_json {{").unwrap();
+            writeln!(out, "                        let event = ModelEvent {{ table: \"{table}\", record_id: *record_id }};").unwrap();
+            writeln!(out, "                        let _ = observer.on_deleted(&event, old_data).await;").unwrap();
+            writeln!(out, "                    }}").unwrap();
+            writeln!(out, "                }}").unwrap();
+            writeln!(out, "            }}").unwrap();
+        }
         writeln!(out, "            return Ok(res.rows_affected());").unwrap();
         writeln!(out, "        }}").unwrap();
     }
@@ -1319,6 +1342,16 @@ fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool) -> 
     writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
     writeln!(out, "        for b in binds {{ q = bind_query(q, b); }}").unwrap();
     writeln!(out, "        let res = db.execute(q).await?;").unwrap();
+    if audit {
+        writeln!(out, "        if !__old_rows_json.is_empty() && res.rows_affected() > 0 {{").unwrap();
+        writeln!(out, "            if let Some(observer) = try_get_observer() {{").unwrap();
+        writeln!(out, "                for (record_id, old_data) in &__old_rows_json {{").unwrap();
+        writeln!(out, "                    let event = ModelEvent {{ table: \"{table}\", record_id: *record_id }};").unwrap();
+        writeln!(out, "                    let _ = observer.on_deleted(&event, old_data).await;").unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
     writeln!(out, "        Ok(res.rows_affected())").unwrap();
     writeln!(out, "    }}").unwrap();
     out
@@ -3189,6 +3222,8 @@ fn render_model(
         );
     }
     let use_snowflake_id = !cfg.disable_id && id_strategy == "snowflake" && parent_pk_ty == "i64";
+    // Emit lifecycle hooks only for audit-enabled models with i64 PKs
+    let emit_hooks = cfg.audit && parent_pk_ty == "i64";
     let has_created_at = fields.iter().any(|f| f.name == "created_at");
     let has_updated_at = fields.iter().any(|f| f.name == "updated_at");
     let has_soft_delete = fields.iter().any(|f| f.name == "deleted_at");
@@ -3364,6 +3399,13 @@ fn render_model(
     }
     if !enum_explained_fields.is_empty() {
         writeln!(imports, "use super::enums::*;").unwrap();
+    }
+    if emit_hooks {
+        writeln!(
+            imports,
+            "use core_db::common::model_observer::{{ModelEvent, try_get_observer}};"
+        )
+        .unwrap();
     }
 
     let mut constants = String::new();
@@ -4418,7 +4460,7 @@ fn render_model(
     }
 
     out.push_str(&render_into_where_parts_method(&col_ident, has_soft_delete));
-    out.push_str(&render_delete_method(&table, &col_ident, has_soft_delete));
+    out.push_str(&render_delete_method(&table, &col_ident, has_soft_delete, emit_hooks, &row_ident, &to_snake(&pk)));
     if has_soft_delete {
         out.push_str(&render_restore_method(&table, &col_ident));
     }
@@ -4659,13 +4701,34 @@ fn render_model(
         .unwrap();
     writeln!(out, "                    .into_inner();").unwrap();
     writeln!(out, "                tx.commit().await?;").unwrap();
+    if emit_hooks {
+        writeln!(out, "                if let Some(observer) = try_get_observer() {{").unwrap();
+        writeln!(out, "                    let event = ModelEvent {{ table: \"{table}\", record_id: view.{pk} }};", pk = to_snake(&pk)).unwrap();
+        writeln!(out, "                    if let Ok(data) = serde_json::to_value(&view) {{").unwrap();
+        writeln!(out, "                        let _ = observer.on_created(&event, &data).await;").unwrap();
+        writeln!(out, "                    }}").unwrap();
+        writeln!(out, "                }}").unwrap();
+    }
     writeln!(out, "                Ok(view)").unwrap();
     writeln!(out, "            }}").unwrap();
-    writeln!(
-        out,
-        "            DbConn::Tx(_) => self.save_with_db(db_conn).await,"
-    )
-    .unwrap();
+    if emit_hooks {
+        writeln!(out, "            DbConn::Tx(_) => {{").unwrap();
+        writeln!(out, "                let view = self.save_with_db(db_conn).await?;").unwrap();
+        writeln!(out, "                if let Some(observer) = try_get_observer() {{").unwrap();
+        writeln!(out, "                    let event = ModelEvent {{ table: \"{table}\", record_id: view.{pk} }};", pk = to_snake(&pk)).unwrap();
+        writeln!(out, "                    if let Ok(data) = serde_json::to_value(&view) {{").unwrap();
+        writeln!(out, "                        let _ = observer.on_created(&event, &data).await;").unwrap();
+        writeln!(out, "                    }}").unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "                Ok(view)").unwrap();
+        writeln!(out, "            }}").unwrap();
+    } else {
+        writeln!(
+            out,
+            "            DbConn::Tx(_) => self.save_with_db(db_conn).await,"
+        )
+        .unwrap();
+    }
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
@@ -5141,6 +5204,20 @@ fn render_model(
         "        let target_ids = db.fetch_all_scalar(select_q).await?;"
     )
     .unwrap();
+    if emit_hooks {
+        let pk_snake = to_snake(&pk);
+        writeln!(out, "        let __observer_active = try_get_observer().is_some();").unwrap();
+        writeln!(out, "        let __old_rows_json: Vec<({parent_pk_ty}, serde_json::Value)> = if __observer_active && !target_ids.is_empty() {{").unwrap();
+        writeln!(out, "            let phs: Vec<String> = (1..=target_ids.len()).map(|i| format!(\"${{}}\", i)).collect();").unwrap();
+        writeln!(out, "            let fetch_sql = format!(\"SELECT * FROM {table} WHERE {pk} IN ({{}})\", phs.join(\", \"));").unwrap();
+        writeln!(out, "            let mut fq = sqlx::query_as::<_, {row_ident}>(&fetch_sql);").unwrap();
+        writeln!(out, "            for id in &target_ids {{ fq = fq.bind(id); }}").unwrap();
+        writeln!(out, "            let rows: Vec<{row_ident}> = db.fetch_all(fq).await.unwrap_or_default();").unwrap();
+        writeln!(out, "            rows.into_iter().map(|r| (r.{pk_snake}, serde_json::to_value(&r).unwrap_or_default())).collect()").unwrap();
+        writeln!(out, "        }} else {{").unwrap();
+        writeln!(out, "            Vec::new()").unwrap();
+        writeln!(out, "        }};").unwrap();
+    }
     writeln!(out, "        let mut parts: Vec<String> = Vec::new();").unwrap();
     writeln!(out, "        for (i, (c, mode)) in cols.iter().zip(set_modes.iter()).enumerate() {{").unwrap();
     writeln!(
@@ -5343,6 +5420,21 @@ fn render_model(
         )
         .unwrap();
         writeln!(out, "                    localized::delete_attachment_ids(db.clone(), localized::{}_OWNER_TYPE, id.clone(), field, ids).await?;", model_snake_upper).unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    if emit_hooks {
+        writeln!(out, "        if !__old_rows_json.is_empty() && res.rows_affected() > 0 {{").unwrap();
+        writeln!(out, "            if let Some(observer) = try_get_observer() {{").unwrap();
+        writeln!(out, "                for (record_id, old_data) in &__old_rows_json {{").unwrap();
+        writeln!(out, "                    let fetch_sql = format!(\"SELECT * FROM {table} WHERE {pk} = $1\");").unwrap();
+        writeln!(out, "                    if let Ok(Some(new_row)) = db.fetch_optional(sqlx::query_as::<_, {row_ident}>(&fetch_sql).bind(record_id)).await {{").unwrap();
+        writeln!(out, "                        if let Ok(new_data) = serde_json::to_value(&new_row) {{").unwrap();
+        writeln!(out, "                            let event = ModelEvent {{ table: \"{table}\", record_id: *record_id }};").unwrap();
+        writeln!(out, "                            let _ = observer.on_updated(&event, old_data, &new_data).await;").unwrap();
+        writeln!(out, "                        }}").unwrap();
+        writeln!(out, "                    }}").unwrap();
         writeln!(out, "                }}").unwrap();
         writeln!(out, "            }}").unwrap();
         writeln!(out, "        }}").unwrap();

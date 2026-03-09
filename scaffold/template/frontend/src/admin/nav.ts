@@ -70,6 +70,11 @@ export const navigation: NavItem[] = [
         path: "/other/countries",
         permissions: [PERMISSION.COUNTRY_READ, PERMISSION.COUNTRY_MANAGE],
       },
+      {
+        label: "Audit Logs",
+        path: "/other/audit-logs",
+        permissions: [PERMISSION.AUDIT_LOG_READ],
+      },
     ],
   },
   {

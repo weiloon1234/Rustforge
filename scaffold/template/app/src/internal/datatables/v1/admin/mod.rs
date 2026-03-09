@@ -1,3 +1,4 @@
+pub mod audit_log;
 pub mod account;
 pub mod content_page;
 pub mod country;
@@ -15,6 +16,7 @@ use core_web::openapi::ApiRouter;
 use generated::permissions::Permission;
 
 use crate::contracts::datatable::admin::{
+    audit_log::{ROUTE_PREFIX as AUDIT_LOG_ROUTE_PREFIX, SCOPED_KEY as AUDIT_LOG_SCOPED_KEY},
     account::{ROUTE_PREFIX as ACCOUNT_ROUTE_PREFIX, SCOPED_KEY as ACCOUNT_SCOPED_KEY},
     content_page::{
         ROUTE_PREFIX as CONTENT_PAGE_ROUTE_PREFIX, SCOPED_KEY as CONTENT_PAGE_SCOPED_KEY,
@@ -36,6 +38,7 @@ use crate::contracts::datatable::admin::{
 };
 use crate::internal::api::state::AppApiState;
 
+pub use audit_log::AuditLogDataTableAppHooks;
 pub use account::{build_admin_summary_output, AdminDataTableAppHooks};
 pub use content_page::ContentPageDataTableAppHooks;
 pub use country::CountryDataTableAppHooks;
@@ -76,6 +79,10 @@ pub struct ScopedDatatableSpec {
     pub mount_routes: fn(AppApiState) -> ApiRouter,
 }
 
+fn audit_log_routes(state: AppApiState) -> ApiRouter {
+    audit_log::routes(state)
+}
+
 fn account_routes(state: AppApiState) -> ApiRouter {
     account::routes(state)
 }
@@ -109,6 +116,12 @@ fn webhook_log_routes(state: AppApiState) -> ApiRouter {
 }
 
 pub static ADMIN_SCOPED_DATATABLES: &[ScopedDatatableSpec] = &[
+    ScopedDatatableSpec {
+        scoped_key: AUDIT_LOG_SCOPED_KEY,
+        route_prefix: AUDIT_LOG_ROUTE_PREFIX,
+        register: audit_log::register_scoped,
+        mount_routes: audit_log_routes,
+    },
     ScopedDatatableSpec {
         scoped_key: ACCOUNT_SCOPED_KEY,
         route_prefix: ACCOUNT_ROUTE_PREFIX,

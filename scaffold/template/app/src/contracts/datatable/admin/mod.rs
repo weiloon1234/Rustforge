@@ -1,3 +1,4 @@
+pub mod audit_log;
 pub mod account;
 pub mod content_page;
 pub mod country;

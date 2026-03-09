@@ -43,7 +43,8 @@ pub async fn create(
     }
 
     let insert = insert.set_password(&req.password).map_err(AppError::from)?;
-    insert.save().await.map_err(AppError::from)
+    let view = insert.save().await.map_err(AppError::from)?;
+    Ok(view)
 }
 
 pub async fn update(
@@ -114,7 +115,8 @@ pub async fn update(
         return Err(AppError::NotFound(t("Admin not found")));
     }
 
-    detail(state, id).await
+    let updated = detail(state, id).await?;
+    Ok(updated)
 }
 
 pub async fn remove(
@@ -146,6 +148,23 @@ pub async fn remove(
         return Err(AppError::NotFound(t("Admin not found")));
     }
     Ok(())
+}
+
+pub async fn batch_resolve_names(
+    state: &AppApiState,
+    ids: &[i64],
+) -> Result<Vec<(i64, String, String)>, AppError> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut results = Vec::new();
+    for &id in ids {
+        if let Ok(Some(admin)) = Admin::new(DbConn::pool(&state.db), None).find(id).await {
+            results.push((admin.id, admin.username, admin.name));
+        }
+    }
+    Ok(results)
 }
 
 fn normalize_email_value(email: &str) -> Option<String> {

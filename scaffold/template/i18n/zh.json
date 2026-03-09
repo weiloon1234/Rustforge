@@ -115,6 +115,7 @@
   "user.hierarchy": "查看用户层级",
   "user.change_introducer": "变更推荐人",
   "user.credit": "管理用户额度",
+  "audit_log.read": "查看审计日志",
   "export": "导出数据",
   "Cannot delete developer or superadmin accounts": "不能删除开发者或超级管理员账号",
   "Go to": "跳转",
@@ -395,5 +396,22 @@
   "Transaction Type": "交易类型",
   "Amount": "金额",
   "Related Key": "关联键",
-  "Amount must not be zero": "金额不能为零"
+  "Amount must not be zero": "金额不能为零",
+
+  "Audit Logs": "审计日志",
+  "View audit log records": "查看审计日志记录",
+  "Action": "操作",
+  "Record ID": "记录ID",
+  "View": "查看",
+  "Audit Detail": "审计详情",
+  "Old Data": "旧数据",
+  "New Data": "新数据",
+  "No data": "无数据",
+  "fields changed": "字段已变更",
+  "All models": "所有模型",
+  "All actions": "所有操作",
+  "Exact match": "精确匹配",
+  "enum.audit_action.create": "创建",
+  "enum.audit_action.update": "更新",
+  "enum.audit_action.delete": "删除"
 }

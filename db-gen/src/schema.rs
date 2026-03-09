@@ -38,6 +38,10 @@ pub struct ModelSpec {
     pub disable_id: bool,
     #[serde(default)]
     pub disable_timestamps: bool,
+    /// Whether admin mutations on this model are audit-logged.
+    /// Default: true — set `audit = false` in TOML to opt out.
+    #[serde(default = "default_audit")]
+    pub audit: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -359,6 +363,10 @@ pub fn to_label(s: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn default_audit() -> bool {
+    true
 }
 
 pub fn parse_fields(cfg: &ModelSpec, pk: &str) -> Vec<FieldSpec> {

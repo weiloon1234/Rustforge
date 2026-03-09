@@ -19,6 +19,7 @@ use validator::Validate;
 
 use crate::{
     contracts::api::v1::admin::account::{
+        AdminBatchResolveEntry, AdminBatchResolveInput, AdminBatchResolveOutput,
         AdminDeleteOutput, AdminOutput, CreateAdminInput, UpdateAdminInput,
     },
     internal::{api::state::AppApiState, workflows::admin as workflow},
@@ -62,6 +63,23 @@ pub fn router(state: AppApiState) -> ApiRouter {
                 [Permission::AdminManage.as_str()],
                 |op| op.summary("Delete admin").tag("Admin Account"),
             )),
+        )
+        .api_route(
+            "/batch_resolve",
+            with_permission_check_post_with(
+                batch_resolve,
+                AdminGuard,
+                PermissionMode::Any,
+                [
+                    Permission::AdminRead.as_str(),
+                    Permission::AdminManage.as_str(),
+                    Permission::AuditLogRead.as_str(),
+                ],
+                |op| {
+                    op.summary("Batch resolve admin IDs to names")
+                        .tag("Admin Account")
+                },
+            ),
         )
         .with_state(state)
 }
@@ -114,6 +132,26 @@ async fn remove(
     Ok(ApiResponse::success(
         AdminDeleteOutput { deleted: true },
         &t("Admin deleted"),
+    ))
+}
+
+async fn batch_resolve(
+    State(state): State<AppApiState>,
+    _auth: AuthUser<AdminGuard>,
+    Json(req): Json<AdminBatchResolveInput>,
+) -> Result<ApiResponse<AdminBatchResolveOutput>, AppError> {
+    let results = workflow::batch_resolve_names(&state, &req.ids).await?;
+    let entries: Vec<AdminBatchResolveEntry> = results
+        .into_iter()
+        .map(|(id, username, name)| AdminBatchResolveEntry {
+            id: id.into(),
+            username,
+            name,
+        })
+        .collect();
+    Ok(ApiResponse::success(
+        AdminBatchResolveOutput { entries },
+        "ok",
     ))
 }
 

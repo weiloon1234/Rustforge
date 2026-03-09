@@ -103,6 +103,7 @@
   "user.hierarchy": "View User Hierarchy",
   "user.change_introducer": "Change User Introducer",
   "user.credit": "Manage User Credits",
+  "audit_log.read": "Read Audit Logs",
   "export": "Export Data",
   ":count Permissions": ":count Permissions",
   "Permissions for :username": "Permissions for :username",
@@ -273,5 +274,22 @@
   "Transaction Type": "Transaction Type",
   "Amount": "Amount",
   "Related Key": "Related Key",
-  "Amount must not be zero": "Amount must not be zero"
+  "Amount must not be zero": "Amount must not be zero",
+
+  "Audit Logs": "Audit Logs",
+  "View audit log records": "View audit log records",
+  "Action": "Action",
+  "Record ID": "Record ID",
+  "View": "View",
+  "Audit Detail": "Audit Detail",
+  "Old Data": "Old Data",
+  "New Data": "New Data",
+  "No data": "No data",
+  "fields changed": "fields changed",
+  "All models": "All models",
+  "All actions": "All actions",
+  "Exact match": "Exact match",
+  "enum.audit_action.create": "Create",
+  "enum.audit_action.update": "Update",
+  "enum.audit_action.delete": "Delete"
 }

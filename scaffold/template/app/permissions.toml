@@ -77,6 +77,13 @@ group = "user"
 description = "View credit transactions and adjust user balances."
 
 [[permissions]]
+key = "audit_log.read"
+guard = "admin"
+label = "Read Audit Logs"
+group = "audit_log"
+description = "View audit log datatable and inspect change details."
+
+[[permissions]]
 key = "export"
 guard = "admin"
 label = "Export Data"

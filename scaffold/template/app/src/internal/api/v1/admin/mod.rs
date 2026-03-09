@@ -39,7 +39,7 @@ fn guarded_router(state: AppApiState) -> ApiRouter {
         .merge(datatable::router(state.clone()))
         .layer(from_fn_with_state(
             state,
-            crate::internal::middleware::auth::require_admin,
+            crate::internal::middleware::auth::require_admin_with_audit,
         ))
 }
 

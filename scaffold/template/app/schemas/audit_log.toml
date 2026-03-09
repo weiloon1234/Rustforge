@@ -1,0 +1,26 @@
+[AuditAction]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "Create", value = 1 },
+  { name = "Update", value = 2 },
+  { name = "Delete", value = 3 }
+]
+
+[model.audit_log]
+table = "audit_logs"
+pk = "id"
+pk_type = "i64"
+id_strategy = "snowflake"
+audit = false
+disable_timestamps = true
+fields = [
+  "id:i64",
+  "admin_id:i64",
+  "action:AuditAction",
+  "table_name:string",
+  "record_id:i64",
+  "old_data:Option<serde_json::Value>",
+  "new_data:Option<serde_json::Value>",
+  "created_at:datetime"
+]

@@ -156,3 +156,23 @@ impl From<generated::models::AdminView> for AdminOutput {
 pub struct AdminDeleteOutput {
     pub deleted: bool,
 }
+
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+pub struct AdminBatchResolveInput {
+    pub ids: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
+pub struct AdminBatchResolveOutput {
+    #[ts(inline)]
+    pub entries: Vec<AdminBatchResolveEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
+pub struct AdminBatchResolveEntry {
+    pub id: SnowflakeId,
+    pub username: String,
+    pub name: String,
+}
