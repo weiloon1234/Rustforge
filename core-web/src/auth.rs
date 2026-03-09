@@ -400,6 +400,7 @@ pub async fn refresh_guard_session<G: Guard>(
         .where_token_kind(Op::Eq, PersonalAccessTokenKind::Refresh)
         .first()
         .await?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::Unauthorized("Invalid refresh token".to_string()))?;
 
     if token_row_is_revoked(&refresh_row) {
@@ -503,6 +504,7 @@ pub async fn revoke_session_by_refresh_token<G: Guard>(
         .where_token_kind(Op::Eq, PersonalAccessTokenKind::Refresh)
         .first()
         .await?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::Unauthorized("Invalid refresh token".to_string()))?;
 
     if let Some(expected) = G::tokenable_type() {
@@ -542,6 +544,7 @@ pub async fn authenticate_token<G: Guard>(
         .where_token_kind(Op::Eq, PersonalAccessTokenKind::Access)
         .first()
         .await?
+        .map(|r| r.into_row())
         .ok_or_else(|| AppError::Unauthorized("Invalid access token".to_string()))?;
 
     assert_token_row_valid::<G>(&pat, PersonalAccessTokenKind::Access)?;

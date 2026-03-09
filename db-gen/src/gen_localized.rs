@@ -392,7 +392,8 @@ fn render_load_owner_attachments_function() -> String {
         .get()
         .await?;
     let mut out: HashMap<String, HashMap<i64, Vec<core_db::platform::attachments::types::Attachment>>> = HashMap::new();
-    for row in rows {
+    for wr in rows {
+        let row = wr.into_row();
         out.entry(row.field.clone())
             .or_default()
             .entry(row.owner_id)

@@ -159,7 +159,7 @@ meta = ["flags:bool", "extra:json"]
     assert!(mod_rs.contains("pub use enums::*;"));
     assert!(enums_rs.contains("pub enum ArticleStatus"));
     assert!(mod_rs.contains(
-        "pub use article::{Article, ArticleView, ArticleQuery, ArticleInsert, ArticleUpdate, ArticleCol, ArticleViewsExt, ArticleTableAdapter, ArticleDataTable, ArticleDataTableConfig, ArticleDataTableHooks, ArticleDefaultDataTableHooks};"
+        "pub use article::{Article, ArticleView, ArticleWithRelations, ArticleQuery, ArticleInsert, ArticleUpdate, ArticleCol, ArticleViewsExt, ArticleTableAdapter, ArticleDataTable, ArticleDataTableConfig, ArticleDataTableHooks, ArticleDefaultDataTableHooks};"
     ));
     assert!(!mod_rs.contains("pub use article::*;"));
 
@@ -169,9 +169,9 @@ meta = ["flags:bool", "extra:json"]
     assert!(article_rs.contains("pub struct ArticleTableAdapter;"));
     assert!(article_rs.contains("pub struct ArticleDataTableConfig {"));
     assert!(article_rs.contains("pub trait ArticleDataTableHooks: Send + Sync + 'static {"));
-    assert!(article_rs.contains("fn map_row(&self, _row: &mut ArticleView"));
-    assert!(article_rs.contains("fn default_row_to_record(&self, row: ArticleView)"));
-    assert!(article_rs.contains("fn row_to_record(&self, row: ArticleView"));
+    assert!(article_rs.contains("fn map_row(&self, _row: &mut ArticleWithRelations"));
+    assert!(article_rs.contains("fn default_row_to_record(&self, row: ArticleWithRelations)"));
+    assert!(article_rs.contains("fn row_to_record(&self, row: ArticleWithRelations"));
     assert!(article_rs.contains("pub struct ArticleDataTable<H = ArticleDefaultDataTableHooks> where H: ArticleDataTableHooks {"));
     assert!(article_rs
         .contains("impl<H: ArticleDataTableHooks> AutoDataTable for ArticleDataTable<H> {"));
@@ -180,7 +180,7 @@ meta = ["flags:bool", "extra:json"]
     assert!(article_rs.contains("fn apply_auto_filter<'db>(&self, query: ArticleQuery<'db>, filter: &ParsedFilter, value: &str)"));
     assert!(article_rs.contains("fn apply_cursor<'db>(&self, query: ArticleQuery<'db>, column: &str, dir: SortDirection, cursor: &str)"));
     assert!(article_rs
-        .contains("fn cursor_from_row(&self, row: &ArticleView, column: &str) -> Option<String>"));
+        .contains("fn cursor_from_row(&self, row: &ArticleWithRelations, column: &str) -> Option<String>"));
     assert!(article_rs.contains("let per_page = resolve_per_page(per_page);"));
     assert!(!article_rs.contains("std::env::var(\"DEFAULT_PER_PAGE\")"));
 
@@ -204,8 +204,8 @@ meta = ["flags:bool", "extra:json"]
     assert!(article_rs.contains("pub fn where_key(self, id: i64) -> Self"));
     assert!(article_rs
         .contains("pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self"));
-    assert!(article_rs.contains("pub async fn first_or_fail(self) -> Result<ArticleView>"));
-    assert!(article_rs.contains("pub async fn find_or_fail(self, id: i64) -> Result<ArticleView>"));
+    assert!(article_rs.contains("pub async fn first_or_fail(self) -> Result<ArticleWithRelations>"));
+    assert!(article_rs.contains("pub async fn find_or_fail(self, id: i64) -> Result<ArticleWithRelations>"));
     assert!(article_rs.contains("pub trait ArticleViewsExt {"));
     assert!(article_rs.contains("impl ArticleViewsExt for Vec<ArticleView> {"));
     assert!(article_rs.contains("use core_db::common::collection::TypedCollectionExt;"));

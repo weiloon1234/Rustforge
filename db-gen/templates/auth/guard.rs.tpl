@@ -28,12 +28,13 @@ impl Guard for {{struct_name}} {
 
 pub async fn list_tokens<'a>(db: DbConn<'a>, subject_id: &str) -> anyhow::Result<Vec<PersonalAccessTokenView>> {
     let tokenable_type = <{{struct_name}} as Guard>::tokenable_type().unwrap_or(<{{struct_name}} as Guard>::name());
-    PersonalAccessToken::new(db, None)
+    let rows = PersonalAccessToken::new(db, None)
         .query()
         .where_tokenable_type(Op::Eq, tokenable_type.to_string())
         .where_tokenable_id(Op::Eq, subject_id.to_string())
         .get()
-        .await
+        .await?;
+    Ok(rows.into_iter().map(|r| r.into_row()).collect())
 }
 
 pub async fn revoke_tokens<'a>(db: DbConn<'a>, subject_id: &str) -> anyhow::Result<u64> {

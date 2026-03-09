@@ -129,13 +129,13 @@ fn render_fetch_user_section(
 ) -> String {
     match provider_pk_ty {
         "uuid::Uuid" => format!(
-            "        let parsed = match uuid::Uuid::parse_str(id.trim()) {{ Ok(v) => v, Err(_) => return Ok(None), }};\n        {provider_title}Query::new(db, None).find(parsed).await"
+            "        let parsed = match uuid::Uuid::parse_str(id.trim()) {{ Ok(v) => v, Err(_) => return Ok(None), }};\n        {provider_title}Query::new(db, None).find(parsed).await.map(|opt| opt.map(|r| r.into_row()))"
         ),
         "i16" | "i32" | "i64" | "u16" | "u32" | "u64" | "isize" | "usize" => format!(
-            "        let parsed = match id.trim().parse::<{provider_pk_ty}>() {{ Ok(v) => v, Err(_) => return Ok(None), }};\n        {provider_title}Query::new(db, None).find(parsed).await"
+            "        let parsed = match id.trim().parse::<{provider_pk_ty}>() {{ Ok(v) => v, Err(_) => return Ok(None), }};\n        {provider_title}Query::new(db, None).find(parsed).await.map(|opt| opt.map(|r| r.into_row()))"
         ),
         "String" => format!(
-            "        {provider_title}Query::new(db, None).find(id.to_string()).await"
+            "        {provider_title}Query::new(db, None).find(id.to_string()).await.map(|opt| opt.map(|r| r.into_row()))"
         ),
         other => panic!(
             "Guard '{}' provider '{}' uses unsupported pk_type '{}' for auth resolution. Supported: i16/i32/i64/u16/u32/u64/isize/usize, uuid, String",

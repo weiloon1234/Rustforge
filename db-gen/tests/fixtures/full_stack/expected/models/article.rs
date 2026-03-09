@@ -21,6 +21,7 @@ use core_i18n::current_locale;
 use crate::generated::models::user::{UserCol, UserQuery, UserRow};
 use crate::generated::localized::LocalizedMapHelper;
 use super::enums::*;
+use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
 const HAS_UPDATED_AT: bool = true;
 const HAS_SOFT_DELETE: bool = false;
@@ -155,6 +156,19 @@ pub struct ArticleWithRelations {
     pub author: Option<UserRow>,
 }
 
+impl ArticleWithRelations {
+    pub fn into_row(self) -> ArticleView { self.row }
+}
+
+impl std::ops::Deref for ArticleWithRelations {
+    type Target = ArticleView;
+    fn deref(&self) -> &Self::Target { &self.row }
+}
+
+impl std::ops::DerefMut for ArticleWithRelations {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+}
+
 #[derive(Debug, Clone, Copy, JsonSchema)]
 pub enum ArticleCol {
     Id,
@@ -193,13 +207,13 @@ impl<'db> Article<'db> {
     pub fn query(&self) -> ArticleQuery<'db> { ArticleQuery::new(self.db.clone(), self.base_url.clone()) }
     pub fn insert(&self) -> ArticleInsert<'db> { ArticleInsert::new(self.db.clone(), self.base_url.clone()) }
     pub fn update(&self) -> ArticleUpdate<'db> { ArticleUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<ArticleView>> {
+    pub async fn find(&self, id: i64) -> Result<Option<ArticleWithRelations>> {
         self.query().find(id).await
     }
     pub async fn delete(&self, id: i64) -> Result<u64> {
         self.query().where_id(Op::Eq, id).delete().await
     }
-    pub async fn load_author(&self, parents: &[ArticleView]) -> Result<HashMap<i64, Option<UserRow>>> {
+    pub async fn load_author(&self, parents: &[ArticleRow]) -> Result<HashMap<i64, Option<UserRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -631,7 +645,7 @@ impl<'db> ArticleQuery<'db> {
     }
     pub fn where_has_author(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db, None));
+        let scoped = scope(UserQuery::new(self.db.clone(), None));
         let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
         sub_where.insert(0, "users.id = articles.author_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
@@ -644,7 +658,7 @@ impl<'db> ArticleQuery<'db> {
     }
     pub fn where_doesnt_have_author(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db, None));
+        let scoped = scope(UserQuery::new(self.db.clone(), None));
         let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
         sub_where.insert(0, "users.id = articles.author_id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM users WHERE ");
@@ -657,7 +671,7 @@ impl<'db> ArticleQuery<'db> {
     }
     pub fn or_where_has_author(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db, None));
+        let scoped = scope(UserQuery::new(self.db.clone(), None));
         let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
         sub_where.insert(0, "users.id = articles.author_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
@@ -720,7 +734,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<ArticleView>> {
+    pub async fn get(self) -> Result<Vec<ArticleWithRelations>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -763,37 +777,6 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in join_binds { q = bind(q, b); }
         for b in having_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
-        let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
-        let localized = localized::load_article_localized(db.clone(), &ids).await?;
-        let meta_map = localized::load_article_meta(db.clone(), &ids).await?;
-        let attachments = localized::load_article_attachments(db.clone(), &ids).await?;
-        let mut out_vec = Vec::with_capacity(rows.len());
-        for r in rows {
-            out_vec.push(hydrate_view(r, &localized, &meta_map, &attachments, base_url.as_deref()));
-        }
-        Ok(out_vec)
-    }
-
-    pub async fn get_with_relations(self) -> Result<Vec<ArticleWithRelations>> {
-        let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
-        let mut where_sql = where_sql;
-        let select_clause = match (distinct, distinct_on.as_ref()) {
-            (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
-            (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
-            (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
-        };
-        let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
-        let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
-        if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
-        if !where_sql.is_empty() { sql.push_str(" WHERE "); sql.push_str(&where_sql.join(" AND ")); }
-        if !order_sql.is_empty() { sql.push_str(" ORDER BY "); sql.push_str(&order_sql.join(", ")); }
-        if let Some(off) = offset { sql.push_str(" OFFSET "); sql.push_str(&off.to_string()); }
-        if let Some(l) = limit { sql.push_str(" LIMIT "); sql.push_str(&l.to_string()); }
-        if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut q = sqlx::query_as::<_, ArticleRow>(&sql);
-        for b in binds { q = bind(q, b); }
-        for b in join_binds { q = bind(q, b); }
-        let rows = db.fetch_all(q).await?;
         let m = Article { db: db.clone(), base_url: base_url.clone() };
         let author = m.load_author(&rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
@@ -801,9 +784,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let meta_map = localized::load_article_meta(db.clone(), &ids).await?;
         let attachments = localized::load_article_attachments(db.clone(), &ids).await?;
         let mut out_vec = Vec::with_capacity(rows.len());
-        for row in rows {
-            let key = row.id.clone();
-            let view = hydrate_view(row.clone(), &localized, &meta_map, &attachments, base_url.as_deref());
+        for r in rows {
+            let key = r.id.clone();
+            let view = hydrate_view(r.clone(), &localized, &meta_map, &attachments, base_url.as_deref());
             out_vec.push(ArticleWithRelations {
                 row: view,
                 author: author.get(&key).cloned().unwrap_or(None),
@@ -812,36 +795,37 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<ArticleView>> {
+    pub async fn first(self) -> Result<Option<ArticleWithRelations>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<ArticleView> {
+    pub async fn first_or_fail(self) -> Result<ArticleWithRelations> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("articles: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<ArticleView>> {
+    pub async fn find(self, id: i64) -> Result<Option<ArticleWithRelations>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<ArticleView> {
+    pub async fn find_or_fail(self, id: i64) -> Result<ArticleWithRelations> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("articles: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(ArticleInsert<'db>) -> ArticleInsert<'db>) -> Result<ArticleView> {
+    pub async fn first_or_create(self, create: impl FnOnce(ArticleInsert<'db>) -> ArticleInsert<'db>) -> Result<ArticleWithRelations> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(ArticleInsert::new(db, base_url));
-        insert_builder.save().await
+        let insert_builder = create(ArticleInsert::new(db.clone(), base_url.clone()));
+        let view = insert_builder.save().await?;
+        Article::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
         on_update: impl FnOnce(ArticleUpdate<'db>) -> ArticleUpdate<'db>,
         on_create: impl FnOnce(ArticleInsert<'db>) -> ArticleInsert<'db>,
-    ) -> Result<ArticleView> {
+    ) -> Result<ArticleWithRelations> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
@@ -852,10 +836,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Article::new(db, base_url.clone()).query().find(existing.id).await.map(|r| r.unwrap());
+            return Article::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(ArticleInsert::new(db, base_url));
-        insert_builder.save().await
+        let insert_builder = on_create(ArticleInsert::new(db.clone(), base_url.clone()));
+        let view = insert_builder.save().await?;
+        Article::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn increment(self, col: ArticleCol, amount: i64) -> Result<u64> {
@@ -920,7 +905,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<ArticleView>) -> Fut,
+        F: FnMut(Vec<ArticleWithRelations>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
@@ -955,7 +940,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<ArticleView> {
+    pub async fn sole(self) -> Result<ArticleWithRelations> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -974,7 +959,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&ArticleView) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&ArticleWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -1054,7 +1039,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<ArticleView>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<ArticleWithRelations>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1096,61 +1081,12 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in binds.iter().cloned() { q = bind(q, b); }
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
+        let m = Article { db: db.clone(), base_url: base_url.clone() };
+        let author = m.load_author(&rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = localized::load_article_localized(db, &ids).await?;
         let meta_map = localized::load_article_meta(db, &ids).await?;
         let attachments = localized::load_article_attachments(db, &ids).await?;
-        let mut data = Vec::with_capacity(rows.len());
-        for r in rows {
-            data.push(hydrate_view(r, &localized, &meta_map, &attachments, base_url.as_deref()));
-        }
-        Ok(Page { data, total, per_page, current_page, last_page })
-    }
-    pub async fn paginate_with_relations(self, page: i64, per_page: i64) -> Result<Page<ArticleWithRelations>> {
-        let page = if page < 1 { 1 } else { page };
-        let per_page = resolve_per_page(per_page);
-        let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
-        let mut where_sql = where_sql;
-        let select_clause = match (distinct, distinct_on.as_ref()) {
-            (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
-            (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
-            (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
-        };
-        let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let count_expr = count_sql.unwrap_or_else(|| "COUNT(*)".to_string());
-        let count_sql = if distinct || distinct_on.is_some() {
-            format!("SELECT COUNT(*) FROM (SELECT {} {}{}) AS sub", select_clause, from_clause, where_clause)
-        } else {
-            format!("SELECT {} {}{}", count_expr, from_clause, where_clause)
-        };
-        let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
-        for b in binds.iter().cloned() { count_q = bind_scalar(count_q, b); }
-        for b in join_binds.iter().cloned() { count_q = bind_scalar(count_q, b); }
-        let total: i64 = db.fetch_scalar(count_q).await?;
-        let last_page = ((total + per_page - 1) / per_page).max(1);
-        let current_page = page.min(last_page);
-        let offset_val = (current_page - 1) * per_page;
-        let mut sql = format!("SELECT {} {}{}", select_clause, from_clause, where_clause);
-        if !order_sql.is_empty() { sql.push_str(" ORDER BY "); sql.push_str(&order_sql.join(", ")); }
-        sql.push_str(&format!(" OFFSET {}", offset_val));
-        sql.push_str(&format!(" LIMIT {}", per_page));
-        if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut q = sqlx::query_as::<_, ArticleRow>(&sql);
-        for b in binds.iter().cloned() { q = bind(q, b); }
-        for b in join_binds { q = bind(q, b); }
-        let rows = db.fetch_all(q).await?;
-        let m = Article { db: db.clone(), base_url: base_url.clone() };
-        let author = m.load_author(&rows).await?;
-        let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
-        let localized = localized::load_article_localized(db.clone(), &ids).await?;
-        let meta_map = localized::load_article_meta(db.clone(), &ids).await?;
-        let attachments = localized::load_article_attachments(db.clone(), &ids).await?;
         let mut data = Vec::with_capacity(rows.len());
         for row in rows {
             let key = row.id.clone();
@@ -1173,6 +1109,16 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         }
         let Self { db, where_sql, binds, .. } = self;
         if where_sql.is_empty() { anyhow::bail!("delete(): no conditions set"); }
+        let __observer_active = try_get_observer().is_some();
+        let __old_rows_json: Vec<(i64, serde_json::Value)> = if __observer_active {
+            let select_sql = format!("SELECT * FROM articles WHERE {}", where_sql.join(" AND "));
+            let mut fq = sqlx::query_as::<_, ArticleRow>(&select_sql);
+            for b in &binds { fq = bind(fq, b.clone()); }
+            let rows: Vec<ArticleRow> = db.fetch_all(fq).await.unwrap_or_default();
+            rows.into_iter().map(|r| (r.id, serde_json::to_value(&r).unwrap_or_default())).collect()
+        } else {
+            Vec::new()
+        };
         let mut sql = String::from("DELETE FROM articles");
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
@@ -1181,6 +1127,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let mut q = sqlx::query(&sql);
         for b in binds { q = bind_query(q, b); }
         let res = db.execute(q).await?;
+        if !__old_rows_json.is_empty() && res.rows_affected() > 0 {
+            if let Some(observer) = try_get_observer() {
+                for (record_id, old_data) in &__old_rows_json {
+                    let event = ModelEvent { table: "articles", record_id: *record_id };
+                    let _ = observer.on_deleted(&event, old_data).await;
+                }
+            }
+        }
         Ok(res.rows_affected())
     }
 }
@@ -1320,9 +1274,24 @@ pub async fn save(self) -> Result<ArticleView> {
                     .map_err(|_| anyhow::anyhow!("transaction scope still has active handles"))?
                     .into_inner();
                 tx.commit().await?;
+                if let Some(observer) = try_get_observer() {
+                    let event = ModelEvent { table: "articles", record_id: view.id };
+                    if let Ok(data) = serde_json::to_value(&view) {
+                        let _ = observer.on_created(&event, &data).await;
+                    }
+                }
                 Ok(view)
             }
-            DbConn::Tx(_) => self.save_with_db(db_conn).await,
+            DbConn::Tx(_) => {
+                let view = self.save_with_db(db_conn).await?;
+                if let Some(observer) = try_get_observer() {
+                    let event = ModelEvent { table: "articles", record_id: view.id };
+                    if let Ok(data) = serde_json::to_value(&view) {
+                        let _ = observer.on_created(&event, &data).await;
+                    }
+                }
+                Ok(view)
+            }
         }
     }
 
@@ -1597,6 +1566,17 @@ pub async fn save(self) -> Result<u64> {
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
         for b in &self.binds { select_q = bind_scalar(select_q, b.clone()); }
         let target_ids = db.fetch_all_scalar(select_q).await?;
+        let __observer_active = try_get_observer().is_some();
+        let __old_rows_json: Vec<(i64, serde_json::Value)> = if __observer_active && !target_ids.is_empty() {
+            let phs: Vec<String> = (1..=target_ids.len()).map(|i| format!("${}", i)).collect();
+            let fetch_sql = format!("SELECT * FROM articles WHERE id IN ({})", phs.join(", "));
+            let mut fq = sqlx::query_as::<_, ArticleRow>(&fetch_sql);
+            for id in &target_ids { fq = fq.bind(id); }
+            let rows: Vec<ArticleRow> = db.fetch_all(fq).await.unwrap_or_default();
+            rows.into_iter().map(|r| (r.id, serde_json::to_value(&r).unwrap_or_default())).collect()
+        } else {
+            Vec::new()
+        };
         let mut parts: Vec<String> = Vec::new();
         for (i, (c, mode)) in cols.iter().zip(set_modes.iter()).enumerate() {
             let col = c.as_sql();
@@ -1657,6 +1637,19 @@ pub async fn save(self) -> Result<u64> {
                 }
                 for (field, ids) in &self.attachments_delete_multi {
                     localized::delete_attachment_ids(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), field, ids).await?;
+                }
+            }
+        }
+        if !__old_rows_json.is_empty() && res.rows_affected() > 0 {
+            if let Some(observer) = try_get_observer() {
+                for (record_id, old_data) in &__old_rows_json {
+                    let fetch_sql = format!("SELECT * FROM articles WHERE id = $1");
+                    if let Ok(Some(new_row)) = db.fetch_optional(sqlx::query_as::<_, ArticleRow>(&fetch_sql).bind(record_id)).await {
+                        if let Ok(new_data) = serde_json::to_value(&new_row) {
+                            let event = ModelEvent { table: "articles", record_id: *record_id };
+                            let _ = observer.on_updated(&event, old_data, &new_data).await;
+                        }
+                    }
                 }
             }
         }
@@ -1754,7 +1747,7 @@ impl ArticleTableAdapter {
 }
 impl GeneratedTableAdapter for ArticleTableAdapter {
     type Query<'db> = ArticleQuery<'db>;
-    type Row = ArticleView;
+    type Row = ArticleWithRelations;
     fn model_key(&self) -> &'static str { "Article" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "author_id", "status", "is_system", "created_at", "updated_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at"] }
@@ -1934,7 +1927,7 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &ArticleView, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &ArticleWithRelations, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "author_id" => Some(row.author_id.to_string()),
@@ -1946,7 +1939,7 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
     fn count<'db>(&self, query: ArticleQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: ArticleQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<ArticleView>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: ArticleQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<ArticleWithRelations>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -1976,8 +1969,8 @@ pub trait ArticleDataTableHooks: Send + Sync + 'static {
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
     fn filter_query<'db>(&'db self, _query: ArticleQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<ArticleQuery<'db>>> { Ok(None) }
     fn filters<'db>(&'db self, query: ArticleQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<ArticleQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut ArticleView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: ArticleView) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn map_row(&self, _row: &mut ArticleWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: ArticleWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         let value = serde_json::to_value(row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         if let Some(id_value) = record.get("id").cloned() {
@@ -1990,7 +1983,7 @@ pub trait ArticleDataTableHooks: Send + Sync + 'static {
         }
         Ok(record)
     }
-    fn row_to_record(&self, row: ArticleView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: ArticleWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
     fn summary<'db>(&'db self, _query: ArticleQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
@@ -2037,8 +2030,8 @@ impl<H: ArticleDataTableHooks> AutoDataTable for ArticleDataTable<H> {
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
     fn filter_query<'db>(&'db self, query: ArticleQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<ArticleQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
     fn filters<'db>(&'db self, query: ArticleQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<ArticleQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut ArticleView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: ArticleView, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn map_row(&self, row: &mut ArticleWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: ArticleWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
     fn summary<'db>(&'db self, query: ArticleQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
@@ -2052,7 +2045,7 @@ use core_db::common::active_record::ActiveRecord;
 impl ActiveRecord for ArticleView {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Article::new(db, None).find(id).await.map_err(|e| e.into())
+        Article::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
     }
 }
 
