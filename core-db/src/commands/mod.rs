@@ -201,6 +201,7 @@ CREATE TABLE IF NOT EXISTS countries (
     assignment_status TEXT,
     un_member BOOLEAN,
     flag_emoji TEXT,
+    is_default SMALLINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (iso2 ~ '^[A-Z]{2}$'),
@@ -214,6 +215,7 @@ CREATE INDEX IF NOT EXISTS idx_countries_status ON countries(status);
 CREATE INDEX IF NOT EXISTS idx_countries_region ON countries(region);
 CREATE INDEX IF NOT EXISTS idx_countries_primary_currency_code ON countries(primary_currency_code);
 CREATE INDEX IF NOT EXISTS idx_countries_currencies_gin ON countries USING GIN (currencies);
+CREATE INDEX IF NOT EXISTS idx_countries_is_default ON countries(is_default);
 "#;
         let countries_path = migrations_dir.join("0000000000008_countries.sql");
         fs::write(&countries_path, countries_sql).await?;
