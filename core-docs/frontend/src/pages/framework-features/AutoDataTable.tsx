@@ -294,8 +294,9 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
     }
 
     /// Typed post-fetch row transform. Mutate the app-facing row first.
+    /// WithRelations implements Deref<Target=View>, so field access is transparent.
     fn map_row(
-        &self, row: &mut AdminView,
+        &self, row: &mut AdminWithRelations,
         _input: &DataTableInput, _ctx: &DataTableContext,
     ) -> anyhow::Result<()> {
         row.identity = row.identity();
@@ -303,11 +304,12 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
     }
 
     /// Optional final record projection for display/export parity.
+    /// WithRelations serializes flat (via #[serde(flatten)]) — no "row" wrapper.
     fn row_to_record(
-        &self, row: AdminView,
+        &self, row: AdminWithRelations,
         _input: &DataTableInput, _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let mut record = AdminTableAdapter::row_to_map(row)?;
+        let mut record = self.default_row_to_record(row)?;
         record.remove("password");
         record.remove("deleted_at");
         Ok(record)

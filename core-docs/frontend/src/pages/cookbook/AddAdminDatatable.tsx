@@ -99,14 +99,14 @@ impl DataTableScopedContract for AdminContentPageDataTableContract {
         }
     }
 
-    fn map_row(&self, row: &mut ContentPageView, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> {
+    fn map_row(&self, row: &mut ContentPageWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> {
         row.identity = row.identity();
         Ok(())
     }
 
     fn row_to_record(
         &self,
-        row: ContentPageView,
+        row: ContentPageWithRelations,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {

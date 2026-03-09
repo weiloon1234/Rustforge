@@ -46,6 +46,17 @@ let users = user
     .await?;`}</code>
                 </pre>
 
+                <h2>WithRelations and serialization</h2>
+                <p>
+                    All query methods (<code>.get()</code>, <code>.find()</code>, <code>.first()</code>, etc.) return <code>ModelWithRelations</code>. This struct wraps the inner <code>ModelView</code> with <code>#[serde(flatten)]</code> and implements <code>Deref&lt;Target=ModelView&gt;</code>.
+                </p>
+                <ul>
+                    <li><strong>Rust access</strong>: field access is transparent via <code>Deref</code> — <code>row.username</code> works directly without <code>row.row.username</code>.</li>
+                    <li><strong>JSON serialization</strong>: <code>#[serde(flatten)]</code> ensures fields are at the top level — <code>{`{"id": 1, "username": "john"}`}</code>, not <code>{`{"row": {"id": 1, ...}}`}</code>.</li>
+                    <li><strong>Unwrap to View</strong>: use <code>.into_row()</code> when you need the plain <code>ModelView</code> (e.g., for API response DTOs).</li>
+                    <li><strong>Move fields</strong>: since <code>Deref</code> returns a reference, moving <code>String</code>/<code>Option</code> fields out requires <code>.clone()</code>. Alternatively, call <code>.into_row()</code> first to take ownership.</li>
+                </ul>
+
                 <h2>Current framework conventions</h2>
                 <ul>
                     <li>Country linkage should use <code>country_iso2</code> and relation metadata should point to <code>countries.iso2</code>.</li>
