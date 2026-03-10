@@ -70,11 +70,18 @@ group = "user"
 description = "Change a user's introducer and view change logs."
 
 [[permissions]]
-key = "user.credit"
+key = "user.credit_read"
+guard = "admin"
+label = "Read User Credits"
+group = "user"
+description = "View credit transactions and balances."
+
+[[permissions]]
+key = "user.credit_manage"
 guard = "admin"
 label = "Manage User Credits"
 group = "user"
-description = "View credit transactions and adjust user balances."
+description = "Adjust user credit balances."
 
 [[permissions]]
 key = "audit_log.read"

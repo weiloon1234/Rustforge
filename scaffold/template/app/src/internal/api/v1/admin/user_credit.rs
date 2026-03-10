@@ -22,7 +22,7 @@ pub fn router(state: AppApiState) -> ApiRouter {
                 adjust_credit,
                 AdminGuard,
                 PermissionMode::Any,
-                [Permission::UserCredit.as_str()],
+                [Permission::UserCreditManage.as_str()],
                 |op| op.summary("Adjust user credit").tag("Admin User Credit"),
             ),
         )

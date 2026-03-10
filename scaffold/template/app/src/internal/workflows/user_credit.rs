@@ -14,7 +14,7 @@ use crate::{
 
 pub async fn adjust_credit(
     state: &AppApiState,
-    _admin_id: i64,
+    admin_id: i64,
     req: AdminCreditAdjustInput,
 ) -> Result<UserCreditTransactionView, AppError> {
     let username = req.username.trim().to_ascii_lowercase();
@@ -23,6 +23,10 @@ pub async fn adjust_credit(
     if amount.is_zero() {
         return Err(AppError::BadRequest(t("Amount must not be zero")));
     }
+
+    // Convert AdjustableCreditType → CreditType (same i16 values)
+    let credit_type = CreditType::from_storage(req.credit_type.as_str())
+        .ok_or_else(|| AppError::BadRequest(t("Invalid credit type")))?;
 
     // Resolve user by username
     let user = UserQuery::new(DbConn::pool(&state.db), None)
@@ -38,6 +42,13 @@ pub async fn adjust_credit(
         CreditTransactionType::AdminDeduct
     };
 
+    let has_custom_desc = req.custom_description.is_some();
+    let custom_desc_default = req
+        .custom_description
+        .as_ref()
+        .and_then(|m| m.get("en").or_else(|| m.values().next()))
+        .cloned();
+
     // Begin transaction scope — both operations share the same DB transaction
     let scope = DbConn::pool(&state.db).begin_scope().await.map_err(AppError::from)?;
     let conn = scope.conn();
@@ -46,18 +57,34 @@ pub async fn adjust_credit(
     let txn = UserCreditTransaction::new(conn.clone(), None)
         .insert()
         .set_user_id(user.id)
-        .set_credit_type(req.credit_type)
+        .set_admin_id(Some(admin_id))
+        .set_credit_type(credit_type)
         .set_amount(amount)
         .set_transaction_type(transaction_type)
         .set_related_key(None)
         .set_remark(req.remark)
+        .set_custom_description(has_custom_desc)
+        .set_custom_description_text(custom_desc_default)
         .save()
         .await
         .map_err(AppError::from)?;
 
+    // Save localized custom description text (multi-locale)
+    if let Some(ref descriptions) = req.custom_description {
+        generated::localized::upsert_localized_many(
+            conn.clone(),
+            "user_credit_transaction",
+            txn.id,
+            "custom_description_text",
+            descriptions,
+        )
+        .await
+        .map_err(AppError::from)?;
+    }
+
     // Atomic relative balance update
     let mut update = User::new(conn, None).update().where_id(Op::Eq, user.id);
-    update = match req.credit_type {
+    update = match credit_type {
         CreditType::Credit1 => update.increment_credit_1(amount),
         CreditType::Credit2 => update.increment_credit_2(amount),
     };

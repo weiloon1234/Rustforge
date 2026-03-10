@@ -1,5 +1,5 @@
 use core_web::ids::SnowflakeId;
-use generated::models::{CreditTransactionType, CreditType};
+use generated::models::{AdjustableCreditType, CreditTransactionType, CreditType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -8,12 +8,15 @@ use ts_rs::TS;
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminCreditAdjustInput {
     pub username: String,
-    pub credit_type: CreditType,
+    pub credit_type: AdjustableCreditType,
     #[schemars(with = "String")]
     #[ts(type = "string")]
     pub amount: rust_decimal::Decimal,
     #[serde(default)]
     pub remark: Option<String>,
+    /// Localized custom description: { "en": "...", "zh": "..." }
+    #[serde(default)]
+    pub custom_description: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]

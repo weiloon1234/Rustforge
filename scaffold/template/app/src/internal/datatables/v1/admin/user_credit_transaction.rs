@@ -39,7 +39,7 @@ impl UserCreditTransactionDataTableHooks for UserCreditTransactionDataTableAppHo
         };
         let base_authorized = has_required_permissions(
             &actor.permissions,
-            &[Permission::UserCredit.as_str()],
+            &[Permission::UserCreditRead.as_str(), Permission::UserCreditManage.as_str()],
             PermissionMode::Any,
         );
         Ok(authorize_with_optional_export(base_authorized, input, ctx))
@@ -100,6 +100,9 @@ impl UserCreditTransactionDataTableHooks for UserCreditTransactionDataTableAppHo
         record.insert("user_username".into(),
             row.user.as_ref().map(|u| serde_json::Value::String(u.username.clone()))
                 .unwrap_or(serde_json::Value::Null));
+        record.insert("admin_username".into(),
+            row.admin.as_ref().map(|a| serde_json::Value::String(a.username.clone()))
+                .unwrap_or(serde_json::Value::Null));
         Ok(record)
     }
 }
@@ -107,10 +110,22 @@ impl UserCreditTransactionDataTableHooks for UserCreditTransactionDataTableAppHo
 /// Enrich the generated `transaction_type_explained` on the View directly.
 ///
 /// Priority:
+/// - `custom_description == true` → use localized `custom_description_text` for current locale
 /// - `remark` non-empty → use remark as the explanation
 /// - `params` non-empty → re-translate with `t_args` to interpolate `:param` placeholders
 /// - otherwise → keep the generated `explained_label()` as-is
 fn enrich_transaction_type_explained(row: &mut UserCreditTransactionView) {
+    // Custom description takes highest priority
+    if row.custom_description {
+        if let Some(ref text) = row.custom_description_text {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                row.transaction_type_explained = trimmed.to_string();
+                return;
+            }
+        }
+    }
+
     if let Some(ref remark) = row.remark {
         let trimmed = remark.trim();
         if !trimmed.is_empty() {
