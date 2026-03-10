@@ -1,5 +1,5 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
-use core_db::common::sql::{Op, RawClause};
+use core_db::common::sql::Op;
 use core_i18n::t_args;
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
@@ -10,7 +10,7 @@ use generated::{
     models::{
         CreditTransactionType, CreditType, UserCreditTransactionDataTable,
         UserCreditTransactionDataTableHooks, UserCreditTransactionQuery,
-        UserCreditTransactionView,
+        UserCreditTransactionView, UserCol,
     },
     permissions::Permission,
 };
@@ -147,14 +147,7 @@ fn apply_keyword_filter<'db>(
         return query;
     }
     let pattern = format!("%{trimmed}%");
-    if let Ok(clause) = RawClause::new(
-        "user_id IN (SELECT id FROM users WHERE username LIKE ?)",
-        [pattern],
-    ) {
-        query.unsafe_sql().where_raw(clause).done()
-    } else {
-        query
-    }
+    query.where_has_user(|rq| rq.where_col(UserCol::Username, Op::Like, pattern))
 }
 
 pub type AppUserCreditTransactionDataTable =
