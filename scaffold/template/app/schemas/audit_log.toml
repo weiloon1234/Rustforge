@@ -24,3 +24,4 @@ fields = [
   "new_data:Option<serde_json::Value>",
   "created_at:datetime"
 ]
+relations = ["admin:belongs_to:admin:admin_id:id"]

@@ -8,6 +8,7 @@ use core_web::openapi::ApiRouter;
 use generated::{
     models::{
         IntroducerChangeDataTable, IntroducerChangeDataTableHooks, IntroducerChangeQuery,
+        IntroducerChangeWithRelations,
     },
     permissions::Permission,
 };
@@ -54,6 +55,28 @@ impl IntroducerChangeDataTableHooks for IntroducerChangeDataTableAppHooks {
             "q" => Ok(Some(apply_keyword_filter(query, value))),
             _ => Ok(None),
         }
+    }
+
+    fn row_to_record(
+        &self,
+        row: IntroducerChangeWithRelations,
+        _input: &DataTableInput,
+        _ctx: &DataTableContext,
+    ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let mut record = self.default_row_to_record(row.clone())?;
+        record.insert("user_username".into(),
+            row.user.as_ref().map(|u| serde_json::Value::String(u.username.clone()))
+                .unwrap_or(serde_json::Value::Null));
+        record.insert("from_username".into(),
+            row.from_user.as_ref().map(|u| serde_json::Value::String(u.username.clone()))
+                .unwrap_or(serde_json::Value::Null));
+        record.insert("to_username".into(),
+            row.to_user.as_ref().map(|u| serde_json::Value::String(u.username.clone()))
+                .unwrap_or(serde_json::Value::Null));
+        record.insert("admin_username".into(),
+            row.admin.as_ref().map(|a| serde_json::Value::String(a.username.clone()))
+                .unwrap_or(serde_json::Value::Null));
+        Ok(record)
     }
 }
 

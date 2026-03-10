@@ -5,7 +5,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
@@ -613,6 +613,8 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
             sql.push_str(&l.to_string());
         }
         if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
+        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).chain(having_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_as::<_, OutboxJobRow>(&sql);
         for b in binds {
             q = bind(q, b);
@@ -620,6 +622,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in join_binds { q = bind(q, b); }
         for b in having_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
+        record_profiled_query("outbox_jobs", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let ids: Vec<uuid::Uuid> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
@@ -684,9 +687,12 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let binds = self.binds;
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let sql = format!("UPDATE outbox_jobs SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
+        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query(&sql);
         for b in binds { q = bind_query(q, b); }
         let res = db.execute(q).await?;
+        record_profiled_query("outbox_jobs", "UPDATE", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(res.rows_affected())
     }
 
@@ -706,10 +712,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let count_expr = count_sql.unwrap_or_else(|| "COUNT(*)".to_string());
         let sql = format!("SELECT {} {}{}", count_expr, from_clause, where_clause);
+        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_scalar::<_, i64>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let count = db.fetch_scalar(q).await?;
+        record_profiled_query("outbox_jobs", "COUNT", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(count)
     }
 
@@ -727,10 +736,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let limit_clause = limit.map(|n| format!(" LIMIT {}", n)).unwrap_or_default();
         let offset_clause = offset.map(|n| format!(" OFFSET {}", n)).unwrap_or_default();
         let sql = format!("SELECT id {}{}{}{}{}", from_clause, where_clause, order_clause, limit_clause, offset_clause);
+        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_scalar::<_, uuid::Uuid>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let ids = db.fetch_all_scalar(q).await?;
+        record_profiled_query("outbox_jobs", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(ids)
     }
 
@@ -813,10 +825,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         };
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let sql = format!("SELECT SUM({}::DOUBLE PRECISION) {}{}", col.as_sql(), from_clause, where_clause);
+        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_scalar::<_, Option<f64>>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let result = db.fetch_scalar(q).await?;
+        record_profiled_query("outbox_jobs", "SUM", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(result)
     }
 
@@ -831,10 +846,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         };
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let sql = format!("SELECT AVG({}::DOUBLE PRECISION) {}{}", col.as_sql(), from_clause, where_clause);
+        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_scalar::<_, Option<f64>>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let result = db.fetch_scalar(q).await?;
+        record_profiled_query("outbox_jobs", "AVG", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(result)
     }
 
@@ -849,10 +867,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         };
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let sql = format!("SELECT MIN({}) {}{}", col.as_sql(), from_clause, where_clause);
+        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_scalar::<_, Option<i64>>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let result = db.fetch_scalar(q).await?;
+        record_profiled_query("outbox_jobs", "MIN_VAL", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(result)
     }
 
@@ -867,10 +888,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         };
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let sql = format!("SELECT MAX({}) {}{}", col.as_sql(), from_clause, where_clause);
+        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_scalar::<_, Option<i64>>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let result = db.fetch_scalar(q).await?;
+        record_profiled_query("outbox_jobs", "MAX_VAL", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(result)
     }
 
@@ -897,10 +921,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         } else {
             format!("SELECT {} {}{}", count_expr, from_clause, where_clause)
         };
+        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+        let __profiler_start = std::time::Instant::now();
         let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
         for b in binds.iter().cloned() { count_q = bind_scalar(count_q, b); }
         for b in join_binds.iter().cloned() { count_q = bind_scalar(count_q, b); }
         let total: i64 = db.fetch_scalar(count_q).await?;
+        record_profiled_query("outbox_jobs", "COUNT", &count_sql, &__profiler_binds, __profiler_start.elapsed());
         let last_page = ((total + per_page - 1) / per_page).max(1);
         let current_page = page.min(last_page);
         let offset_val = (current_page - 1) * per_page;
@@ -912,10 +939,12 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         sql.push_str(&format!(" OFFSET {}", offset_val));
         sql.push_str(&format!(" LIMIT {}", per_page));
         if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
+        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_as::<_, OutboxJobRow>(&sql);
         for b in binds.iter().cloned() { q = bind(q, b); }
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
+        record_profiled_query("outbox_jobs", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let ids: Vec<uuid::Uuid> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
@@ -925,6 +954,61 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let data: Vec<OutboxJobWithRelations> = data.into_iter().map(|v| OutboxJobWithRelations { row: v }).collect();
         Ok(Page { data, total, per_page, current_page, last_page })
     }
+    pub fn to_sql(&self) -> (String, Vec<BindValue>) {
+        let select_sql = self.select_sql.clone();
+        let from_sql = self.from_sql.clone();
+        let distinct = self.distinct;
+        let distinct_on = self.distinct_on.clone();
+        let lock_sql = self.lock_sql;
+        let join_sql = self.join_sql.clone();
+        let join_binds = self.join_binds.clone();
+        let mut where_sql = self.where_sql.clone();
+        let order_sql = self.order_sql.clone();
+        let group_by_sql = self.group_by_sql.clone();
+        let having_sql = self.having_sql.clone();
+        let having_binds = self.having_binds.clone();
+        let offset = self.offset;
+        let limit = self.limit;
+        let binds = self.binds.clone();
+        let select_clause = match (distinct, distinct_on.as_ref()) {
+            (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
+            (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
+            (_, Some(col)) => format!("DISTINCT ON ({}) {}", col, select_sql.unwrap_or_else(|| "*".to_string())),
+        };
+        let table_name = from_sql.unwrap_or_else(|| "outbox_jobs".to_string());
+        let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
+        if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
+        if !where_sql.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&where_sql.join(" AND "));
+        }
+        if !group_by_sql.is_empty() {
+            sql.push_str(" GROUP BY ");
+            sql.push_str(&group_by_sql.join(", "));
+        }
+        if !having_sql.is_empty() {
+            sql.push_str(" HAVING ");
+            sql.push_str(&having_sql.join(" AND "));
+        }
+        if !order_sql.is_empty() {
+            sql.push_str(" ORDER BY ");
+            sql.push_str(&order_sql.join(", "));
+        }
+        if let Some(off) = offset {
+            sql.push_str(" OFFSET ");
+            sql.push_str(&off.to_string());
+        }
+        if let Some(l) = limit {
+            sql.push_str(" LIMIT ");
+            sql.push_str(&l.to_string());
+        }
+        if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
+        let mut all_binds = binds;
+        all_binds.extend(join_binds);
+        all_binds.extend(having_binds);
+        (sql, all_binds)
+    }
+
     pub fn into_where_parts(self) -> (Vec<String>, Vec<BindValue>) {
         let Self { where_sql, binds, .. } = self;
         let mut where_sql = where_sql;
@@ -936,14 +1020,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         }
         let Self { db, where_sql, binds, .. } = self;
         if where_sql.is_empty() { anyhow::bail!("delete(): no conditions set"); }
+        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
         let mut sql = String::from("DELETE FROM outbox_jobs");
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&where_sql.join(" AND "));
         }
+        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query(&sql);
         for b in binds { q = bind_query(q, b); }
         let res = db.execute(q).await?;
+        record_profiled_query("outbox_jobs", "DELETE", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(res.rows_affected())
     }
 }
@@ -1076,11 +1163,14 @@ pub async fn save(self) -> Result<OutboxJobView> {
             }
         }
         sql.push_str(" RETURNING *");
+        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_as::<_, OutboxJobRow>(&sql);
         for b in binds {
             q = bind(q, b);
         }
         let row = db.fetch_one(q).await?;
+        record_profiled_query("outbox_jobs", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
         Ok(hydrate_view(row, &LocalizedMap::default(), self.base_url.as_deref()))
     }
@@ -1225,9 +1315,12 @@ pub async fn save(self) -> Result<u64> {
             sql.push_str(&where_sql.join(" AND "));
         }
         let mut q = sqlx::query(&sql);
+        let __profiler_binds = if is_sql_profiler_enabled() { set_binds.iter().chain(binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+        let __profiler_start = std::time::Instant::now();
         for b in &set_binds { q = bind_query(q, b.clone()); }
         for b in &binds { q = bind_query(q, b.clone()); }
         let res = db.execute(q).await?;
+        record_profiled_query("outbox_jobs", "UPDATE", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(res.rows_affected())
     }
 }

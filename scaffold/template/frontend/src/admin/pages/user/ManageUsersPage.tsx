@@ -60,19 +60,34 @@ function CreditTransactionsModal({
   userId,
   creditType,
 }: {
-  userId: string;
+  userId?: string;
   creditType: CreditType;
 }) {
   const { t } = useTranslation();
 
+  const extraBody: Record<string, string> = { "f-credit_type": creditType };
+  if (userId) {
+    extraBody["f-user_id"] = userId;
+  }
+
   return (
     <DataTable<UserCreditTransactionDatatableRow>
       url="datatable/user_credit_transaction/query"
-      extraBody={{ "f-user_id": userId, "f-credit_type": creditType }}
+      extraBody={extraBody}
       perPage={10}
       showRefresh={false}
       enableAutoRefresh={false}
       columns={[
+        ...(!userId
+          ? [
+              {
+                key: "user_username" as const,
+                label: t("User"),
+                render: (row: UserCreditTransactionDatatableRow) =>
+                  row.user_username ?? row.user_id,
+              },
+            ]
+          : []),
         {
           key: "amount",
           label: t("Amount"),
@@ -313,6 +328,26 @@ export default function ManageUsersPage() {
     });
   };
 
+  const handleSummaryCardCreditClick = (creditType: CreditType) => {
+    const creditLabel = t(CREDIT_TYPE_I18N[creditType] ?? creditType);
+    useModalStore.getState().open({
+      title: creditLabel,
+      size: "xl",
+      content: (
+        <CreditTransactionsModal creditType={creditType} />
+      ),
+      footer: (
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => useModalStore.getState().close()}
+        >
+          {t("Close")}
+        </Button>
+      ),
+    });
+  };
+
   const handleDatatablePostCall = (
     event: DataTablePostCallEvent<UserDatatableRow>,
   ) => {
@@ -534,14 +569,22 @@ export default function ManageUsersPage() {
               <p className="text-xs text-muted">{t("Banned")}</p>
               <p className="font-semibold">{summary.banned_count}</p>
             </div>
-            <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+            <button
+              type="button"
+              className="cursor-pointer rounded-lg border border-border bg-surface px-3 py-2 text-left text-sm transition-colors hover:bg-muted/50"
+              onClick={() => handleSummaryCardCreditClick(CREDIT_TYPE._1)}
+            >
               <p className="text-xs text-muted">{t("Total Credit 1")}</p>
               <p className="font-semibold tabular-nums">{summary.total_credit_1}</p>
-            </div>
-            <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+            </button>
+            <button
+              type="button"
+              className="cursor-pointer rounded-lg border border-border bg-surface px-3 py-2 text-left text-sm transition-colors hover:bg-muted/50"
+              onClick={() => handleSummaryCardCreditClick(CREDIT_TYPE._2)}
+            >
               <p className="text-xs text-muted">{t("Total Credit 2")}</p>
               <p className="font-semibold tabular-nums">{summary.total_credit_2}</p>
-            </div>
+            </button>
           </div>
         ) : undefined
       }

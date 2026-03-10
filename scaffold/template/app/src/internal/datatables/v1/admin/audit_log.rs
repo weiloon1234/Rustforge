@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use core_datatable::{
     AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput,
     DataTableRegistry, GeneratedTableAdapter, SortDirection,
@@ -11,7 +9,7 @@ use core_web::datatable::{
 };
 use core_web::openapi::ApiRouter;
 use generated::models::{
-    Admin, AuditAction, AuditLog, AuditLogCol, AuditLogQuery,
+    AuditAction, AuditLog, AuditLogCol, AuditLogQuery,
 };
 use generated::permissions::Permission;
 
@@ -217,29 +215,23 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
 
             let rows = filtered.get().await?;
 
-            // Batch resolve admin usernames
-            let admin_ids: Vec<i64> = rows.iter().map(|r| r.admin_id).collect::<std::collections::HashSet<_>>().into_iter().collect();
-            let admin_map = batch_resolve_admin_usernames(&db, &admin_ids).await;
-
             let out = rows
                 .into_iter()
                 .map(|r| {
-                    let row = r.into_row();
-                    let admin_username = admin_map
-                        .get(&row.admin_id)
-                        .cloned()
-                        .unwrap_or_else(|| row.admin_id.to_string());
+                    let admin_username = r.admin.as_ref()
+                        .map(|a| a.username.clone())
+                        .unwrap_or_else(|| r.row.admin_id.to_string());
                     AuditLogDatatableRow {
-                        id: row.id.into(),
-                        admin_id: row.admin_id,
+                        id: r.row.id.into(),
+                        admin_id: r.row.admin_id,
                         admin_username,
-                        action: row.action,
-                        action_explained: row.action_explained,
-                        table_name: row.table_name,
-                        record_id: row.record_id,
-                        old_data: row.old_data,
-                        new_data: row.new_data,
-                        created_at: format_rfc3339(row.created_at),
+                        action: r.row.action,
+                        action_explained: r.row.action_explained,
+                        table_name: r.row.table_name,
+                        record_id: r.row.record_id,
+                        old_data: r.row.old_data,
+                        new_data: r.row.new_data,
+                        created_at: format_rfc3339(r.row.created_at),
                     }
                 })
                 .collect();
@@ -247,19 +239,6 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
             Ok(out)
         })
     }
-}
-
-async fn batch_resolve_admin_usernames(
-    db: &sqlx::PgPool,
-    admin_ids: &[i64],
-) -> HashMap<i64, String> {
-    let mut map = HashMap::new();
-    for &id in admin_ids {
-        if let Ok(Some(admin)) = Admin::new(db, None).find(id).await {
-            map.insert(id, admin.into_row().username);
-        }
-    }
-    map
 }
 
 #[derive(Default, Clone)]

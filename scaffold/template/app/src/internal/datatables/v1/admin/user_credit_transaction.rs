@@ -89,6 +89,19 @@ impl UserCreditTransactionDataTableHooks for UserCreditTransactionDataTableAppHo
         enrich_transaction_type_explained(&mut *row);
         Ok(())
     }
+
+    fn row_to_record(
+        &self,
+        row: generated::models::UserCreditTransactionWithRelations,
+        _input: &DataTableInput,
+        _ctx: &DataTableContext,
+    ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let mut record = self.default_row_to_record(row.clone())?;
+        record.insert("user_username".into(),
+            row.user.as_ref().map(|u| serde_json::Value::String(u.username.clone()))
+                .unwrap_or(serde_json::Value::Null));
+        Ok(record)
+    }
 }
 
 /// Enrich the generated `transaction_type_explained` on the View directly.

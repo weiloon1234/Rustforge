@@ -5,217 +5,178 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{Page, renumber_placeholders};
 use core_db::common::collection::TypedCollectionExt;
 const HAS_CREATED_AT: bool = true;
-const HAS_UPDATED_AT: bool = true;
-const HAS_SOFT_DELETE: bool = true;
+const HAS_UPDATED_AT: bool = false;
+const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
-pub struct AttachmentRow {
-    pub id: uuid::Uuid,
-    pub owner_type: String,
-    pub owner_id: i64,
-    pub field: String,
-    pub path: String,
-    pub content_type: String,
-    pub size: i64,
-    pub width: Option<i32>,
-    pub height: Option<i32>,
+pub struct SqlProfilerQueryRow {
+    pub id: i64,
+    pub request_id: uuid::Uuid,
+    pub table_name: String,
+    pub operation: String,
+    pub sql: String,
+    pub binds: String,
+    pub duration_us: i64,
     #[serde(with = "time::serde::rfc3339")]
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339")]
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339::option")]
-    #[schemars(with = "String")]
-    pub deleted_at: Option<time::OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AttachmentView {
-    pub id: uuid::Uuid,
-    pub owner_type: String,
-    pub owner_id: i64,
-    pub field: String,
-    pub path: String,
-    pub content_type: String,
-    pub size: i64,
-    pub width: Option<i32>,
-    pub height: Option<i32>,
+pub struct SqlProfilerQueryView {
+    pub id: i64,
+    pub request_id: uuid::Uuid,
+    pub table_name: String,
+    pub operation: String,
+    pub sql: String,
+    pub binds: String,
+    pub duration_us: i64,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub deleted_at: Option<time::OffsetDateTime>,
 }
 
-impl AttachmentView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> AttachmentUpdate<'db> {
-        Attachment::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
+impl SqlProfilerQueryView {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> SqlProfilerQueryUpdate<'db> {
+        SqlProfilerQuery::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
     }
-    pub fn update_with<'db>(&self, model: &Attachment<'db>) -> AttachmentUpdate<'db> {
+    pub fn update_with<'db>(&self, model: &SqlProfilerQuery<'db>) -> SqlProfilerQueryUpdate<'db> {
         model.update().where_id(Op::Eq, self.id.clone())
     }
-    pub fn to_json(&self) -> AttachmentJson {
-        AttachmentJson {
+    pub fn to_json(&self) -> SqlProfilerQueryJson {
+        SqlProfilerQueryJson {
             id: self.id.clone(),
-            owner_type: self.owner_type.clone(),
-            owner_id: self.owner_id.clone(),
-            field: self.field.clone(),
-            path: self.path.clone(),
-            content_type: self.content_type.clone(),
-            size: self.size.clone(),
-            width: self.width.clone(),
-            height: self.height.clone(),
+            request_id: self.request_id.clone(),
+            table_name: self.table_name.clone(),
+            operation: self.operation.clone(),
+            sql: self.sql.clone(),
+            binds: self.binds.clone(),
+            duration_us: self.duration_us.clone(),
             created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            deleted_at: self.deleted_at.clone(),
         }
     }
 }
 
-pub trait AttachmentViewsExt {
-    fn ids(&self) -> Vec<uuid::Uuid>;
-    fn pluck<R>(&self, f: impl Fn(&AttachmentView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&AttachmentView) -> K) -> std::collections::HashMap<K, AttachmentView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&AttachmentView) -> K) -> std::collections::HashMap<K, Vec<AttachmentView>> where K: Eq + std::hash::Hash;
+pub trait SqlProfilerQueryViewsExt {
+    fn ids(&self) -> Vec<i64>;
+    fn pluck<R>(&self, f: impl Fn(&SqlProfilerQueryView) -> R) -> Vec<R>;
+    fn key_by<K>(&self, f: impl Fn(&SqlProfilerQueryView) -> K) -> std::collections::HashMap<K, SqlProfilerQueryView> where K: Eq + std::hash::Hash;
+    fn group_by<K>(&self, f: impl Fn(&SqlProfilerQueryView) -> K) -> std::collections::HashMap<K, Vec<SqlProfilerQueryView>> where K: Eq + std::hash::Hash;
 }
 
-impl AttachmentViewsExt for Vec<AttachmentView> {
-    fn ids(&self) -> Vec<uuid::Uuid> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&AttachmentView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&AttachmentView) -> K) -> std::collections::HashMap<K, AttachmentView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&AttachmentView) -> K) -> std::collections::HashMap<K, Vec<AttachmentView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
+impl SqlProfilerQueryViewsExt for Vec<SqlProfilerQueryView> {
+    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
+    fn pluck<R>(&self, f: impl Fn(&SqlProfilerQueryView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
+    fn key_by<K>(&self, f: impl Fn(&SqlProfilerQueryView) -> K) -> std::collections::HashMap<K, SqlProfilerQueryView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
+    fn group_by<K>(&self, f: impl Fn(&SqlProfilerQueryView) -> K) -> std::collections::HashMap<K, Vec<SqlProfilerQueryView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
-pub struct AttachmentJson {
-    pub id: uuid::Uuid,
-    pub owner_type: String,
-    pub owner_id: i64,
-    pub field: String,
-    pub path: String,
-    pub content_type: String,
-    pub size: i64,
-    pub width: Option<i32>,
-    pub height: Option<i32>,
+pub struct SqlProfilerQueryJson {
+    pub id: i64,
+    pub request_id: uuid::Uuid,
+    pub table_name: String,
+    pub operation: String,
+    pub sql: String,
+    pub binds: String,
+    pub duration_us: i64,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub deleted_at: Option<time::OffsetDateTime>,
 }
 
-fn hydrate_view(row: AttachmentRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> AttachmentView {
-    let view = AttachmentView {
+fn hydrate_view(row: SqlProfilerQueryRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> SqlProfilerQueryView {
+    let view = SqlProfilerQueryView {
         id: row.id,
-        owner_type: row.owner_type,
-        owner_id: row.owner_id,
-        field: row.field,
-        path: row.path,
-        content_type: row.content_type,
-        size: row.size,
-        width: row.width,
-        height: row.height,
+        request_id: row.request_id,
+        table_name: row.table_name,
+        operation: row.operation,
+        sql: row.sql,
+        binds: row.binds,
+        duration_us: row.duration_us,
         created_at: row.created_at,
-        updated_at: row.updated_at,
-        deleted_at: row.deleted_at,
     };
     view
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[doc(hidden)]
-pub struct AttachmentWithRelations {
+pub struct SqlProfilerQueryWithRelations {
     #[serde(flatten)]
-    pub row: AttachmentView,
+    pub row: SqlProfilerQueryView,
 }
 
-impl AttachmentWithRelations {
-    pub fn into_row(self) -> AttachmentView { self.row }
+impl SqlProfilerQueryWithRelations {
+    pub fn into_row(self) -> SqlProfilerQueryView { self.row }
 }
 
-impl std::ops::Deref for AttachmentWithRelations {
-    type Target = AttachmentView;
+impl std::ops::Deref for SqlProfilerQueryWithRelations {
+    type Target = SqlProfilerQueryView;
     fn deref(&self) -> &Self::Target { &self.row }
 }
 
-impl std::ops::DerefMut for AttachmentWithRelations {
+impl std::ops::DerefMut for SqlProfilerQueryWithRelations {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum AttachmentCol {
+pub enum SqlProfilerQueryCol {
     Id,
-    OwnerType,
-    OwnerId,
-    Field,
-    Path,
-    ContentType,
-    Size,
-    Width,
-    Height,
+    RequestId,
+    TableName,
+    Operation,
+    Sql,
+    Binds,
+    DurationUs,
     CreatedAt,
-    UpdatedAt,
-    DeletedAt,
 }
 
-impl AttachmentCol {
-    pub const fn all() -> &'static [AttachmentCol] {
-        &[AttachmentCol::Id, AttachmentCol::OwnerType, AttachmentCol::OwnerId, AttachmentCol::Field, AttachmentCol::Path, AttachmentCol::ContentType, AttachmentCol::Size, AttachmentCol::Width, AttachmentCol::Height, AttachmentCol::CreatedAt, AttachmentCol::UpdatedAt, AttachmentCol::DeletedAt]
+impl SqlProfilerQueryCol {
+    pub const fn all() -> &'static [SqlProfilerQueryCol] {
+        &[SqlProfilerQueryCol::Id, SqlProfilerQueryCol::RequestId, SqlProfilerQueryCol::TableName, SqlProfilerQueryCol::Operation, SqlProfilerQueryCol::Sql, SqlProfilerQueryCol::Binds, SqlProfilerQueryCol::DurationUs, SqlProfilerQueryCol::CreatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            AttachmentCol::Id => "id",
-            AttachmentCol::OwnerType => "owner_type",
-            AttachmentCol::OwnerId => "owner_id",
-            AttachmentCol::Field => "field",
-            AttachmentCol::Path => "path",
-            AttachmentCol::ContentType => "content_type",
-            AttachmentCol::Size => "size",
-            AttachmentCol::Width => "width",
-            AttachmentCol::Height => "height",
-            AttachmentCol::CreatedAt => "created_at",
-            AttachmentCol::UpdatedAt => "updated_at",
-            AttachmentCol::DeletedAt => "deleted_at",
+            SqlProfilerQueryCol::Id => "id",
+            SqlProfilerQueryCol::RequestId => "request_id",
+            SqlProfilerQueryCol::TableName => "table_name",
+            SqlProfilerQueryCol::Operation => "operation",
+            SqlProfilerQueryCol::Sql => "sql",
+            SqlProfilerQueryCol::Binds => "binds",
+            SqlProfilerQueryCol::DurationUs => "duration_us",
+            SqlProfilerQueryCol::CreatedAt => "created_at",
         }
     }
 }
 
-pub struct Attachment<'db> {
+pub struct SqlProfilerQuery<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
 }
 
-impl<'db> Attachment<'db> {
-    pub const TABLE: &'static str = "attachments";
+impl<'db> SqlProfilerQuery<'db> {
+    pub const TABLE: &'static str = "sql_profiler_queries";
     pub const PK: &'static str = "id";
     pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> AttachmentQuery<'db> { AttachmentQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> AttachmentInsert<'db> { AttachmentInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> AttachmentUpdate<'db> { AttachmentUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: uuid::Uuid) -> Result<Option<AttachmentWithRelations>> {
+    pub fn query(&self) -> SqlProfilerQueryQuery<'db> { SqlProfilerQueryQuery::new(self.db.clone(), self.base_url.clone()) }
+    pub fn insert(&self) -> SqlProfilerQueryInsert<'db> { SqlProfilerQueryInsert::new(self.db.clone(), self.base_url.clone()) }
+    pub fn update(&self) -> SqlProfilerQueryUpdate<'db> { SqlProfilerQueryUpdate::new(self.db.clone(), self.base_url.clone()) }
+    pub async fn find(&self, id: i64) -> Result<Option<SqlProfilerQueryWithRelations>> {
         self.query().find(id).await
     }
-    pub async fn delete(&self, id: uuid::Uuid) -> Result<u64> {
+    pub async fn delete(&self, id: i64) -> Result<u64> {
         self.query().where_id(Op::Eq, id).delete().await
-    }
-    pub async fn restore(&self, id: uuid::Uuid) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).restore().await
     }
 }
 
 #[derive(Clone)]
-pub struct AttachmentQuery<'db> {
+pub struct SqlProfilerQueryQuery<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -234,164 +195,114 @@ pub struct AttachmentQuery<'db> {
     offset: Option<i64>,
     limit: Option<i64>,
     binds: Vec<BindValue>,
-    with_deleted: bool,
-    only_deleted: bool,
 }
 
 
 
-impl<'db> AttachmentQuery<'db> {
+impl<'db> SqlProfilerQueryQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![], with_deleted: false, only_deleted: false }
+        Self { db, base_url, select_sql: Some("id, request_id, table_name, operation, sql, binds, duration_us, created_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> AttachmentUnsafeQuery<'db> { AttachmentUnsafeQuery::new(self) }
-    pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
+    pub fn unsafe_sql(self) -> SqlProfilerQueryUnsafeQuery<'db> { SqlProfilerQueryUnsafeQuery::new(self) }
+    pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_owner_type(mut self, op: Op, val: String) -> Self {
+    pub fn where_request_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::RequestId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_owner_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_request_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::RequestId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
+    pub fn where_table_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::TableName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_owner_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_table_name_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::TableName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_field(mut self, op: Op, val: String) -> Self {
+    pub fn where_operation(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Field.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Operation.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_field_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_operation_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Field.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Operation.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_path(mut self, op: Op, val: String) -> Self {
+    pub fn where_sql(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Path.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Sql.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_path_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_sql_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Path.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Sql.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_content_type(mut self, op: Op, val: String) -> Self {
+    pub fn where_binds(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::ContentType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Binds.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_content_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_binds_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::ContentType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Binds.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_size(mut self, op: Op, val: i64) -> Self {
+    pub fn where_duration_us(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Size.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::DurationUs.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_size_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+    pub fn where_duration_us_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Size.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_width(mut self, op: Op, val: Option<i32>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Width.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_width_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Width.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_height(mut self, op: Op, val: Option<i32>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Height.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_height_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Height.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::DurationUs.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::DeletedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_deleted_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::DeletedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_key(self, id: uuid::Uuid) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(AttachmentCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AttachmentCol, op: Op, val: T) -> Self {
+    pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(SqlProfilerQueryCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: SqlProfilerQueryCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -410,7 +321,7 @@ impl<'db> AttachmentQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: AttachmentCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: SqlProfilerQueryCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -425,7 +336,7 @@ impl<'db> AttachmentQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: AttachmentCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: SqlProfilerQueryCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -437,7 +348,7 @@ impl<'db> AttachmentQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: AttachmentCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: SqlProfilerQueryCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -445,15 +356,15 @@ impl<'db> AttachmentQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: AttachmentCol) -> Self {
+    pub fn where_null(mut self, col: SqlProfilerQueryCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: AttachmentCol) -> Self {
+    pub fn where_not_null(mut self, col: SqlProfilerQueryCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: AttachmentCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: SqlProfilerQueryCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -507,23 +418,23 @@ impl<'db> AttachmentQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[AttachmentCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[SqlProfilerQueryCol]) -> Self {
         if cols.is_empty() {
-            self.select_sql = Some("id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".to_string());
+            self.select_sql = Some("id, request_id, table_name, operation, sql, binds, duration_us, created_at".to_string());
         } else {
             let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect();
+            let mut list: Vec<String> = "id, request_id, table_name, operation, sql, binds, duration_us, created_at".split(',').map(|s| s.trim().to_string()).collect();
             for s in &list { seen.insert(s.clone()); }
             for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
             self.select_sql = Some(list.join(", "));
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[AttachmentCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[SqlProfilerQueryCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".split(',').map(|s| s.trim().to_string()).collect(),
+            _ => "id, request_id, table_name, operation, sql, binds, duration_us, created_at".split(',').map(|s| s.trim().to_string()).collect(),
         };
         for s in &list { seen.insert(s.clone()); }
         for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
@@ -533,16 +444,16 @@ impl<'db> AttachmentQuery<'db> {
     fn select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() {
-            self.select_sql = Some("id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".to_string());
+            self.select_sql = Some("id, request_id, table_name, operation, sql, binds, duration_us, created_at".to_string());
         } else {
-            self.select_sql = Some(format!("id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at, {}", s));
+            self.select_sql = Some(format!("id, request_id, table_name, operation, sql, binds, duration_us, created_at, {}", s));
         }
         self
     }
     fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".to_string());
+        let mut base = self.select_sql.take().unwrap_or_else(|| "id, request_id, table_name, operation, sql, binds, duration_us, created_at".to_string());
         if !base.is_empty() { base.push_str(", "); }
         base.push_str(&s);
         self.select_sql = Some(base);
@@ -600,26 +511,26 @@ impl<'db> AttachmentQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: AttachmentCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: SqlProfilerQueryCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: AttachmentCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: SqlProfilerQueryCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: AttachmentCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: SqlProfilerQueryCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[AttachmentCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[SqlProfilerQueryCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[AttachmentCol]) -> Self {
+    pub fn select(mut self, cols: &[SqlProfilerQueryCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -667,7 +578,7 @@ impl<'db> AttachmentQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[AttachmentCol]) -> Self {
+    pub fn group_by(mut self, cols: &[SqlProfilerQueryCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -694,8 +605,6 @@ impl<'db> AttachmentQuery<'db> {
         self.offset = Some(n);
         self
     }
-    pub fn with_deleted(mut self) -> Self { self.with_deleted = true; self }
-    pub fn only_deleted(mut self) -> Self { self.only_deleted = true; self }
 
 
 pub async fn get_as<T>(self) -> Result<Vec<T>>
@@ -709,7 +618,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -744,22 +653,15 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<AttachmentWithRelations>> {
-        let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , with_deleted, only_deleted, .. } = self;
+    pub async fn get(self) -> Result<Vec<SqlProfilerQueryWithRelations>> {
+        let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
-            }
-        }
         let select_clause = match (distinct, distinct_on.as_ref()) {
             (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
         let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
         if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
         if !where_sql.is_empty() {
@@ -788,106 +690,92 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         }
         if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
         let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).chain(having_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_as::<_, AttachmentRow>(&sql);
+        let mut q = sqlx::query_as::<_, SqlProfilerQueryRow>(&sql);
         for b in binds {
             q = bind(q, b);
         }
         for b in join_binds { q = bind(q, b); }
         for b in having_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
-        record_profiled_query("attachments", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let ids: Vec<uuid::Uuid> = rows.iter().map(|r| r.id.clone()).collect();
+        let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
             out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let out_vec: Vec<AttachmentWithRelations> = out_vec.into_iter().map(|v| AttachmentWithRelations { row: v }).collect();
+        let out_vec: Vec<SqlProfilerQueryWithRelations> = out_vec.into_iter().map(|v| SqlProfilerQueryWithRelations { row: v }).collect();
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<AttachmentWithRelations>> {
+    pub async fn first(self) -> Result<Option<SqlProfilerQueryWithRelations>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<AttachmentWithRelations> {
-        self.first().await?.ok_or_else(|| anyhow::anyhow!("attachments: record not found"))
+    pub async fn first_or_fail(self) -> Result<SqlProfilerQueryWithRelations> {
+        self.first().await?.ok_or_else(|| anyhow::anyhow!("sql_profiler_queries: record not found"))
     }
 
-    pub async fn find(self, id: uuid::Uuid) -> Result<Option<AttachmentWithRelations>> {
+    pub async fn find(self, id: i64) -> Result<Option<SqlProfilerQueryWithRelations>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<AttachmentWithRelations> {
-        self.find(id).await?.ok_or_else(|| anyhow::anyhow!("attachments: record not found"))
+    pub async fn find_or_fail(self, id: i64) -> Result<SqlProfilerQueryWithRelations> {
+        self.find(id).await?.ok_or_else(|| anyhow::anyhow!("sql_profiler_queries: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(AttachmentInsert<'db>) -> AttachmentInsert<'db>) -> Result<AttachmentWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(SqlProfilerQueryInsert<'db>) -> SqlProfilerQueryInsert<'db>) -> Result<SqlProfilerQueryWithRelations> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(AttachmentInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(SqlProfilerQueryInsert::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Attachment::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        SqlProfilerQuery::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(AttachmentUpdate<'db>) -> AttachmentUpdate<'db>,
-        on_create: impl FnOnce(AttachmentInsert<'db>) -> AttachmentInsert<'db>,
-    ) -> Result<AttachmentWithRelations> {
+        on_update: impl FnOnce(SqlProfilerQueryUpdate<'db>) -> SqlProfilerQueryUpdate<'db>,
+        on_create: impl FnOnce(SqlProfilerQueryInsert<'db>) -> SqlProfilerQueryInsert<'db>,
+    ) -> Result<SqlProfilerQueryWithRelations> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = AttachmentUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = SqlProfilerQueryUpdate::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Attachment::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return SqlProfilerQuery::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(AttachmentInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(SqlProfilerQueryInsert::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Attachment::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        SqlProfilerQuery::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: AttachmentCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: SqlProfilerQueryCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
-        if HAS_SOFT_DELETE && !self.with_deleted {
-            where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
-        }
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("UPDATE attachments SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
+        let sql = format!("UPDATE sql_profiler_queries SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
         let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query(&sql);
         for b in binds { q = bind_query(q, b); }
         let res = db.execute(q).await?;
-        record_profiled_query("attachments", "UPDATE", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: AttachmentCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: SqlProfilerQueryCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
     pub async fn count(self) -> Result<i64> {
-        let Self { db, from_sql, count_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+        let Self { db, from_sql, count_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -897,26 +785,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let count_expr = count_sql.unwrap_or_else(|| "COUNT(*)".to_string());
         let sql = format!("SELECT {} {}{}", count_expr, from_clause, where_clause);
         let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_scalar::<_, i64>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let count = db.fetch_scalar(q).await?;
-        record_profiled_query("attachments", "COUNT", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(count)
     }
 
-    pub async fn pluck_ids(self) -> Result<Vec<uuid::Uuid>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds, order_sql, limit, offset , with_deleted, only_deleted , .. } = self;
+    pub async fn pluck_ids(self) -> Result<Vec<i64>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds, order_sql, limit, offset  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -928,12 +807,10 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let offset_clause = offset.map(|n| format!(" OFFSET {}", n)).unwrap_or_default();
         let sql = format!("SELECT id {}{}{}{}{}", from_clause, where_clause, order_clause, limit_clause, offset_clause);
         let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_scalar::<_, uuid::Uuid>(&sql);
+        let mut q = sqlx::query_scalar::<_, i64>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let ids = db.fetch_all_scalar(q).await?;
-        record_profiled_query("attachments", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(ids)
     }
 
@@ -943,13 +820,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<AttachmentWithRelations>) -> Fut,
+        F: FnMut(Vec<SqlProfilerQueryWithRelations>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = AttachmentQuery::new(db.clone(), self.base_url.clone());
+            let mut query = SqlProfilerQueryQuery::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -963,11 +840,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(AttachmentCol::CreatedAt, OrderDir::Desc)
+        self.order_by(SqlProfilerQueryCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(AttachmentCol::CreatedAt, OrderDir::Asc)
+        self.order_by(SqlProfilerQueryCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -978,7 +855,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<AttachmentWithRelations> {
+    pub async fn sole(self) -> Result<SqlProfilerQueryWithRelations> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -997,7 +874,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&AttachmentWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&SqlProfilerQueryWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -1005,17 +882,10 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: AttachmentCol) -> Result<Option<f64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+    pub async fn sum(self, col: SqlProfilerQueryCol) -> Result<Option<f64>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1024,26 +894,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let sql = format!("SELECT SUM({}::DOUBLE PRECISION) {}{}", col.as_sql(), from_clause, where_clause);
         let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_scalar::<_, Option<f64>>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let result = db.fetch_scalar(q).await?;
-        record_profiled_query("attachments", "SUM", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(result)
     }
 
-    pub async fn avg(self, col: AttachmentCol) -> Result<Option<f64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+    pub async fn avg(self, col: SqlProfilerQueryCol) -> Result<Option<f64>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1052,26 +913,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let sql = format!("SELECT AVG({}::DOUBLE PRECISION) {}{}", col.as_sql(), from_clause, where_clause);
         let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_scalar::<_, Option<f64>>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let result = db.fetch_scalar(q).await?;
-        record_profiled_query("attachments", "AVG", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(result)
     }
 
-    pub async fn min_val(self, col: AttachmentCol) -> Result<Option<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+    pub async fn min_val(self, col: SqlProfilerQueryCol) -> Result<Option<i64>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1080,26 +932,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let sql = format!("SELECT MIN({}) {}{}", col.as_sql(), from_clause, where_clause);
         let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_scalar::<_, Option<i64>>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let result = db.fetch_scalar(q).await?;
-        record_profiled_query("attachments", "MIN_VAL", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(result)
     }
 
-    pub async fn max_val(self, col: AttachmentCol) -> Result<Option<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
+    pub async fn max_val(self, col: SqlProfilerQueryCol) -> Result<Option<i64>> {
+        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
-            }
-        }
-        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1108,33 +951,24 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let sql = format!("SELECT MAX({}) {}{}", col.as_sql(), from_clause, where_clause);
         let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_scalar::<_, Option<i64>>(&sql);
         for b in binds { q = bind_scalar(q, b); }
         for b in join_binds { q = bind_scalar(q, b); }
         let result = db.fetch_scalar(q).await?;
-        record_profiled_query("attachments", "MAX_VAL", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<AttachmentWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<SqlProfilerQueryWithRelations>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
-        let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , with_deleted, only_deleted, .. } = self;
+        let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
-            }
-        }
         let select_clause = match (distinct, distinct_on.as_ref()) {
             (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
         let from_clause = if join_sql.is_empty() {
             format!("FROM {}", table_name)
         } else {
@@ -1148,12 +982,10 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
             format!("SELECT {} {}{}", count_expr, from_clause, where_clause)
         };
         let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
         let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
         for b in binds.iter().cloned() { count_q = bind_scalar(count_q, b); }
         for b in join_binds.iter().cloned() { count_q = bind_scalar(count_q, b); }
         let total: i64 = db.fetch_scalar(count_q).await?;
-        record_profiled_query("attachments", "COUNT", &count_sql, &__profiler_binds, __profiler_start.elapsed());
         let last_page = ((total + per_page - 1) / per_page).max(1);
         let current_page = page.min(last_page);
         let offset_val = (current_page - 1) * per_page;
@@ -1165,19 +997,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         sql.push_str(&format!(" OFFSET {}", offset_val));
         sql.push_str(&format!(" LIMIT {}", per_page));
         if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_as::<_, AttachmentRow>(&sql);
+        let mut q = sqlx::query_as::<_, SqlProfilerQueryRow>(&sql);
         for b in binds.iter().cloned() { q = bind(q, b); }
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
-        record_profiled_query("attachments", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let ids: Vec<uuid::Uuid> = rows.iter().map(|r| r.id.clone()).collect();
+        let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
             data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let data: Vec<AttachmentWithRelations> = data.into_iter().map(|v| AttachmentWithRelations { row: v }).collect();
+        let data: Vec<SqlProfilerQueryWithRelations> = data.into_iter().map(|v| SqlProfilerQueryWithRelations { row: v }).collect();
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn to_sql(&self) -> (String, Vec<BindValue>) {
@@ -1196,21 +1026,12 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let offset = self.offset;
         let limit = self.limit;
         let binds = self.binds.clone();
-        let with_deleted = self.with_deleted;
-        let only_deleted = self.only_deleted;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
-            }
-        }
         let select_clause = match (distinct, distinct_on.as_ref()) {
             (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
             (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
             (_, Some(col)) => format!("DISTINCT ON ({}) {}", col, select_sql.unwrap_or_else(|| "*".to_string())),
         };
-        let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
+        let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
         let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
         if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
         if !where_sql.is_empty() {
@@ -1245,79 +1066,25 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn into_where_parts(self) -> (Vec<String>, Vec<BindValue>) {
-        let Self { where_sql, binds, with_deleted, only_deleted, .. } = self;
+        let Self { where_sql, binds, .. } = self;
         let mut where_sql = where_sql;
-        if HAS_SOFT_DELETE {
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
-            }
-        }
         (where_sql, binds)
     }
     pub async fn delete(self) -> Result<u64> {
         if self.limit.is_some() {
             anyhow::bail!("delete() does not support limit; add where clauses");
         }
-        let Self { db, where_sql, binds, with_deleted, only_deleted, .. } = self;
+        let Self { db, where_sql, binds, .. } = self;
         if where_sql.is_empty() { anyhow::bail!("delete(): no conditions set"); }
         let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        if HAS_SOFT_DELETE {
-            let mut where_sql = where_sql;
-            if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
-            } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
-            }
-            let idx = binds.len() + 1;
-            let mut sql = format!("UPDATE attachments SET {} = ${}", AttachmentCol::DeletedAt.as_sql(), idx);
-            if !where_sql.is_empty() {
-                sql.push_str(" WHERE ");
-                sql.push_str(&where_sql.join(" AND "));
-            }
-            let __profiler_start = std::time::Instant::now();
-            let mut q = sqlx::query(&sql);
-            for b in binds { q = bind_query(q, b); }
-            q = bind_query(q, time::OffsetDateTime::now_utc().into());
-            let res = db.execute(q).await?;
-            record_profiled_query("attachments", "UPDATE", &sql, &__profiler_binds, __profiler_start.elapsed());
-            return Ok(res.rows_affected());
-        }
-        let mut sql = String::from("DELETE FROM attachments");
+        let mut sql = String::from("DELETE FROM sql_profiler_queries");
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&where_sql.join(" AND "));
         }
-        let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query(&sql);
         for b in binds { q = bind_query(q, b); }
         let res = db.execute(q).await?;
-        record_profiled_query("attachments", "DELETE", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(res.rows_affected())
-    }
-    pub async fn restore(self) -> Result<u64> {
-        if !HAS_SOFT_DELETE { anyhow::bail!("restore() not supported"); }
-        if self.limit.is_some() {
-            anyhow::bail!("restore() does not support limit; add where clauses");
-        }
-        let Self { db, where_sql, binds, with_deleted, only_deleted, .. } = self;
-        if where_sql.is_empty() { anyhow::bail!("restore(): no conditions set"); }
-        let mut where_sql = where_sql;
-        if !with_deleted && !only_deleted {
-            where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
-        }
-        let mut sql = format!("UPDATE attachments SET {} = NULL", AttachmentCol::DeletedAt.as_sql());
-        if !where_sql.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&where_sql.join(" AND "));
-        }
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query(&sql);
-        for b in binds { q = bind_query(q, b); }
-        let res = db.execute(q).await?;
-        record_profiled_query("attachments", "UPDATE", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(res.rows_affected())
     }
 }
@@ -1325,12 +1092,12 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 #[doc(hidden)]
-pub struct AttachmentUnsafeQuery<'db> {
-    inner: AttachmentQuery<'db>,
+pub struct SqlProfilerQueryUnsafeQuery<'db> {
+    inner: SqlProfilerQueryQuery<'db>,
 }
 
-impl<'db> AttachmentUnsafeQuery<'db> {
-    fn new(inner: AttachmentQuery<'db>) -> Self { Self { inner } }
+impl<'db> SqlProfilerQueryUnsafeQuery<'db> {
+    fn new(inner: SqlProfilerQueryQuery<'db>) -> Self { Self { inner } }
     pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
     pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
     pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
@@ -1342,20 +1109,20 @@ impl<'db> AttachmentUnsafeQuery<'db> {
     pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
     pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
     pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> AttachmentQuery<'db> { self.inner }
+    pub fn done(self) -> SqlProfilerQueryQuery<'db> { self.inner }
 }
 
 
-pub struct AttachmentInsert<'db> {
+pub struct SqlProfilerQueryInsert<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<AttachmentCol>,
+    cols: Vec<SqlProfilerQueryCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<AttachmentCol>,
+    conflict_cols: Vec<SqlProfilerQueryCol>,
 }
 
-impl<'db> AttachmentInsert<'db> {
+impl<'db> SqlProfilerQueryInsert<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1368,79 +1135,59 @@ impl<'db> AttachmentInsert<'db> {
     }
 
 
-pub fn set_id(mut self, val: uuid::Uuid) -> Self {
-        self.cols.push(AttachmentCol::Id);
+pub fn set_id(mut self, val: i64) -> Self {
+        self.cols.push(SqlProfilerQueryCol::Id);
         self.binds.push(val.into());
         self
     }
-    pub fn set_owner_type(mut self, val: String) -> Self {
-        self.cols.push(AttachmentCol::OwnerType);
+    pub fn set_request_id(mut self, val: uuid::Uuid) -> Self {
+        self.cols.push(SqlProfilerQueryCol::RequestId);
         self.binds.push(val.into());
         self
     }
-    pub fn set_owner_id(mut self, val: i64) -> Self {
-        self.cols.push(AttachmentCol::OwnerId);
+    pub fn set_table_name(mut self, val: String) -> Self {
+        self.cols.push(SqlProfilerQueryCol::TableName);
         self.binds.push(val.into());
         self
     }
-    pub fn set_field(mut self, val: String) -> Self {
-        self.cols.push(AttachmentCol::Field);
+    pub fn set_operation(mut self, val: String) -> Self {
+        self.cols.push(SqlProfilerQueryCol::Operation);
         self.binds.push(val.into());
         self
     }
-    pub fn set_path(mut self, val: String) -> Self {
-        self.cols.push(AttachmentCol::Path);
+    pub fn set_sql(mut self, val: String) -> Self {
+        self.cols.push(SqlProfilerQueryCol::Sql);
         self.binds.push(val.into());
         self
     }
-    pub fn set_content_type(mut self, val: String) -> Self {
-        self.cols.push(AttachmentCol::ContentType);
+    pub fn set_binds(mut self, val: String) -> Self {
+        self.cols.push(SqlProfilerQueryCol::Binds);
         self.binds.push(val.into());
         self
     }
-    pub fn set_size(mut self, val: i64) -> Self {
-        self.cols.push(AttachmentCol::Size);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn set_width(mut self, val: Option<i32>) -> Self {
-        self.cols.push(AttachmentCol::Width);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn set_height(mut self, val: Option<i32>) -> Self {
-        self.cols.push(AttachmentCol::Height);
+    pub fn set_duration_us(mut self, val: i64) -> Self {
+        self.cols.push(SqlProfilerQueryCol::DurationUs);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AttachmentCol::CreatedAt);
+        self.cols.push(SqlProfilerQueryCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AttachmentCol::UpdatedAt);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.cols.push(AttachmentCol::DeletedAt);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[AttachmentCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[SqlProfilerQueryCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[AttachmentCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[SqlProfilerQueryCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
 
 
-pub async fn save(self) -> Result<AttachmentView> {
+pub async fn save(self) -> Result<SqlProfilerQueryView> {
         let db_conn = self.db.clone();
         match db_conn {
             DbConn::Pool(pool) => {
@@ -1460,17 +1207,16 @@ pub async fn save(self) -> Result<AttachmentView> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<AttachmentView> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<SqlProfilerQueryView> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, AttachmentCol::CreatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(AttachmentCol::CreatedAt);
-            binds.push(now.into());
+        if !cols.iter().any(|c| matches!(c, SqlProfilerQueryCol::Id)) {
+            cols.push(SqlProfilerQueryCol::Id);
+            binds.push(generate_snowflake_i64().into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AttachmentCol::UpdatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, SqlProfilerQueryCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AttachmentCol::UpdatedAt);
+            cols.push(SqlProfilerQueryCol::CreatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1478,7 +1224,7 @@ pub async fn save(self) -> Result<AttachmentView> {
         }
         let col_sql: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         let placeholders: Vec<String> = (1..=binds.len()).map(|i| format!("${}", i)).collect();
-        let mut sql = format!("INSERT INTO {} ({}) VALUES ({})", "attachments", col_sql.join(", "), placeholders.join(", "));
+        let mut sql = format!("INSERT INTO {} ({}) VALUES ({})", "sql_profiler_queries", col_sql.join(", "), placeholders.join(", "));
         if let Some(action) = self.conflict_action {
             if !self.conflict_cols.is_empty() {
                 let conflict_col_sql: Vec<&'static str> = self.conflict_cols.iter().map(|c| c.as_sql()).collect();
@@ -1496,27 +1242,25 @@ pub async fn save(self) -> Result<AttachmentView> {
         }
         sql.push_str(" RETURNING *");
         let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_as::<_, AttachmentRow>(&sql);
+        let mut q = sqlx::query_as::<_, SqlProfilerQueryRow>(&sql);
         for b in binds {
             q = bind(q, b);
         }
         let row = db.fetch_one(q).await?;
-        record_profiled_query("attachments", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
         Ok(hydrate_view(row, &LocalizedMap::default(), self.base_url.as_deref()))
     }
 }
 
-pub struct AttachmentUpdate<'db> {
+pub struct SqlProfilerQueryUpdate<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(AttachmentCol, BindValue, SetMode)>,
+    sets: Vec<(SqlProfilerQueryCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> AttachmentUpdate<'db> {
+impl<'db> SqlProfilerQueryUpdate<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1526,146 +1270,106 @@ impl<'db> AttachmentUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> AttachmentUnsafeUpdate<'db> { AttachmentUnsafeUpdate::new(self) }
+    pub fn unsafe_sql(self) -> SqlProfilerQueryUnsafeUpdate<'db> { SqlProfilerQueryUnsafeUpdate::new(self) }
 
 
-pub fn set_id(mut self, val: uuid::Uuid) -> Self {
-        self.sets.push((AttachmentCol::Id, val.into(), SetMode::Assign));
+pub fn set_id(mut self, val: i64) -> Self {
+        self.sets.push((SqlProfilerQueryCol::Id, val.into(), SetMode::Assign));
         self
     }
-    pub fn set_owner_type(mut self, val: String) -> Self {
-        self.sets.push((AttachmentCol::OwnerType, val.into(), SetMode::Assign));
+    pub fn increment_id(mut self, val: i64) -> Self {
+        self.sets.push((SqlProfilerQueryCol::Id, val.into(), SetMode::Increment));
         self
     }
-    pub fn set_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((AttachmentCol::OwnerId, val.into(), SetMode::Assign));
+    pub fn decrement_id(mut self, val: i64) -> Self {
+        self.sets.push((SqlProfilerQueryCol::Id, val.into(), SetMode::Decrement));
         self
     }
-    pub fn increment_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((AttachmentCol::OwnerId, val.into(), SetMode::Increment));
+    pub fn set_request_id(mut self, val: uuid::Uuid) -> Self {
+        self.sets.push((SqlProfilerQueryCol::RequestId, val.into(), SetMode::Assign));
         self
     }
-    pub fn decrement_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((AttachmentCol::OwnerId, val.into(), SetMode::Decrement));
+    pub fn set_table_name(mut self, val: String) -> Self {
+        self.sets.push((SqlProfilerQueryCol::TableName, val.into(), SetMode::Assign));
         self
     }
-    pub fn set_field(mut self, val: String) -> Self {
-        self.sets.push((AttachmentCol::Field, val.into(), SetMode::Assign));
+    pub fn set_operation(mut self, val: String) -> Self {
+        self.sets.push((SqlProfilerQueryCol::Operation, val.into(), SetMode::Assign));
         self
     }
-    pub fn set_path(mut self, val: String) -> Self {
-        self.sets.push((AttachmentCol::Path, val.into(), SetMode::Assign));
+    pub fn set_sql(mut self, val: String) -> Self {
+        self.sets.push((SqlProfilerQueryCol::Sql, val.into(), SetMode::Assign));
         self
     }
-    pub fn set_content_type(mut self, val: String) -> Self {
-        self.sets.push((AttachmentCol::ContentType, val.into(), SetMode::Assign));
+    pub fn set_binds(mut self, val: String) -> Self {
+        self.sets.push((SqlProfilerQueryCol::Binds, val.into(), SetMode::Assign));
         self
     }
-    pub fn set_size(mut self, val: i64) -> Self {
-        self.sets.push((AttachmentCol::Size, val.into(), SetMode::Assign));
+    pub fn set_duration_us(mut self, val: i64) -> Self {
+        self.sets.push((SqlProfilerQueryCol::DurationUs, val.into(), SetMode::Assign));
         self
     }
-    pub fn increment_size(mut self, val: i64) -> Self {
-        self.sets.push((AttachmentCol::Size, val.into(), SetMode::Increment));
+    pub fn increment_duration_us(mut self, val: i64) -> Self {
+        self.sets.push((SqlProfilerQueryCol::DurationUs, val.into(), SetMode::Increment));
         self
     }
-    pub fn decrement_size(mut self, val: i64) -> Self {
-        self.sets.push((AttachmentCol::Size, val.into(), SetMode::Decrement));
-        self
-    }
-    pub fn set_width(mut self, val: Option<i32>) -> Self {
-        self.sets.push((AttachmentCol::Width, val.into(), SetMode::Assign));
-        self
-    }
-    pub fn set_height(mut self, val: Option<i32>) -> Self {
-        self.sets.push((AttachmentCol::Height, val.into(), SetMode::Assign));
+    pub fn decrement_duration_us(mut self, val: i64) -> Self {
+        self.sets.push((SqlProfilerQueryCol::DurationUs, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AttachmentCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((SqlProfilerQueryCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AttachmentCol::UpdatedAt, val.into(), SetMode::Assign));
-        self
-    }
-    pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((AttachmentCol::DeletedAt, val.into(), SetMode::Assign));
-        self
-    }
-    pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
+    pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_owner_type(mut self, op: Op, val: String) -> Self {
+    pub fn where_request_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::RequestId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
+    pub fn where_table_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::TableName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_field(mut self, op: Op, val: String) -> Self {
+    pub fn where_operation(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Field.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Operation.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_path(mut self, op: Op, val: String) -> Self {
+    pub fn where_sql(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Path.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Sql.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_content_type(mut self, op: Op, val: String) -> Self {
+    pub fn where_binds(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::ContentType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Binds.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_size(mut self, op: Op, val: i64) -> Self {
+    pub fn where_duration_us(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Size.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_width(mut self, op: Op, val: Option<i32>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Width.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_height(mut self, op: Op, val: Option<i32>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Height.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::DurationUs.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::DeletedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AttachmentCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: SqlProfilerQueryCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1713,15 +1417,9 @@ pub async fn save(self) -> Result<u64> {
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AttachmentCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(AttachmentCol::UpdatedAt);
-            set_binds.push(now.into());
-            set_modes.push(SetMode::Assign);
-        }
         // find target ids for localized updates
-        let select_sql = format!("SELECT id FROM attachments WHERE {}", self.where_sql.join(" AND "));
-        let mut select_q = sqlx::query_scalar::<_, uuid::Uuid>(&select_sql);
+        let select_sql = format!("SELECT id FROM sql_profiler_queries WHERE {}", self.where_sql.join(" AND "));
+        let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
         for b in &self.binds { select_q = bind_scalar(select_q, b.clone()); }
         let target_ids = db.fetch_all_scalar(select_q).await?;
         let mut parts: Vec<String> = Vec::new();
@@ -1742,7 +1440,7 @@ pub async fn save(self) -> Result<u64> {
             renumbered.push(renumber_placeholders(&clause, offset + 1));
         }
         where_sql = renumbered;
-        let mut sql = String::from("UPDATE attachments SET ");
+        let mut sql = String::from("UPDATE sql_profiler_queries SET ");
         sql.push_str(&parts.join(", "));
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
@@ -1750,43 +1448,37 @@ pub async fn save(self) -> Result<u64> {
         }
         let mut q = sqlx::query(&sql);
         let __profiler_binds = if is_sql_profiler_enabled() { set_binds.iter().chain(binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
         for b in &set_binds { q = bind_query(q, b.clone()); }
         for b in &binds { q = bind_query(q, b.clone()); }
         let res = db.execute(q).await?;
-        record_profiled_query("attachments", "UPDATE", &sql, &__profiler_binds, __profiler_start.elapsed());
         Ok(res.rows_affected())
     }
 }
 
 
 #[doc(hidden)]
-pub struct AttachmentUnsafeUpdate<'db> {
-    inner: AttachmentUpdate<'db>,
+pub struct SqlProfilerQueryUnsafeUpdate<'db> {
+    inner: SqlProfilerQueryUpdate<'db>,
 }
 
-impl<'db> AttachmentUnsafeUpdate<'db> {
-    fn new(inner: AttachmentUpdate<'db>) -> Self { Self { inner } }
+impl<'db> SqlProfilerQueryUnsafeUpdate<'db> {
+    fn new(inner: SqlProfilerQueryUpdate<'db>) -> Self { Self { inner } }
     pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> AttachmentUpdate<'db> { self.inner }
+    pub fn done(self) -> SqlProfilerQueryUpdate<'db> { self.inner }
 }
 
-pub struct AttachmentTableAdapter;
-impl AttachmentTableAdapter {
-    fn parse_col(name: &str) -> Option<AttachmentCol> {
+pub struct SqlProfilerQueryTableAdapter;
+impl SqlProfilerQueryTableAdapter {
+    fn parse_col(name: &str) -> Option<SqlProfilerQueryCol> {
         match name {
-            "id" => Some(AttachmentCol::Id),
-            "owner_type" => Some(AttachmentCol::OwnerType),
-            "owner_id" => Some(AttachmentCol::OwnerId),
-            "field" => Some(AttachmentCol::Field),
-            "path" => Some(AttachmentCol::Path),
-            "content_type" => Some(AttachmentCol::ContentType),
-            "size" => Some(AttachmentCol::Size),
-            "width" => Some(AttachmentCol::Width),
-            "height" => Some(AttachmentCol::Height),
-            "created_at" => Some(AttachmentCol::CreatedAt),
-            "updated_at" => Some(AttachmentCol::UpdatedAt),
-            "deleted_at" => Some(AttachmentCol::DeletedAt),
+            "id" => Some(SqlProfilerQueryCol::Id),
+            "request_id" => Some(SqlProfilerQueryCol::RequestId),
+            "table_name" => Some(SqlProfilerQueryCol::TableName),
+            "operation" => Some(SqlProfilerQueryCol::Operation),
+            "sql" => Some(SqlProfilerQueryCol::Sql),
+            "binds" => Some(SqlProfilerQueryCol::Binds),
+            "duration_us" => Some(SqlProfilerQueryCol::DurationUs),
+            "created_at" => Some(SqlProfilerQueryCol::CreatedAt),
             _ => None,
         }
     }
@@ -1800,29 +1492,25 @@ impl AttachmentTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<AttachmentCol> {
+    fn parse_like_col(name: &str) -> Option<SqlProfilerQueryCol> {
         match name {
-            "owner_type" => Some(AttachmentCol::OwnerType),
-            "field" => Some(AttachmentCol::Field),
-            "path" => Some(AttachmentCol::Path),
-            "content_type" => Some(AttachmentCol::ContentType),
+            "table_name" => Some(SqlProfilerQueryCol::TableName),
+            "operation" => Some(SqlProfilerQueryCol::Operation),
+            "sql" => Some(SqlProfilerQueryCol::Sql),
+            "binds" => Some(SqlProfilerQueryCol::Binds),
             _ => None,
         }
     }
     fn parse_bind_for_col(name: &str, raw: &str) -> Option<BindValue> {
         match name {
-            "id" => uuid::Uuid::parse_str(raw.trim()).ok().map(Into::into),
-            "owner_type" => Some(raw.trim().to_string().into()),
-            "owner_id" => raw.trim().parse::<i64>().ok().map(Into::into),
-            "field" => Some(raw.trim().to_string().into()),
-            "path" => Some(raw.trim().to_string().into()),
-            "content_type" => Some(raw.trim().to_string().into()),
-            "size" => raw.trim().parse::<i64>().ok().map(Into::into),
-            "width" => Some(Self::parse_bind(raw.trim())),
-            "height" => Some(Self::parse_bind(raw.trim())),
+            "id" => raw.trim().parse::<i64>().ok().map(Into::into),
+            "request_id" => uuid::Uuid::parse_str(raw.trim()).ok().map(Into::into),
+            "table_name" => Some(raw.trim().to_string().into()),
+            "operation" => Some(raw.trim().to_string().into()),
+            "sql" => Some(raw.trim().to_string().into()),
+            "binds" => Some(raw.trim().to_string().into()),
+            "duration_us" => raw.trim().parse::<i64>().ok().map(Into::into),
             "created_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            "updated_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            "deleted_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             _ => None,
         }
     }
@@ -1852,26 +1540,22 @@ impl AttachmentTableAdapter {
         None
     }
 }
-impl GeneratedTableAdapter for AttachmentTableAdapter {
-    type Query<'db> = AttachmentQuery<'db>;
-    type Row = AttachmentWithRelations;
-    fn model_key(&self) -> &'static str { "Attachment" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "owner_type", "owner_id", "field", "path", "content_type", "size", "width", "height", "created_at", "updated_at", "deleted_at"] }
-    fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at", "deleted_at"] }
+impl GeneratedTableAdapter for SqlProfilerQueryTableAdapter {
+    type Query<'db> = SqlProfilerQueryQuery<'db>;
+    type Row = SqlProfilerQueryWithRelations;
+    fn model_key(&self) -> &'static str { "SqlProfilerQuery" }
+    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "request_id", "table_name", "operation", "sql", "binds", "duration_us", "created_at"] }
+    fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at"] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
         &[
-            DataTableColumnDescriptor { name: "id", label: "ID", data_type: "uuid::Uuid", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "owner_type", label: "Owner Type", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "owner_id", label: "Owner ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "field", label: "Field", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "path", label: "Path", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "content_type", label: "Content Type", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "size", label: "Size", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "width", label: "Width", data_type: "Option<i32>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "height", label: "Height", data_type: "Option<i32>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "id", label: "ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "request_id", label: "Request ID", data_type: "uuid::Uuid", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "table_name", label: "Table Name", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "operation", label: "Operation", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "sql", label: "Sql", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "binds", label: "Binds", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "duration_us", label: "Duration Us", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "created_at", label: "Created At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
-            DataTableColumnDescriptor { name: "updated_at", label: "Updated At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
-            DataTableColumnDescriptor { name: "deleted_at", label: "Deleted At", data_type: "Option<time::OffsetDateTime>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
         ]
     }
     fn relation_column_descriptors(&self) -> &'static [DataTableRelationColumnDescriptor] {
@@ -1892,7 +1576,7 @@ impl GeneratedTableAdapter for AttachmentTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: AttachmentQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<AttachmentQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: SqlProfilerQueryQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<SqlProfilerQueryQuery<'db>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -1986,57 +1670,49 @@ impl GeneratedTableAdapter for AttachmentTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: AttachmentQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<AttachmentQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: SqlProfilerQueryQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<SqlProfilerQueryQuery<'db>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(AttachmentCol::Id, dir),
-            "owner_type" => query.order_by(AttachmentCol::OwnerType, dir),
-            "owner_id" => query.order_by(AttachmentCol::OwnerId, dir),
-            "field" => query.order_by(AttachmentCol::Field, dir),
-            "path" => query.order_by(AttachmentCol::Path, dir),
-            "content_type" => query.order_by(AttachmentCol::ContentType, dir),
-            "size" => query.order_by(AttachmentCol::Size, dir),
-            "width" => query.order_by(AttachmentCol::Width, dir),
-            "height" => query.order_by(AttachmentCol::Height, dir),
-            "created_at" => query.order_by(AttachmentCol::CreatedAt, dir),
-            "updated_at" => query.order_by(AttachmentCol::UpdatedAt, dir),
-            "deleted_at" => query.order_by(AttachmentCol::DeletedAt, dir),
+            "id" => query.order_by(SqlProfilerQueryCol::Id, dir),
+            "request_id" => query.order_by(SqlProfilerQueryCol::RequestId, dir),
+            "table_name" => query.order_by(SqlProfilerQueryCol::TableName, dir),
+            "operation" => query.order_by(SqlProfilerQueryCol::Operation, dir),
+            "sql" => query.order_by(SqlProfilerQueryCol::Sql, dir),
+            "binds" => query.order_by(SqlProfilerQueryCol::Binds, dir),
+            "duration_us" => query.order_by(SqlProfilerQueryCol::DurationUs, dir),
+            "created_at" => query.order_by(SqlProfilerQueryCol::CreatedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: AttachmentQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<AttachmentQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: SqlProfilerQueryQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<SqlProfilerQueryQuery<'db>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &AttachmentWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &SqlProfilerQueryWithRelations, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
-            "owner_type" => Some(row.owner_type.clone()),
-            "owner_id" => Some(row.owner_id.to_string()),
-            "field" => Some(row.field.clone()),
-            "path" => Some(row.path.clone()),
-            "content_type" => Some(row.content_type.clone()),
-            "size" => Some(row.size.to_string()),
-            "width" => row.width.as_ref().map(|v| v.to_string()),
-            "height" => row.height.as_ref().map(|v| v.to_string()),
+            "request_id" => Some(row.request_id.to_string()),
+            "table_name" => Some(row.table_name.clone()),
+            "operation" => Some(row.operation.clone()),
+            "sql" => Some(row.sql.clone()),
+            "binds" => Some(row.binds.clone()),
+            "duration_us" => Some(row.duration_us.to_string()),
             "created_at" => row.created_at.format(&time::format_description::well_known::Rfc3339).ok(),
-            "updated_at" => row.updated_at.format(&time::format_description::well_known::Rfc3339).ok(),
-            "deleted_at" => row.deleted_at.as_ref().and_then(|v| v.format(&time::format_description::well_known::Rfc3339).ok()),
             _ => None,
         }
     }
-    fn count<'db>(&self, query: AttachmentQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: SqlProfilerQueryQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: AttachmentQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<AttachmentWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: SqlProfilerQueryQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<SqlProfilerQueryWithRelations>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
 #[derive(Debug, Clone, Copy)]
-pub struct AttachmentDataTableConfig {
+pub struct SqlProfilerQueryDataTableConfig {
     pub default_sorting_column: &'static str,
     pub default_sorted: SortDirection,
     pub default_export_ignore_columns: &'static [&'static str],
@@ -2044,79 +1720,87 @@ pub struct AttachmentDataTableConfig {
     pub default_unsortable: &'static [&'static str],
     pub default_row_per_page: Option<i64>,
 }
-impl Default for AttachmentDataTableConfig {
+impl Default for SqlProfilerQueryDataTableConfig {
     fn default() -> Self {
         Self {
             default_sorting_column: "id",
             default_sorted: SortDirection::Desc,
             default_export_ignore_columns: &["actions", "action"],
-            default_timestamp_columns: &["created_at", "updated_at", "deleted_at"],
+            default_timestamp_columns: &["created_at"],
             default_unsortable: &[],
             default_row_per_page: None,
         }
     }
 }
-pub trait AttachmentDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: AttachmentQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> AttachmentQuery<'db> { query }
+pub trait SqlProfilerQueryDataTableHooks: Send + Sync + 'static {
+    fn scope<'db>(&'db self, query: SqlProfilerQueryQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> SqlProfilerQueryQuery<'db> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: AttachmentQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<AttachmentQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: AttachmentQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<AttachmentQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut AttachmentWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: AttachmentWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn filter_query<'db>(&'db self, _query: SqlProfilerQueryQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<SqlProfilerQueryQuery<'db>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: SqlProfilerQueryQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<SqlProfilerQueryQuery<'db>> { Ok(query) }
+    fn map_row(&self, _row: &mut SqlProfilerQueryWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: SqlProfilerQueryWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         let value = serde_json::to_value(row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
+        if let Some(id_value) = record.get("id").cloned() {
+            let id_text = match id_value {
+                serde_json::Value::Number(number) => number.to_string(),
+                serde_json::Value::String(text) => text,
+                other => other.to_string(),
+            };
+            record.insert("id".to_string(), serde_json::Value::String(id_text));
+        }
         Ok(record)
     }
-    fn row_to_record(&self, row: AttachmentWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: SqlProfilerQueryWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: AttachmentQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: SqlProfilerQueryQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
-pub struct AttachmentDefaultDataTableHooks;
-impl AttachmentDataTableHooks for AttachmentDefaultDataTableHooks {}
-pub struct AttachmentDataTable<H = AttachmentDefaultDataTableHooks> where H: AttachmentDataTableHooks {
+pub struct SqlProfilerQueryDefaultDataTableHooks;
+impl SqlProfilerQueryDataTableHooks for SqlProfilerQueryDefaultDataTableHooks {}
+pub struct SqlProfilerQueryDataTable<H = SqlProfilerQueryDefaultDataTableHooks> where H: SqlProfilerQueryDataTableHooks {
     pub db: sqlx::PgPool,
     pub hooks: H,
-    pub config: AttachmentDataTableConfig,
-    adapter: AttachmentTableAdapter,
+    pub config: SqlProfilerQueryDataTableConfig,
+    adapter: SqlProfilerQueryTableAdapter,
 }
-impl AttachmentDataTable<AttachmentDefaultDataTableHooks> {
+impl SqlProfilerQueryDataTable<SqlProfilerQueryDefaultDataTableHooks> {
     pub fn new(db: sqlx::PgPool) -> Self {
         Self {
             db,
-            hooks: AttachmentDefaultDataTableHooks,
-            config: AttachmentDataTableConfig::default(),
-            adapter: AttachmentTableAdapter,
+            hooks: SqlProfilerQueryDefaultDataTableHooks,
+            config: SqlProfilerQueryDataTableConfig::default(),
+            adapter: SqlProfilerQueryTableAdapter,
         }
     }
 }
-impl<H: AttachmentDataTableHooks> AttachmentDataTable<H> {
-    pub fn with_hooks<NH: AttachmentDataTableHooks>(self, hooks: NH) -> AttachmentDataTable<NH> {
-        AttachmentDataTable {
+impl<H: SqlProfilerQueryDataTableHooks> SqlProfilerQueryDataTable<H> {
+    pub fn with_hooks<NH: SqlProfilerQueryDataTableHooks>(self, hooks: NH) -> SqlProfilerQueryDataTable<NH> {
+        SqlProfilerQueryDataTable {
             db: self.db,
             hooks,
             config: self.config,
-            adapter: AttachmentTableAdapter,
+            adapter: SqlProfilerQueryTableAdapter,
         }
     }
-    pub fn with_config(mut self, config: AttachmentDataTableConfig) -> Self {
+    pub fn with_config(mut self, config: SqlProfilerQueryDataTableConfig) -> Self {
         self.config = config;
         self
     }
 }
-impl<H: AttachmentDataTableHooks> AutoDataTable for AttachmentDataTable<H> {
-    type Adapter = AttachmentTableAdapter;
+impl<H: SqlProfilerQueryDataTableHooks> AutoDataTable for SqlProfilerQueryDataTable<H> {
+    type Adapter = SqlProfilerQueryTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> AttachmentQuery<'db> {
-        self.hooks.scope(Attachment::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> SqlProfilerQueryQuery<'db> {
+        self.hooks.scope(SqlProfilerQuery::new(&self.db, None).query(), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: AttachmentQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<AttachmentQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: AttachmentQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<AttachmentQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut AttachmentWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: AttachmentWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: AttachmentQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: SqlProfilerQueryQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<SqlProfilerQueryQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: SqlProfilerQueryQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<SqlProfilerQueryQuery<'db>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut SqlProfilerQueryWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: SqlProfilerQueryWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: SqlProfilerQueryQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -2126,10 +1810,10 @@ impl<H: AttachmentDataTableHooks> AutoDataTable for AttachmentDataTable<H> {
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for AttachmentView {
-    type Id = uuid::Uuid;
+impl ActiveRecord for SqlProfilerQueryView {
+    type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Attachment::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        SqlProfilerQuery::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
     }
 }
 

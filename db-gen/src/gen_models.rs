@@ -3330,15 +3330,20 @@ fn render_model(
     if !localized_fields.is_empty() {
         writeln!(imports, "use core_i18n::current_locale;").unwrap();
     }
-    for rel in &relations {
-        let target_mod = to_snake(&rel.target_model);
-        let target_title = to_title_case(&rel.target_model);
-        writeln!(
-            imports,
-            "use crate::generated::models::{}::{{{}Col, {}Query, {}Row}};",
-            target_mod, target_title, target_title, target_title
-        )
-        .unwrap();
+    {
+        let mut imported_models = std::collections::BTreeSet::new();
+        for rel in &relations {
+            let target_mod = to_snake(&rel.target_model);
+            if imported_models.insert(target_mod.clone()) {
+                let target_title = to_title_case(&rel.target_model);
+                writeln!(
+                    imports,
+                    "use crate::generated::models::{}::{{{}Col, {}Query, {}Row}};",
+                    target_mod, target_title, target_title, target_title
+                )
+                .unwrap();
+            }
+        }
     }
     // Check if any field uses a custom type (not a built-in, no "::" in name)
     let builtin_types = [
@@ -4093,6 +4098,9 @@ fn render_model(
         let fn_name = format!("load_{}", to_snake(&rel.name));
         let target_title = to_title_case(&rel.target_model);
         let target_row = format!("{}Row", target_title);
+        let is_fk_optional = fields
+            .iter()
+            .any(|f| f.name == rel.foreign_key && f.ty.starts_with("Option<"));
         match rel.kind {
             RelationKind::HasMany => {
                 writeln!(out, "    pub async fn {fn_name}(&self, parents: &[{row_ident}]) -> Result<HashMap<{parent_pk_ty}, Vec<{target_row}>>> {{").unwrap();
@@ -4133,19 +4141,29 @@ fn render_model(
                 writeln!(out, "        let mut fk_vals = Vec::new();").unwrap();
                 writeln!(out, "        let mut parent_pairs = Vec::new();").unwrap();
                 writeln!(out, "        for p in parents {{").unwrap();
-                writeln!(
-                    out,
-                    "            fk_vals.push(p.{fk}.clone());",
-                    fk = rel.foreign_key
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "            parent_pairs.push((p.{pk}.clone(), p.{fk}.clone()));",
-                    pk = pk,
-                    fk = rel.foreign_key
-                )
-                .unwrap();
+                if is_fk_optional {
+                    writeln!(
+                        out,
+                        "            if let Some(fk_val) = p.{fk}.clone() {{ fk_vals.push(fk_val); parent_pairs.push((p.{pk}.clone(), Some(fk_val))); }} else {{ parent_pairs.push((p.{pk}.clone(), None)); }}",
+                        fk = rel.foreign_key,
+                        pk = pk
+                    )
+                    .unwrap();
+                } else {
+                    writeln!(
+                        out,
+                        "            fk_vals.push(p.{fk}.clone());",
+                        fk = rel.foreign_key
+                    )
+                    .unwrap();
+                    writeln!(
+                        out,
+                        "            parent_pairs.push((p.{pk}.clone(), Some(p.{fk}.clone())));",
+                        pk = pk,
+                        fk = rel.foreign_key
+                    )
+                    .unwrap();
+                }
                 writeln!(out, "        }}").unwrap();
                 writeln!(
                     out,
@@ -4174,7 +4192,7 @@ fn render_model(
                 .unwrap();
                 writeln!(out, "        let mut out = HashMap::new();").unwrap();
                 writeln!(out, "        for (pid, fk) in parent_pairs {{").unwrap();
-                writeln!(out, "            out.insert(pid, by_pk.get(&fk).cloned());").unwrap();
+                writeln!(out, "            out.insert(pid, fk.and_then(|k| by_pk.get(&k).cloned()));").unwrap();
                 writeln!(out, "        }}").unwrap();
                 writeln!(out, "        Ok(out)").unwrap();
                 writeln!(out, "    }}").unwrap();

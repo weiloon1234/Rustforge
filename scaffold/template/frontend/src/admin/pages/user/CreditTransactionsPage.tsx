@@ -1,18 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import type {
   UserCreditTransactionDatatableRow,
-  BatchResolveOutput,
   AdminMeOutput,
 } from "@admin/types";
 import { PERMISSION, CREDIT_TYPES } from "@admin/types";
 import { CREDIT_TYPE_I18N } from "@admin/constants/enums";
-import type { ApiResponse } from "@shared/types";
 import {
   Button,
   DataTable,
-  type DataTablePostCallEvent,
   useAutoForm,
   useModalStore,
   alertSuccess,
@@ -109,46 +106,7 @@ export default function CreditTransactionsPage() {
   const account = useAuthStore((state) => state.account);
   const canManage = canManageCredits(account);
 
-  const [userMap, setUserMap] = useState<
-    Map<string, { username: string; name: string | null }>
-  >(new Map());
   const refreshRef = useRef<(() => void) | null>(null);
-
-  const handlePostCall = (
-    event: DataTablePostCallEvent<UserCreditTransactionDatatableRow>,
-  ) => {
-    if (!event.response || event.error) return;
-
-    const rows = event.response?.records ?? [];
-    const userIds = new Set<string>();
-    for (const row of rows) {
-      if (row.user_id) userIds.add(row.user_id);
-    }
-
-    const idsToResolve = [...userIds].filter((id) => !userMap.has(id));
-    if (idsToResolve.length > 0) {
-      void api
-        .post<ApiResponse<BatchResolveOutput>>("users/batch_resolve", {
-          ids: idsToResolve.map(Number),
-        })
-        .then((res) => {
-          const entries = res.data?.data?.entries ?? [];
-          setUserMap((prev) => {
-            const next = new Map(prev);
-            for (const entry of entries) {
-              next.set(String(entry.id), {
-                username: entry.username,
-                name: entry.name,
-              });
-            }
-            return next;
-          });
-        })
-        .catch(() => {
-          // silently ignore resolve errors
-        });
-    }
-  };
 
   const handleAdjust = (refresh: () => void) => {
     refreshRef.current = refresh;
@@ -190,11 +148,6 @@ export default function CreditTransactionsPage() {
     });
   };
 
-  const resolveUsername = (id: string | null): string => {
-    if (!id) return "\u2014";
-    return userMap.get(id)?.username ?? id;
-  };
-
   return (
     <DataTable<UserCreditTransactionDatatableRow>
       url="datatable/user_credit_transaction/query"
@@ -216,9 +169,9 @@ export default function CreditTransactionsPage() {
       }
       columns={[
         {
-          key: "user_id",
+          key: "user_username",
           label: t("User"),
-          render: (row) => resolveUsername(row.user_id),
+          render: (row) => row.user_username ?? row.user_id,
         },
         {
           key: "credit_type",
@@ -258,7 +211,6 @@ export default function CreditTransactionsPage() {
           render: (row) => formatDateTime(row.created_at),
         },
       ]}
-      onPostCall={handlePostCall}
     />
   );
 }

@@ -19,6 +19,10 @@ pub struct IntroducerChangeDatatableRow {
     pub to_user_id: SnowflakeId,
     pub admin_id: SnowflakeId,
     pub remark: Option<String>,
+    pub user_username: Option<String>,
+    pub from_username: Option<String>,
+    pub to_username: Option<String>,
+    pub admin_username: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

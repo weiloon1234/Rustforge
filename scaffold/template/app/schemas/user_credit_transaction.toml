@@ -37,3 +37,4 @@ fields = [
   "created_at:datetime",
   "updated_at:datetime"
 ]
+relations = ["user:belongs_to:user:user_id:id"]

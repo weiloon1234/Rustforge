@@ -10,5 +10,5 @@ export type UserCreditTransactionDatatableRow = { id: string, user_id: string, c
  * respecting current locale and interpolating dynamic `params`.
  * If `remark` is set, it overrides this value.
  */
-transaction_type_explained: string, related_key: string | null, remark: string | null, created_at: string, updated_at: string, };
+transaction_type_explained: string, related_key: string | null, remark: string | null, user_username: string | null, created_at: string, updated_at: string, };
 

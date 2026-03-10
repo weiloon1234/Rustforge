@@ -27,6 +27,7 @@ pub struct UserCreditTransactionDatatableRow {
     pub transaction_type_explained: String,
     pub related_key: Option<String>,
     pub remark: Option<String>,
+    pub user_username: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

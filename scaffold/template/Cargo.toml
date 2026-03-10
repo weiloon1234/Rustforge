@@ -35,3 +35,17 @@ core-notify = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "
 core-realtime = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 core-web = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 db-gen = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
+
+[patch."https://github.com/weiloon1234/Rustforge.git"]
+db-gen = { path = "../../db-gen" }
+bootstrap = { path = "../../bootstrap" }
+core-config = { path = "../../core-config" }
+core-db = { path = "../../core-db" }
+core-datatable = { path = "../../core-datatable" }
+core-mailer = { path = "../../core-mailer" }
+core-i18n = { path = "../../core-i18n" }
+core-jobs = { path = "../../core-jobs" }
+core-notify = { path = "../../core-notify" }
+core-realtime = { path = "../../core-realtime" }
+core-web = { path = "../../core-web" }
+rustforge-contract-macros = { path = "../../rustforge-contract-macros" }

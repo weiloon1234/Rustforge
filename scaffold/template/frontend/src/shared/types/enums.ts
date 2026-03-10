@@ -15,6 +15,20 @@ export const ADMIN_TYPES: ReadonlyArray<AdminType> = [
   "admin",
 ];
 
+export type AuditAction = "1" | "2" | "3";
+
+export const AUDIT_ACTION: Readonly<Record<string, AuditAction>> = {
+  _1: "1",
+  _2: "2",
+  _3: "3",
+};
+
+export const AUDIT_ACTIONS: ReadonlyArray<AuditAction> = [
+  "1",
+  "2",
+  "3",
+];
+
 export type AuthClientType = "web" | "mobile";
 
 export type ContentPageSystemFlag = "0" | "1";
@@ -63,7 +77,7 @@ export const CREDIT_TYPES: ReadonlyArray<CreditType> = [
   "2",
 ];
 
-export type Permission = "admin.read" | "admin.manage" | "content_page.read" | "content_page.manage" | "country.read" | "country.manage" | "user.read" | "user.manage" | "user.hierarchy" | "user.change_introducer" | "user.credit" | "export";
+export type Permission = "admin.read" | "admin.manage" | "content_page.read" | "content_page.manage" | "country.read" | "country.manage" | "user.read" | "user.manage" | "user.hierarchy" | "user.change_introducer" | "user.credit" | "audit_log.read" | "export";
 
 export interface PermissionMeta {
   key: Permission;
@@ -85,6 +99,7 @@ export const PERMISSION_META: ReadonlyArray<PermissionMeta> = [
   { key: "user.hierarchy", guard: "admin", label: "View User Hierarchy", group: "user", description: "Browse user referral tree and navigate downlines." },
   { key: "user.change_introducer", guard: "admin", label: "Change User Introducer", group: "user", description: "Change a user's introducer and view change logs." },
   { key: "user.credit", guard: "admin", label: "Manage User Credits", group: "user", description: "View credit transactions and adjust user balances." },
+  { key: "audit_log.read", guard: "admin", label: "Read Audit Logs", group: "audit_log", description: "View audit log datatable and inspect change details." },
   { key: "export", guard: "admin", label: "Export Data", group: "datatable", description: "Export datatable records as CSV." },
 ];
 
@@ -100,6 +115,7 @@ export const PERMISSIONS: ReadonlyArray<Permission> = [
   "user.hierarchy",
   "user.change_introducer",
   "user.credit",
+  "audit_log.read",
   "export",
 ];
 
@@ -115,6 +131,7 @@ export const PERMISSION: Readonly<Record<string, Permission>> = {
   USER_HIERARCHY: "user.hierarchy",
   USER_CHANGE_INTRODUCER: "user.change_introducer",
   USER_CREDIT: "user.credit",
+  AUDIT_LOG_READ: "audit_log.read",
   EXPORT: "export",
 };
 
@@ -130,6 +147,7 @@ export const PERMISSION_META_BY_KEY: Readonly<Record<Permission, PermissionMeta>
   "user.hierarchy": { key: "user.hierarchy", guard: "admin", label: "View User Hierarchy", group: "user", description: "Browse user referral tree and navigate downlines." },
   "user.change_introducer": { key: "user.change_introducer", guard: "admin", label: "Change User Introducer", group: "user", description: "Change a user's introducer and view change logs." },
   "user.credit": { key: "user.credit", guard: "admin", label: "Manage User Credits", group: "user", description: "View credit transactions and adjust user balances." },
+  "audit_log.read": { key: "audit_log.read", guard: "admin", label: "Read Audit Logs", group: "audit_log", description: "View audit log datatable and inspect change details." },
   "export": { key: "export", guard: "admin", label: "Export Data", group: "datatable", description: "Export datatable records as CSV." },
 };
 

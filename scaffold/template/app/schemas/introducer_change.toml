@@ -14,3 +14,9 @@ fields = [
   "created_at:datetime",
   "updated_at:datetime"
 ]
+relations = [
+  "user:belongs_to:user:user_id:id",
+  "from_user:belongs_to:user:from_user_id:id",
+  "to_user:belongs_to:user:to_user_id:id",
+  "admin:belongs_to:admin:admin_id:id"
+]
