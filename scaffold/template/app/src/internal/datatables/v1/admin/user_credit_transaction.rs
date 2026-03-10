@@ -1,6 +1,5 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
 use core_db::common::sql::Op;
-use core_i18n::t_args;
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
@@ -9,11 +8,12 @@ use core_web::openapi::ApiRouter;
 use generated::{
     models::{
         CreditTransactionType, CreditType, UserCreditTransactionDataTable,
-        UserCreditTransactionDataTableHooks, UserCreditTransactionQuery,
-        UserCreditTransactionView, UserCol,
+        UserCreditTransactionDataTableHooks, UserCreditTransactionQuery, UserCol,
     },
     permissions::Permission,
 };
+
+use crate::internal::extensions::user_credit_transaction::UserCreditTransactionViewExt;
 
 use crate::contracts::datatable::admin::user_credit_transaction::{
     AdminUserCreditTransactionDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
@@ -86,7 +86,7 @@ impl UserCreditTransactionDataTableHooks for UserCreditTransactionDataTableAppHo
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<()> {
-        enrich_transaction_type_explained(&mut *row);
+        row.enrich_transaction_type_explained();
         Ok(())
     }
 
@@ -104,52 +104,6 @@ impl UserCreditTransactionDataTableHooks for UserCreditTransactionDataTableAppHo
             row.admin.as_ref().map(|a| serde_json::Value::String(a.username.clone()))
                 .unwrap_or(serde_json::Value::Null));
         Ok(record)
-    }
-}
-
-/// Enrich the generated `transaction_type_explained` on the View directly.
-///
-/// Priority:
-/// - `custom_description == true` → use localized `custom_description_text` for current locale
-/// - `remark` non-empty → use remark as the explanation
-/// - `params` non-empty → re-translate with `t_args` to interpolate `:param` placeholders
-/// - otherwise → keep the generated `explained_label()` as-is
-fn enrich_transaction_type_explained(row: &mut UserCreditTransactionView) {
-    // Custom description takes highest priority
-    if row.custom_description {
-        if let Some(ref text) = row.custom_description_text {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                row.transaction_type_explained = trimmed.to_string();
-                return;
-            }
-        }
-    }
-
-    if let Some(ref remark) = row.remark {
-        let trimmed = remark.trim();
-        if !trimmed.is_empty() {
-            row.transaction_type_explained = trimmed.to_string();
-            return;
-        }
-    }
-
-    if let Some(serde_json::Value::Object(ref map)) = row.params {
-        if !map.is_empty() {
-            let args: Vec<(&str, String)> = map
-                .iter()
-                .map(|(k, v)| {
-                    let s = match v {
-                        serde_json::Value::String(s) => s.clone(),
-                        other => other.to_string(),
-                    };
-                    (k.as_str(), s)
-                })
-                .collect();
-            let refs: Vec<(&str, &str)> =
-                args.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            row.transaction_type_explained = t_args(row.transaction_type.i18n_key(), &refs);
-        }
     }
 }
 

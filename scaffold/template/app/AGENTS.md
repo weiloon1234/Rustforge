@@ -34,6 +34,7 @@ Generated outputs are produced from these inputs (plus build-time codegen) and c
 - `src/internal/workflows/` — business/domain logic.
 - `src/internal/datatables/` — datatable runtime wiring and hooks.
 - `src/internal/jobs/` — async worker jobs and schedules.
+- `src/internal/extensions/` — computed values and custom methods on generated View types.
 - `src/internal/middleware/` — custom request middleware.
 - `src/internal/realtime/` — websocket channel policy.
 - `src/validation/` — sync/async validation helpers.
