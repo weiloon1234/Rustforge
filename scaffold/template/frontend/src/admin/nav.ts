@@ -66,11 +66,6 @@ export const navigation: NavItem[] = [
         permissions: [PERMISSION.USER_HIERARCHY],
       },
       {
-        label: "Credit Transactions",
-        path: "/user/credit-transactions",
-        permissions: [PERMISSION.USER_CREDIT_READ, PERMISSION.USER_CREDIT_MANAGE],
-      },
-      {
         label: "Adjust Credits",
         path: "/user/adjust-credits",
         permissions: [PERMISSION.USER_CREDIT_MANAGE],

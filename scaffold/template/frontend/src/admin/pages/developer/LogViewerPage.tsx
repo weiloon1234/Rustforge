@@ -196,7 +196,7 @@ export default function LogViewerPage() {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <Select
           value={selectedFile}
           onChange={(e) => setSelectedFile(e.target.value)}
@@ -205,45 +205,46 @@ export default function LogViewerPage() {
             label: `${f.filename} (${formatBytes(f.size_bytes)})`,
           }))}
           placeholder={files.length === 0 ? t("No log files") : undefined}
-          containerClassName="min-w-[16rem]"
+          containerClassName="sm:min-w-[16rem] sm:max-w-[24rem]"
         />
-
-        <Button
-          type="button"
-          onClick={() => {
-            fetchFiles();
-            if (selectedFile) fetchContent(selectedFile);
-          }}
-          variant="secondary"
-          size="sm"
-          title={t("Refresh")}
-        >
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-          <span className="ml-1">{t("Refresh")}</span>
-        </Button>
-
-        {selectedFile && (
+        <div className="flex items-center gap-2">
           <Button
             type="button"
-            onClick={() => handleDelete(selectedFile)}
-            variant="danger"
+            onClick={() => {
+              fetchFiles();
+              if (selectedFile) fetchContent(selectedFile);
+            }}
+            variant="secondary"
             size="sm"
-            title={t("Delete")}
+            title={t("Refresh")}
           >
-            <Trash2 size={14} />
-            <span className="ml-1">{t("Delete")}</span>
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+            <span className="ml-1">{t("Refresh")}</span>
           </Button>
-        )}
+          {selectedFile && (
+            <Button
+              type="button"
+              onClick={() => handleDelete(selectedFile)}
+              variant="danger"
+              size="sm"
+              title={t("Delete")}
+            >
+              <Trash2 size={14} />
+              <span className="ml-1">{t("Delete")}</span>
+            </Button>
+          )}
+        </div>
+      </div>
 
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <Select
           value={minLevel}
           onChange={(e) => setMinLevel(e.target.value)}
           options={LOG_LEVELS.map((l) => ({ value: l, label: l }))}
           placeholder={t("All levels")}
-          containerClassName="min-w-[8rem]"
+          containerClassName="sm:min-w-[8rem] sm:max-w-[12rem]"
         />
-
-        <div className="relative ml-auto">
+        <div className="relative">
           <Search
             size={14}
             className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
@@ -253,7 +254,7 @@ export default function LogViewerPage() {
             placeholder={t("Filter logs...")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="rounded-lg border border-border bg-surface py-1.5 pl-8 pr-3 text-sm"
+            className="w-full rounded-lg border border-border bg-surface py-1.5 pl-8 pr-3 text-sm sm:w-auto"
           />
         </div>
       </div>
