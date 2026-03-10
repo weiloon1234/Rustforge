@@ -14,6 +14,7 @@ const ManageUsersPage = lazy(() => import("@admin/pages/user/ManageUsersPage"));
 const UserHierarchyPage = lazy(() => import("@admin/pages/user/UserHierarchyPage"));
 const IntroducerChangesPage = lazy(() => import("@admin/pages/user/IntroducerChangesPage"));
 const CreditTransactionsPage = lazy(() => import("@admin/pages/user/CreditTransactionsPage"));
+const AdjustCreditsPage = lazy(() => import("@admin/pages/user/AdjustCreditsPage"));
 const AuditLogsPage = lazy(() => import("@admin/pages/other/AuditLogsPage"));
 const HttpClientLogsPage = lazy(() => import("@admin/pages/developer/HttpClientLogsPage"));
 const WebhookLogsPage = lazy(() => import("@admin/pages/developer/WebhookLogsPage"));
@@ -45,6 +46,7 @@ export default function App() {
             <Route path="/user/manage" element={<ManageUsersPage />} />
             <Route path="/user/hierarchy" element={<UserHierarchyPage />} />
             <Route path="/user/credit-transactions" element={<CreditTransactionsPage />} />
+            <Route path="/user/adjust-credits" element={<AdjustCreditsPage />} />
             <Route path="/user/introducer-changes" element={<IntroducerChangesPage />} />
             <Route path="/developer/http-client-logs" element={<HttpClientLogsPage />} />
             <Route path="/developer/webhook-logs" element={<WebhookLogsPage />} />

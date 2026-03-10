@@ -68,7 +68,12 @@ export const navigation: NavItem[] = [
       {
         label: "Credit Transactions",
         path: "/user/credit-transactions",
-        permissions: [PERMISSION.USER_CREDIT],
+        permissions: [PERMISSION.USER_CREDIT_READ, PERMISSION.USER_CREDIT_MANAGE],
+      },
+      {
+        label: "Adjust Credits",
+        path: "/user/adjust-credits",
+        permissions: [PERMISSION.USER_CREDIT_MANAGE],
       },
       {
         label: "Introducer Changes",
