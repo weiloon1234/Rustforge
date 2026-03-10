@@ -575,6 +575,7 @@ fn ts_shared_types() -> &'static [&'static str] {
         "JsonPrimitive",
         "JsonValue",
         "LocaleCode",
+        "LocalizedInput",
         "LocalizedMap",
         "MetaMap",
         "MetaRecord",
@@ -672,6 +673,7 @@ fn shared_type_module(shared_type: &str) -> Option<&'static str> {
         | "JsonPrimitive"
         | "JsonValue"
         | "LocaleCode"
+        | "LocalizedInput"
         | "LocalizedMap"
         | "LocalizedText"
         | "MetaMap"
