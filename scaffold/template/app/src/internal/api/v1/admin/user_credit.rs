@@ -33,9 +33,8 @@ pub fn router(state: AppApiState) -> ApiRouter {
 async fn adjust_credit(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
-    req: ContractJson<AdminCreditAdjustInput>,
+    ContractJson(req): ContractJson<AdminCreditAdjustInput>,
 ) -> Result<ApiResponse<UserCreditTransactionOutput>, AppError> {
-    let req = req.0;
     let txn = workflow::adjust_credit(&state, auth.user.id, req).await?;
 
     Ok(ApiResponse::success(

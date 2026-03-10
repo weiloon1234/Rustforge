@@ -191,6 +191,71 @@ pub trait ResponseContract: Serialize + JsonSchema {}
 
 impl<T> ResponseContract for T where T: Serialize + JsonSchema {}
 
-/// Developer-friendly aliases for request extractors under the contract standard.
-pub type ContractJson<T> = ValidatedJson<T>;
-pub type AsyncContractJson<T> = AsyncValidatedJson<T>;
+/// Developer-friendly extractors for contract-validated JSON request bodies.
+///
+/// These are proper newtype wrappers (not aliases) so they can be destructured
+/// in handler signatures: `ContractJson(req): ContractJson<MyInput>`
+pub struct ContractJson<T>(pub T);
+
+impl<T, S> axum::extract::FromRequest<S> for ContractJson<T>
+where
+    T: serde::de::DeserializeOwned + validator::Validate,
+    S: Send + Sync,
+{
+    type Rejection = crate::error::AppError;
+
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let inner = ValidatedJson::<T>::from_request(req, state).await?;
+        Ok(ContractJson(inner.0))
+    }
+}
+
+impl<T> aide::OperationInput for ContractJson<T>
+where
+    T: schemars::JsonSchema,
+{
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        ValidatedJson::<T>::operation_input(ctx, operation);
+    }
+}
+
+pub struct AsyncContractJson<T>(pub T);
+
+impl<T, S> axum::extract::FromRequest<S> for AsyncContractJson<T>
+where
+    T: serde::de::DeserializeOwned
+        + validator::Validate
+        + crate::extract::validation::AsyncValidate
+        + Send
+        + Sync
+        + 'static,
+    S: Send + Sync + crate::extract::validated_json::GetDb,
+{
+    type Rejection = crate::error::AppError;
+
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let inner = AsyncValidatedJson::<T>::from_request(req, state).await?;
+        Ok(AsyncContractJson(inner.0))
+    }
+}
+
+impl<T> aide::OperationInput for AsyncContractJson<T>
+where
+    T: schemars::JsonSchema,
+{
+    fn operation_input(
+        ctx: &mut aide::generate::GenContext,
+        operation: &mut aide::openapi::Operation,
+    ) {
+        AsyncValidatedJson::<T>::operation_input(ctx, operation);
+    }
+}
