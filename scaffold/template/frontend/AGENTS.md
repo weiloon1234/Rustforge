@@ -302,7 +302,8 @@ make gen          # Code generation + type generation
 | `time::OffsetDateTime` | `string` | Use `#[ts(type = "string")]` (override-only case) |
 | `UsernameString` (newtype) | `string` | Auto via framework `TS` support |
 | `AdminType` (generated enum) | `AdminType` | Auto via generated enum `TS` support |
-| `generated::LocalizedText` | `LocalizedText` | Shared localized payload alias |
+| `generated::LocalizedText` | `LocalizedText` | Shared localized output type |
+| `generated::LocalizedInput` | `LocalizedInput` | Shared localized input type (fields are `Option<String>`) |
 | `#[serde(skip)]` field | omitted | ts-rs respects serde attrs |
 
 ## State Management (Zustand)

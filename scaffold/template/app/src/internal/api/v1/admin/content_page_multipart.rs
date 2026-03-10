@@ -1,9 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use axum::extract::Multipart;
 use core_i18n::t;
 use core_web::error::AppError;
+use generated::localized::LocalizedInput;
 use uuid::Uuid;
+use validator::Validate;
 
 use crate::{
     contracts::api::v1::admin::content_page::AdminContentPageUpdateInput,
@@ -83,15 +85,34 @@ pub async fn parse_content_page_update_multipart(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| AppError::BadRequest(t("Missing required field: tag")))?;
 
-    ensure_default_locale("title", &title)?;
-    ensure_default_locale("content", &content)?;
+    // Sanitize HTML content before constructing input
+    let content: BTreeMap<String, String> = content
+        .into_iter()
+        .map(|(locale, value)| (locale, sanitize_rich_html(&value).trim().to_string()))
+        .collect();
 
-    Ok(AdminContentPageUpdateInput {
+    let title = LocalizedInput::from_map(&title);
+    let content = LocalizedInput::from_map(&content);
+    let cover = if cover.is_empty() {
+        None
+    } else {
+        Some(LocalizedInput::from_map(&cover))
+    };
+
+    let input = AdminContentPageUpdateInput {
         tag,
-        title: generated::LocalizedText::from_map(&title),
-        content: generated::LocalizedText::from_map(&content),
-        cover: generated::LocalizedText::from_map(&cover),
-    })
+        title,
+        content,
+        cover,
+    };
+    if let Err(e) = input.validate() {
+        let errors = core_web::extract::validation::transform_validation_errors(e);
+        return Err(AppError::Validation {
+            message: t("Validation failed"),
+            errors,
+        });
+    }
+    Ok(input)
 }
 
 async fn upload_content_page_cover(
@@ -212,23 +233,76 @@ fn normalize_locale(raw: &str) -> Result<&'static str, AppError> {
         .ok_or_else(|| AppError::BadRequest(t("Unsupported locale")))
 }
 
-fn ensure_default_locale(
-    field_label: &str,
-    values: &BTreeMap<String, String>,
-) -> Result<(), AppError> {
-    let default = generated::DEFAULT_LOCALE;
-    let has_value = values
-        .get(default)
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false);
-    if !has_value {
-        return Err(AppError::Validation {
-            message: t("Validation failed"),
-            errors: std::collections::HashMap::from([(
-                format!("{field_label}.{default}"),
-                vec![t("This field is required.")],
-            )]),
-        });
+fn sanitize_rich_html(input: &str) -> String {
+    let mut tag_attributes: HashMap<&str, HashSet<&str>> = HashMap::new();
+    tag_attributes.insert("a", HashSet::from(["href", "target"]));
+    tag_attributes.insert(
+        "img",
+        HashSet::from(["src", "alt", "title", "width", "height"]),
+    );
+    tag_attributes.insert("th", HashSet::from(["colspan", "rowspan"]));
+    tag_attributes.insert("td", HashSet::from(["colspan", "rowspan"]));
+    tag_attributes.insert("ul", HashSet::from(["data-type"]));
+    tag_attributes.insert("li", HashSet::from(["data-type", "data-checked"]));
+    tag_attributes.insert("input", HashSet::from(["type", "checked", "disabled"]));
+
+    let mut builder = ammonia::Builder::default();
+    builder
+        .tags(HashSet::from([
+            "p",
+            "br",
+            "ul",
+            "ol",
+            "li",
+            "h2",
+            "h3",
+            "strong",
+            "em",
+            "s",
+            "blockquote",
+            "code",
+            "pre",
+            "hr",
+            "a",
+            "u",
+            "mark",
+            "img",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "th",
+            "td",
+            "label",
+            "input",
+            "span",
+            "div",
+        ]))
+        .tag_attributes(tag_attributes)
+        .url_schemes(HashSet::from(["http", "https"]))
+        .url_relative(ammonia::UrlRelative::PassThrough)
+        .link_rel(Some("noopener noreferrer nofollow"))
+        .clean_content_tags(HashSet::from(["script", "style", "iframe"]));
+
+    builder.clean(input).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_rich_html;
+
+    #[test]
+    fn sanitize_rich_html_keeps_links_without_panicking() {
+        let output =
+            sanitize_rich_html(r#"<p><a href="https://example.com" target="_blank">x</a></p>"#);
+        assert!(output.contains("href=\"https://example.com\""));
+        assert!(output.contains("rel=\"noopener noreferrer nofollow\""));
     }
-    Ok(())
+
+    #[test]
+    fn sanitize_rich_html_removes_script() {
+        let output = sanitize_rich_html("<p>ok</p><script>alert('x')</script>");
+        assert!(output.contains("<p>ok</p>"));
+        assert!(!output.contains("script"));
+    }
 }

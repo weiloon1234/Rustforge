@@ -414,6 +414,14 @@ impl LocalizedInput {
     pub fn is_empty(&self) -> bool {
         self.en.is_none() && self.zh.is_none()
     }
+
+    /// Construct from a BTreeMap, treating empty/missing values as None.
+    pub fn from_map(map: &std::collections::BTreeMap<String, String>) -> Self {
+        Self {
+            en: map.get("en").filter(|s| !s.is_empty()).cloned(),
+            zh: map.get("zh").filter(|s| !s.is_empty()).cloned(),
+        }
+    }
 }
 
 impl validator::Validate for LocalizedInput {

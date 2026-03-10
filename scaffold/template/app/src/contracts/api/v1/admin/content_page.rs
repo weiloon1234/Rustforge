@@ -1,16 +1,46 @@
 use core_web::ids::SnowflakeId;
+use generated::localized::LocalizedInput;
 use generated::models::ContentPageSystemFlag;
 use schemars::JsonSchema;
 use serde::Serialize;
 use ts_rs::TS;
+use validator::Validate;
 
 #[derive(Debug, Clone, Default, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminContentPageUpdateInput {
     pub tag: String,
-    pub title: generated::LocalizedText,
-    pub content: generated::LocalizedText,
-    pub cover: generated::LocalizedText,
+    pub title: LocalizedInput,
+    pub content: LocalizedInput,
+    pub cover: Option<LocalizedInput>,
+}
+
+impl Validate for AdminContentPageUpdateInput {
+    fn validate(&self) -> Result<(), validator::ValidationErrors> {
+        let mut errors = validator::ValidationErrors::new();
+        let required =
+            || validator::ValidationError::new("required")
+                .with_message(std::borrow::Cow::Borrowed("This field is required."));
+
+        if self.title.en.as_ref().map_or(true, |s| s.is_empty()) {
+            errors.add("title.en", required());
+        }
+        if self.title.zh.as_ref().map_or(true, |s| s.is_empty()) {
+            errors.add("title.zh", required());
+        }
+        if self.content.en.as_ref().map_or(true, |s| s.is_empty()) {
+            errors.add("content.en", required());
+        }
+        if self.content.zh.as_ref().map_or(true, |s| s.is_empty()) {
+            errors.add("content.zh", required());
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]

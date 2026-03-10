@@ -499,6 +499,19 @@ fn render_localized_text_from_map_fields(locales: &Locales) -> String {
         .join("\n")
 }
 
+fn render_localized_input_from_map_fields(locales: &Locales) -> String {
+    locales
+        .supported
+        .iter()
+        .map(|lang| {
+            format!(
+                "            {lang}: map.get(\"{lang}\").filter(|s| !s.is_empty()).cloned(),"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn render_localized_text_empty_fields(locales: &Locales) -> String {
     locales
         .supported
@@ -551,6 +564,7 @@ fn render_localized_input_section(locales: &Locales) -> String {
         .map(|lang| format!("self.{lang}.is_none()"))
         .collect::<Vec<_>>()
         .join(" && ");
+    let from_map_fields = render_localized_input_from_map_fields(locales);
     let default_locale = &locales.default;
     format!(
         r#"#[derive(Debug, Clone, Default, serde::Deserialize, schemars::JsonSchema)]
@@ -569,6 +583,13 @@ impl LocalizedInput {{
     /// Returns true if all locale values are None.
     pub fn is_empty(&self) -> bool {{
         {is_empty_checks}
+    }}
+
+    /// Construct from a BTreeMap, treating empty/missing values as None.
+    pub fn from_map(map: &std::collections::BTreeMap<String, String>) -> Self {{
+        Self {{
+{from_map_fields}
+        }}
     }}
 }}
 
@@ -599,6 +620,7 @@ impl ts_rs::TS for LocalizedInput {{
         fields = fields,
         to_map_lines = to_map_lines,
         is_empty_checks = is_empty_checks,
+        from_map_fields = from_map_fields,
         default_locale = default_locale,
     )
 }
