@@ -19,6 +19,7 @@ import {
 import { FileInput, type FilePreviewItem } from "@shared/components/FileInput";
 import { ContactInput } from "@shared/components/ContactInput";
 import { useLocaleStore } from "@shared/stores/locale";
+import { useTranslation } from "react-i18next";
 
 type InputFieldType =
   | "text"
@@ -297,6 +298,7 @@ export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, con
     onError,
   } = config;
 
+  const { t } = useTranslation();
   const availableLocales = useLocaleStore((s) => s.availableLocales);
   const resolveFields = typeof fieldsProp === "function" ? fieldsProp : () => fieldsProp;
   const [values, setValuesState] = useState<Record<string, string>>(() => {
@@ -452,7 +454,8 @@ export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, con
   const renderLocalizedField = useCallback((field: FieldDef<T>, locale: string): ReactElement => {
     const valueKey = `${field.name}.${locale}`;
     const errors = fieldErrors[valueKey];
-    const label = `${field.label} (${locale.toUpperCase()})`;
+    const localeName = t(`Locale ${locale.toUpperCase()}`);
+    const label = `${field.label} (${localeName})`;
 
     switch (field.type) {
       case "textarea":
@@ -519,7 +522,7 @@ export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, con
               <div key={field.name} style={style} className="space-y-3">
                 {availableLocales.map((locale) => (
                   <div key={locale} className="rounded-md border border-border p-3">
-                    <div className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">{locale}</div>
+                    <div className="mb-2 text-xs font-medium text-muted-foreground tracking-wide">{t(`Locale ${locale.toUpperCase()}`)}</div>
                     {renderLocalizedField(field, locale)}
                   </div>
                 ))}
