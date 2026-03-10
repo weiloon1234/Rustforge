@@ -6,6 +6,8 @@ import { ADJUSTABLE_CREDIT_TYPES } from "@admin/types";
 import { CREDIT_TYPE_I18N, ADJUSTABLE_CREDIT_TYPE_I18N } from "@admin/constants/enums";
 import {
   Button,
+  Checkbox,
+  TextInput,
   DataTable,
   useAutoForm,
   useModalStore,
@@ -13,6 +15,7 @@ import {
   alertError,
   formatDateTime,
 } from "@shared/components";
+import { useLocaleStore } from "@shared/stores/locale";
 import { api } from "@admin/api";
 
 function normalizeErrorMessage(error: unknown, fallback: string): string {
@@ -31,13 +34,20 @@ function AdjustCreditForm({
 }) {
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
+  const availableLocales = useLocaleStore((s) => s.availableLocales);
   const [useCustomDesc, setUseCustomDesc] = useState(false);
-  const [customDescEn, setCustomDescEn] = useState("");
-  const [customDescZh, setCustomDescZh] = useState("");
+  const [customDescValues, setCustomDescValues] = useState<Record<string, string>>({});
+
   const extraPayload = useMemo(() => {
     if (!useCustomDesc) return {};
-    return { custom_description: { en: customDescEn, zh: customDescZh } };
-  }, [useCustomDesc, customDescEn, customDescZh]);
+    const filtered: Record<string, string> = {};
+    for (const [locale, text] of Object.entries(customDescValues)) {
+      if (text.trim()) filtered[locale] = text.trim();
+    }
+    return Object.keys(filtered).length > 0
+      ? { custom_description: filtered }
+      : {};
+  }, [useCustomDesc, customDescValues]);
 
   const { submit, busy, form } = useAutoForm(api, {
     url: "users/credits/adjust",
@@ -79,8 +89,7 @@ function AdjustCreditForm({
       close();
       alertSuccess({ title: t("Success"), message: t("Credit adjusted") });
       setUseCustomDesc(false);
-      setCustomDescEn("");
-      setCustomDescZh("");
+      setCustomDescValues({});
       onCreated();
     },
     onError: (error) => {
@@ -98,43 +107,25 @@ function AdjustCreditForm({
   return (
     <form id={formId} onSubmit={submit}>
       {form}
-      <div className="rf-field mt-4">
-        <label className="flex items-center gap-2 text-sm font-medium">
-          <input
-            type="checkbox"
-            checked={useCustomDesc}
-            onChange={(e) => setUseCustomDesc(e.target.checked)}
-            className="rounded border-border"
-          />
-          {t("Custom Description")}
-        </label>
-      </div>
+      <Checkbox
+        label={t("Custom Description")}
+        checked={useCustomDesc}
+        onChange={(e) => setUseCustomDesc(e.target.checked)}
+        containerClassName="mt-4"
+      />
       {useCustomDesc && (
         <div className="space-y-3 mt-2">
-          <div className="rf-field">
-            <label className="block text-sm font-medium text-foreground mb-1">
-              {t("Custom Description")} (EN)
-            </label>
-            <input
-              type="text"
-              value={customDescEn}
-              onChange={(e) => setCustomDescEn(e.target.value)}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-              placeholder="English description"
+          {availableLocales.map((locale) => (
+            <TextInput
+              key={locale}
+              label={`${t("Custom Description")} (${locale.toUpperCase()})`}
+              value={customDescValues[locale] ?? ""}
+              onChange={(e) =>
+                setCustomDescValues((prev) => ({ ...prev, [locale]: e.target.value }))
+              }
+              placeholder={t("Locale :locale", { locale: locale.toUpperCase() })}
             />
-          </div>
-          <div className="rf-field">
-            <label className="block text-sm font-medium text-foreground mb-1">
-              {t("Custom Description")} (ZH)
-            </label>
-            <input
-              type="text"
-              value={customDescZh}
-              onChange={(e) => setCustomDescZh(e.target.value)}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-              placeholder="中文说明"
-            />
-          </div>
+          ))}
         </div>
       )}
     </form>
