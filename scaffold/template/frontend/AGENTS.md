@@ -215,7 +215,38 @@ function Greeting({ name }: { name: string }) {
 
 The key is the English text itself — if no translation is found, the key is the fallback.
 
-Permission labels are an explicit exception and must use permission keys from `app/permissions.toml` as i18n keys (for example `admin.read`, `country.manage`) instead of English label text keys.
+### `en.json` rules — do NOT add redundant entries
+
+**`en.json` must only contain entries where the key differs from the value.** Since the i18n key IS the English text and serves as the automatic fallback, entries like `"Submit": "Submit"` or `"Enter username": "Enter username"` are redundant and must NOT be added.
+
+Only add to `en.json` when:
+
+| Scenario | Example | Why it's needed |
+|---|---|---|
+| Key differs from displayed English | `"Adjust Credits": "User Credit Manage"` | Display text differs from key |
+| Non-English key needs English label | `"enum.credit_type.credit1": "Cash Point"` | Key is a code path, not English |
+| Permission key needs English label | `"admin.read": "Read Admins"` | Key is a permission code |
+| Locale name display | `"Locale EN": "English"` | Key is a code, not the display text |
+
+Never add to `en.json`:
+
+```jsonc
+// BAD — key === value, completely redundant:
+"Username": "Username",
+"Enter username": "Enter username",
+"Failed to update.": "Failed to update.",
+"Submit": "Submit",
+"Welcome :name": "Welcome :name"
+
+// These keys already ARE English — i18next returns the key as fallback.
+// Adding them just bloats the file with no effect.
+```
+
+`zh.json` (and other non-English locale files) must contain ALL keys since every key needs a translation.
+
+### Permission and enum labels
+
+Permission labels and enum labels use non-English keys (e.g., `admin.read`, `enum.credit_type.credit1`) — these MUST exist in both `en.json` and `zh.json` since the key itself is not displayable English.
 
 When permissions are added/updated:
 1. Add/update permission-key translations in both `i18n/en.json` and `i18n/zh.json` in the same change.
