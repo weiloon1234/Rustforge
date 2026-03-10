@@ -46,7 +46,6 @@ fields = [
   "params:Option<serde_json::Value>",
   "remark:Option<String>",
   "custom_description:bool",
-  "custom_description_text:Option<String>",
   "created_at:datetime",
   "updated_at:datetime"
 ]

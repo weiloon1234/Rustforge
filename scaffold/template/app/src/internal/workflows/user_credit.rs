@@ -43,11 +43,6 @@ pub async fn adjust_credit(
     };
 
     let has_custom_desc = req.custom_description.is_some();
-    let custom_desc_default = req
-        .custom_description
-        .as_ref()
-        .and_then(|m| m.get("en").or_else(|| m.values().next()))
-        .cloned();
 
     // Begin transaction scope — both operations share the same DB transaction
     let scope = DbConn::pool(&state.db).begin_scope().await.map_err(AppError::from)?;
@@ -64,7 +59,6 @@ pub async fn adjust_credit(
         .set_related_key(None)
         .set_remark(req.remark)
         .set_custom_description(has_custom_desc)
-        .set_custom_description_text(custom_desc_default)
         .save()
         .await
         .map_err(AppError::from)?;
