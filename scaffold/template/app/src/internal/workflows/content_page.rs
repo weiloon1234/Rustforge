@@ -44,8 +44,8 @@ pub async fn update(
         }
     }
 
-    let title_langs = localized_text_from_map(&title, true, "title")?;
-    let content_langs = localized_text_from_map(&content, true, "content")?;
+    let title_langs = localized_text_from_map(&title, "title")?;
+    let content_langs = localized_text_from_map(&content, "content")?;
 
     let mut update = ContentPage::new(DbConn::pool(&state.db), None)
         .update()
@@ -55,7 +55,7 @@ pub async fn update(
         .set_content_langs(content_langs);
 
     if has_cover_update {
-        let cover_langs = localized_text_from_map(&cover, false, "cover")?;
+        let cover_langs = localized_text_from_map(&cover, "cover")?;
         update = update.set_cover_langs(cover_langs);
     }
 
@@ -201,8 +201,7 @@ fn localized_text_to_map(
 
 fn localized_text_from_map(
     input: &BTreeMap<String, String>,
-    require_all_locales: bool,
-    field_label: &str,
+    _field_label: &str,
 ) -> Result<generated::LocalizedText, AppError> {
     let mut payload = BTreeMap::new();
     for &locale in generated::SUPPORTED_LOCALES {
@@ -210,14 +209,6 @@ fn localized_text_from_map(
             .get(locale)
             .map(|item| item.trim().to_string())
             .unwrap_or_default();
-        if require_all_locales && value.is_empty() {
-            return Err(AppError::BadRequest(format!(
-                "{}: {} ({})",
-                t("Missing localized value"),
-                field_label,
-                locale
-            )));
-        }
         payload.insert(locale.to_string(), value);
     }
 

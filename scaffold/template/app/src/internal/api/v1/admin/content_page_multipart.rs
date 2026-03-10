@@ -83,8 +83,8 @@ pub async fn parse_content_page_update_multipart(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| AppError::BadRequest(t("Missing required field: tag")))?;
 
-    ensure_required_locales("title", &title)?;
-    ensure_required_locales("content", &content)?;
+    ensure_default_locale("title", &title)?;
+    ensure_default_locale("content", &content)?;
 
     Ok(AdminContentPageUpdateInput {
         tag,
@@ -212,23 +212,23 @@ fn normalize_locale(raw: &str) -> Result<&'static str, AppError> {
         .ok_or_else(|| AppError::BadRequest(t("Unsupported locale")))
 }
 
-fn ensure_required_locales(
+fn ensure_default_locale(
     field_label: &str,
     values: &BTreeMap<String, String>,
 ) -> Result<(), AppError> {
-    for &locale in generated::SUPPORTED_LOCALES {
-        let has_value = values
-            .get(locale)
-            .map(|value| !value.trim().is_empty())
-            .unwrap_or(false);
-        if !has_value {
-            return Err(AppError::BadRequest(format!(
-                "{}: {} ({})",
-                t("Missing localized value"),
-                field_label,
-                locale
-            )));
-        }
+    let default = generated::DEFAULT_LOCALE;
+    let has_value = values
+        .get(default)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    if !has_value {
+        return Err(AppError::Validation {
+            message: t("Validation failed"),
+            errors: std::collections::HashMap::from([(
+                format!("{field_label}.{default}"),
+                vec![t("This field is required.")],
+            )]),
+        });
     }
     Ok(())
 }

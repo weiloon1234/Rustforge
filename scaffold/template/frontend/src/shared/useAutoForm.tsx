@@ -40,13 +40,13 @@ type AutoFormBodyType = "auto" | "json" | "multipart";
 type AutoFormDefaultValue = string | number | boolean | null | undefined | File | File[] | FilePreviewItem | FilePreviewItem[];
 
 // Shared props across all field types
-type FieldBase = { span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean };
+type FieldBase = { span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean; localized?: boolean };
 
 // Type-specific variants (without name — name is added via FieldIdentity)
 type FieldVariant =
-  | (FieldBase & { type: InputFieldType; label: string; placeholder?: string; localized?: boolean })
-  | (FieldBase & { type: RichEditorFieldType; label: string; placeholder?: string; editorPreset?: TiptapPreset; imageFolder?: string; localized?: boolean })
-  | (FieldBase & { type: "textarea"; label: string; placeholder?: string; rows?: number; localized?: boolean })
+  | (FieldBase & { type: InputFieldType; label: string; placeholder?: string })
+  | (FieldBase & { type: RichEditorFieldType; label: string; placeholder?: string; editorPreset?: TiptapPreset; imageFolder?: string })
+  | (FieldBase & { type: "textarea"; label: string; placeholder?: string; rows?: number })
   | (FieldBase & { type: "select"; label: string; options: SelectOption[]; placeholder?: string })
   | (FieldBase & { type: "checkbox"; label: string })
   | (FieldBase & { type: "checkboxGroup"; label: string; options: CheckboxGroupOption[]; columns?: number })
@@ -69,8 +69,18 @@ type ContactField = FieldBase & {
   phoneName?: string;
 };
 
+// Children inside a type: "localized" group — regular fields without span/localized
+type LocalizedChildField = Omit<FieldVariant, 'span' | 'localized'> & { name: string };
+
+// Compound field: groups children into locale sections (EN block / ZH block)
+type LocalizedGroupField = {
+  type: "localized";
+  children: LocalizedChildField[];
+  span?: 1 | 2;
+};
+
 // FieldDef<T>: intersection distributes over both unions → full type-safe field definitions
-type FieldDef<T = Record<string, unknown>> = (FieldVariant & FieldIdentity<T>) | ContactField;
+type FieldDef<T = Record<string, unknown>> = (FieldVariant & FieldIdentity<T>) | ContactField | LocalizedGroupField;
 
 interface AutoFormConfig<T = Record<string, unknown>> {
   url: string;
@@ -103,6 +113,8 @@ interface AutoFormResult {
 
 export type {
   FieldDef,
+  LocalizedGroupField,
+  LocalizedChildField,
   AutoFormConfig,
   AutoFormErrors,
   AutoFormResult,
@@ -161,13 +173,69 @@ function normalizeFilePreview(value: AutoFormDefaultValue): FilePreviewItem | nu
   return null;
 }
 
+function isLocalizedGroup(field: FieldDef<any>): field is LocalizedGroupField {
+  return field.type === "localized";
+}
+
 function isLocalizable(field: FieldDef<any>): field is FieldDef<any> & { localized: true } {
   return "localized" in field && field.localized === true;
+}
+
+function collectLocalizedFieldNames(fields: FieldDef<any>[]): Set<string> {
+  const names = new Set<string>();
+  for (const field of fields) {
+    if (isLocalizedGroup(field)) {
+      for (const child of field.children) names.add(child.name);
+    } else if (isLocalizable(field)) {
+      names.add(field.name);
+    }
+  }
+  return names;
 }
 
 function buildDefaults(fields: FieldDef<any>[], locales: string[], defaults?: Record<string, AutoFormDefaultValue>): Record<string, string> {
   const values: Record<string, string> = {};
   for (const field of fields) {
+    // Pattern 2: type: "localized" with children
+    if (isLocalizedGroup(field)) {
+      for (const child of field.children) {
+        const raw = defaults?.[child.name];
+        const localeDefaults = typeof raw === "object" && raw !== null && !Array.isArray(raw)
+          ? raw as Record<string, unknown> : undefined;
+        if (child.type === "file" || child.type === "files") {
+          for (const locale of locales) {
+            const ld = localeDefaults?.[locale];
+            if (typeof ld === "string") values[`${child.name}.${locale}`] = ld;
+            else if (ld && typeof ld === "object" && "name" in (ld as any)) values[`${child.name}.${locale}`] = (ld as any).name ?? "";
+            else values[`${child.name}.${locale}`] = "";
+          }
+        } else {
+          for (const locale of locales) {
+            values[`${child.name}.${locale}`] = toTextDefault(localeDefaults?.[locale] as AutoFormDefaultValue);
+          }
+        }
+      }
+      continue;
+    }
+    // Pattern 1: localized: true on individual field (handles file + text types)
+    if (isLocalizable(field)) {
+      const raw = defaults?.[field.name];
+      const localeDefaults = typeof raw === "object" && raw !== null && !Array.isArray(raw)
+        ? raw as Record<string, unknown> : undefined;
+      if (field.type === "file" || field.type === "files") {
+        for (const locale of locales) {
+          const ld = localeDefaults?.[locale];
+          if (typeof ld === "string") values[`${field.name}.${locale}`] = ld;
+          else if (ld && typeof ld === "object" && "name" in (ld as any)) values[`${field.name}.${locale}`] = (ld as any).name ?? "";
+          else values[`${field.name}.${locale}`] = "";
+        }
+      } else {
+        for (const locale of locales) {
+          values[`${field.name}.${locale}`] = toTextDefault(localeDefaults?.[locale] as AutoFormDefaultValue);
+        }
+      }
+      continue;
+    }
     if (field.type === "file" || field.type === "files") {
       values[field.name] = "";
       continue;
@@ -184,16 +252,6 @@ function buildDefaults(fields: FieldDef<any>[], locales: string[], defaults?: Re
       values[pKey] = toTextDefault(defaults?.[pKey]);
       continue;
     }
-    if (isLocalizable(field)) {
-      const raw = defaults?.[field.name];
-      const localeDefaults = typeof raw === "object" && raw !== null && !Array.isArray(raw)
-        ? raw as Record<string, unknown>
-        : undefined;
-      for (const locale of locales) {
-        values[`${field.name}.${locale}`] = toTextDefault(localeDefaults?.[locale] as AutoFormDefaultValue);
-      }
-      continue;
-    }
     values[field.name] = toTextDefault(defaults?.[field.name]);
   }
   return values;
@@ -207,6 +265,31 @@ function buildFileDefaultPreviews(
   if (!defaults) return result;
 
   for (const field of fields) {
+    // Pattern 2: type: "localized" with file children
+    if (isLocalizedGroup(field)) {
+      for (const child of field.children) {
+        if (child.type !== "file" && child.type !== "files") continue;
+        const raw = defaults[child.name];
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+        for (const [locale, localeValue] of Object.entries(raw as Record<string, unknown>)) {
+          const preview = normalizeFilePreview(localeValue as AutoFormDefaultValue);
+          if (preview) result[`${child.name}.${locale}`] = [preview];
+        }
+      }
+      continue;
+    }
+
+    // Pattern 1: localized: true on file field
+    if ((field.type === "file" || field.type === "files") && isLocalizable(field)) {
+      const raw = defaults[field.name];
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      for (const [locale, localeValue] of Object.entries(raw as Record<string, unknown>)) {
+        const preview = normalizeFilePreview(localeValue as AutoFormDefaultValue);
+        if (preview) result[`${field.name}.${locale}`] = [preview];
+      }
+      continue;
+    }
+
     if (field.type !== "file" && field.type !== "files") continue;
     const raw = defaults[field.name];
     if (raw === undefined || raw === null) continue;
@@ -262,6 +345,14 @@ function appendFormDataValue(formData: FormData, key: string, value: unknown): v
 
   if (value instanceof Date) {
     formData.append(key, value.toISOString());
+    return;
+  }
+
+  // Flatten plain objects to dot-key notation (e.g. title.en=Hi)
+  if (typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date)) {
+    for (const [subKey, subValue] of Object.entries(value as Record<string, unknown>)) {
+      appendFormDataValue(formData, `${key}.${subKey}`, subValue);
+    }
     return;
   }
 
@@ -365,7 +456,61 @@ export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, con
     // Build payload — checkboxes send "1"/"0" instead of "on"/""
     const payload: Record<string, unknown> = { ...extraPayload };
     for (const field of fields) {
-      if (field.virtual) continue;
+      if ("virtual" in field && field.virtual) continue;
+
+      // Pattern 2: type: "localized" with children
+      if (isLocalizedGroup(field)) {
+        for (const child of field.children) {
+          if (child.type === "file" || child.type === "files") {
+            const localeValues: Record<string, unknown> = {};
+            for (const locale of availableLocales) {
+              const fileKey = `${child.name}.${locale}`;
+              const selected = fileValues[fileKey] ?? [];
+              if (selected.length > 0) {
+                localeValues[locale] = selected[0];
+              } else {
+                const existing = (values[fileKey] ?? "").trim();
+                localeValues[locale] = existing || null;
+              }
+            }
+            payload[child.name] = localeValues;
+          } else {
+            const localeValues: Record<string, string | null> = {};
+            for (const locale of availableLocales) {
+              const v = (values[`${child.name}.${locale}`] ?? "").trim();
+              localeValues[locale] = v || null;
+            }
+            payload[child.name] = localeValues;
+          }
+        }
+        continue;
+      }
+
+      // Pattern 1: localized: true on individual field
+      if (isLocalizable(field)) {
+        if (field.type === "file" || field.type === "files") {
+          const localeValues: Record<string, unknown> = {};
+          for (const locale of availableLocales) {
+            const fileKey = `${field.name}.${locale}`;
+            const selected = fileValues[fileKey] ?? [];
+            if (selected.length > 0) {
+              localeValues[locale] = selected[0];
+            } else {
+              const existing = (values[fileKey] ?? "").trim();
+              localeValues[locale] = existing || null;
+            }
+          }
+          payload[field.name] = localeValues;
+        } else {
+          const localeValues: Record<string, string | null> = {};
+          for (const locale of availableLocales) {
+            const v = (values[`${field.name}.${locale}`] ?? "").trim();
+            localeValues[locale] = v || null;
+          }
+          payload[field.name] = localeValues;
+        }
+        continue;
+      }
 
       if (field.type === "file" || field.type === "files") {
         const selected = fileValues[field.name] ?? [];
@@ -381,17 +526,6 @@ export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, con
         const pVal = (values[pKey] ?? "").trim();
         payload[cKey] = cVal === "" ? null : cVal;
         payload[pKey] = pVal === "" ? null : pVal;
-        continue;
-      }
-
-      // Localized fields → { [name]: { locale: value | null } } (replace strategy)
-      if (isLocalizable(field)) {
-        const localeValues: Record<string, string | null> = {};
-        for (const locale of availableLocales) {
-          const v = (values[`${field.name}.${locale}`] ?? "").trim();
-          localeValues[locale] = v || null;
-        }
-        payload[field.name] = localeValues;
         continue;
       }
 
@@ -432,11 +566,14 @@ export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, con
         const message = body.message ?? "Something went wrong";
         setGeneralError(message);
         if (body.errors) {
+          const localizedNames = collectLocalizedFieldNames(fields);
           const mapped: Record<string, string[]> = {};
           for (const [key, msgs] of Object.entries(body.errors)) {
             if (msgs.length > 0) {
-              // Use base field name (strip nested suffixes like ".value")
-              const fieldKey = key.split(".")[0];
+              // Preserve locale suffix for localized fields (title.en → title.en)
+              // Collapse nested suffixes for non-localized fields (address.line1 → address)
+              const baseName = key.split(".")[0];
+              const fieldKey = localizedNames.has(baseName) ? key : baseName;
               mapped[fieldKey] = [...(mapped[fieldKey] ?? []), ...msgs];
             }
           }
@@ -489,6 +626,39 @@ export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, con
             disabled={field.disabled}
           />
         );
+      case "file":
+      case "files": {
+        const fileKey = `${field.name}.${locale}`;
+        return (
+          <FileInput
+            label={label}
+            accept={(field as any).accept ?? (field as any).accepts}
+            multiple={field.type === "files" || (field as any).multiple}
+            maxFiles={(field as any).maxFiles}
+            files={fileValues[fileKey] ?? []}
+            defaultFiles={defaultFilePreviews[fileKey] ?? []}
+            onChange={(e) => setFiles(fileKey, Array.from(e.target.files ?? []), (field as any).maxFiles)}
+            errors={errors}
+            notes={field.notes}
+            required={field.required}
+            disabled={field.disabled}
+          />
+        );
+      }
+      case "select":
+        return (
+          <Select
+            label={label}
+            options={(field as any).options}
+            value={values[valueKey] ?? ""}
+            onChange={(e) => setValue(valueKey, e.target.value)}
+            errors={errors}
+            notes={field.notes}
+            placeholder={(field as any).placeholder}
+            required={field.required}
+            disabled={field.disabled}
+          />
+        );
       default: {
         const inputField = field as FieldDef<T> & { type: InputFieldType };
         return (
@@ -506,17 +676,39 @@ export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, con
         );
       }
     }
-  }, [values, fieldErrors, setValue, tiptapImageUpload]);
+  }, [values, fieldErrors, fileValues, defaultFilePreviews, setValue, setFiles, tiptapImageUpload]);
 
   const form = useMemo((): ReactElement => {
     return (
       <div className="rf-form-grid">
         {fields.map((field) => {
+          // Pattern 2: type: "localized" — grouped locale sections
+          if (isLocalizedGroup(field)) {
+            const groupSpan = field.span ?? 2;
+            const groupStyle = { gridColumn: `span ${groupSpan}` };
+            return (
+              <div key={`localized-${field.children.map(c => c.name).join("-")}`} style={groupStyle} className="space-y-4">
+                {availableLocales.map((locale) => (
+                  <div key={locale} className="space-y-3 rounded-lg border border-border bg-surface px-4 py-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                      {t(`Locale ${locale.toUpperCase()}`)}
+                    </p>
+                    {field.children.map((child) => (
+                      <div key={child.name}>
+                        {renderLocalizedField(child as FieldDef<T>, locale)}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            );
+          }
+
           const span = field.span ?? 2;
           const style = { gridColumn: `span ${span}` };
           const errors = fieldErrors[field.name];
 
-          // Localized fields: render one input per locale in bordered cards
+          // Pattern 1: localized: true — inline locale cards
           if (isLocalizable(field)) {
             return (
               <div key={field.name} style={style} className="space-y-3">

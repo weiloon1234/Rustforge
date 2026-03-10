@@ -2,27 +2,20 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Save } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { AdminContentPageOutput, AdminContentPageUpdateOutput } from "@admin/types";
+import type { AdminContentPageOutput } from "@admin/types";
 import { CONTENT_PAGE_SYSTEM_FLAG } from "@admin/types";
 import { api } from "@admin/api";
 import { uploadAdminTiptapImage } from "@admin/tiptapUpload";
-import type { ApiResponse, LocaleCode } from "@shared/types";
+import type { ApiResponse } from "@shared/types";
 import {
   Button,
-  FileInput,
-  TextInput,
-  TiptapInput,
   useLocaleStore,
   alertSuccess,
   attachmentUrl,
 } from "@shared/components";
+import { useAutoForm } from "@shared/useAutoForm";
 
 const CONTENT_PAGE_SYSTEM_YES = CONTENT_PAGE_SYSTEM_FLAG._1;
-
-function normalizeErrorMessage(error: unknown, fallback: string): string {
-  const maybe = error as { response?: { data?: { message?: string } } };
-  return maybe?.response?.data?.message ?? fallback;
-}
 
 export default function ContentPageEditPage() {
   const { t } = useTranslation();
@@ -31,32 +24,25 @@ export default function ContentPageEditPage() {
   const pageId = params.id ?? "";
   const availableLocales = useLocaleStore((s) => s.availableLocales);
   const defaultLocale = useLocaleStore((s) => s.defaultLocale);
-  const locales = useMemo<LocaleCode[]>(
+  const locales = useMemo(
     () => (availableLocales.length > 0 ? availableLocales : [defaultLocale]),
     [availableLocales, defaultLocale],
   );
 
-  const [busy, setBusy] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [contentPage, setContentPage] = useState<AdminContentPageOutput | null>(null);
-  const [tag, setTag] = useState("");
-  const [title, setTitle] = useState<Record<string, string>>({});
-  const [content, setContent] = useState<Record<string, string>>({});
-  const [cover, setCover] = useState<Record<string, string>>({});
-  const [coverUrl, setCoverUrl] = useState<Record<string, string>>({});
-  const [coverFiles, setCoverFiles] = useState<Record<string, File | null>>({});
 
   useEffect(() => {
     if (!pageId) {
-      setBusy(false);
-      setError(t("Invalid page id"));
+      setLoading(false);
+      setLoadError(t("Invalid page id"));
       return;
     }
 
     let active = true;
-    setBusy(true);
-    setError(null);
+    setLoading(true);
+    setLoadError(null);
 
     void api
       .get<ApiResponse<AdminContentPageOutput>>(`content_page/${pageId}`)
@@ -64,82 +50,67 @@ export default function ContentPageEditPage() {
         if (!active) return;
         const payload = res.data?.data;
         if (!payload) {
-          setError(t("Failed to load page detail."));
-          setBusy(false);
+          setLoadError(t("Failed to load page detail."));
+          setLoading(false);
           return;
         }
-
         setContentPage(payload);
-        setTag(payload.tag);
-
-        const nextTitle: Record<string, string> = {};
-        const nextContent: Record<string, string> = {};
-        const nextCover: Record<string, string> = {};
-        const nextCoverUrl: Record<string, string> = {};
-        for (const locale of locales) {
-          nextTitle[locale] = payload.title[locale] ?? "";
-          nextContent[locale] = payload.content[locale] ?? "";
-          nextCover[locale] = payload.cover[locale] ?? "";
-          nextCoverUrl[locale] = payload.cover_url[locale] ?? "";
-        }
-        setTitle(nextTitle);
-        setContent(nextContent);
-        setCover(nextCover);
-        setCoverUrl(nextCoverUrl);
-        setBusy(false);
+        setLoading(false);
       })
       .catch((err) => {
         if (!active) return;
-        setError(normalizeErrorMessage(err, t("Failed to load page detail.")));
-        setBusy(false);
+        const maybe = err as { response?: { data?: { message?: string } } };
+        setLoadError(maybe?.response?.data?.message ?? t("Failed to load page detail."));
+        setLoading(false);
       });
 
-    return () => {
-      active = false;
-    };
-  }, [pageId, locales, t]);
+    return () => { active = false; };
+  }, [pageId, t]);
 
   const isSystem = contentPage?.is_system === CONTENT_PAGE_SYSTEM_YES;
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (!pageId || saving) return;
-
-    setSaving(true);
-    setError(null);
-
-    try {
-      const formData = new FormData();
-      formData.append("tag", tag.trim());
-
-      for (const locale of locales) {
-        formData.append(`title.${locale}`, title[locale] ?? "");
-        formData.append(`content.${locale}`, content[locale] ?? "");
-
-        const selected = coverFiles[locale];
-        if (selected) {
-          formData.append(`cover.${locale}`, selected);
-        } else {
-          const existingPath = (cover[locale] ?? "").trim();
-          if (existingPath) {
-            formData.append(`cover.${locale}`, existingPath);
-          }
-        }
+  const coverDefaults = useMemo(() => {
+    if (!contentPage) return {};
+    const result: Record<string, { name: string; url: string }> = {};
+    for (const locale of locales) {
+      const path = (contentPage.cover[locale] ?? "").trim();
+      if (path) {
+        result[locale] = {
+          name: path,
+          url: (contentPage.cover_url[locale] ?? "").trim() || attachmentUrl(path),
+        };
       }
+    }
+    return result;
+  }, [contentPage, locales]);
 
-      await api.patch<ApiResponse<AdminContentPageUpdateOutput>>(
-        `content_page/${pageId}`,
-        formData,
-      );
+  const { submit, busy: saving, form, errors } = useAutoForm(api, {
+    url: `content_page/${pageId}`,
+    method: "patch",
+    bodyType: "multipart",
+    tiptapImageUpload: uploadAdminTiptapImage,
+    fields: [
+      { name: "tag", type: "text", label: t("Tag"), required: true, disabled: isSystem },
+      {
+        type: "localized",
+        children: [
+          { name: "title", type: "text", label: t("Title"), required: true, disabled: isSystem },
+          { name: "content", type: "tiptap", label: t("Content"), required: true, editorPreset: "full", imageFolder: "uploads/content_page" },
+          { name: "cover", type: "file", label: t("Cover"), accept: "image/*", notes: t("Optional localized cover image") },
+        ],
+      },
+    ],
+    defaults: contentPage ? {
+      tag: contentPage.tag ?? "",
+      title: contentPage.title ?? {},
+      content: contentPage.content ?? {},
+      cover: coverDefaults,
+    } : undefined,
+    onSuccess: () => {
       alertSuccess({ title: t("Success"), message: t("Page updated") });
       navigate("/other/content-pages");
-    } catch (err) {
-      setError(normalizeErrorMessage(err, t("Failed to update page.")));
-    } finally {
-      setSaving(false);
-    }
-  };
+    },
+  });
 
   return (
     <section className="space-y-4">
@@ -157,78 +128,22 @@ export default function ContentPageEditPage() {
         </Link>
       </div>
 
-      {busy && <p className="text-sm text-muted">{t("Loading…")}</p>}
-      {!busy && error && (
+      {loading && <p className="text-sm text-muted">{t("Loading…")}</p>}
+      {!loading && loadError && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-          {error}
+          {loadError}
         </p>
       )}
 
-      {!busy && !error && (
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="rounded-lg border border-border bg-surface px-4 py-4">
-            <TextInput
-              label={t("Tag")}
-              value={tag}
-              onChange={(e) => setTag(e.target.value)}
-              disabled={isSystem || saving}
-            />
-          </div>
+      {!loading && contentPage && (
+        <form onSubmit={submit} className="space-y-4">
+          {errors.general && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+              {errors.general}
+            </p>
+          )}
 
-          {locales.map((locale) => (
-            <div
-              key={locale}
-              className="space-y-3 rounded-lg border border-border bg-surface px-4 py-4"
-            >
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-                {t("Locale :locale", { locale })}
-              </p>
-
-              <TextInput
-                label={t("Title")}
-                value={title[locale] ?? ""}
-                onChange={(e) =>
-                  setTitle((prev) => ({ ...prev, [locale]: e.target.value }))
-                }
-                disabled={isSystem || saving}
-              />
-
-              <TiptapInput
-                label={t("Content")}
-                value={content[locale] ?? ""}
-                onChange={(e) =>
-                  setContent((prev) => ({ ...prev, [locale]: e.target.value }))
-                }
-                preset="full"
-                imageFolder="uploads/content_page"
-                imageUpload={uploadAdminTiptapImage}
-                disabled={saving}
-              />
-
-              <FileInput
-                label={t("Cover")}
-                accept="image/*"
-                multiple={false}
-                files={coverFiles[locale] ? [coverFiles[locale] as File] : []}
-                defaultFiles={
-                  (cover[locale] ?? "").trim()
-                    ? [
-                        {
-                          name: cover[locale],
-                          url: (coverUrl[locale] ?? "").trim() || attachmentUrl(cover[locale]),
-                        },
-                      ]
-                    : []
-                }
-                onChange={(e) => {
-                  const next = e.target.files?.[0] ?? null;
-                  setCoverFiles((prev) => ({ ...prev, [locale]: next }));
-                }}
-                disabled={saving}
-                notes={t("Optional localized cover image")}
-              />
-            </div>
-          ))}
+          {form}
 
           <div className="sticky bottom-0 z-10 flex justify-end rounded-lg border border-border bg-background/95 px-4 py-3 backdrop-blur">
             <Button
