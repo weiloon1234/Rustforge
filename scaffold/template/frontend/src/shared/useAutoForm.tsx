@@ -18,6 +18,7 @@ import {
 } from "@shared/components/TiptapInput";
 import { FileInput, type FilePreviewItem } from "@shared/components/FileInput";
 import { ContactInput } from "@shared/components/ContactInput";
+import { useLocaleStore } from "@shared/stores/locale";
 
 type InputFieldType =
   | "text"
@@ -38,7 +39,7 @@ type AutoFormBodyType = "auto" | "json" | "multipart";
 type AutoFormDefaultValue = string | number | boolean | null | undefined | File | File[] | FilePreviewItem | FilePreviewItem[];
 
 type FieldDef =
-  | { name: string; type: InputFieldType; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean }
+  | { name: string; type: InputFieldType; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean; localized?: boolean }
   | {
       name: string;
       type: RichEditorFieldType;
@@ -50,8 +51,9 @@ type FieldDef =
       disabled?: boolean;
       editorPreset?: TiptapPreset;
       imageFolder?: string;
+      localized?: boolean;
     }
-  | { name: string; type: "textarea"; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean; rows?: number }
+  | { name: string; type: "textarea"; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean; rows?: number; localized?: boolean }
   | { name: string; type: "select"; label: string; options: SelectOption[]; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean }
   | { name: string; type: "checkbox"; label: string; span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean }
   | { name: string; type: "checkboxGroup"; label: string; options: CheckboxGroupOption[]; span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean; columns?: number }
@@ -99,7 +101,7 @@ interface AutoFormConfig {
   url: string;
   method?: "post" | "put" | "patch";
   bodyType?: AutoFormBodyType;
-  fields: FieldDef[];
+  fields: FieldDef[] | ((values: Record<string, string>) => FieldDef[]);
   defaults?: Record<string, AutoFormDefaultValue>;
   tiptapImageUpload?: TiptapImageUploadHandler;
   /** Static key-value pairs merged into every submission (not rendered as form fields). */
@@ -184,7 +186,11 @@ function normalizeFilePreview(value: AutoFormDefaultValue): FilePreviewItem | nu
   return null;
 }
 
-function buildDefaults(fields: FieldDef[], defaults?: Record<string, AutoFormDefaultValue>): Record<string, string> {
+function isLocalizable(field: FieldDef): field is FieldDef & { localized: true } {
+  return "localized" in field && field.localized === true;
+}
+
+function buildDefaults(fields: FieldDef[], locales: string[], defaults?: Record<string, AutoFormDefaultValue>): Record<string, string> {
   const values: Record<string, string> = {};
   for (const field of fields) {
     if (field.type === "file" || field.type === "files") {
@@ -201,6 +207,16 @@ function buildDefaults(fields: FieldDef[], defaults?: Record<string, AutoFormDef
       const pKey = field.phoneName ?? "contact_number";
       values[cKey] = toTextDefault(defaults?.[cKey]);
       values[pKey] = toTextDefault(defaults?.[pKey]);
+      continue;
+    }
+    if (isLocalizable(field)) {
+      const raw = defaults?.[field.name];
+      const localeDefaults = typeof raw === "object" && raw !== null && !Array.isArray(raw)
+        ? raw as Record<string, unknown>
+        : undefined;
+      for (const locale of locales) {
+        values[`${field.name}.${locale}`] = toTextDefault(localeDefaults?.[locale] as AutoFormDefaultValue);
+      }
       continue;
     }
     values[field.name] = toTextDefault(defaults?.[field.name]);
@@ -299,7 +315,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
     url,
     method = "post",
     bodyType = "auto",
-    fields,
+    fields: fieldsProp,
     defaults,
     tiptapImageUpload,
     extraPayload,
@@ -307,7 +323,16 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
     onError,
   } = config;
 
-  const [values, setValuesState] = useState<Record<string, string>>(() => buildDefaults(fields, defaults));
+  const availableLocales = useLocaleStore((s) => s.availableLocales);
+  const resolveFields = typeof fieldsProp === "function" ? fieldsProp : () => fieldsProp;
+  const [values, setValuesState] = useState<Record<string, string>>(() => {
+    const initialFields = resolveFields({});
+    return buildDefaults(initialFields, availableLocales, defaults);
+  });
+
+  // Resolve fields reactively from current values
+  const fields = resolveFields(values);
+
   const [fileValues, setFileValues] = useState<Record<string, File[]>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
@@ -340,12 +365,13 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
   }, []);
 
   const reset = useCallback(() => {
-    setValuesState(buildDefaults(fields, defaults));
+    const resetFields = resolveFields({});
+    setValuesState(buildDefaults(resetFields, availableLocales, defaults));
     setFileValues({});
     setFileInputVersion((prev) => prev + 1);
     setFieldErrors({});
     setGeneralError(null);
-  }, [fields, defaults]);
+  }, [resolveFields, availableLocales, defaults]);
 
   const setValues = useCallback((incoming: Record<string, string>) => {
     setValuesState((prev) => ({ ...prev, ...incoming }));
@@ -377,6 +403,17 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
         const pVal = (values[pKey] ?? "").trim();
         payload[cKey] = cVal === "" ? null : cVal;
         payload[pKey] = pVal === "" ? null : pVal;
+        continue;
+      }
+
+      // Localized fields → { [name]: { locale: value | null } } (replace strategy)
+      if (isLocalizable(field)) {
+        const localeValues: Record<string, string | null> = {};
+        for (const locale of availableLocales) {
+          const v = (values[`${field.name}.${locale}`] ?? "").trim();
+          localeValues[locale] = v || null;
+        }
+        payload[field.name] = localeValues;
         continue;
       }
 
@@ -434,7 +471,63 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
     } finally {
       setBusy(false);
     }
-  }, [api, method, url, bodyType, fields, values, fileValues, extraPayload, onSuccess, onError, busy]);
+  }, [api, method, url, bodyType, fields, values, fileValues, availableLocales, extraPayload, onSuccess, onError, busy]);
+
+  const renderLocalizedField = useCallback((field: FieldDef, locale: string): ReactElement => {
+    const valueKey = `${field.name}.${locale}`;
+    const errors = fieldErrors[valueKey];
+    const label = `${field.label} (${locale.toUpperCase()})`;
+
+    switch (field.type) {
+      case "textarea":
+        return (
+          <TextArea
+            label={label}
+            value={values[valueKey] ?? ""}
+            onChange={(e) => setValue(valueKey, e.target.value)}
+            errors={errors}
+            notes={field.notes}
+            placeholder={(field as { placeholder?: string }).placeholder}
+            required={field.required}
+            disabled={field.disabled}
+            rows={field.rows}
+          />
+        );
+      case "tapbit":
+      case "tiptap":
+        return (
+          <TiptapInput
+            label={label}
+            value={values[valueKey] ?? ""}
+            onChange={(e) => setValue(valueKey, e.target.value)}
+            errors={errors}
+            notes={field.notes}
+            preset={(field as { editorPreset?: TiptapPreset }).editorPreset}
+            placeholder={(field as { placeholder?: string }).placeholder}
+            imageFolder={(field as { imageFolder?: string }).imageFolder}
+            imageUpload={tiptapImageUpload}
+            required={field.required}
+            disabled={field.disabled}
+          />
+        );
+      default: {
+        const inputField = field as FieldDef & { type: InputFieldType };
+        return (
+          <TextInput
+            type={inputField.type}
+            label={label}
+            value={values[valueKey] ?? ""}
+            onChange={(e) => setValue(valueKey, e.target.value)}
+            errors={errors}
+            notes={field.notes}
+            placeholder={(field as { placeholder?: string }).placeholder}
+            required={field.required}
+            disabled={field.disabled}
+          />
+        );
+      }
+    }
+  }, [values, fieldErrors, setValue, tiptapImageUpload]);
 
   const form = useMemo((): ReactElement => {
     return (
@@ -443,6 +536,20 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
           const span = field.span ?? 2;
           const style = { gridColumn: `span ${span}` };
           const errors = fieldErrors[field.name];
+
+          // Localized fields: render one input per locale in bordered cards
+          if (isLocalizable(field)) {
+            return (
+              <div key={field.name} style={style} className="space-y-3">
+                {availableLocales.map((locale) => (
+                  <div key={locale} className="rounded-md border border-border p-3">
+                    <div className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">{locale}</div>
+                    {renderLocalizedField(field, locale)}
+                  </div>
+                ))}
+              </div>
+            );
+          }
 
           switch (field.type) {
             case "textarea":
@@ -678,9 +785,11 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
     fieldErrors,
     defaultFilePreviews,
     fileInputVersion,
+    availableLocales,
     setValue,
     setFiles,
     tiptapImageUpload,
+    renderLocalizedField,
   ]);
 
   return {
