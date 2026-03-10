@@ -414,6 +414,30 @@ impl ContentPageLocalized for core_db::platform::localized::types::LocalizedMap 
     }
 }
 
+pub const USER_CREDIT_TRANSACTION_OWNER_TYPE: &str = "user_credit_transaction";
+pub const USER_CREDIT_TRANSACTION_FIELDS: &[&str] = &[
+    "custom_description_text",
+];
+
+pub async fn load_user_credit_transaction_localized<'a>(db: DbConn<'a>, ids: &[i64]) -> Result<core_db::platform::localized::types::LocalizedMap> {
+    load_owner_localized(db, USER_CREDIT_TRANSACTION_OWNER_TYPE, ids, USER_CREDIT_TRANSACTION_FIELDS).await
+}
+
+pub trait UserCreditTransactionLocalized {
+    fn user_credit_transaction_custom_description_text_translations(&self, id: i64) -> Option<crate::generated::LocalizedText>;
+    fn user_credit_transaction_custom_description_text(&self, id: i64) -> Option<String>;
+}
+
+impl UserCreditTransactionLocalized for core_db::platform::localized::types::LocalizedMap {
+    fn user_credit_transaction_custom_description_text_translations(&self, id: i64) -> Option<crate::generated::LocalizedText> {
+        self.get_localized_text("custom_description_text", id)
+    }
+    fn user_credit_transaction_custom_description_text(&self, id: i64) -> Option<String> {
+        let locale = core_i18n::current_locale();
+        self.get_value("custom_description_text", id, locale)
+    }
+}
+
 pub fn get_attachment_rules(name: &str) -> Option<AttachmentRules> {
     match name {
         "image" => Some(AttachmentRules {

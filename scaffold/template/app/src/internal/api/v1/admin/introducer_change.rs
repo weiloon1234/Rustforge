@@ -1,9 +1,10 @@
-use axum::{extract::State, Json};
+use axum::extract::State;
 use core_i18n::t;
 use core_web::{
     auth::AuthUser,
     authz::PermissionMode,
     error::AppError,
+    extract::CleanJson,
     openapi::{with_permission_check_post_with, ApiRouter},
     response::ApiResponse,
 };
@@ -40,7 +41,7 @@ pub fn router(state: AppApiState) -> ApiRouter {
 async fn change_introducer(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
-    Json(req): Json<ChangeIntroducerInput>,
+    CleanJson(req): CleanJson<ChangeIntroducerInput>,
 ) -> Result<ApiResponse<ChangeIntroducerOutput>, AppError> {
     let log = workflow::change_introducer(
         &state,

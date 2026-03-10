@@ -2,7 +2,6 @@ use axum::{
     extract::{FromRequestParts, State},
     http::request::Parts,
     middleware::from_fn_with_state,
-    Json,
 };
 use core_i18n::t;
 use core_web::{
@@ -11,6 +10,7 @@ use core_web::{
     error::AppError,
     extract::request_headers::RequestHeaders,
     extract::validation::transform_validation_errors,
+    extract::CleanJson,
     openapi::{
         aide::axum::routing::{get_with, patch_with, post_with},
         ApiRouter,
@@ -199,7 +199,7 @@ async fn me(auth: AuthUser<AdminGuard>) -> Result<ApiResponse<AdminMeOutput>, Ap
 async fn profile_update(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
-    Json(req): Json<AdminProfileUpdateInput>,
+    CleanJson(req): CleanJson<AdminProfileUpdateInput>,
 ) -> Result<ApiResponse<AdminProfileUpdateOutput>, AppError> {
     let req = validate_profile_update_input(req)?;
     let admin = workflow::profile_update(&state, auth.user.id, req).await?;
@@ -247,7 +247,6 @@ async fn password_update(
 fn validate_profile_update_input(
     req: AdminProfileUpdateInput,
 ) -> Result<AdminProfileUpdateInput, AppError> {
-    let req = req.normalize();
     if let Err(e) = req.validate() {
         return Err(AppError::Validation {
             message: t("Validation failed"),

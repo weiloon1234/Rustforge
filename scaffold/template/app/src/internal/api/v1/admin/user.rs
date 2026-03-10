@@ -1,13 +1,10 @@
-use axum::{
-    extract::{Path, State},
-    Json,
-};
+use axum::extract::{Path, State};
 use core_i18n::t;
 use core_web::{
     auth::AuthUser,
     authz::PermissionMode,
     error::AppError,
-    extract::{validation::transform_validation_errors, AsyncValidate},
+    extract::{validation::transform_validation_errors, AsyncValidate, CleanJson},
     openapi::{
         with_permission_check_get_with, with_permission_check_patch_with,
         with_permission_check_post_with, ApiRouter,
@@ -104,7 +101,7 @@ async fn detail(
 async fn create(
     State(state): State<AppApiState>,
     _auth: AuthUser<AdminGuard>,
-    Json(req): Json<CreateUserInput>,
+    CleanJson(req): CleanJson<CreateUserInput>,
 ) -> Result<ApiResponse<UserManageOutput>, AppError> {
     let req = validate_create_input(&state, req).await?;
     let user = workflow::create(&state, req).await?;
@@ -118,7 +115,7 @@ async fn update(
     State(state): State<AppApiState>,
     _auth: AuthUser<AdminGuard>,
     Path(id): Path<i64>,
-    Json(req): Json<UpdateUserInput>,
+    CleanJson(req): CleanJson<UpdateUserInput>,
 ) -> Result<ApiResponse<UserManageOutput>, AppError> {
     let req = validate_update_input(&state, id, req).await?;
     let user = workflow::update(&state, id, req).await?;
@@ -132,7 +129,7 @@ async fn set_ban(
     State(state): State<AppApiState>,
     _auth: AuthUser<AdminGuard>,
     Path(id): Path<i64>,
-    Json(req): Json<UserBanInput>,
+    CleanJson(req): CleanJson<UserBanInput>,
 ) -> Result<ApiResponse<UserBanOutput>, AppError> {
     let _user = workflow::set_ban(&state, id, req.ban).await?;
     let banned = matches!(req.ban, UserBanStatus::Yes);
@@ -147,7 +144,7 @@ async fn set_ban(
 async fn batch_resolve(
     State(state): State<AppApiState>,
     _auth: AuthUser<AdminGuard>,
-    Json(req): Json<BatchResolveInput>,
+    CleanJson(req): CleanJson<BatchResolveInput>,
 ) -> Result<ApiResponse<BatchResolveOutput>, AppError> {
     let parsed_ids: Vec<i64> = req
         .ids

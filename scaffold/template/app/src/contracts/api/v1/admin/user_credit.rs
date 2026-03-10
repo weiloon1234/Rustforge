@@ -1,4 +1,5 @@
 use core_web::ids::SnowflakeId;
+use generated::localized::LocalizedInput;
 use generated::models::{AdjustableCreditType, CreditTransactionType, CreditType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -14,9 +15,9 @@ pub struct AdminCreditAdjustInput {
     pub amount: rust_decimal::Decimal,
     #[serde(default)]
     pub remark: Option<String>,
-    /// Localized custom description: { "en": "...", "zh": "..." }
+    /// Localized custom description
     #[serde(default)]
-    pub custom_description: Option<std::collections::HashMap<String, String>>,
+    pub custom_description: Option<LocalizedInput>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]

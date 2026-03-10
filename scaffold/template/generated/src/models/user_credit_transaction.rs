@@ -12,7 +12,11 @@ use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTa
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{Page, renumber_placeholders};
 use core_db::common::collection::TypedCollectionExt;
+use crate::generated::localized;
+use core_i18n::current_locale;
 use crate::generated::models::user::{UserCol, UserQuery, UserRow};
+use crate::generated::models::admin::{AdminCol, AdminQuery, AdminRow};
+use crate::generated::localized::LocalizedMapHelper;
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
@@ -23,12 +27,14 @@ const HAS_SOFT_DELETE: bool = false;
 pub struct UserCreditTransactionRow {
     pub id: i64,
     pub user_id: i64,
+    pub admin_id: Option<i64>,
     pub credit_type: CreditType,
     pub amount: rust_decimal::Decimal,
     pub transaction_type: CreditTransactionType,
     pub related_key: Option<String>,
     pub params: Option<serde_json::Value>,
     pub remark: Option<String>,
+    pub custom_description: bool,
     #[serde(with = "time::serde::rfc3339")]
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
@@ -41,18 +47,22 @@ pub struct UserCreditTransactionRow {
 pub struct UserCreditTransactionView {
     pub id: i64,
     pub user_id: i64,
+    pub admin_id: Option<i64>,
     pub credit_type: CreditType,
     pub amount: rust_decimal::Decimal,
     pub transaction_type: CreditTransactionType,
     pub related_key: Option<String>,
     pub params: Option<serde_json::Value>,
     pub remark: Option<String>,
+    pub custom_description: bool,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
     #[schemars(with = "String")]
     pub updated_at: time::OffsetDateTime,
     pub credit_type_explained: String,
     pub transaction_type_explained: String,
+    pub custom_description_text: Option<String>,
+    pub custom_description_text_translations: Option<localized::LocalizedText>,
 }
 
 impl UserCreditTransactionView {
@@ -66,16 +76,20 @@ impl UserCreditTransactionView {
         UserCreditTransactionJson {
             id: self.id.clone(),
             user_id: self.user_id.clone(),
+            admin_id: self.admin_id.clone(),
             credit_type: self.credit_type.clone(),
             amount: self.amount.clone(),
             transaction_type: self.transaction_type.clone(),
             related_key: self.related_key.clone(),
             params: self.params.clone(),
             remark: self.remark.clone(),
+            custom_description: self.custom_description.clone(),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
             credit_type_explained: self.credit_type_explained.clone(),
             transaction_type_explained: self.transaction_type_explained.clone(),
+            custom_description_text: self.custom_description_text.clone(),
+            custom_description_text_translations: self.custom_description_text_translations.clone(),
         }
     }
 }
@@ -99,35 +113,49 @@ impl UserCreditTransactionViewsExt for Vec<UserCreditTransactionView> {
 pub struct UserCreditTransactionJson {
     pub id: i64,
     pub user_id: i64,
+    pub admin_id: Option<i64>,
     pub credit_type: CreditType,
     pub amount: rust_decimal::Decimal,
     pub transaction_type: CreditTransactionType,
     pub related_key: Option<String>,
     pub params: Option<serde_json::Value>,
     pub remark: Option<String>,
+    pub custom_description: bool,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
     #[schemars(with = "String")]
     pub updated_at: time::OffsetDateTime,
     pub credit_type_explained: String,
     pub transaction_type_explained: String,
+    pub custom_description_text: Option<String>,
+    pub custom_description_text_translations: Option<localized::LocalizedText>,
 }
 
-fn hydrate_view(row: UserCreditTransactionRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> UserCreditTransactionView {
-    let view = UserCreditTransactionView {
+fn hydrate_view(row: UserCreditTransactionRow, loc: &LocalizedMap, _base_url: Option<&str>) -> UserCreditTransactionView {
+    let locale = current_locale();
+    let mut view = UserCreditTransactionView {
         id: row.id,
         user_id: row.user_id,
+        admin_id: row.admin_id,
         credit_type: row.credit_type,
         amount: row.amount,
         transaction_type: row.transaction_type,
         related_key: row.related_key,
         params: row.params,
         remark: row.remark,
+        custom_description: row.custom_description,
         created_at: row.created_at,
         updated_at: row.updated_at,
         credit_type_explained: row.credit_type.explained_label(),
         transaction_type_explained: row.transaction_type.explained_label(),
+        custom_description_text: None,
+        custom_description_text_translations: None,
     };
+    let ml_custom_description_text = loc.get_localized_text("custom_description_text", view.id);
+    if let Some(ref ml) = ml_custom_description_text {
+        view.custom_description_text = Some(ml.get(locale).to_string());
+    }
+    view.custom_description_text_translations = ml_custom_description_text;
     view
 }
 
@@ -137,6 +165,7 @@ pub struct UserCreditTransactionWithRelations {
     #[serde(flatten)]
     pub row: UserCreditTransactionView,
     pub user: Option<UserRow>,
+    pub admin: Option<AdminRow>,
 }
 
 impl UserCreditTransactionWithRelations {
@@ -156,30 +185,34 @@ impl std::ops::DerefMut for UserCreditTransactionWithRelations {
 pub enum UserCreditTransactionCol {
     Id,
     UserId,
+    AdminId,
     CreditType,
     Amount,
     TransactionType,
     RelatedKey,
     Params,
     Remark,
+    CustomDescription,
     CreatedAt,
     UpdatedAt,
 }
 
 impl UserCreditTransactionCol {
     pub const fn all() -> &'static [UserCreditTransactionCol] {
-        &[UserCreditTransactionCol::Id, UserCreditTransactionCol::UserId, UserCreditTransactionCol::CreditType, UserCreditTransactionCol::Amount, UserCreditTransactionCol::TransactionType, UserCreditTransactionCol::RelatedKey, UserCreditTransactionCol::Params, UserCreditTransactionCol::Remark, UserCreditTransactionCol::CreatedAt, UserCreditTransactionCol::UpdatedAt]
+        &[UserCreditTransactionCol::Id, UserCreditTransactionCol::UserId, UserCreditTransactionCol::AdminId, UserCreditTransactionCol::CreditType, UserCreditTransactionCol::Amount, UserCreditTransactionCol::TransactionType, UserCreditTransactionCol::RelatedKey, UserCreditTransactionCol::Params, UserCreditTransactionCol::Remark, UserCreditTransactionCol::CustomDescription, UserCreditTransactionCol::CreatedAt, UserCreditTransactionCol::UpdatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
             UserCreditTransactionCol::Id => "id",
             UserCreditTransactionCol::UserId => "user_id",
+            UserCreditTransactionCol::AdminId => "admin_id",
             UserCreditTransactionCol::CreditType => "credit_type",
             UserCreditTransactionCol::Amount => "amount",
             UserCreditTransactionCol::TransactionType => "transaction_type",
             UserCreditTransactionCol::RelatedKey => "related_key",
             UserCreditTransactionCol::Params => "params",
             UserCreditTransactionCol::Remark => "remark",
+            UserCreditTransactionCol::CustomDescription => "custom_description",
             UserCreditTransactionCol::CreatedAt => "created_at",
             UserCreditTransactionCol::UpdatedAt => "updated_at",
         }
@@ -226,6 +259,27 @@ impl<'db> UserCreditTransaction<'db> {
         }
         Ok(out)
     }
+    pub async fn load_admin(&self, parents: &[UserCreditTransactionRow]) -> Result<HashMap<i64, Option<AdminRow>>> {
+        if parents.is_empty() { return Ok(HashMap::new()); }
+        let mut fk_vals = Vec::new();
+        let mut parent_pairs = Vec::new();
+        for p in parents {
+            if let Some(fk_val) = p.admin_id.clone() { fk_vals.push(fk_val); parent_pairs.push((p.id.clone(), Some(fk_val))); } else { parent_pairs.push((p.id.clone(), None)); }
+        }
+        if fk_vals.is_empty() { return Ok(HashMap::new()); }
+        let placeholders: Vec<String> = (1..=fk_vals.len()).map(|i| format!("${}", i)).collect();
+        let sql = format!("SELECT * FROM admin WHERE id IN ({})", placeholders.join(", "));
+        let mut q = sqlx::query_as::<_, AdminRow>(&sql);
+        for fk in fk_vals { q = bind(q, fk.into()); }
+        let rows = self.db.fetch_all(q).await?;
+        let mut by_pk: HashMap<i64, AdminRow> = HashMap::new();
+        for row in rows { by_pk.insert(row.id.clone(), row); }
+        let mut out = HashMap::new();
+        for (pid, fk) in parent_pairs {
+            out.insert(pid, fk.and_then(|k| by_pk.get(&k).cloned()));
+        }
+        Ok(out)
+    }
 }
 
 #[derive(Clone)]
@@ -254,7 +308,7 @@ pub struct UserCreditTransactionQuery<'db> {
 
 impl<'db> UserCreditTransactionQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, user_id, credit_type, amount, transaction_type, related_key, params, remark, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
+        Self { db, base_url, select_sql: Some("id, user_id, admin_id, credit_type, amount, transaction_type, related_key, params, remark, custom_description, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
     pub fn unsafe_sql(self) -> UserCreditTransactionUnsafeQuery<'db> { UserCreditTransactionUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
@@ -278,6 +332,18 @@ impl<'db> UserCreditTransactionQuery<'db> {
     pub fn where_user_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::UserId.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_admin_id(mut self, op: Op, val: Option<i64>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_admin_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -350,6 +416,18 @@ impl<'db> UserCreditTransactionQuery<'db> {
     pub fn where_remark_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Remark.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_custom_description(mut self, op: Op, val: bool) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::CustomDescription.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_custom_description_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::CustomDescription.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -497,10 +575,10 @@ impl<'db> UserCreditTransactionQuery<'db> {
     }
     pub fn select_cols(mut self, cols: &[UserCreditTransactionCol]) -> Self {
         if cols.is_empty() {
-            self.select_sql = Some("id, user_id, credit_type, amount, transaction_type, related_key, params, remark, created_at, updated_at".to_string());
+            self.select_sql = Some("id, user_id, admin_id, credit_type, amount, transaction_type, related_key, params, remark, custom_description, created_at, updated_at".to_string());
         } else {
             let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, user_id, credit_type, amount, transaction_type, related_key, params, remark, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect();
+            let mut list: Vec<String> = "id, user_id, admin_id, credit_type, amount, transaction_type, related_key, params, remark, custom_description, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect();
             for s in &list { seen.insert(s.clone()); }
             for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
             self.select_sql = Some(list.join(", "));
@@ -511,7 +589,7 @@ impl<'db> UserCreditTransactionQuery<'db> {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, user_id, credit_type, amount, transaction_type, related_key, params, remark, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect(),
+            _ => "id, user_id, admin_id, credit_type, amount, transaction_type, related_key, params, remark, custom_description, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect(),
         };
         for s in &list { seen.insert(s.clone()); }
         for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
@@ -521,16 +599,16 @@ impl<'db> UserCreditTransactionQuery<'db> {
     fn select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() {
-            self.select_sql = Some("id, user_id, credit_type, amount, transaction_type, related_key, params, remark, created_at, updated_at".to_string());
+            self.select_sql = Some("id, user_id, admin_id, credit_type, amount, transaction_type, related_key, params, remark, custom_description, created_at, updated_at".to_string());
         } else {
-            self.select_sql = Some(format!("id, user_id, credit_type, amount, transaction_type, related_key, params, remark, created_at, updated_at, {}", s));
+            self.select_sql = Some(format!("id, user_id, admin_id, credit_type, amount, transaction_type, related_key, params, remark, custom_description, created_at, updated_at, {}", s));
         }
         self
     }
     fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, user_id, credit_type, amount, transaction_type, related_key, params, remark, created_at, updated_at".to_string());
+        let mut base = self.select_sql.take().unwrap_or_else(|| "id, user_id, admin_id, credit_type, amount, transaction_type, related_key, params, remark, custom_description, created_at, updated_at".to_string());
         if !base.is_empty() { base.push_str(", "); }
         base.push_str(&s);
         self.select_sql = Some(base);
@@ -695,6 +773,19 @@ impl<'db> UserCreditTransactionQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
+    pub fn where_has_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+        let start_idx = self.binds.len() + 1;
+        let scoped = scope(AdminQuery::new(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        sub_where.insert(0, "admin.id = user_credit_transactions.admin_id".to_string());
+        let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
+        clause.push_str(&sub_where.join(" AND "));
+        clause.push(')');
+        let clause = renumber_placeholders(&clause, start_idx);
+        self.where_sql.push(clause);
+        self.binds.extend(sub_binds);
+        self
+    }
     pub fn where_doesnt_have_user(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
         let start_idx = self.binds.len() + 1;
         let scoped = scope(UserQuery::new(self.db.clone(), None));
@@ -708,12 +799,42 @@ impl<'db> UserCreditTransactionQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
+    pub fn where_doesnt_have_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+        let start_idx = self.binds.len() + 1;
+        let scoped = scope(AdminQuery::new(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        sub_where.insert(0, "admin.id = user_credit_transactions.admin_id".to_string());
+        let mut clause = String::from("NOT EXISTS (SELECT 1 FROM admin WHERE ");
+        clause.push_str(&sub_where.join(" AND "));
+        clause.push(')');
+        let clause = renumber_placeholders(&clause, start_idx);
+        self.where_sql.push(clause);
+        self.binds.extend(sub_binds);
+        self
+    }
     pub fn or_where_has_user(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
         let start_idx = self.binds.len() + 1;
         let scoped = scope(UserQuery::new(self.db.clone(), None));
         let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
         sub_where.insert(0, "users.id = user_credit_transactions.user_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
+        clause.push_str(&sub_where.join(" AND "));
+        clause.push(')');
+        let clause = renumber_placeholders(&clause, start_idx);
+        if let Some(last) = self.where_sql.pop() {
+            self.where_sql.push(format!("({} OR {})", last, clause));
+        } else {
+            self.where_sql.push(clause);
+        }
+        self.binds.extend(sub_binds);
+        self
+    }
+    pub fn or_where_has_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+        let start_idx = self.binds.len() + 1;
+        let scoped = scope(AdminQuery::new(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        sub_where.insert(0, "admin.id = user_credit_transactions.admin_id".to_string());
+        let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
         clause.push_str(&sub_where.join(" AND "));
         clause.push(')');
         let clause = renumber_placeholders(&clause, start_idx);
@@ -821,15 +942,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         record_profiled_query("user_credit_transactions", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let m = UserCreditTransaction { db: db.clone(), base_url: base_url.clone() };
         let user = m.load_user(&rows).await?;
+        let admin = m.load_admin(&rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
-        let localized = LocalizedMap::default();
+        let localized = localized::load_user_credit_transaction_localized(db.clone(), &ids).await?;
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
             let key = r.id.clone();
-            let view = hydrate_view(r.clone(), &LocalizedMap::default(), base_url.as_deref());
+            let view = hydrate_view(r.clone(), &localized, base_url.as_deref());
             out_vec.push(UserCreditTransactionWithRelations {
                 row: view,
                 user: user.get(&key).cloned().unwrap_or(None),
+                admin: admin.get(&key).cloned().unwrap_or(None),
             });
         }
         Ok(out_vec)
@@ -1149,15 +1272,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         record_profiled_query("user_credit_transactions", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let m = UserCreditTransaction { db: db.clone(), base_url: base_url.clone() };
         let user = m.load_user(&rows).await?;
+        let admin = m.load_admin(&rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
-        let localized = LocalizedMap::default();
+        let localized = localized::load_user_credit_transaction_localized(db, &ids).await?;
         let mut data = Vec::with_capacity(rows.len());
         for row in rows {
             let key = row.id.clone();
-            let view = hydrate_view(row.clone(), &LocalizedMap::default(), base_url.as_deref());
+            let view = hydrate_view(row.clone(), &localized, base_url.as_deref());
             data.push(UserCreditTransactionWithRelations {
                 row: view,
                 user: user.get(&key).cloned().unwrap_or(None),
+                admin: admin.get(&key).cloned().unwrap_or(None),
             });
         }
         Ok(Page { data, total, per_page, current_page, last_page })
@@ -1290,6 +1415,7 @@ pub struct UserCreditTransactionInsert<'db> {
     base_url: Option<String>,
     cols: Vec<UserCreditTransactionCol>,
     binds: Vec<BindValue>,
+    translations: HashMap<&'static str, HashMap<String, String>>,
     conflict_action: Option<&'static str>,
     conflict_cols: Vec<UserCreditTransactionCol>,
 }
@@ -1301,6 +1427,7 @@ impl<'db> UserCreditTransactionInsert<'db> {
             base_url,
             cols: vec![],
             binds: vec![],
+            translations: HashMap::new(),
             conflict_action: None,
             conflict_cols: vec![],
         }
@@ -1314,6 +1441,11 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
     pub fn set_user_id(mut self, val: i64) -> Self {
         self.cols.push(UserCreditTransactionCol::UserId);
+        self.binds.push(val.into());
+        self
+    }
+    pub fn set_admin_id(mut self, val: Option<i64>) -> Self {
+        self.cols.push(UserCreditTransactionCol::AdminId);
         self.binds.push(val.into());
         self
     }
@@ -1347,6 +1479,11 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.push(val.into());
         self
     }
+    pub fn set_custom_description(mut self, val: bool) -> Self {
+        self.cols.push(UserCreditTransactionCol::CustomDescription);
+        self.binds.push(val.into());
+        self
+    }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
         self.cols.push(UserCreditTransactionCol::CreatedAt);
         self.binds.push(val.into());
@@ -1355,6 +1492,15 @@ pub fn set_id(mut self, val: i64) -> Self {
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
         self.cols.push(UserCreditTransactionCol::UpdatedAt);
         self.binds.push(val.into());
+        self
+    }
+    pub fn set_custom_description_text_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
+        self.translations.entry("custom_description_text").or_default().insert(locale.into(), val.into());
+        self
+    }
+    pub fn set_custom_description_text_langs(mut self, langs: localized::LocalizedText) -> Self {
+        if !langs.en.is_empty() { self = self.set_custom_description_text_lang(localized::Locale::En, langs.en); }
+        if !langs.zh.is_empty() { self = self.set_custom_description_text_lang(localized::Locale::Zh, langs.zh); }
         self
     }
     pub fn on_conflict_do_nothing(mut self, conflict_cols: &[UserCreditTransactionCol]) -> Self {
@@ -1451,8 +1597,20 @@ pub async fn save(self) -> Result<UserCreditTransactionView> {
         }
         let row = db.fetch_one(q).await?;
         record_profiled_query("user_credit_transactions", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let localized = LocalizedMap::default();
-        Ok(hydrate_view(row, &LocalizedMap::default(), self.base_url.as_deref()))
+        if !self.translations.is_empty() {
+            let supported = localized::SUPPORTED_LOCALES;
+            if let Some(map) = self.translations.get("custom_description_text") {
+                let mut filtered = HashMap::new();
+                for (loc, val) in map {
+                    if supported.contains(&loc.as_str()) { filtered.insert(loc.clone(), val.clone()); }
+                }
+                if !filtered.is_empty() {
+                    localized::upsert_localized_many(db.clone(), localized::USER_CREDIT_TRANSACTION_OWNER_TYPE, row.id, "custom_description_text", &filtered).await?;
+                }
+            }
+        }
+        let localized = localized::load_user_credit_transaction_localized(db, &[row.id]).await?;
+        Ok(hydrate_view(row, &localized, self.base_url.as_deref()))
     }
 }
 
@@ -1462,6 +1620,7 @@ pub struct UserCreditTransactionUpdate<'db> {
     sets: Vec<(UserCreditTransactionCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
+    translations: HashMap<&'static str, HashMap<String, String>>,
 }
 
 impl<'db> UserCreditTransactionUpdate<'db> {
@@ -1472,6 +1631,7 @@ impl<'db> UserCreditTransactionUpdate<'db> {
             sets: vec![],
             where_sql: vec![],
             binds: vec![],
+            translations: HashMap::new(),
         }
     }
     pub fn unsafe_sql(self) -> UserCreditTransactionUnsafeUpdate<'db> { UserCreditTransactionUnsafeUpdate::new(self) }
@@ -1499,6 +1659,10 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
     pub fn decrement_user_id(mut self, val: i64) -> Self {
         self.sets.push((UserCreditTransactionCol::UserId, val.into(), SetMode::Decrement));
+        self
+    }
+    pub fn set_admin_id(mut self, val: Option<i64>) -> Self {
+        self.sets.push((UserCreditTransactionCol::AdminId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_credit_type(mut self, val: CreditType) -> Self {
@@ -1533,12 +1697,25 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.sets.push((UserCreditTransactionCol::Remark, val.into(), SetMode::Assign));
         self
     }
+    pub fn set_custom_description(mut self, val: bool) -> Self {
+        self.sets.push((UserCreditTransactionCol::CustomDescription, val.into(), SetMode::Assign));
+        self
+    }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
         self.sets.push((UserCreditTransactionCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
         self.sets.push((UserCreditTransactionCol::UpdatedAt, val.into(), SetMode::Assign));
+        self
+    }
+    pub fn set_custom_description_text_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
+        self.translations.entry("custom_description_text").or_default().insert(locale.into(), val.into());
+        self
+    }
+    pub fn set_custom_description_text_langs(mut self, langs: localized::LocalizedText) -> Self {
+        if !langs.en.is_empty() { self = self.set_custom_description_text_lang(localized::Locale::En, langs.en); }
+        if !langs.zh.is_empty() { self = self.set_custom_description_text_lang(localized::Locale::Zh, langs.zh); }
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
@@ -1550,6 +1727,12 @@ pub fn set_id(mut self, val: i64) -> Self {
     pub fn where_user_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::UserId.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_admin_id(mut self, op: Op, val: Option<i64>) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -1586,6 +1769,12 @@ pub fn set_id(mut self, val: i64) -> Self {
     pub fn where_remark(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Remark.as_sql(), op.as_sql(), idx));
+        self.binds.push(val.into());
+        self
+    }
+    pub fn where_custom_description(mut self, op: Op, val: bool) -> Self {
+        let idx = self.binds.len() + 1;
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::CustomDescription.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -1702,6 +1891,20 @@ pub async fn save(self) -> Result<u64> {
         for b in &binds { q = bind_query(q, b.clone()); }
         let res = db.execute(q).await?;
         record_profiled_query("user_credit_transactions", "UPDATE", &sql, &__profiler_binds, __profiler_start.elapsed());
+        if res.rows_affected() > 0 && !self.translations.is_empty() && !target_ids.is_empty() {
+            let supported = localized::SUPPORTED_LOCALES;
+            if let Some(map) = self.translations.get("custom_description_text") {
+                let mut filtered = HashMap::new();
+                for (loc, val) in map {
+                    if supported.contains(&loc.as_str()) { filtered.insert(loc.clone(), val.clone()); }
+                }
+                if !filtered.is_empty() {
+                    for id in &target_ids {
+                        localized::upsert_localized_many(db.clone(), localized::USER_CREDIT_TRANSACTION_OWNER_TYPE, id.clone(), "custom_description_text", &filtered).await?;
+                    }
+                }
+            }
+        }
         if !__old_rows_json.is_empty() && res.rows_affected() > 0 {
             if let Some(observer) = try_get_observer() {
                 for (record_id, old_data) in &__old_rows_json {
@@ -1737,12 +1940,14 @@ impl UserCreditTransactionTableAdapter {
         match name {
             "id" => Some(UserCreditTransactionCol::Id),
             "user_id" => Some(UserCreditTransactionCol::UserId),
+            "admin_id" => Some(UserCreditTransactionCol::AdminId),
             "credit_type" => Some(UserCreditTransactionCol::CreditType),
             "amount" => Some(UserCreditTransactionCol::Amount),
             "transaction_type" => Some(UserCreditTransactionCol::TransactionType),
             "related_key" => Some(UserCreditTransactionCol::RelatedKey),
             "params" => Some(UserCreditTransactionCol::Params),
             "remark" => Some(UserCreditTransactionCol::Remark),
+            "custom_description" => Some(UserCreditTransactionCol::CustomDescription),
             "created_at" => Some(UserCreditTransactionCol::CreatedAt),
             "updated_at" => Some(UserCreditTransactionCol::UpdatedAt),
             _ => None,
@@ -1755,6 +1960,7 @@ impl UserCreditTransactionTableAdapter {
     }
     fn parse_locale_field(name: &str) -> Option<&'static str> {
         match name {
+            "custom_description_text" => Some("custom_description_text"),
             _ => None,
         }
     }
@@ -1769,12 +1975,14 @@ impl UserCreditTransactionTableAdapter {
         match name {
             "id" => raw.trim().parse::<i64>().ok().map(Into::into),
             "user_id" => raw.trim().parse::<i64>().ok().map(Into::into),
+            "admin_id" => Some(Self::parse_bind(raw.trim())),
             "credit_type" => Some(Self::parse_bind(raw.trim())),
             "amount" => raw.trim().parse::<rust_decimal::Decimal>().ok().map(Into::into),
             "transaction_type" => Some(Self::parse_bind(raw.trim())),
             "related_key" => Some(Self::parse_bind(raw.trim())),
             "params" => Some(Self::parse_bind(raw.trim())),
             "remark" => Some(Self::parse_bind(raw.trim())),
+            "custom_description" => raw.trim().parse::<bool>().ok().map(Into::into),
             "created_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             "updated_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             _ => None,
@@ -1797,6 +2005,17 @@ impl UserCreditTransactionTableAdapter {
             ("user", "credit_2") => raw.trim().parse::<rust_decimal::Decimal>().ok().map(Into::into),
             ("user", "created_at") => Self::parse_datetime(raw.trim(), false).map(Into::into),
             ("user", "updated_at") => Self::parse_datetime(raw.trim(), false).map(Into::into),
+            ("admin", "id") => raw.trim().parse::<i64>().ok().map(Into::into),
+            ("admin", "username") => Some(raw.trim().to_string().into()),
+            ("admin", "email") => Some(Self::parse_bind(raw.trim())),
+            ("admin", "locale") => Some(Self::parse_bind(raw.trim())),
+            ("admin", "password") => Some(raw.trim().to_string().into()),
+            ("admin", "name") => Some(raw.trim().to_string().into()),
+            ("admin", "admin_type") => Some(Self::parse_bind(raw.trim())),
+            ("admin", "abilities") => Some(Self::parse_bind(raw.trim())),
+            ("admin", "created_at") => Self::parse_datetime(raw.trim(), false).map(Into::into),
+            ("admin", "updated_at") => Self::parse_datetime(raw.trim(), false).map(Into::into),
+            ("admin", "deleted_at") => Self::parse_datetime(raw.trim(), false).map(Into::into),
             _ => None,
         }
     }
@@ -1825,20 +2044,23 @@ impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
     type Query<'db> = UserCreditTransactionQuery<'db>;
     type Row = UserCreditTransactionWithRelations;
     fn model_key(&self) -> &'static str { "UserCreditTransaction" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "user_id", "credit_type", "amount", "transaction_type", "related_key", "remark", "created_at", "updated_at"] }
+    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "user_id", "admin_id", "credit_type", "amount", "transaction_type", "related_key", "remark", "custom_description", "created_at", "updated_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at"] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
         &[
             DataTableColumnDescriptor { name: "id", label: "ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "user_id", label: "User ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "admin_id", label: "Admin ID", data_type: "Option<i64>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "credit_type", label: "Credit Type", data_type: "CreditType", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "amount", label: "Amount", data_type: "rust_decimal::Decimal", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "transaction_type", label: "Transaction Type", data_type: "CreditTransactionType", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "related_key", label: "Related Key", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
             DataTableColumnDescriptor { name: "params", label: "Params", data_type: "Option<serde_json::Value>", sortable: false, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "remark", label: "Remark", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
+            DataTableColumnDescriptor { name: "custom_description", label: "Custom Description", data_type: "bool", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "created_at", label: "Created At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
             DataTableColumnDescriptor { name: "updated_at", label: "Updated At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
+            DataTableColumnDescriptor { name: "custom_description_text", label: "Custom Description Text", data_type: "String", sortable: false, localized: true, filter_ops: &["locale_eq", "locale_like"] },
         ]
     }
     fn relation_column_descriptors(&self) -> &'static [DataTableRelationColumnDescriptor] {
@@ -1858,6 +2080,17 @@ impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
             DataTableRelationColumnDescriptor { relation: "user", column: "credit_2", data_type: "rust_decimal::Decimal", filter_ops: &["has_eq"] },
             DataTableRelationColumnDescriptor { relation: "user", column: "created_at", data_type: "time::OffsetDateTime", filter_ops: &["has_eq"] },
             DataTableRelationColumnDescriptor { relation: "user", column: "updated_at", data_type: "time::OffsetDateTime", filter_ops: &["has_eq"] },
+            DataTableRelationColumnDescriptor { relation: "admin", column: "id", data_type: "i64", filter_ops: &["has_eq"] },
+            DataTableRelationColumnDescriptor { relation: "admin", column: "username", data_type: "String", filter_ops: &["has_eq", "has_like"] },
+            DataTableRelationColumnDescriptor { relation: "admin", column: "email", data_type: "Option<String>", filter_ops: &["has_eq", "has_like"] },
+            DataTableRelationColumnDescriptor { relation: "admin", column: "locale", data_type: "Option<String>", filter_ops: &["has_eq", "has_like"] },
+            DataTableRelationColumnDescriptor { relation: "admin", column: "password", data_type: "String", filter_ops: &["has_eq", "has_like"] },
+            DataTableRelationColumnDescriptor { relation: "admin", column: "name", data_type: "String", filter_ops: &["has_eq", "has_like"] },
+            DataTableRelationColumnDescriptor { relation: "admin", column: "admin_type", data_type: "AdminType", filter_ops: &["has_eq"] },
+            DataTableRelationColumnDescriptor { relation: "admin", column: "abilities", data_type: "serde_json::Value", filter_ops: &["has_eq"] },
+            DataTableRelationColumnDescriptor { relation: "admin", column: "created_at", data_type: "time::OffsetDateTime", filter_ops: &["has_eq"] },
+            DataTableRelationColumnDescriptor { relation: "admin", column: "updated_at", data_type: "time::OffsetDateTime", filter_ops: &["has_eq"] },
+            DataTableRelationColumnDescriptor { relation: "admin", column: "deleted_at", data_type: "Option<time::OffsetDateTime>", filter_ops: &["has_eq"] },
         ]
     }
     fn filter_patterns(&self) -> &'static [&'static str] {
@@ -1872,6 +2105,8 @@ impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
             "f-any-<col1|col2|...>",
             "f-has-<relation>-<col>",
             "f-has-like-<relation>-<col>",
+            "f-locale-<col>",
+            "f-locale-like-<col>",
         ]
     }
     fn apply_auto_filter<'db>(&self, query: UserCreditTransactionQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<UserCreditTransactionQuery<'db>>> where Self: 'db {
@@ -1908,10 +2143,17 @@ impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
                 Ok(Some(query.where_col(col, Op::Le, ts)))
             }
             ParsedFilter::LocaleEq { column } => {
-                Ok(None)
+                let Some(field) = Self::parse_locale_field(column.as_str()) else { return Ok(None); };
+                let locale = core_i18n::current_locale().to_string();
+                let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = user_credit_transactions.id AND l.field = ? AND l.locale = ? AND l.value = ?)".to_string();
+                Ok(Some(query.where_exists(clause, vec![localized::USER_CREDIT_TRANSACTION_OWNER_TYPE.to_string(), field.to_string(), locale, trimmed.to_string()])))
             }
             ParsedFilter::LocaleLike { column } => {
-                Ok(None)
+                let Some(field) = Self::parse_locale_field(column.as_str()) else { return Ok(None); };
+                let locale = core_i18n::current_locale().to_string();
+                let pattern = format!("%{}%", trimmed);
+                let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = user_credit_transactions.id AND l.field = ? AND l.locale = ? AND l.value LIKE ?)".to_string();
+                Ok(Some(query.where_exists(clause, vec![localized::USER_CREDIT_TRANSACTION_OWNER_TYPE.to_string(), field.to_string(), locale, pattern])))
             }
             ParsedFilter::LikeAny { columns } => {
                 let mut applied = false;
@@ -1957,6 +2199,17 @@ impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
                     ("user", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))) },
                     ("user", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))) },
                     ("user", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("admin", "id") => { let Some(bind) = Self::parse_bind_for_relation("admin", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Id, Op::Eq, bind)))) },
+                    ("admin", "username") => { let Some(bind) = Self::parse_bind_for_relation("admin", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Username, Op::Eq, bind)))) },
+                    ("admin", "email") => { let Some(bind) = Self::parse_bind_for_relation("admin", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Email, Op::Eq, bind)))) },
+                    ("admin", "locale") => { let Some(bind) = Self::parse_bind_for_relation("admin", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Locale, Op::Eq, bind)))) },
+                    ("admin", "password") => { let Some(bind) = Self::parse_bind_for_relation("admin", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Password, Op::Eq, bind)))) },
+                    ("admin", "name") => { let Some(bind) = Self::parse_bind_for_relation("admin", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Name, Op::Eq, bind)))) },
+                    ("admin", "admin_type") => { let Some(bind) = Self::parse_bind_for_relation("admin", "admin_type", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::AdminType, Op::Eq, bind)))) },
+                    ("admin", "abilities") => { let Some(bind) = Self::parse_bind_for_relation("admin", "abilities", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Abilities, Op::Eq, bind)))) },
+                    ("admin", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::CreatedAt, Op::Eq, bind)))) },
+                    ("admin", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("admin", "deleted_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "deleted_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::DeletedAt, Op::Eq, bind)))) },
                     _ => Ok(None),
                 }
             }
@@ -1971,6 +2224,11 @@ impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
                     ("user", "password") => Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))),
                     ("user", "country_iso2") => Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))),
                     ("user", "contact_number") => Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))),
+                    ("admin", "username") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Username, Op::Like, pattern.clone())))),
+                    ("admin", "email") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Email, Op::Like, pattern.clone())))),
+                    ("admin", "locale") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Locale, Op::Like, pattern.clone())))),
+                    ("admin", "password") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Password, Op::Like, pattern.clone())))),
+                    ("admin", "name") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Name, Op::Like, pattern.clone())))),
                     _ => Ok(None),
                 }
             }
@@ -1996,12 +2254,14 @@ impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
         let next = match column {
             "id" => query.order_by(UserCreditTransactionCol::Id, dir),
             "user_id" => query.order_by(UserCreditTransactionCol::UserId, dir),
+            "admin_id" => query.order_by(UserCreditTransactionCol::AdminId, dir),
             "credit_type" => query.order_by(UserCreditTransactionCol::CreditType, dir),
             "amount" => query.order_by(UserCreditTransactionCol::Amount, dir),
             "transaction_type" => query.order_by(UserCreditTransactionCol::TransactionType, dir),
             "related_key" => query.order_by(UserCreditTransactionCol::RelatedKey, dir),
             "params" => query.order_by(UserCreditTransactionCol::Params, dir),
             "remark" => query.order_by(UserCreditTransactionCol::Remark, dir),
+            "custom_description" => query.order_by(UserCreditTransactionCol::CustomDescription, dir),
             "created_at" => query.order_by(UserCreditTransactionCol::CreatedAt, dir),
             "updated_at" => query.order_by(UserCreditTransactionCol::UpdatedAt, dir),
             _ => query,
@@ -2018,9 +2278,11 @@ impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
         match column {
             "id" => Some(row.id.to_string()),
             "user_id" => Some(row.user_id.to_string()),
+            "admin_id" => row.admin_id.as_ref().map(|v| v.to_string()),
             "amount" => Some(row.amount.to_string()),
             "related_key" => row.related_key.as_ref().map(|v| v.to_string()),
             "remark" => row.remark.as_ref().map(|v| v.to_string()),
+            "custom_description" => Some(row.custom_description.to_string()),
             "created_at" => row.created_at.format(&time::format_description::well_known::Rfc3339).ok(),
             "updated_at" => row.updated_at.format(&time::format_description::well_known::Rfc3339).ok(),
             _ => None,

@@ -44,6 +44,10 @@ pub fn generate_localized(
         render_localized_text_section(locales),
     )?;
     context.insert(
+        "localized_input_section",
+        render_localized_input_section(locales),
+    )?;
+    context.insert(
         "model_localized_section",
         render_model_localized_section(locales, schema),
     )?;
@@ -493,6 +497,81 @@ fn render_localized_text_default_fill_lines(locales: &Locales) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn render_localized_input_section(locales: &Locales) -> String {
+    let fields = locales
+        .supported
+        .iter()
+        .map(|lang| format!("    #[serde(default)]\n    pub {lang}: Option<String>,"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let to_map_lines = locales
+        .supported
+        .iter()
+        .map(|lang| {
+            format!(
+                "        if let Some(v) = self.{lang} {{ out.insert(\"{lang}\".to_string(), v); }}"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let is_empty_checks = locales
+        .supported
+        .iter()
+        .map(|lang| format!("self.{lang}.is_none()"))
+        .collect::<Vec<_>>()
+        .join(" && ");
+    let default_locale = &locales.default;
+    format!(
+        r#"#[derive(Debug, Clone, Default, serde::Deserialize, schemars::JsonSchema)]
+pub struct LocalizedInput {{
+{fields}
+}}
+
+impl LocalizedInput {{
+    /// Convert to HashMap, keeping only non-None values.
+    pub fn to_hashmap(self) -> std::collections::HashMap<String, String> {{
+        let mut out = std::collections::HashMap::new();
+{to_map_lines}
+        out
+    }}
+
+    /// Returns true if all locale values are None.
+    pub fn is_empty(&self) -> bool {{
+        {is_empty_checks}
+    }}
+}}
+
+impl validator::Validate for LocalizedInput {{
+    fn validate(&self) -> Result<(), validator::ValidationErrors> {{
+        let mut errors = validator::ValidationErrors::new();
+        if self.{default_locale}.as_ref().map_or(true, |s| s.is_empty()) {{
+            errors.add(
+                "{default_locale}",
+                validator::ValidationError::new("required")
+                    .with_message(std::borrow::Cow::Borrowed("Default locale value is required.")),
+            );
+        }}
+        if errors.is_empty() {{ Ok(()) }} else {{ Err(errors) }}
+    }}
+}}
+
+impl ts_rs::TS for LocalizedInput {{
+    type WithoutGenerics = Self;
+    fn name() -> String {{ "LocalizedInput".to_string() }}
+    fn inline() -> String {{ Self::name() }}
+    fn inline_flattened() -> String {{ panic!("LocalizedInput cannot be flattened") }}
+    fn decl() -> String {{ panic!("LocalizedInput declaration is provided by shared platform types") }}
+    fn decl_concrete() -> String {{ Self::decl() }}
+}}
+
+"#,
+        fields = fields,
+        to_map_lines = to_map_lines,
+        is_empty_checks = is_empty_checks,
+        default_locale = default_locale,
+    )
 }
 
 fn render_loader_functions_section(has_loader_functions: bool) -> String {

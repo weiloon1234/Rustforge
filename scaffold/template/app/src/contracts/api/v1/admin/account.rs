@@ -55,52 +55,10 @@ pub struct UpdateAdminInput {
     pub abilities: Option<Vec<Permission>>,
 }
 
-impl CreateAdminInput {
-    pub fn normalize(mut self) -> Self {
-        self.email = self.email.and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        });
-        self
-    }
-}
-
 impl UpdateAdminInput {
     pub fn with_target_id(mut self, id: i64) -> Self {
         self.__target_id = id;
         self
-    }
-
-    pub fn normalize(mut self) -> Self {
-        self.email = normalize_email_patch(self.email);
-        self.password = self.password.and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        });
-        self
-    }
-}
-
-fn normalize_email_patch(email: Patch<String>) -> Patch<String> {
-    match email {
-        Patch::Missing => Patch::Missing,
-        Patch::Null => Patch::Null,
-        Patch::Value(value) => {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                Patch::Null
-            } else {
-                Patch::Value(trimmed.to_string())
-            }
-        }
     }
 }
 

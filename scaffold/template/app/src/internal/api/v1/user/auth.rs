@@ -2,7 +2,6 @@ use axum::{
     extract::{FromRequestParts, State},
     http::request::Parts,
     middleware::from_fn_with_state,
-    Json,
 };
 use core_i18n::t;
 use core_web::{
@@ -11,6 +10,7 @@ use core_web::{
     error::AppError,
     extract::request_headers::RequestHeaders,
     extract::validation::transform_validation_errors,
+    extract::CleanJson,
     openapi::{
         aide::axum::routing::{get_with, patch_with, post_with},
         ApiRouter,
@@ -243,7 +243,7 @@ async fn me(
 async fn profile_update(
     State(state): State<AppApiState>,
     auth: AuthUser<UserGuard>,
-    Json(req): Json<UserProfileUpdateInput>,
+    CleanJson(req): CleanJson<UserProfileUpdateInput>,
 ) -> Result<ApiResponse<UserProfileUpdateOutput>, AppError> {
     let req = validate_profile_update_input(req)?;
     let user = workflow::profile_update(&state, auth.user.id, req).await?;

@@ -25,6 +25,9 @@
   "Invalid credentials": "凭证无效",
   "Access denied": "拒绝访问",
 
+  "Select": "选择",
+  "Please select": "请选择",
+
   "Admin Portal": "管理后台",
   "Dashboard": "仪表盘",
   "Sign in to your account": "登录你的账号",

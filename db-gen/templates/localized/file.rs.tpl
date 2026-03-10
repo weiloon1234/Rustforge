@@ -16,4 +16,4 @@ pub enum Locale {
 {{locale_variants}}
 }
 
-{{loader_functions_section}}{{locale_impls_section}}{{localized_text_section}}{{model_localized_section}}{{attachment_rules_section}}{{meta_helpers_section}}{{attachment_helpers_section}}
+{{loader_functions_section}}{{locale_impls_section}}{{localized_text_section}}{{localized_input_section}}{{model_localized_section}}{{attachment_rules_section}}{{meta_helpers_section}}{{attachment_helpers_section}}

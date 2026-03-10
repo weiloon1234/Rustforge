@@ -34,8 +34,10 @@ pub enum Permission {
     UserHierarchy,
     #[serde(rename = "user.change_introducer")]
     UserChangeIntroducer,
-    #[serde(rename = "user.credit")]
-    UserCredit,
+    #[serde(rename = "user.credit_read")]
+    UserCreditRead,
+    #[serde(rename = "user.credit_manage")]
+    UserCreditManage,
     #[serde(rename = "audit_log.read")]
     AuditLogRead,
     #[serde(rename = "export")]
@@ -48,7 +50,7 @@ impl ts_rs::TS for Permission {
     fn name() -> String { "Permission".to_string() }
     fn inline() -> String { Self::name() }
     fn inline_flattened() -> String { panic!("Permission cannot be flattened") }
-    fn decl() -> String { "type Permission = \"admin.read\" | \"admin.manage\" | \"content_page.read\" | \"content_page.manage\" | \"country.read\" | \"country.manage\" | \"user.read\" | \"user.manage\" | \"user.hierarchy\" | \"user.change_introducer\" | \"user.credit\" | \"audit_log.read\" | \"export\";".to_string() }
+    fn decl() -> String { "type Permission = \"admin.read\" | \"admin.manage\" | \"content_page.read\" | \"content_page.manage\" | \"country.read\" | \"country.manage\" | \"user.read\" | \"user.manage\" | \"user.hierarchy\" | \"user.change_introducer\" | \"user.credit_read\" | \"user.credit_manage\" | \"audit_log.read\" | \"export\";".to_string() }
     fn decl_concrete() -> String { Self::decl() }
 }
 
@@ -63,7 +65,8 @@ pub const PERMISSION_META: &[PermissionMeta] = &[
     PermissionMeta { key: "user.manage", guard: "admin", label: "Manage Users", group: "user", description: "Create/update/ban/unban user records." },
     PermissionMeta { key: "user.hierarchy", guard: "admin", label: "View User Hierarchy", group: "user", description: "Browse user referral tree and navigate downlines." },
     PermissionMeta { key: "user.change_introducer", guard: "admin", label: "Change User Introducer", group: "user", description: "Change a user's introducer and view change logs." },
-    PermissionMeta { key: "user.credit", guard: "admin", label: "Manage User Credits", group: "user", description: "View credit transactions and adjust user balances." },
+    PermissionMeta { key: "user.credit_read", guard: "admin", label: "Read User Credits", group: "user", description: "View credit transactions and balances." },
+    PermissionMeta { key: "user.credit_manage", guard: "admin", label: "Manage User Credits", group: "user", description: "Adjust user credit balances." },
     PermissionMeta { key: "audit_log.read", guard: "admin", label: "Read Audit Logs", group: "audit_log", description: "View audit log datatable and inspect change details." },
     PermissionMeta { key: "export", guard: "admin", label: "Export Data", group: "datatable", description: "Export datatable records as CSV." },
 ];
@@ -81,7 +84,8 @@ impl Permission {
             Self::UserManage => "user.manage",
             Self::UserHierarchy => "user.hierarchy",
             Self::UserChangeIntroducer => "user.change_introducer",
-            Self::UserCredit => "user.credit",
+            Self::UserCreditRead => "user.credit_read",
+            Self::UserCreditManage => "user.credit_manage",
             Self::AuditLogRead => "audit_log.read",
             Self::Export => "export",
         }
@@ -99,7 +103,8 @@ impl Permission {
             "user.manage" => Some(Self::UserManage),
             "user.hierarchy" => Some(Self::UserHierarchy),
             "user.change_introducer" => Some(Self::UserChangeIntroducer),
-            "user.credit" => Some(Self::UserCredit),
+            "user.credit_read" => Some(Self::UserCreditRead),
+            "user.credit_manage" => Some(Self::UserCreditManage),
             "audit_log.read" => Some(Self::AuditLogRead),
             "export" => Some(Self::Export),
             _ => None,
@@ -118,7 +123,8 @@ impl Permission {
             Self::UserManage,
             Self::UserHierarchy,
             Self::UserChangeIntroducer,
-            Self::UserCredit,
+            Self::UserCreditRead,
+            Self::UserCreditManage,
             Self::AuditLogRead,
             Self::Export,
         ]
@@ -136,7 +142,8 @@ impl Permission {
             Self::UserManage => "admin",
             Self::UserHierarchy => "admin",
             Self::UserChangeIntroducer => "admin",
-            Self::UserCredit => "admin",
+            Self::UserCreditRead => "admin",
+            Self::UserCreditManage => "admin",
             Self::AuditLogRead => "admin",
             Self::Export => "admin",
         }
@@ -154,9 +161,10 @@ impl Permission {
             Self::UserManage => &PERMISSION_META[7],
             Self::UserHierarchy => &PERMISSION_META[8],
             Self::UserChangeIntroducer => &PERMISSION_META[9],
-            Self::UserCredit => &PERMISSION_META[10],
-            Self::AuditLogRead => &PERMISSION_META[11],
-            Self::Export => &PERMISSION_META[12],
+            Self::UserCreditRead => &PERMISSION_META[10],
+            Self::UserCreditManage => &PERMISSION_META[11],
+            Self::AuditLogRead => &PERMISSION_META[12],
+            Self::Export => &PERMISSION_META[13],
         }
     }
 

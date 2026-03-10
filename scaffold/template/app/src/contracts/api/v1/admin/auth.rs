@@ -53,23 +53,6 @@ pub struct AdminProfileUpdateInput {
     pub email: Patch<String>,
 }
 
-impl AdminProfileUpdateInput {
-    pub fn normalize(mut self) -> Self {
-        self.email = match self.email {
-            Patch::Missing => Patch::Missing,
-            Patch::Null => Patch::Null,
-            Patch::Value(value) => {
-                let trimmed = value.trim();
-                if trimmed.is_empty() {
-                    Patch::Null
-                } else {
-                    Patch::Value(trimmed.to_string())
-                }
-            }
-        };
-        self
-    }
-}
 
 #[rustforge_contract]
 #[derive(TS)]

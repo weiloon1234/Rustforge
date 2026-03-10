@@ -196,7 +196,7 @@ export default function LogViewerPage() {
         </p>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Select
           value={selectedFile}
           onChange={(e) => setSelectedFile(e.target.value)}
@@ -205,7 +205,7 @@ export default function LogViewerPage() {
             label: `${f.filename} (${formatBytes(f.size_bytes)})`,
           }))}
           placeholder={files.length === 0 ? t("No log files") : undefined}
-          containerClassName="sm:min-w-[16rem] sm:max-w-[24rem]"
+          containerClassName="!mb-0 sm:min-w-[16rem] sm:max-w-[24rem]"
         />
         <div className="flex items-center gap-2">
           <Button
@@ -236,13 +236,13 @@ export default function LogViewerPage() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Select
           value={minLevel}
           onChange={(e) => setMinLevel(e.target.value)}
           options={LOG_LEVELS.map((l) => ({ value: l, label: l }))}
           placeholder={t("All levels")}
-          containerClassName="sm:min-w-[8rem] sm:max-w-[12rem]"
+          containerClassName="!mb-0 sm:min-w-[8rem] sm:max-w-[12rem]"
         />
         <div className="relative">
           <Search
@@ -254,7 +254,7 @@ export default function LogViewerPage() {
             placeholder={t("Filter logs...")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-lg border border-border bg-surface py-1.5 pl-8 pr-3 text-sm sm:w-auto"
+            className="w-full h-8 rounded-lg border border-border bg-surface pl-8 pr-3 text-sm sm:w-auto"
           />
         </div>
       </div>

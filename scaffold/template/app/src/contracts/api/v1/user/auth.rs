@@ -60,22 +60,7 @@ pub struct UserRegisterInput {
 
 impl UserRegisterInput {
     pub fn normalize(mut self) -> Self {
-        self.name = self.name.map(|v| {
-            let trimmed = v.trim().to_string();
-            if trimmed.is_empty() { return trimmed; }
-            trimmed
-        }).filter(|v| !v.is_empty());
-
-        self.email = self.email.map(|v| {
-            let trimmed = v.trim().to_string();
-            if trimmed.is_empty() { return trimmed; }
-            trimmed
-        }).filter(|v| !v.is_empty());
-
-        self.country_iso2 = self.country_iso2.map(|v| v.trim().to_ascii_uppercase()).filter(|v| !v.is_empty());
-        self.contact_number = self.contact_number.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-        self.referral_code = self.referral_code.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-
+        self.country_iso2 = self.country_iso2.map(|v| v.to_ascii_uppercase());
         self
     }
 }
@@ -123,38 +108,7 @@ pub struct UserProfileUpdateInput {
 
 impl UserProfileUpdateInput {
     pub fn normalize(mut self) -> Self {
-        self.name = match self.name {
-            Patch::Missing => Patch::Missing,
-            Patch::Null => Patch::Null,
-            Patch::Value(v) => {
-                let trimmed = v.trim().to_string();
-                if trimmed.is_empty() { Patch::Null } else { Patch::Value(trimmed) }
-            }
-        };
-        self.email = match self.email {
-            Patch::Missing => Patch::Missing,
-            Patch::Null => Patch::Null,
-            Patch::Value(v) => {
-                let trimmed = v.trim().to_string();
-                if trimmed.is_empty() { Patch::Null } else { Patch::Value(trimmed) }
-            }
-        };
-        self.country_iso2 = match self.country_iso2 {
-            Patch::Missing => Patch::Missing,
-            Patch::Null => Patch::Null,
-            Patch::Value(v) => {
-                let trimmed = v.trim().to_ascii_uppercase();
-                if trimmed.is_empty() { Patch::Null } else { Patch::Value(trimmed) }
-            }
-        };
-        self.contact_number = match self.contact_number {
-            Patch::Missing => Patch::Missing,
-            Patch::Null => Patch::Null,
-            Patch::Value(v) => {
-                let trimmed = v.trim().to_string();
-                if trimmed.is_empty() { Patch::Null } else { Patch::Value(trimmed) }
-            }
-        };
+        self.country_iso2 = self.country_iso2.map_value(|v| v.to_ascii_uppercase());
         self
     }
 }

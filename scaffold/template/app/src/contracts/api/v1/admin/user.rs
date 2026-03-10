@@ -62,30 +62,8 @@ pub struct UpdateUserInput {
 
 impl CreateUserInput {
     pub fn normalize(mut self) -> Self {
-        self.email = self.email.and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_ascii_lowercase())
-            }
-        });
-        self.name = self.name.and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        });
-        self.introducer_username = self.introducer_username.and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_ascii_lowercase())
-            }
-        });
+        self.email = self.email.map(|v| v.to_ascii_lowercase());
+        self.introducer_username = self.introducer_username.map(|v| v.to_ascii_lowercase());
         self
     }
 }
@@ -97,49 +75,8 @@ impl UpdateUserInput {
     }
 
     pub fn normalize(mut self) -> Self {
-        self.email = normalize_patch_email(self.email);
-        self.name = normalize_patch_string(self.name);
-        self.password = self.password.and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        });
-        self.country_iso2 = normalize_patch_string(self.country_iso2);
-        self.contact_number = normalize_patch_string(self.contact_number);
+        self.email = self.email.map_value(|v| v.to_ascii_lowercase());
         self
-    }
-}
-
-fn normalize_patch_email(patch: Patch<String>) -> Patch<String> {
-    match patch {
-        Patch::Missing => Patch::Missing,
-        Patch::Null => Patch::Null,
-        Patch::Value(value) => {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                Patch::Null
-            } else {
-                Patch::Value(trimmed.to_ascii_lowercase())
-            }
-        }
-    }
-}
-
-fn normalize_patch_string(patch: Patch<String>) -> Patch<String> {
-    match patch {
-        Patch::Missing => Patch::Missing,
-        Patch::Null => Patch::Null,
-        Patch::Value(value) => {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                Patch::Null
-            } else {
-                Patch::Value(trimmed.to_string())
-            }
-        }
     }
 }
 

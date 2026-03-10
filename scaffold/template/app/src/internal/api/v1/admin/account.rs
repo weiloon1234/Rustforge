@@ -1,13 +1,10 @@
-use axum::{
-    extract::{Path, State},
-    Json,
-};
+use axum::extract::{Path, State};
 use core_i18n::t;
 use core_web::{
     auth::AuthUser,
     authz::PermissionMode,
     error::AppError,
-    extract::{validation::transform_validation_errors, AsyncValidate},
+    extract::{validation::transform_validation_errors, AsyncValidate, CleanJson},
     openapi::{
         with_permission_check_delete_with, with_permission_check_get_with,
         with_permission_check_patch_with, with_permission_check_post_with, ApiRouter,
@@ -99,7 +96,7 @@ async fn detail(
 async fn create(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
-    Json(req): Json<CreateAdminInput>,
+    CleanJson(req): CleanJson<CreateAdminInput>,
 ) -> Result<ApiResponse<AdminOutput>, AppError> {
     let req = validate_create_input(&state, req).await?;
     let admin = workflow::create(&state, &auth, req).await?;
@@ -113,7 +110,7 @@ async fn update(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
     Path(id): Path<i64>,
-    Json(req): Json<UpdateAdminInput>,
+    CleanJson(req): CleanJson<UpdateAdminInput>,
 ) -> Result<ApiResponse<AdminOutput>, AppError> {
     let req = validate_update_input(&state, id, req).await?;
     let admin = workflow::update(&state, &auth, id, req).await?;
@@ -138,7 +135,7 @@ async fn remove(
 async fn batch_resolve(
     State(state): State<AppApiState>,
     _auth: AuthUser<AdminGuard>,
-    Json(req): Json<AdminBatchResolveInput>,
+    CleanJson(req): CleanJson<AdminBatchResolveInput>,
 ) -> Result<ApiResponse<AdminBatchResolveOutput>, AppError> {
     let parsed_ids: Vec<i64> = req
         .ids
@@ -164,7 +161,6 @@ async fn validate_create_input(
     state: &AppApiState,
     req: CreateAdminInput,
 ) -> Result<CreateAdminInput, AppError> {
-    let req = req.normalize();
     if let Err(e) = req.validate() {
         return Err(AppError::Validation {
             message: t("Validation failed"),
@@ -185,7 +181,7 @@ async fn validate_update_input(
     id: i64,
     req: UpdateAdminInput,
 ) -> Result<UpdateAdminInput, AppError> {
-    let req = req.with_target_id(id).normalize();
+    let req = req.with_target_id(id);
     if let Err(e) = req.validate() {
         return Err(AppError::Validation {
             message: t("Validation failed"),

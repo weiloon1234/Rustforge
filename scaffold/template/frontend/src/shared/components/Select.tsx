@@ -18,7 +18,7 @@ export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement
 }
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ options, label, error, errors, notes, required, placeholder, className, containerClassName, value, defaultValue, id: externalId, ...rest }, ref) => {
+  ({ options, label, error, errors, notes, required, placeholder = " ", className, containerClassName, value, defaultValue, id: externalId, ...rest }, ref) => {
     const autoId = useId();
     const id = externalId ?? autoId;
     const isPlaceholder = value === "" || (value === undefined && defaultValue === undefined);

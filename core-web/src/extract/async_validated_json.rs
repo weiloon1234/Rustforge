@@ -1,20 +1,17 @@
-use axum::{
-    extract::{FromRequest, Request},
-    Json,
-};
+use axum::extract::{FromRequest, Request};
 use core_i18n::t;
 use serde::de::DeserializeOwned;
 use validator::Validate;
 
 use crate::error::AppError;
 pub use crate::extract::validated_json::GetDb;
+use crate::extract::json_cleaner::clean_and_deserialize;
 use crate::extract::validation::{
     apply_json_request_body_schema, transform_validation_errors, AsyncValidate,
 };
 
 pub struct AsyncValidatedJson<T>(pub T);
 
-// #[axum::async_trait]
 impl<T, S> FromRequest<S> for AsyncValidatedJson<T>
 where
     T: DeserializeOwned + Validate + AsyncValidate + Send + Sync + 'static,
@@ -23,12 +20,8 @@ where
     type Rejection = AppError;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-        // 1. Parse JSON
-        let Json(data) = Json::<T>::from_request(req, state)
-            .await
-            .map_err(|e| AppError::BadRequest(format!("{}: {}", t("Invalid JSON"), e)))?;
+        let data: T = clean_and_deserialize(req, state).await?;
 
-        // 2. Sync Validate
         if let Err(e) = data.validate() {
             let errors = transform_validation_errors(e);
             return Err(AppError::Validation {
@@ -37,7 +30,6 @@ where
             });
         }
 
-        // 3. Async Validate
         if let Err(e) = data.validate_async(state.db()).await {
             let errors = transform_validation_errors(e);
             return Err(AppError::Validation {

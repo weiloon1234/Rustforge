@@ -1,9 +1,10 @@
-use axum::{extract::State, Json};
+use axum::extract::State;
 use core_i18n::t;
 use core_web::{
     auth::AuthUser,
     authz::PermissionMode,
     error::AppError,
+    extract::CleanJson,
     openapi::{with_permission_check_post_with, ApiRouter},
     response::ApiResponse,
 };
@@ -32,7 +33,7 @@ pub fn router(state: AppApiState) -> ApiRouter {
 async fn adjust_credit(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
-    Json(req): Json<AdminCreditAdjustInput>,
+    CleanJson(req): CleanJson<AdminCreditAdjustInput>,
 ) -> Result<ApiResponse<UserCreditTransactionOutput>, AppError> {
     let txn = workflow::adjust_credit(&state, auth.user.id, req).await?;
 
