@@ -40,7 +40,7 @@ function AdjustCreditForm({
       { name: "credit_type", type: "select", label: t("Credit Type"), required: true, options: ADJUSTABLE_CREDIT_TYPES.map((value) => ({ value, label: t(ADJUSTABLE_CREDIT_TYPE_I18N[value] ?? value) })) },
       { name: "amount", type: "text", label: t("Amount"), placeholder: "e.g. 100 or -50", required: true },
       { name: "remark", type: "textarea", label: t("Remark"), placeholder: t("Enter remark") },
-      { name: "use_custom_description", type: "checkbox", label: t("Custom Description") },
+      { name: "use_custom_description", type: "checkbox", label: t("Custom Description"), virtual: true },
       ...(values.use_custom_description === "1"
         ? [{ name: "custom_description", type: "text" as const, label: t("Custom Description"), localized: true }]
         : []),

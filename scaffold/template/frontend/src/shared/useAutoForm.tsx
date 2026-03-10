@@ -38,70 +38,44 @@ type RichEditorFieldType = "tapbit" | "tiptap";
 type AutoFormBodyType = "auto" | "json" | "multipart";
 type AutoFormDefaultValue = string | number | boolean | null | undefined | File | File[] | FilePreviewItem | FilePreviewItem[];
 
-type FieldDef =
-  | { name: string; type: InputFieldType; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean; localized?: boolean }
-  | {
-      name: string;
-      type: RichEditorFieldType;
-      label: string;
-      span?: 1 | 2;
-      required?: boolean;
-      notes?: string;
-      placeholder?: string;
-      disabled?: boolean;
-      editorPreset?: TiptapPreset;
-      imageFolder?: string;
-      localized?: boolean;
-    }
-  | { name: string; type: "textarea"; label: string; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean; rows?: number; localized?: boolean }
-  | { name: string; type: "select"; label: string; options: SelectOption[]; span?: 1 | 2; required?: boolean; notes?: string; placeholder?: string; disabled?: boolean }
-  | { name: string; type: "checkbox"; label: string; span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean }
-  | { name: string; type: "checkboxGroup"; label: string; options: CheckboxGroupOption[]; span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean; columns?: number }
-  | { name: string; type: "radio"; label: string; options: RadioOption[]; span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean }
-  | {
-      name: string;
-      type: "file";
-      label: string;
-      span?: 1 | 2;
-      required?: boolean;
-      notes?: string;
-      disabled?: boolean;
-      accept?: string;
-      accepts?: string;
-      multiple?: boolean;
-      maxFiles?: number;
-    }
-  | {
-      name: string;
-      type: "files";
-      label: string;
-      span?: 1 | 2;
-      required?: boolean;
-      notes?: string;
-      disabled?: boolean;
-      accept?: string;
-      accepts?: string;
-      maxFiles?: number;
-    }
-  | {
-      name: string;
-      type: "contact";
-      label?: string;
-      span?: 1 | 2;
-      required?: boolean;
-      notes?: string;
-      disabled?: boolean;
-      /** Payload key for country ISO2 (default: "country_iso2") */
-      countryName?: string;
-      /** Payload key for phone number (default: "contact_number") */
-      phoneName?: string;
-    };
+// Shared props across all field types
+type FieldBase = { span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean };
 
-interface AutoFormConfig {
+// Type-specific variants (without name — name is added via FieldIdentity)
+type FieldVariant =
+  | (FieldBase & { type: InputFieldType; label: string; placeholder?: string; localized?: boolean })
+  | (FieldBase & { type: RichEditorFieldType; label: string; placeholder?: string; editorPreset?: TiptapPreset; imageFolder?: string; localized?: boolean })
+  | (FieldBase & { type: "textarea"; label: string; placeholder?: string; rows?: number; localized?: boolean })
+  | (FieldBase & { type: "select"; label: string; options: SelectOption[]; placeholder?: string })
+  | (FieldBase & { type: "checkbox"; label: string })
+  | (FieldBase & { type: "checkboxGroup"; label: string; options: CheckboxGroupOption[]; columns?: number })
+  | (FieldBase & { type: "radio"; label: string; options: RadioOption[] })
+  | (FieldBase & { type: "file"; label: string; accept?: string; accepts?: string; multiple?: boolean; maxFiles?: number })
+  | (FieldBase & { type: "files"; label: string; accept?: string; accepts?: string; maxFiles?: number });
+
+// Name identity: payload fields must match T keys, virtual fields can be any string
+type FieldIdentity<T> =
+  | { name: keyof T & string; virtual?: false }
+  | { name: string; virtual: true };
+
+// Contact is special: name is an identifier, actual payload keys are countryName/phoneName
+type ContactField = FieldBase & {
+  name: string;
+  type: "contact";
+  label?: string;
+  virtual?: boolean;
+  countryName?: string;
+  phoneName?: string;
+};
+
+// FieldDef<T>: intersection distributes over both unions → full type-safe field definitions
+type FieldDef<T = Record<string, unknown>> = (FieldVariant & FieldIdentity<T>) | ContactField;
+
+interface AutoFormConfig<T = Record<string, unknown>> {
   url: string;
   method?: "post" | "put" | "patch";
   bodyType?: AutoFormBodyType;
-  fields: FieldDef[] | ((values: Record<string, string>) => FieldDef[]);
+  fields: FieldDef<NoInfer<T>>[] | ((values: Record<string, string>) => FieldDef<NoInfer<T>>[]);
   defaults?: Record<string, AutoFormDefaultValue>;
   tiptapImageUpload?: TiptapImageUploadHandler;
   /** Static key-value pairs merged into every submission (not rendered as form fields). */
@@ -186,11 +160,11 @@ function normalizeFilePreview(value: AutoFormDefaultValue): FilePreviewItem | nu
   return null;
 }
 
-function isLocalizable(field: FieldDef): field is FieldDef & { localized: true } {
+function isLocalizable(field: FieldDef<any>): field is FieldDef<any> & { localized: true } {
   return "localized" in field && field.localized === true;
 }
 
-function buildDefaults(fields: FieldDef[], locales: string[], defaults?: Record<string, AutoFormDefaultValue>): Record<string, string> {
+function buildDefaults(fields: FieldDef<any>[], locales: string[], defaults?: Record<string, AutoFormDefaultValue>): Record<string, string> {
   const values: Record<string, string> = {};
   for (const field of fields) {
     if (field.type === "file" || field.type === "files") {
@@ -225,7 +199,7 @@ function buildDefaults(fields: FieldDef[], locales: string[], defaults?: Record<
 }
 
 function buildFileDefaultPreviews(
-  fields: FieldDef[],
+  fields: FieldDef<any>[],
   defaults?: Record<string, AutoFormDefaultValue>,
 ): Record<string, FilePreviewItem[]> {
   const result: Record<string, FilePreviewItem[]> = {};
@@ -305,12 +279,12 @@ function appendFormDataValue(formData: FormData, key: string, value: unknown): v
   }
 }
 
-function shouldSerializeEmptyAsNull(field: FieldDef): boolean {
+function shouldSerializeEmptyAsNull(field: FieldDef<any>): boolean {
   if (field.required) return false;
   return field.type !== "checkbox" && field.type !== "checkboxGroup" && field.type !== "file" && field.type !== "files";
 }
 
-export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFormResult {
+export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, config: AutoFormConfig<T>): AutoFormResult {
   const {
     url,
     method = "post",
@@ -389,6 +363,8 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
     // Build payload — checkboxes send "1"/"0" instead of "on"/""
     const payload: Record<string, unknown> = { ...extraPayload };
     for (const field of fields) {
+      if (field.virtual) continue;
+
       if (field.type === "file" || field.type === "files") {
         const selected = fileValues[field.name] ?? [];
         if (selected.length === 0) continue;
@@ -473,7 +449,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
     }
   }, [api, method, url, bodyType, fields, values, fileValues, availableLocales, extraPayload, onSuccess, onError, busy]);
 
-  const renderLocalizedField = useCallback((field: FieldDef, locale: string): ReactElement => {
+  const renderLocalizedField = useCallback((field: FieldDef<T>, locale: string): ReactElement => {
     const valueKey = `${field.name}.${locale}`;
     const errors = fieldErrors[valueKey];
     const label = `${field.label} (${locale.toUpperCase()})`;
@@ -511,7 +487,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
           />
         );
       default: {
-        const inputField = field as FieldDef & { type: InputFieldType };
+        const inputField = field as FieldDef<T> & { type: InputFieldType };
         return (
           <TextInput
             type={inputField.type}
@@ -757,7 +733,7 @@ export function useAutoForm(api: AxiosInstance, config: AutoFormConfig): AutoFor
 
             default: {
               // All TextInput types: text, email, password, search, url, tel, number, money, atm, pin
-              const inputField = field as FieldDef & { type: InputFieldType };
+              const inputField = field as FieldDef<T> & { type: InputFieldType };
               return (
                 <div key={field.name} style={style}>
                   <TextInput
