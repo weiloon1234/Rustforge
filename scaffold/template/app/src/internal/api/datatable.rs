@@ -57,9 +57,9 @@ pub fn router(state: AppApiState) -> ApiRouter {
 async fn admin_summary(
     State(state): State<AppApiState>,
     headers: core_web::extract::request_headers::RequestHeaders,
-    req: ContractJson<DataTableGenericQueryRequest>,
+    ContractJson(req): ContractJson<DataTableGenericQueryRequest>,
 ) -> Result<ApiResponse<AdminDatatableSummaryOutput>, AppError> {
-    let mut input = req.0.datatable_query_to_input();
+    let mut input = req.datatable_query_to_input();
     input.model = Some(ADMIN_ACCOUNT_SCOPED_KEY.to_string());
 
     let ctx = state.datatable_context(&headers).await;
@@ -118,9 +118,9 @@ impl DataTableRouteState for AppApiState {
 async fn user_summary(
     State(state): State<AppApiState>,
     headers: core_web::extract::request_headers::RequestHeaders,
-    req: ContractJson<DataTableGenericQueryRequest>,
+    ContractJson(req): ContractJson<DataTableGenericQueryRequest>,
 ) -> Result<ApiResponse<UserDatatableSummaryOutput>, AppError> {
-    let mut input = req.0.datatable_query_to_input();
+    let mut input = req.datatable_query_to_input();
     input.model = Some(USER_SCOPED_KEY.to_string());
 
     let ctx = state.datatable_context(&headers).await;

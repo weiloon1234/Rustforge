@@ -122,9 +122,8 @@ pub fn router(state: AppApiState) -> ApiRouter {
 async fn login(
     State(state): State<AppApiState>,
     cookies: RequestCookies,
-    req: ContractJson<AdminLoginInput>,
+    ContractJson(req): ContractJson<AdminLoginInput>,
 ) -> Result<ApiResponse<AdminAuthOutput>, AppError> {
-    let req = req.0;
     let (_admin, tokens) = workflow::login(&state, &req.username, &req.password).await?;
     let output = to_auth_output(&state, &cookies, req.client_type, tokens);
     Ok(ApiResponse::success(output, &t("Login successful")))
@@ -134,9 +133,8 @@ async fn refresh(
     State(state): State<AppApiState>,
     headers: RequestHeaders,
     cookies: RequestCookies,
-    req: ContractJson<AdminRefreshInput>,
+    ContractJson(req): ContractJson<AdminRefreshInput>,
 ) -> Result<ApiResponse<AdminAuthOutput>, AppError> {
-    let req = req.0;
     let refresh_token = auth::extract_refresh_token_for_client(
         &headers,
         AdminGuard::name(),
@@ -155,9 +153,8 @@ async fn logout(
     headers: RequestHeaders,
     cookies: RequestCookies,
     _auth: AuthUser<AdminGuard>,
-    req: ContractJson<AdminLogoutInput>,
+    ContractJson(req): ContractJson<AdminLogoutInput>,
 ) -> Result<ApiResponse<AdminLogoutOutput>, AppError> {
-    let req = req.0;
     let refresh_token = auth::extract_refresh_token_for_client(
         &headers,
         AdminGuard::name(),
@@ -221,9 +218,8 @@ async fn profile_update(
 async fn locale_update(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
-    req: ContractJson<AdminLocaleUpdateInput>,
+    ContractJson(req): ContractJson<AdminLocaleUpdateInput>,
 ) -> Result<ApiResponse<AdminLocaleUpdateOutput>, AppError> {
-    let req = req.0;
     let locale = workflow::locale_update(&state, auth.user.id, req).await?;
     Ok(ApiResponse::success(
         AdminLocaleUpdateOutput { locale },
@@ -234,9 +230,8 @@ async fn locale_update(
 async fn password_update(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
-    req: ContractJson<AdminPasswordUpdateInput>,
+    ContractJson(req): ContractJson<AdminPasswordUpdateInput>,
 ) -> Result<ApiResponse<AdminPasswordUpdateOutput>, AppError> {
-    let req = req.0;
     workflow::password_update(&state, auth.user.id, req).await?;
     Ok(ApiResponse::success(
         AdminPasswordUpdateOutput { updated: true },

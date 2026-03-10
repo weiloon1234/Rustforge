@@ -64,9 +64,8 @@ async fn update_status(
     State(state): State<AppApiState>,
     _auth: AuthUser<AdminGuard>,
     Path(iso2): Path<String>,
-    req: ContractJson<AdminCountryStatusUpdateInput>,
+    ContractJson(req): ContractJson<AdminCountryStatusUpdateInput>,
 ) -> Result<ApiResponse<AdminCountryStatusUpdateOutput>, AppError> {
-    let req = req.0;
     let country = workflow::update_status(&state, &iso2, &req.status).await?;
 
     Ok(ApiResponse::success(

@@ -152,9 +152,8 @@ async fn resolve_referral(
 async fn login(
     State(state): State<AppApiState>,
     cookies: RequestCookies,
-    req: ContractJson<UserLoginInput>,
+    ContractJson(req): ContractJson<UserLoginInput>,
 ) -> Result<ApiResponse<UserAuthOutput>, AppError> {
-    let req = req.0;
     let (_user, tokens) = workflow::login(&state, &req.username, &req.password).await?;
     let output = to_auth_output(&state, &cookies, req.client_type, tokens);
     Ok(ApiResponse::success(output, &t("Login successful")))
@@ -163,9 +162,9 @@ async fn login(
 async fn register(
     State(state): State<AppApiState>,
     cookies: RequestCookies,
-    req: ContractJson<UserRegisterInput>,
+    ContractJson(req): ContractJson<UserRegisterInput>,
 ) -> Result<ApiResponse<UserAuthOutput>, AppError> {
-    let req = validate_register_input(req.0)?;
+    let req = validate_register_input(req)?;
     let (_user, tokens) = workflow::register(&state, req.clone()).await?;
     let output = to_auth_output(&state, &cookies, req.client_type, tokens);
     Ok(ApiResponse::success(output, &t("Registration successful")))
@@ -175,9 +174,8 @@ async fn refresh(
     State(state): State<AppApiState>,
     headers: RequestHeaders,
     cookies: RequestCookies,
-    req: ContractJson<UserRefreshInput>,
+    ContractJson(req): ContractJson<UserRefreshInput>,
 ) -> Result<ApiResponse<UserAuthOutput>, AppError> {
-    let req = req.0;
     let refresh_token = auth::extract_refresh_token_for_client(
         &headers,
         UserGuard::name(),
@@ -196,9 +194,8 @@ async fn logout(
     headers: RequestHeaders,
     cookies: RequestCookies,
     _auth: AuthUser<UserGuard>,
-    req: ContractJson<UserLogoutInput>,
+    ContractJson(req): ContractJson<UserLogoutInput>,
 ) -> Result<ApiResponse<UserLogoutOutput>, AppError> {
-    let req = req.0;
     let refresh_token = auth::extract_refresh_token_for_client(
         &headers,
         UserGuard::name(),
@@ -264,9 +261,8 @@ async fn profile_update(
 async fn locale_update(
     State(state): State<AppApiState>,
     auth: AuthUser<UserGuard>,
-    req: ContractJson<UserLocaleUpdateInput>,
+    ContractJson(req): ContractJson<UserLocaleUpdateInput>,
 ) -> Result<ApiResponse<UserLocaleUpdateOutput>, AppError> {
-    let req = req.0;
     let locale = workflow::locale_update(&state, auth.user.id, req).await?;
     Ok(ApiResponse::success(
         UserLocaleUpdateOutput { locale },
@@ -277,9 +273,8 @@ async fn locale_update(
 async fn password_update(
     State(state): State<AppApiState>,
     auth: AuthUser<UserGuard>,
-    req: ContractJson<UserPasswordUpdateInput>,
+    ContractJson(req): ContractJson<UserPasswordUpdateInput>,
 ) -> Result<ApiResponse<UserPasswordUpdateOutput>, AppError> {
-    let req = req.0;
     workflow::password_update(&state, auth.user.id, req).await?;
     Ok(ApiResponse::success(
         UserPasswordUpdateOutput { updated: true },
