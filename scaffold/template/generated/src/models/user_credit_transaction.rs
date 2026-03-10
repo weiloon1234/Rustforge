@@ -92,15 +92,6 @@ impl UserCreditTransactionView {
             custom_description_text_translations: self.custom_description_text_translations.clone(),
         }
     }
-    pub async fn upsert_custom_description_text<'a>(&self, db: DbConn<'a>, input: Option<localized::LocalizedInput>) -> Result<()> {
-        let Some(input) = input else { return Ok(()); };
-        if input.is_empty() { return Ok(()); }
-        let map = input.to_hashmap();
-        localized::upsert_localized_many(db, localized::USER_CREDIT_TRANSACTION_OWNER_TYPE, self.id, "custom_description_text", &map).await
-    }
-    pub async fn clear_custom_description_text<'a>(&self, db: DbConn<'a>) -> Result<()> {
-        localized::delete_localized_field(db, localized::USER_CREDIT_TRANSACTION_OWNER_TYPE, self.id, "custom_description_text").await
-    }
 }
 
 pub trait UserCreditTransactionViewsExt {
@@ -1512,15 +1503,6 @@ pub fn set_id(mut self, val: i64) -> Self {
         if !langs.zh.is_empty() { self = self.set_custom_description_text_lang(localized::Locale::Zh, langs.zh); }
         self
     }
-    pub fn set_custom_description_text_input(mut self, input: Option<localized::LocalizedInput>) -> Self {
-        let Some(input) = input else { return self; };
-        if input.is_empty() { return self; }
-        let map = input.to_hashmap();
-        for (locale, val) in map {
-            self.translations.entry("custom_description_text").or_default().insert(locale, val);
-        }
-        self
-    }
     pub fn on_conflict_do_nothing(mut self, conflict_cols: &[UserCreditTransactionCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
@@ -1734,15 +1716,6 @@ pub fn set_id(mut self, val: i64) -> Self {
     pub fn set_custom_description_text_langs(mut self, langs: localized::LocalizedText) -> Self {
         if !langs.en.is_empty() { self = self.set_custom_description_text_lang(localized::Locale::En, langs.en); }
         if !langs.zh.is_empty() { self = self.set_custom_description_text_lang(localized::Locale::Zh, langs.zh); }
-        self
-    }
-    pub fn set_custom_description_text_input(mut self, input: Option<localized::LocalizedInput>) -> Self {
-        let Some(input) = input else { return self; };
-        if input.is_empty() { return self; }
-        let map = input.to_hashmap();
-        for (locale, val) in map {
-            self.translations.entry("custom_description_text").or_default().insert(locale, val);
-        }
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {

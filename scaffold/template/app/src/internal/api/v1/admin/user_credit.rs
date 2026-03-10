@@ -4,7 +4,7 @@ use core_web::{
     auth::AuthUser,
     authz::PermissionMode,
     error::AppError,
-    extract::CleanJson,
+    contracts::ContractJson,
     openapi::{with_permission_check_post_with, ApiRouter},
     response::ApiResponse,
 };
@@ -33,9 +33,9 @@ pub fn router(state: AppApiState) -> ApiRouter {
 async fn adjust_credit(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
-    CleanJson(req): CleanJson<AdminCreditAdjustInput>,
+    req: ContractJson<AdminCreditAdjustInput>,
 ) -> Result<ApiResponse<UserCreditTransactionOutput>, AppError> {
-    let txn = workflow::adjust_credit(&state, auth.user.id, req).await?;
+    let txn = workflow::adjust_credit(&state, auth.user.id, req.0).await?;
 
     Ok(ApiResponse::success(
         UserCreditTransactionOutput {
