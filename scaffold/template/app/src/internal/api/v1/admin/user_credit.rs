@@ -35,7 +35,8 @@ async fn adjust_credit(
     auth: AuthUser<AdminGuard>,
     req: ContractJson<AdminCreditAdjustInput>,
 ) -> Result<ApiResponse<UserCreditTransactionOutput>, AppError> {
-    let txn = workflow::adjust_credit(&state, auth.user.id, req.0).await?;
+    let req = req.0;
+    let txn = workflow::adjust_credit(&state, auth.user.id, req).await?;
 
     Ok(ApiResponse::success(
         UserCreditTransactionOutput {
