@@ -158,6 +158,35 @@ fn render_upsert_localized_many_function() -> String {
     )
 }
 
+fn render_delete_localized_field_function() -> String {
+    String::from(
+        r#"pub async fn delete_localized_field<'a>(
+    db: DbConn<'a>,
+    owner_type: &str,
+    owner_id: i64,
+    field: &str,
+) -> Result<()> {
+    let rows = LocalizedModel::new(db.clone(), None)
+        .query()
+        .where_owner_type(Op::Eq, owner_type.to_string())
+        .where_owner_id(Op::Eq, owner_id)
+        .where_field(Op::Eq, field.to_string())
+        .get()
+        .await?;
+    for row in rows {
+        LocalizedModel::new(db.clone(), None)
+            .query()
+            .where_id(Op::Eq, row.id)
+            .delete()
+            .await?;
+    }
+    Ok(())
+}
+
+"#,
+    )
+}
+
 fn render_load_owner_localized_function() -> String {
     String::from(
         r#"pub async fn load_owner_localized<'a>(
@@ -581,6 +610,7 @@ fn render_loader_functions_section(has_loader_functions: bool) -> String {
 
     let mut out = String::new();
     out.push_str(&render_upsert_localized_many_function());
+    out.push_str(&render_delete_localized_field_function());
     out.push_str(&render_load_owner_localized_function());
     out.push_str(&render_upsert_meta_many_function());
     out.push_str(&render_load_owner_meta_function());

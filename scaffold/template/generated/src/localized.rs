@@ -68,6 +68,29 @@ pub async fn upsert_localized_many<'a>(
     Ok(())
 }
 
+pub async fn delete_localized_field<'a>(
+    db: DbConn<'a>,
+    owner_type: &str,
+    owner_id: i64,
+    field: &str,
+) -> Result<()> {
+    let rows = LocalizedModel::new(db.clone(), None)
+        .query()
+        .where_owner_type(Op::Eq, owner_type.to_string())
+        .where_owner_id(Op::Eq, owner_id)
+        .where_field(Op::Eq, field.to_string())
+        .get()
+        .await?;
+    for row in rows {
+        LocalizedModel::new(db.clone(), None)
+            .query()
+            .where_id(Op::Eq, row.id)
+            .delete()
+            .await?;
+    }
+    Ok(())
+}
+
 pub async fn load_owner_localized<'a>(
     db: DbConn<'a>,
     owner_type: &str,
@@ -368,6 +391,52 @@ impl LocalizedMapHelper for core_db::platform::localized::types::LocalizedMap {
         }
         Some(out)
     }
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize, schemars::JsonSchema)]
+pub struct LocalizedInput {
+    #[serde(default)]
+    pub en: Option<String>,
+    #[serde(default)]
+    pub zh: Option<String>,
+}
+
+impl LocalizedInput {
+    /// Convert to HashMap, keeping only non-None values.
+    pub fn to_hashmap(self) -> std::collections::HashMap<String, String> {
+        let mut out = std::collections::HashMap::new();
+        if let Some(v) = self.en { out.insert("en".to_string(), v); }
+        if let Some(v) = self.zh { out.insert("zh".to_string(), v); }
+        out
+    }
+
+    /// Returns true if all locale values are None.
+    pub fn is_empty(&self) -> bool {
+        self.en.is_none() && self.zh.is_none()
+    }
+}
+
+impl validator::Validate for LocalizedInput {
+    fn validate(&self) -> Result<(), validator::ValidationErrors> {
+        let mut errors = validator::ValidationErrors::new();
+        if self.en.as_ref().map_or(true, |s| s.is_empty()) {
+            errors.add(
+                "en",
+                validator::ValidationError::new("required")
+                    .with_message(std::borrow::Cow::Borrowed("Default locale value is required.")),
+            );
+        }
+        if errors.is_empty() { Ok(()) } else { Err(errors) }
+    }
+}
+
+impl ts_rs::TS for LocalizedInput {
+    type WithoutGenerics = Self;
+    fn name() -> String { "LocalizedInput".to_string() }
+    fn inline() -> String { Self::name() }
+    fn inline_flattened() -> String { panic!("LocalizedInput cannot be flattened") }
+    fn decl() -> String { panic!("LocalizedInput declaration is provided by shared platform types") }
+    fn decl_concrete() -> String { Self::decl() }
 }
 
 pub const CONTENT_PAGE_OWNER_TYPE: &str = "content_page";

@@ -85,6 +85,15 @@ impl ArticleView {
     }
     pub fn meta_flags(&self) -> Option<bool> { self.meta.get("flags").and_then(|v| v.as_bool()) }
     pub fn meta_extra_as<T: serde::de::DeserializeOwned>(&self) -> anyhow::Result<Option<T>> { match self.meta.get("extra") { None => Ok(None), Some(v) => Ok(Some(serde_json::from_value(v.clone())?)), } }
+    pub async fn upsert_title<'a>(&self, db: DbConn<'a>, input: Option<localized::LocalizedInput>) -> Result<()> {
+        let Some(input) = input else { return Ok(()); };
+        if input.is_empty() { return Ok(()); }
+        let map = input.to_hashmap();
+        localized::upsert_localized_many(db, localized::ARTICLE_OWNER_TYPE, self.id, "title", &map).await
+    }
+    pub async fn clear_title<'a>(&self, db: DbConn<'a>) -> Result<()> {
+        localized::delete_localized_field(db, localized::ARTICLE_OWNER_TYPE, self.id, "title").await
+    }
 }
 
 pub trait ArticleViewsExt {
@@ -220,7 +229,7 @@ impl<'db> Article<'db> {
         let mut parent_pairs = Vec::new();
         for p in parents {
             fk_vals.push(p.author_id.clone());
-            parent_pairs.push((p.id.clone(), p.author_id.clone()));
+            parent_pairs.push((p.id.clone(), Some(p.author_id.clone())));
         }
         if fk_vals.is_empty() { return Ok(HashMap::new()); }
         let placeholders: Vec<String> = (1..=fk_vals.len()).map(|i| format!("${}", i)).collect();
@@ -232,7 +241,7 @@ impl<'db> Article<'db> {
         for row in rows { by_pk.insert(row.id.clone(), row); }
         let mut out = HashMap::new();
         for (pid, fk) in parent_pairs {
-            out.insert(pid, by_pk.get(&fk).cloned());
+            out.insert(pid, fk.and_then(|k| by_pk.get(&k).cloned()));
         }
         Ok(out)
     }
@@ -1320,6 +1329,15 @@ pub fn set_id(mut self, val: i64) -> Self {
         if !langs.zh.is_empty() { self = self.set_title_lang(localized::Locale::Zh, langs.zh); }
         self
     }
+    pub fn set_title_input(mut self, input: Option<localized::LocalizedInput>) -> Self {
+        let Some(input) = input else { return self; };
+        if input.is_empty() { return self; }
+        let map = input.to_hashmap();
+        for (locale, val) in map {
+            self.translations.entry("title").or_default().insert(locale, val);
+        }
+        self
+    }
     pub fn set_meta_flags(mut self, val: bool) -> Self {
         self.meta.insert("flags".to_string(), JsonValue::Bool(val));
         self
@@ -1540,6 +1558,15 @@ pub fn set_id(mut self, val: i64) -> Self {
     pub fn set_title_langs(mut self, langs: localized::LocalizedText) -> Self {
         if !langs.en.is_empty() { self = self.set_title_lang(localized::Locale::En, langs.en); }
         if !langs.zh.is_empty() { self = self.set_title_lang(localized::Locale::Zh, langs.zh); }
+        self
+    }
+    pub fn set_title_input(mut self, input: Option<localized::LocalizedInput>) -> Self {
+        let Some(input) = input else { return self; };
+        if input.is_empty() { return self; }
+        let map = input.to_hashmap();
+        for (locale, val) in map {
+            self.translations.entry("title").or_default().insert(locale, val);
+        }
         self
     }
     pub fn set_meta_flags(mut self, val: bool) -> Self {

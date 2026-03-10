@@ -1649,6 +1649,25 @@ fn render_localized_setters(localized_fields: &[String], cfgs: &ConfigsFile) -> 
         }
         writeln!(out, "        self").unwrap();
         writeln!(out, "    }}").unwrap();
+
+        let fn_name_input = format!("set_{}_input", to_snake(f));
+        writeln!(
+            out,
+            "    pub fn {fn_name_input}(mut self, input: Option<localized::LocalizedInput>) -> Self {{"
+        )
+        .unwrap();
+        writeln!(out, "        let Some(input) = input else {{ return self; }};").unwrap();
+        writeln!(out, "        if input.is_empty() {{ return self; }}").unwrap();
+        writeln!(out, "        let map = input.to_hashmap();").unwrap();
+        writeln!(out, "        for (locale, val) in map {{").unwrap();
+        writeln!(
+            out,
+            "            self.translations.entry(\"{f}\").or_default().insert(locale, val);"
+        )
+        .unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "        self").unwrap();
+        writeln!(out, "    }}").unwrap();
     }
     out
 }
@@ -3658,6 +3677,41 @@ fn render_model(
                     .unwrap();
                 }
             }
+        }
+    }
+    if !localized_fields.is_empty() {
+        let model_snake_upper = model_snake.to_uppercase();
+        for f in &localized_fields {
+            let fn_upsert = format!("upsert_{}", to_snake(f));
+            writeln!(
+                out,
+                "    pub async fn {fn_upsert}<'a>(&self, db: DbConn<'a>, input: Option<localized::LocalizedInput>) -> Result<()> {{"
+            )
+            .unwrap();
+            writeln!(out, "        let Some(input) = input else {{ return Ok(()); }};").unwrap();
+            writeln!(out, "        if input.is_empty() {{ return Ok(()); }}").unwrap();
+            writeln!(out, "        let map = input.to_hashmap();").unwrap();
+            writeln!(
+                out,
+                "        localized::upsert_localized_many(db, localized::{model_snake_upper}_OWNER_TYPE, self.{pk}, \"{f}\", &map).await",
+                pk = to_snake(&pk)
+            )
+            .unwrap();
+            writeln!(out, "    }}").unwrap();
+
+            let fn_clear = format!("clear_{}", to_snake(f));
+            writeln!(
+                out,
+                "    pub async fn {fn_clear}<'a>(&self, db: DbConn<'a>) -> Result<()> {{"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        localized::delete_localized_field(db, localized::{model_snake_upper}_OWNER_TYPE, self.{pk}, \"{f}\").await",
+                pk = to_snake(&pk)
+            )
+            .unwrap();
+            writeln!(out, "    }}").unwrap();
         }
     }
     writeln!(out, "}}\n").unwrap();

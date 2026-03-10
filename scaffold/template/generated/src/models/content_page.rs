@@ -81,6 +81,33 @@ impl ContentPageView {
             cover_translations: self.cover_translations.clone(),
         }
     }
+    pub async fn upsert_title<'a>(&self, db: DbConn<'a>, input: Option<localized::LocalizedInput>) -> Result<()> {
+        let Some(input) = input else { return Ok(()); };
+        if input.is_empty() { return Ok(()); }
+        let map = input.to_hashmap();
+        localized::upsert_localized_many(db, localized::CONTENT_PAGE_OWNER_TYPE, self.id, "title", &map).await
+    }
+    pub async fn clear_title<'a>(&self, db: DbConn<'a>) -> Result<()> {
+        localized::delete_localized_field(db, localized::CONTENT_PAGE_OWNER_TYPE, self.id, "title").await
+    }
+    pub async fn upsert_content<'a>(&self, db: DbConn<'a>, input: Option<localized::LocalizedInput>) -> Result<()> {
+        let Some(input) = input else { return Ok(()); };
+        if input.is_empty() { return Ok(()); }
+        let map = input.to_hashmap();
+        localized::upsert_localized_many(db, localized::CONTENT_PAGE_OWNER_TYPE, self.id, "content", &map).await
+    }
+    pub async fn clear_content<'a>(&self, db: DbConn<'a>) -> Result<()> {
+        localized::delete_localized_field(db, localized::CONTENT_PAGE_OWNER_TYPE, self.id, "content").await
+    }
+    pub async fn upsert_cover<'a>(&self, db: DbConn<'a>, input: Option<localized::LocalizedInput>) -> Result<()> {
+        let Some(input) = input else { return Ok(()); };
+        if input.is_empty() { return Ok(()); }
+        let map = input.to_hashmap();
+        localized::upsert_localized_many(db, localized::CONTENT_PAGE_OWNER_TYPE, self.id, "cover", &map).await
+    }
+    pub async fn clear_cover<'a>(&self, db: DbConn<'a>) -> Result<()> {
+        localized::delete_localized_field(db, localized::CONTENT_PAGE_OWNER_TYPE, self.id, "cover").await
+    }
 }
 
 pub trait ContentPageViewsExt {
@@ -1371,6 +1398,15 @@ pub fn set_id(mut self, val: i64) -> Self {
         if !langs.zh.is_empty() { self = self.set_title_lang(localized::Locale::Zh, langs.zh); }
         self
     }
+    pub fn set_title_input(mut self, input: Option<localized::LocalizedInput>) -> Self {
+        let Some(input) = input else { return self; };
+        if input.is_empty() { return self; }
+        let map = input.to_hashmap();
+        for (locale, val) in map {
+            self.translations.entry("title").or_default().insert(locale, val);
+        }
+        self
+    }
     pub fn set_content_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
         self.translations.entry("content").or_default().insert(locale.into(), val.into());
         self
@@ -1380,6 +1416,15 @@ pub fn set_id(mut self, val: i64) -> Self {
         if !langs.zh.is_empty() { self = self.set_content_lang(localized::Locale::Zh, langs.zh); }
         self
     }
+    pub fn set_content_input(mut self, input: Option<localized::LocalizedInput>) -> Self {
+        let Some(input) = input else { return self; };
+        if input.is_empty() { return self; }
+        let map = input.to_hashmap();
+        for (locale, val) in map {
+            self.translations.entry("content").or_default().insert(locale, val);
+        }
+        self
+    }
     pub fn set_cover_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
         self.translations.entry("cover").or_default().insert(locale.into(), val.into());
         self
@@ -1387,6 +1432,15 @@ pub fn set_id(mut self, val: i64) -> Self {
     pub fn set_cover_langs(mut self, langs: localized::LocalizedText) -> Self {
         if !langs.en.is_empty() { self = self.set_cover_lang(localized::Locale::En, langs.en); }
         if !langs.zh.is_empty() { self = self.set_cover_lang(localized::Locale::Zh, langs.zh); }
+        self
+    }
+    pub fn set_cover_input(mut self, input: Option<localized::LocalizedInput>) -> Self {
+        let Some(input) = input else { return self; };
+        if input.is_empty() { return self; }
+        let map = input.to_hashmap();
+        for (locale, val) in map {
+            self.translations.entry("cover").or_default().insert(locale, val);
+        }
         self
     }
     pub fn on_conflict_do_nothing(mut self, conflict_cols: &[ContentPageCol]) -> Self {
@@ -1582,6 +1636,15 @@ pub fn set_id(mut self, val: i64) -> Self {
         if !langs.zh.is_empty() { self = self.set_title_lang(localized::Locale::Zh, langs.zh); }
         self
     }
+    pub fn set_title_input(mut self, input: Option<localized::LocalizedInput>) -> Self {
+        let Some(input) = input else { return self; };
+        if input.is_empty() { return self; }
+        let map = input.to_hashmap();
+        for (locale, val) in map {
+            self.translations.entry("title").or_default().insert(locale, val);
+        }
+        self
+    }
     pub fn set_content_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
         self.translations.entry("content").or_default().insert(locale.into(), val.into());
         self
@@ -1591,6 +1654,15 @@ pub fn set_id(mut self, val: i64) -> Self {
         if !langs.zh.is_empty() { self = self.set_content_lang(localized::Locale::Zh, langs.zh); }
         self
     }
+    pub fn set_content_input(mut self, input: Option<localized::LocalizedInput>) -> Self {
+        let Some(input) = input else { return self; };
+        if input.is_empty() { return self; }
+        let map = input.to_hashmap();
+        for (locale, val) in map {
+            self.translations.entry("content").or_default().insert(locale, val);
+        }
+        self
+    }
     pub fn set_cover_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
         self.translations.entry("cover").or_default().insert(locale.into(), val.into());
         self
@@ -1598,6 +1670,15 @@ pub fn set_id(mut self, val: i64) -> Self {
     pub fn set_cover_langs(mut self, langs: localized::LocalizedText) -> Self {
         if !langs.en.is_empty() { self = self.set_cover_lang(localized::Locale::En, langs.en); }
         if !langs.zh.is_empty() { self = self.set_cover_lang(localized::Locale::Zh, langs.zh); }
+        self
+    }
+    pub fn set_cover_input(mut self, input: Option<localized::LocalizedInput>) -> Self {
+        let Some(input) = input else { return self; };
+        if input.is_empty() { return self; }
+        let map = input.to_hashmap();
+        for (locale, val) in map {
+            self.translations.entry("cover").or_default().insert(locale, val);
+        }
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {

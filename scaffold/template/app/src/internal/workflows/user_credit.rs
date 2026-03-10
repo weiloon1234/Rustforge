@@ -42,10 +42,7 @@ pub async fn adjust_credit(
         CreditTransactionType::AdminDeduct
     };
 
-    let custom_desc_map = req
-        .custom_description
-        .map(|d| d.to_hashmap())
-        .filter(|m| !m.is_empty());
+    let has_custom_desc = req.custom_description.as_ref().is_some_and(|d| !d.is_empty());
 
     // Begin transaction scope — both operations share the same DB transaction
     let scope = DbConn::pool(&state.db).begin_scope().await.map_err(AppError::from)?;
@@ -61,23 +58,11 @@ pub async fn adjust_credit(
         .set_transaction_type(transaction_type)
         .set_related_key(None)
         .set_remark(req.remark)
-        .set_custom_description(custom_desc_map.is_some())
+        .set_custom_description(has_custom_desc)
+        .set_custom_description_text_input(req.custom_description)
         .save()
         .await
         .map_err(AppError::from)?;
-
-    // Save localized custom description text (multi-locale)
-    if let Some(ref descriptions) = custom_desc_map {
-        generated::localized::upsert_localized_many(
-            conn.clone(),
-            "user_credit_transaction",
-            txn.id,
-            "custom_description_text",
-            descriptions,
-        )
-        .await
-        .map_err(AppError::from)?;
-    }
 
     // Atomic relative balance update
     let mut update = User::new(conn, None).update().where_id(Op::Eq, user.id);
