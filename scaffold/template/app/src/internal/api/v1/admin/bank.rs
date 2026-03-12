@@ -122,7 +122,7 @@ async fn parse_bank_multipart(
 
                         state.storage.put(&object_key, bytes.clone(), &content_type).await.map_err(AppError::from)?;
 
-                        logo = Some(AttachmentInput::new(object_key, content_type, bytes.len() as i64));
+                        logo = Some(AttachmentInput::new(object_key, content_type, bytes.len() as i64, None, None));
                     }
                 }
             }

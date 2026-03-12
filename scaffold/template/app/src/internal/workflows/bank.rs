@@ -48,7 +48,7 @@ pub async fn create(
         .set_updated_at(now);
 
     if let Some(logo) = logo {
-        insert = insert.set_logo(logo);
+        insert = insert.set_attachment_logo(logo);
     }
 
     let row = insert.save().await.map_err(AppError::from)?;
@@ -85,7 +85,7 @@ pub async fn update(
         .set_updated_at(OffsetDateTime::now_utc());
 
     if let Some(logo) = logo {
-        update = update.set_logo(logo);
+        update = update.set_attachment_logo(logo);
     }
 
     let affected = update.save().await.map_err(AppError::from)?;

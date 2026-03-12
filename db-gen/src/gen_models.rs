@@ -3286,7 +3286,7 @@ fn render_model(
 
     let mut imports = String::new();
     writeln!(imports, "use anyhow::Result;").unwrap();
-    if !relations.is_empty() || !localized_fields.is_empty() || has_meta {
+    if !relations.is_empty() || !localized_fields.is_empty() || has_meta || has_attachments {
         writeln!(imports, "use std::collections::HashMap;").unwrap();
     }
     if has_meta {
@@ -3343,7 +3343,7 @@ fn render_model(
     if has_meta {
         writeln!(imports, "use core_db::platform::meta::types::MetaMap;").unwrap();
     }
-    if !localized_fields.is_empty() || has_meta {
+    if !localized_fields.is_empty() || has_meta || has_attachments {
         writeln!(imports, "use crate::generated::localized;").unwrap();
     }
     if !localized_fields.is_empty() {
