@@ -2,6 +2,7 @@ pub mod audit_log;
 pub mod account;
 pub mod content_page;
 pub mod country;
+pub mod deposit;
 pub mod http_client_log;
 pub mod introducer_change;
 pub mod sql_profiler_query;
@@ -9,6 +10,7 @@ pub mod sql_profiler_request;
 pub mod user;
 pub mod user_credit_transaction;
 pub mod webhook_log;
+pub mod withdrawal;
 
 use std::collections::HashSet;
 
@@ -24,6 +26,7 @@ use crate::contracts::datatable::admin::{
         ROUTE_PREFIX as CONTENT_PAGE_ROUTE_PREFIX, SCOPED_KEY as CONTENT_PAGE_SCOPED_KEY,
     },
     country::{ROUTE_PREFIX as COUNTRY_ROUTE_PREFIX, SCOPED_KEY as COUNTRY_SCOPED_KEY},
+    deposit::{ROUTE_PREFIX as DEPOSIT_ROUTE_PREFIX, SCOPED_KEY as DEPOSIT_SCOPED_KEY},
     http_client_log::{
         ROUTE_PREFIX as HTTP_CLIENT_LOG_ROUTE_PREFIX, SCOPED_KEY as HTTP_CLIENT_LOG_SCOPED_KEY,
     },
@@ -45,6 +48,7 @@ use crate::contracts::datatable::admin::{
         SCOPED_KEY as USER_CREDIT_TRANSACTION_SCOPED_KEY,
     },
     webhook_log::{ROUTE_PREFIX as WEBHOOK_LOG_ROUTE_PREFIX, SCOPED_KEY as WEBHOOK_LOG_SCOPED_KEY},
+    withdrawal::{ROUTE_PREFIX as WITHDRAWAL_ROUTE_PREFIX, SCOPED_KEY as WITHDRAWAL_SCOPED_KEY},
 };
 use crate::internal::api::state::AppApiState;
 
@@ -52,6 +56,7 @@ pub use audit_log::AuditLogDataTableAppHooks;
 pub use account::{build_admin_summary_output, AdminDataTableAppHooks};
 pub use content_page::ContentPageDataTableAppHooks;
 pub use country::CountryDataTableAppHooks;
+pub use deposit::DepositDataTableAppHooks;
 pub use http_client_log::HttpClientLogDataTableAppHooks;
 pub use user::{build_user_summary_output, UserDataTableAppHooks};
 pub use user_credit_transaction::UserCreditTransactionDataTableAppHooks;
@@ -59,6 +64,7 @@ pub use introducer_change::IntroducerChangeDataTableAppHooks;
 pub use sql_profiler_query::SqlProfilerQueryDataTableAppHooks;
 pub use sql_profiler_request::SqlProfilerRequestDataTableAppHooks;
 pub use webhook_log::WebhookLogDataTableAppHooks;
+pub use withdrawal::WithdrawalDataTableAppHooks;
 
 pub fn authorize_with_optional_export(
     base_authorized: bool,
@@ -131,8 +137,16 @@ fn sql_profiler_request_routes(state: AppApiState) -> ApiRouter {
     sql_profiler_request::routes(state)
 }
 
+fn deposit_routes(state: AppApiState) -> ApiRouter {
+    deposit::routes(state)
+}
+
 fn webhook_log_routes(state: AppApiState) -> ApiRouter {
     webhook_log::routes(state)
+}
+
+fn withdrawal_routes(state: AppApiState) -> ApiRouter {
+    withdrawal::routes(state)
 }
 
 pub static ADMIN_SCOPED_DATATABLES: &[ScopedDatatableSpec] = &[
@@ -201,6 +215,18 @@ pub static ADMIN_SCOPED_DATATABLES: &[ScopedDatatableSpec] = &[
         route_prefix: SQL_PROFILER_QUERY_ROUTE_PREFIX,
         register: sql_profiler_query::register_scoped,
         mount_routes: sql_profiler_query_routes,
+    },
+    ScopedDatatableSpec {
+        scoped_key: DEPOSIT_SCOPED_KEY,
+        route_prefix: DEPOSIT_ROUTE_PREFIX,
+        register: deposit::register_scoped,
+        mount_routes: deposit_routes,
+    },
+    ScopedDatatableSpec {
+        scoped_key: WITHDRAWAL_SCOPED_KEY,
+        route_prefix: WITHDRAWAL_ROUTE_PREFIX,
+        register: withdrawal::register_scoped,
+        mount_routes: withdrawal_routes,
     },
 ];
 

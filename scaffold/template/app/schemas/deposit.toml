@@ -1,0 +1,60 @@
+[OwnerType]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "User", value = 1 },
+  { name = "Merchant", value = 2 },
+  { name = "Agent", value = 3 }
+]
+
+[DepositMethod]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "Manual", value = 1 }
+]
+
+[DepositStatus]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "Pending", value = 1 },
+  { name = "Approved", value = 2 },
+  { name = "Rejected", value = 3 }
+]
+
+[DepositReviewAction]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "Approve", value = 1 },
+  { name = "Reject", value = 2 }
+]
+
+[model.deposit]
+table = "deposits"
+pk = "id"
+pk_type = "i64"
+id_strategy = "snowflake"
+soft_delete = false
+localized = []
+fields = [
+  "id:i64",
+  "owner_type:OwnerType",
+  "owner_id:i64",
+  "admin_id:Option<i64>",
+  "credit_type:CreditType",
+  "deposit_method:DepositMethod",
+  "status:DepositStatus",
+  "amount:rust_decimal::Decimal",
+  "fee:rust_decimal::Decimal",
+  "net_amount:rust_decimal::Decimal",
+  "related_key:Option<String>",
+  "params:Option<serde_json::Value>",
+  "remark:Option<String>",
+  "admin_remark:Option<String>",
+  "reviewed_at:Option<datetime>",
+  "created_at:datetime",
+  "updated_at:datetime"
+]
+relations = ["admin:belongs_to:admin:admin_id:id"]

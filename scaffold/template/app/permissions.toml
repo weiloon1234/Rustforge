@@ -91,6 +91,34 @@ group = "audit_log"
 description = "View audit log datatable and inspect change details."
 
 [[permissions]]
+key = "deposit.read"
+guard = "admin"
+label = "Read Deposits"
+group = "finance"
+description = "View deposit records."
+
+[[permissions]]
+key = "deposit.manage"
+guard = "admin"
+label = "Manage Deposits"
+group = "finance"
+description = "Approve or reject deposit requests."
+
+[[permissions]]
+key = "withdrawal.read"
+guard = "admin"
+label = "Read Withdrawals"
+group = "finance"
+description = "View withdrawal records."
+
+[[permissions]]
+key = "withdrawal.manage"
+guard = "admin"
+label = "Manage Withdrawals"
+group = "finance"
+description = "Process, approve or reject withdrawal requests."
+
+[[permissions]]
 key = "export"
 guard = "admin"
 label = "Export Data"

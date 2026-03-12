@@ -8,12 +8,15 @@ mod auth;
 mod content_page;
 mod content_page_multipart;
 mod country;
+mod deposit;
 mod developer_logs;
+mod receipt_upload;
 mod hierarchy;
 mod introducer_change;
 mod tiptap_upload;
 mod user;
 mod user_credit;
+mod withdrawal;
 
 pub fn router(state: AppApiState) -> ApiRouter {
     ApiRouter::new()
@@ -37,6 +40,8 @@ fn guarded_router(state: AppApiState) -> ApiRouter {
         .nest("/countries", country::router(state.clone()))
         .nest("/content_page", content_page::router(state.clone()))
         .nest("/uploads", tiptap_upload::router(state.clone()))
+        .nest("/deposits", deposit::router(state.clone()))
+        .nest("/withdrawals", withdrawal::router(state.clone()))
         .nest("/developer/logs", developer_logs::router(state.clone()))
         .merge(datatable::router(state.clone()))
         .layer(from_fn_with_state(

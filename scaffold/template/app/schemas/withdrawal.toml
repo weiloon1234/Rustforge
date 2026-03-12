@@ -1,0 +1,53 @@
+[WithdrawalMethod]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "Manual", value = 1 }
+]
+
+[WithdrawalStatus]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "Pending", value = 1 },
+  { name = "Processing", value = 2 },
+  { name = "Approved", value = 3 },
+  { name = "Rejected", value = 4 }
+]
+
+[WithdrawalReviewAction]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "Process", value = 1 },
+  { name = "Approve", value = 2 },
+  { name = "Reject", value = 3 }
+]
+
+[model.withdrawal]
+table = "withdrawals"
+pk = "id"
+pk_type = "i64"
+id_strategy = "snowflake"
+soft_delete = false
+localized = []
+fields = [
+  "id:i64",
+  "owner_type:OwnerType",
+  "owner_id:i64",
+  "admin_id:Option<i64>",
+  "credit_type:CreditType",
+  "withdrawal_method:WithdrawalMethod",
+  "status:WithdrawalStatus",
+  "amount:rust_decimal::Decimal",
+  "fee:rust_decimal::Decimal",
+  "net_amount:rust_decimal::Decimal",
+  "related_key:Option<String>",
+  "params:Option<serde_json::Value>",
+  "remark:Option<String>",
+  "admin_remark:Option<String>",
+  "reviewed_at:Option<datetime>",
+  "created_at:datetime",
+  "updated_at:datetime"
+]
+relations = ["admin:belongs_to:admin:admin_id:id"]

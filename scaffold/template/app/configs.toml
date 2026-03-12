@@ -29,6 +29,21 @@ enabled = true
 guard = ""
 presence_enabled = false
 
+# ── Finance ───────────────────────────────────────────────
+# Fee settings for deposits and withdrawals.
+# These are reference values — actual calculation is in Rust config structs.
+[deposit]
+# Fee percentage (0.0 = no fee, 0.02 = 2%)
+fee_percentage = 0.0
+# Fixed fee amount added on top of percentage
+fee_fixed = 0.0
+
+[withdrawal]
+fee_percentage = 0.0
+fee_fixed = 0.0
+# Minimum withdrawal amount
+min_amount = 0.0
+
 # ── CORS ──────────────────────────────────────────────────
 # Mirrors Laravel config/cors.php conventions.
 # Use ["*"] for development; set explicit origins for production.

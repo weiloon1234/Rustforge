@@ -1,4 +1,5 @@
 import {
+  Banknote,
   LayoutDashboard,
   List,
   Settings,
@@ -74,6 +75,22 @@ export const navigation: NavItem[] = [
         label: "Introducer Changes",
         path: "/user/introducer-changes",
         permissions: [PERMISSION.USER_CHANGE_INTRODUCER],
+      },
+    ],
+  },
+  {
+    label: "Finance",
+    icon: Banknote,
+    children: [
+      {
+        label: "Deposits",
+        path: "/finance/deposits",
+        permissions: [PERMISSION.DEPOSIT_READ, PERMISSION.DEPOSIT_MANAGE],
+      },
+      {
+        label: "Withdrawals",
+        path: "/finance/withdrawals",
+        permissions: [PERMISSION.WITHDRAWAL_READ, PERMISSION.WITHDRAWAL_MANAGE],
       },
     ],
   },

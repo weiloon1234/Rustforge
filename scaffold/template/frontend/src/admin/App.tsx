@@ -15,6 +15,8 @@ const UserHierarchyPage = lazy(() => import("@admin/pages/user/UserHierarchyPage
 const IntroducerChangesPage = lazy(() => import("@admin/pages/user/IntroducerChangesPage"));
 const AdjustCreditsPage = lazy(() => import("@admin/pages/user/AdjustCreditsPage"));
 const AuditLogsPage = lazy(() => import("@admin/pages/other/AuditLogsPage"));
+const DepositsPage = lazy(() => import("@admin/pages/finance/DepositsPage"));
+const WithdrawalsPage = lazy(() => import("@admin/pages/finance/WithdrawalsPage"));
 const HttpClientLogsPage = lazy(() => import("@admin/pages/developer/HttpClientLogsPage"));
 const WebhookLogsPage = lazy(() => import("@admin/pages/developer/WebhookLogsPage"));
 const SqlProfilerRequestsPage = lazy(() => import("@admin/pages/developer/SqlProfilerRequestsPage"));
@@ -42,6 +44,8 @@ export default function App() {
             <Route path="/other/content-pages/:id/edit" element={<ContentPageEditPage />} />
             <Route path="/other/countries" element={<CountriesPage />} />
             <Route path="/other/audit-logs" element={<AuditLogsPage />} />
+            <Route path="/finance/deposits" element={<DepositsPage />} />
+            <Route path="/finance/withdrawals" element={<WithdrawalsPage />} />
             <Route path="/user/manage" element={<ManageUsersPage />} />
             <Route path="/user/hierarchy" element={<UserHierarchyPage />} />
             <Route path="/user/adjust-credits" element={<AdjustCreditsPage />} />
