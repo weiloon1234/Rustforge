@@ -432,6 +432,40 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
             ));
         }
 
+        if rf_cfg.is_enabled_country_iso2 {
+            let optional_kind = classify_optional_like(&field_ty);
+            let field_name = field_ident.to_string();
+            let (message, _code) = rf_cfg.message_code_for("is_enabled_country_iso2");
+            let message_expr = if let Some(msg) = message {
+                quote! { #msg.to_string() }
+            } else {
+                quote! { ::core_web::rules::AsyncRule::message(&rule_builder) }
+            };
+            let body = quote! {
+                let rule_builder = ::core_web::rules::IsEnabledCountryIso2::new(value);
+                let ok = match ::core_web::rules::AsyncRule::check(&rule_builder, db).await {
+                    Ok(value) => value,
+                    Err(_) => {
+                        let mut err = ::validator::ValidationError::new("async_validation");
+                        err.message = Some(::std::borrow::Cow::Borrowed("Async validation check failed."));
+                        errors.add(#field_name, err);
+                        true
+                    }
+                };
+                if !ok {
+                    let mut err = ::validator::ValidationError::new("is_enabled_country_iso2");
+                    err.message = Some(::std::borrow::Cow::Owned(#message_expr));
+                    errors.add(#field_name, err);
+                }
+            };
+            let block = match optional_kind {
+                OptionalLikeKind::Option => quote! { if let Some(value) = &self.#field_ident { #body } },
+                OptionalLikeKind::Patch => quote! { if let Some(value) = self.#field_ident.as_value() { #body } },
+                OptionalLikeKind::Required => quote! { let value = &self.#field_ident; #body },
+            };
+            async_validate_blocks.push(block);
+        }
+
         // explicit OpenAPI format override (escape hatch)
         if let Some(fmt) = &rf_cfg.openapi_format {
             generated_shadow_schemars_attrs.push(build_schemars_format_attr(fmt)?);
@@ -1167,6 +1201,10 @@ fn parse_rf_field(
                 Meta::Path(ref path) if path.is_ident("nested") => {
                     local_nested = true;
                     local_rule_keys.push("nested".to_string());
+                }
+                Meta::Path(ref path) if path.is_ident("is_enabled_country_iso2") => {
+                    cfg.is_enabled_country_iso2 = true;
+                    local_rule_keys.push("is_enabled_country_iso2".to_string());
                 }
                 // --- Parameterless builtins from registry ---
                 Meta::Path(ref path) => {
@@ -2158,6 +2196,7 @@ struct FieldRfConfig {
     builtin_rules: Vec<BuiltinRuleUse>,
     custom_rules: Vec<CustomRuleUse>,
     async_rules: Vec<AsyncDbRuleUse>,
+    is_enabled_country_iso2: bool,
     rule_overrides: BTreeMap<String, RuleMessageCode>,
     message: Option<String>,
     code: Option<String>,

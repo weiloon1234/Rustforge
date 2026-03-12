@@ -420,6 +420,48 @@ pub async fn normalize_phone_by_country_iso2(
         .map_err(Into::into)
 }
 
+pub struct IsEnabledCountryIso2 {
+    value: String,
+    message: Option<String>,
+}
+
+impl IsEnabledCountryIso2 {
+    pub fn new(value: impl ToString) -> Self {
+        Self {
+            value: value.to_string(),
+            message: None,
+        }
+    }
+
+    pub fn msg(mut self, msg: &str) -> Self {
+        self.message = Some(msg.to_string());
+        self
+    }
+}
+
+#[async_trait::async_trait]
+impl AsyncRule for IsEnabledCountryIso2 {
+    async fn check(&self, db: &sqlx::PgPool) -> Result<bool> {
+        let Some(iso2) = normalize_country_iso2(&self.value) else {
+            return Ok(false);
+        };
+        let exists = CountryModel::new(DbConn::pool(db), None)
+            .query()
+            .where_iso2(Op::Eq, iso2)
+            .where_status(Op::Eq, GeneratedCountryStatus::Enabled)
+            .first()
+            .await?
+            .is_some();
+        Ok(exists)
+    }
+
+    fn message(&self) -> String {
+        self.message
+            .clone()
+            .unwrap_or_else(|| core_i18n::t("Country is not valid or not enabled."))
+    }
+}
+
 fn to_runtime_country(country: core_db::generated::models::CountryView) -> CountryRuntime {
     let currencies =
         serde_json::from_value::<Vec<CountryCurrency>>(country.currencies).unwrap_or_default();

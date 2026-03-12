@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useMemo, useEffect, useRef } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { BankDatatableRow } from "@admin/types";
 import { PERMISSION } from "@admin/types";
 import { api } from "@admin/api";
 import { useAuthStore } from "@admin/stores/auth";
+import { availableCountries } from "@shared/countryRuntime";
 import {
   Button,
   DataTable,
@@ -47,12 +48,17 @@ function BankForm({
   const { t } = useTranslation();
   const close = useModalStore((s) => s.close);
 
+  const countryOptions = useMemo(
+    () => availableCountries().map((c) => ({ value: c.iso2, label: `${c.flag_emoji ?? ""} ${c.name} (${c.iso2})`.trim() })),
+    [],
+  );
+
   const { submit, busy, form } = useAutoForm(api, {
     url: bankId ? `banks/${bankId}` : "banks",
     method: bankId ? "put" : "post",
     bodyType: "multipart",
     fields: [
-      { name: "country_iso2", type: "text", label: t("Country ISO2"), required: true },
+      { name: "country_iso2", type: "select", label: t("Country"), required: true, options: countryOptions, placeholder: t("Select country") },
       { name: "name", type: "text", label: t("Name"), required: true },
       { name: "code", type: "text", label: t("Code") },
       { name: "logo", type: "file", label: t("Logo"), accept: "image/*" },
