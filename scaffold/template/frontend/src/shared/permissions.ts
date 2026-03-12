@@ -17,6 +17,7 @@ function manageImpliesRead(granted: string, required: string): boolean {
 }
 
 export function permissionMatches(granted: string, required: string): boolean {
+  if (!granted || !required) return false;
   const g = granted.trim();
   const r = required.trim();
   if (!g || !r) return false;
