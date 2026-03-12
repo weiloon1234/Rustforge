@@ -89,7 +89,7 @@ export default function CompanyCryptoAccountsPage() {
   const { t } = useTranslation();
   const refreshRef = useRef<(() => void) | null>(null);
   const account = useAuthStore((s) => s.account);
-  const canManage = useAuthStore.getState().hasPermission(PERMISSION.COMPANY_CRYPTO_ACCOUNT_MANAGE, account);
+  const canManage = useAuthStore.hasPermission(PERMISSION.COMPANY_CRYPTO_ACCOUNT_MANAGE, account);
 
   const openFormModal = (row: CompanyCryptoAccountDatatableRow | null, refresh: () => void) => {
     refreshRef.current = refresh;

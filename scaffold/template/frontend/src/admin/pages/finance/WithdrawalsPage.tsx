@@ -156,7 +156,7 @@ export default function WithdrawalsPage() {
   const { t } = useTranslation();
   const refreshRef = useRef<(() => void) | null>(null);
   const account = useAuthStore((s) => s.account);
-  const canManage = useAuthStore.getState().hasPermission(PERMISSION.WITHDRAWAL_MANAGE, account);
+  const canManage = useAuthStore.hasPermission(PERMISSION.WITHDRAWAL_MANAGE, account);
 
   const openReviewModal = (row: WithdrawalDatatableRow, refresh: () => void) => {
     refreshRef.current = refresh;

@@ -86,7 +86,7 @@ export default function CryptoNetworksPage() {
   const { t } = useTranslation();
   const refreshRef = useRef<(() => void) | null>(null);
   const account = useAuthStore((s) => s.account);
-  const canManage = useAuthStore.getState().hasPermission(PERMISSION.CRYPTO_NETWORK_MANAGE, account);
+  const canManage = useAuthStore.hasPermission(PERMISSION.CRYPTO_NETWORK_MANAGE, account);
 
   const openFormModal = (row: CryptoNetworkDatatableRow | null, refresh: () => void) => {
     refreshRef.current = refresh;

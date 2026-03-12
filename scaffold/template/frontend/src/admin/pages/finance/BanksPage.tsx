@@ -87,7 +87,7 @@ export default function BanksPage() {
   const { t } = useTranslation();
   const refreshRef = useRef<(() => void) | null>(null);
   const account = useAuthStore((s) => s.account);
-  const canManage = useAuthStore.getState().hasPermission(PERMISSION.BANK_MANAGE, account);
+  const canManage = useAuthStore.hasPermission(PERMISSION.BANK_MANAGE, account);
 
   const openFormModal = (row: BankDatatableRow | null, refresh: () => void) => {
     refreshRef.current = refresh;
