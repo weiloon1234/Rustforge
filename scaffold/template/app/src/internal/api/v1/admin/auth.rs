@@ -9,8 +9,6 @@ use core_web::{
     contracts::ContractJson,
     error::AppError,
     extract::request_headers::RequestHeaders,
-    extract::validation::transform_validation_errors,
-    extract::CleanJson,
     openapi::{
         aide::axum::routing::{get_with, patch_with, post_with},
         ApiRouter,
@@ -23,7 +21,6 @@ use generated::guards::AdminGuard;
 use std::ops::Deref;
 use time::Duration;
 use tower_cookies::{cookie::SameSite, Cookie, Cookies};
-use validator::Validate;
 
 use crate::{
     contracts::api::v1::admin::auth::{
@@ -196,9 +193,8 @@ async fn me(auth: AuthUser<AdminGuard>) -> Result<ApiResponse<AdminMeOutput>, Ap
 async fn profile_update(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
-    CleanJson(req): CleanJson<AdminProfileUpdateInput>,
+    ContractJson(req): ContractJson<AdminProfileUpdateInput>,
 ) -> Result<ApiResponse<AdminProfileUpdateOutput>, AppError> {
-    let req = validate_profile_update_input(req)?;
     let admin = workflow::profile_update(&state, auth.user.id, req).await?;
     let identity = admin.identity();
     Ok(ApiResponse::success(
@@ -237,18 +233,6 @@ async fn password_update(
         AdminPasswordUpdateOutput { updated: true },
         &t("Password updated successfully"),
     ))
-}
-
-fn validate_profile_update_input(
-    req: AdminProfileUpdateInput,
-) -> Result<AdminProfileUpdateInput, AppError> {
-    if let Err(e) = req.validate() {
-        return Err(AppError::Validation {
-            message: t("Validation failed"),
-            errors: transform_validation_errors(e),
-        });
-    }
-    Ok(req)
 }
 
 fn to_auth_output(

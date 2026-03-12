@@ -8,6 +8,7 @@ use uuid::Uuid;
 pub struct AttachmentRules {
     pub allowed: Vec<String>,
     pub resize: Option<ResizeRule>,
+    pub max_size: Option<usize>,
 }
 
 #[derive(Debug, Clone)]

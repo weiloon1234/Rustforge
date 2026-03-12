@@ -5,6 +5,8 @@ use validator::Validate;
 use crate::extract::{AsyncValidatedJson, ValidatedJson};
 pub use crate::Patch;
 pub use rustforge_contract_macros::rustforge_contract;
+pub use crate::extract::file_upload::FileUpload;
+pub use crate::extract::{ContractMultipart, AsyncContractMultipart, MultipartContract};
 
 /// Generate a transparent `String` newtype wrapper for reusable request-contract semantics.
 ///

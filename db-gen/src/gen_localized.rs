@@ -749,6 +749,10 @@ fn render_attachment_rules_section(cfgs: &ConfigsFile) -> String {
             out.push_str(&format!("                \"{allowed}\".to_string(),\n"));
         }
         out.push_str("            ],\n");
+        match attachment_type.max_size {
+            Some(max_size) => out.push_str(&format!("            max_size: Some({max_size}),\n")),
+            None => out.push_str("            max_size: None,\n"),
+        }
         if let Some(resize) = &attachment_type.resize {
             out.push_str("            resize: Some(ResizeRule {\n");
             match resize.width {

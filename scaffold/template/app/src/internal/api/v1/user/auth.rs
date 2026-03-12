@@ -162,7 +162,7 @@ async fn login(
 async fn register(
     State(state): State<AppApiState>,
     cookies: RequestCookies,
-    ContractJson(req): ContractJson<UserRegisterInput>,
+    CleanJson(req): CleanJson<UserRegisterInput>,
 ) -> Result<ApiResponse<UserAuthOutput>, AppError> {
     let req = validate_register_input(req)?;
     let (_user, tokens) = workflow::register(&state, req.clone()).await?;

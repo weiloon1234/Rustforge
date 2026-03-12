@@ -3,6 +3,7 @@ use core_i18n::t;
 use core_web::{
     auth::AuthUser,
     authz::PermissionMode,
+    contracts::AsyncContractJson,
     error::AppError,
     extract::{validation::transform_validation_errors, AsyncValidate, CleanJson},
     openapi::{
@@ -96,9 +97,8 @@ async fn detail(
 async fn create(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
-    CleanJson(req): CleanJson<CreateAdminInput>,
+    AsyncContractJson(req): AsyncContractJson<CreateAdminInput>,
 ) -> Result<ApiResponse<AdminOutput>, AppError> {
-    let req = validate_create_input(&state, req).await?;
     let admin = workflow::create(&state, &auth, req).await?;
     Ok(ApiResponse::success(
         AdminOutput::from(admin),
@@ -155,25 +155,6 @@ async fn batch_resolve(
         AdminBatchResolveOutput { entries },
         "ok",
     ))
-}
-
-async fn validate_create_input(
-    state: &AppApiState,
-    req: CreateAdminInput,
-) -> Result<CreateAdminInput, AppError> {
-    if let Err(e) = req.validate() {
-        return Err(AppError::Validation {
-            message: t("Validation failed"),
-            errors: transform_validation_errors(e),
-        });
-    }
-    if let Err(e) = req.validate_async(&state.db).await {
-        return Err(AppError::Validation {
-            message: t("Validation failed"),
-            errors: transform_validation_errors(e),
-        });
-    }
-    Ok(req)
 }
 
 async fn validate_update_input(

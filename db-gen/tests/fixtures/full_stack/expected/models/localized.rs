@@ -502,6 +502,7 @@ pub fn get_attachment_rules(name: &str) -> Option<AttachmentRules> {
                 "image/png".to_string(),
                 "image/jpeg".to_string(),
             ],
+            max_size: None,
             resize: Some(ResizeRule {
                 width: Some(1200),
                 height: Some(630),

@@ -96,6 +96,8 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
     let mut patch_blocks = Vec::new();
     let mut helper_fns = Vec::new();
     let mut async_validation_blocks_all = Vec::<TokenStream2>::new();
+    // (field_ident, attachment_type_name, is_optional)
+    let mut attachment_fields: Vec<(Ident, String, bool)> = Vec::new();
 
     for (idx, field) in named_fields.iter().enumerate() {
         let field_ident = field.ident.clone().expect("named field");
@@ -466,6 +468,62 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
             async_validate_blocks.push(block);
         }
 
+        // ── attachment("type") field handling ────────────────────────────────
+        let is_attachment_field = rf_cfg.attachment.is_some();
+        if let Some(ref type_name) = rf_cfg.attachment {
+            let is_optional = option_inner_type(&field_ty).is_some();
+            attachment_fields.push((field_ident.clone(), type_name.clone(), is_optional));
+
+            // Generate validation helper
+            let helper_ident = format_ident!(
+                "__rf_validate_{}_{}_attachment",
+                struct_ident.to_string().to_lowercase(),
+                field_ident
+            );
+            let type_name_str = type_name.as_str();
+            helper_fns.push(quote! {
+                fn #helper_ident(file: &::core_web::extract::FileUpload) -> Result<(), ::validator::ValidationError> {
+                    if file.is_empty() {
+                        return Ok(());
+                    }
+                    let rules = ::core_web::extract::file_upload::get_attachment_rules(#type_name_str)
+                        .ok_or_else(|| {
+                            let mut err = ::validator::ValidationError::new("unknown_attachment_type");
+                            err.message = Some(::std::borrow::Cow::Borrowed("Unknown attachment type"));
+                            err
+                        })?;
+                    ::core_web::extract::file_upload::validate_attachment(file, &rules)
+                }
+            });
+
+            let (msg, code) = rf_cfg.message_code_for("attachment");
+            generated_validate_attrs.push(build_validate_custom_fn_attr(&helper_ident, &msg, &code)?);
+
+            // Auto-inject serde attrs for multipart: skip JSON deser, default to empty
+            original_field_attrs.push(mk_attr(quote! { #[serde(skip_deserializing)] })?);
+            original_field_attrs.push(mk_attr(quote! { #[serde(default)] })?);
+
+            // Auto-inject ts-rs type override
+            if is_optional {
+                original_field_attrs.push(mk_attr(quote! { #[ts(type = "File | null")] })?);
+            } else {
+                original_field_attrs.push(mk_attr(quote! { #[ts(type = "File")] })?);
+            }
+
+            field_rule_extensions.push(RuleExtensionSpec {
+                key: "attachment".to_string(),
+                source: "rustforge".to_string(),
+                params: {
+                    let mut p = BTreeMap::new();
+                    p.insert("type".to_string(), JsonParam::String(type_name.clone()));
+                    p
+                },
+                default_message: None,
+                description: Some(format!("File upload (attachment type: {type_name}).")),
+            });
+            field_desc_parts.push(format!("File upload (attachment type: {type_name})."));
+        }
+
         // explicit OpenAPI format override (escape hatch)
         if let Some(fmt) = &rf_cfg.openapi_format {
             generated_shadow_schemars_attrs.push(build_schemars_format_attr(fmt)?);
@@ -475,13 +533,30 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
         shadow_field_attrs.extend(generated_validate_attrs);
         shadow_field_attrs.extend(generated_shadow_schemars_attrs);
 
+        // For attachment fields: override shadow type to String (for OpenAPI binary schema)
         let field_tokens_orig = quote! {
             #(#original_field_attrs)*
             #field_vis #field_ident: #field_ty
         };
-        let field_tokens_shadow = quote! {
-            #(#shadow_field_attrs)*
-            #field_vis #field_ident: #field_ty
+        let field_tokens_shadow = if is_attachment_field {
+            let is_optional = option_inner_type(&field_ty).is_some();
+            if is_optional {
+                quote! {
+                    #(#shadow_field_attrs)*
+                    #[schemars(with = "Option<String>")]
+                    #field_vis #field_ident: Option<String>
+                }
+            } else {
+                quote! {
+                    #(#shadow_field_attrs)*
+                    #field_vis #field_ident: String
+                }
+            }
+        } else {
+            quote! {
+                #(#shadow_field_attrs)*
+                #field_vis #field_ident: #field_ty
+            }
         };
         original_fields_tokens.push(field_tokens_orig);
         shadow_fields_tokens.push(field_tokens_shadow);
@@ -520,6 +595,9 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
                 .openapi_format
                 .clone()
                 .or_else(|| {
+                    if is_attachment_field {
+                        return Some("binary".to_string());
+                    }
                     rf_cfg
                         .builtin_rules
                         .iter()
@@ -609,6 +687,49 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
         }
     };
 
+    // ── MultipartContract impl (only if any attachment fields) ──────────────
+    let multipart_contract_impl = if attachment_fields.is_empty() {
+        quote! {}
+    } else {
+        let file_fields_entries = attachment_fields.iter().map(|(ident, type_name, _)| {
+            let name_str = ident.to_string();
+            quote! { (#name_str, #type_name) }
+        });
+
+        let inject_blocks = attachment_fields.iter().map(|(ident, _, is_optional)| {
+            let name_str = ident.to_string();
+            if *is_optional {
+                quote! {
+                    if let Some(file) = files.remove(#name_str) {
+                        data.#ident = Some(file);
+                    }
+                }
+            } else {
+                quote! {
+                    data.#ident = files.remove(#name_str)
+                        .ok_or_else(|| format!("Missing required file: {}", #name_str))?;
+                }
+            }
+        });
+
+        quote! {
+            impl ::core_web::extract::MultipartContract for #original_ident {
+                fn file_fields() -> &'static [(&'static str, &'static str)] {
+                    &[#(#file_fields_entries),*]
+                }
+
+                fn from_multipart_parts(
+                    json: ::serde_json::Value,
+                    mut files: ::std::collections::HashMap<String, ::core_web::extract::FileUpload>,
+                ) -> Result<Self, String> {
+                    let mut data: Self = ::serde_json::from_value(json).map_err(|e| e.to_string())?;
+                    #(#inject_blocks)*
+                    Ok(data)
+                }
+            }
+        }
+    };
+
     let original_attrs = item.attrs.clone();
     let original_generics = item.generics.clone();
 
@@ -629,6 +750,7 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
 
         #impl_block
         #async_validate_impl_block
+        #multipart_contract_impl
     };
 
     Ok(expanded)
@@ -1288,6 +1410,12 @@ fn parse_rf_field(
                 Meta::List(ref list) if list.path.is_ident("async_not_exists") => {
                     local_async_rules.push(parse_async_db_rule(list, AsyncDbRuleKind::NotExists)?);
                     local_rule_keys.push("async_not_exists".to_string());
+                }
+                // --- attachment("type_name") rule ---
+                Meta::List(ref list) if list.path.is_ident("attachment") => {
+                    let type_name: LitStr = list.parse_args()?;
+                    cfg.attachment = Some(type_name.value());
+                    local_rule_keys.push("attachment".to_string());
                 }
                 // --- custom() rule ---
                 Meta::List(ref list) if list.path.is_ident("custom") => {
@@ -2197,6 +2325,7 @@ struct FieldRfConfig {
     custom_rules: Vec<CustomRuleUse>,
     async_rules: Vec<AsyncDbRuleUse>,
     is_enabled_country_iso2: bool,
+    attachment: Option<String>,
     rule_overrides: BTreeMap<String, RuleMessageCode>,
     message: Option<String>,
     code: Option<String>,

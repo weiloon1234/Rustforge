@@ -27,6 +27,8 @@ pub struct AttachmentType {
     pub allowed: Vec<String>,
     #[serde(default)]
     pub resize: Option<Resize>,
+    #[serde(default)]
+    pub max_size: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]

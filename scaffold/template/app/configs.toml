@@ -5,11 +5,7 @@ timezone = "+08:00"
 
 [attachment_type.image]
 allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"]
-
-[attachment_type.image.resize]
-width = 1920
-height = 1080
-quality = 82
+max_size = 5242880
 
 [auth]
 default = "admin"

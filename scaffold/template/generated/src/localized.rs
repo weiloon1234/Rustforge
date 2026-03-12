@@ -447,11 +447,8 @@ pub fn get_attachment_rules(name: &str) -> Option<AttachmentRules> {
                 "image/webp".to_string(),
                 "image/gif".to_string(),
             ],
-            resize: Some(ResizeRule {
-                width: Some(1920),
-                height: Some(1080),
-                quality: Some(82),
-            }),
+            max_size: Some(5242880),
+            resize: None,
         }),
         _ => None,
     }
