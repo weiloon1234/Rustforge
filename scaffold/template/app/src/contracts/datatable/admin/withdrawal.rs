@@ -20,6 +20,13 @@ pub struct WithdrawalDatatableRow {
     pub admin_id: Option<SnowflakeId>,
     pub credit_type: CreditType,
     pub withdrawal_method: WithdrawalMethod,
+    pub bank_id: Option<SnowflakeId>,
+    pub bank_name: Option<String>,
+    pub crypto_network_id: Option<SnowflakeId>,
+    pub crypto_network_name: Option<String>,
+    #[schemars(with = "Option<String>")]
+    #[ts(type = "string | null")]
+    pub conversion_rate: Option<rust_decimal::Decimal>,
     pub status: WithdrawalStatus,
     pub status_label: String,
     #[schemars(with = "String")]

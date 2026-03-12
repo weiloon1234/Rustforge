@@ -20,6 +20,13 @@ pub struct DepositDatatableRow {
     pub admin_id: Option<SnowflakeId>,
     pub credit_type: CreditType,
     pub deposit_method: DepositMethod,
+    pub company_bank_account_id: Option<SnowflakeId>,
+    pub company_bank_account_name: Option<String>,
+    pub company_crypto_account_id: Option<SnowflakeId>,
+    pub company_crypto_network_name: Option<String>,
+    #[schemars(with = "Option<String>")]
+    #[ts(type = "string | null")]
+    pub conversion_rate: Option<rust_decimal::Decimal>,
     pub status: DepositStatus,
     pub status_label: String,
     #[schemars(with = "String")]

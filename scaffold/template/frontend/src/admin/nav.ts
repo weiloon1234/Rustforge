@@ -92,6 +92,26 @@ export const navigation: NavItem[] = [
         path: "/finance/withdrawals",
         permissions: [PERMISSION.WITHDRAWAL_READ, PERMISSION.WITHDRAWAL_MANAGE],
       },
+      {
+        label: "Banks",
+        path: "/finance/banks",
+        permissions: [PERMISSION.BANK_READ, PERMISSION.BANK_MANAGE],
+      },
+      {
+        label: "Crypto Networks",
+        path: "/finance/crypto-networks",
+        permissions: [PERMISSION.CRYPTO_NETWORK_READ, PERMISSION.CRYPTO_NETWORK_MANAGE],
+      },
+      {
+        label: "Company Bank Accounts",
+        path: "/finance/company-bank-accounts",
+        permissions: [PERMISSION.COMPANY_BANK_ACCOUNT_READ, PERMISSION.COMPANY_BANK_ACCOUNT_MANAGE],
+      },
+      {
+        label: "Company Crypto Accounts",
+        path: "/finance/company-crypto-accounts",
+        permissions: [PERMISSION.COMPANY_CRYPTO_ACCOUNT_READ, PERMISSION.COMPANY_CRYPTO_ACCOUNT_MANAGE],
+      },
     ],
   },
   {

@@ -1,0 +1,26 @@
+[CompanyCryptoAccountStatus]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "Enabled", value = 1 },
+  { name = "Disabled", value = 2 }
+]
+
+[model.company_crypto_account]
+table = "company_crypto_accounts"
+pk = "id"
+pk_type = "i64"
+id_strategy = "snowflake"
+soft_delete = false
+localized = []
+fields = [
+  "id:i64",
+  "crypto_network_id:i64",
+  "wallet_address:string",
+  "conversion_rate:rust_decimal::Decimal",
+  "status:CompanyCryptoAccountStatus",
+  "sort_order:i32",
+  "created_at:datetime",
+  "updated_at:datetime"
+]
+relations = ["crypto_network:belongs_to:crypto_network:crypto_network_id:id"]

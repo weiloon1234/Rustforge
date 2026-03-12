@@ -22,6 +22,11 @@ pub struct DepositOutput {
     pub owner_id: SnowflakeId,
     pub credit_type: CreditType,
     pub deposit_method: DepositMethod,
+    pub company_bank_account_id: Option<SnowflakeId>,
+    pub company_crypto_account_id: Option<SnowflakeId>,
+    #[schemars(with = "Option<String>")]
+    #[ts(type = "string | null")]
+    pub conversion_rate: Option<rust_decimal::Decimal>,
     pub status: DepositStatus,
     #[schemars(with = "String")]
     #[ts(type = "string")]

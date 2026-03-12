@@ -22,6 +22,14 @@ pub struct WithdrawalOutput {
     pub owner_id: SnowflakeId,
     pub credit_type: CreditType,
     pub withdrawal_method: WithdrawalMethod,
+    pub bank_id: Option<SnowflakeId>,
+    pub bank_account_name: Option<String>,
+    pub bank_account_number: Option<String>,
+    pub crypto_network_id: Option<SnowflakeId>,
+    pub crypto_wallet_address: Option<String>,
+    #[schemars(with = "Option<String>")]
+    #[ts(type = "string | null")]
+    pub conversion_rate: Option<rust_decimal::Decimal>,
     pub status: WithdrawalStatus,
     #[schemars(with = "String")]
     #[ts(type = "string")]

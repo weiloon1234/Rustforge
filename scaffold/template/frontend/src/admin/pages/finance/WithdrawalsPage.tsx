@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { WithdrawalDatatableRow } from "@admin/types";
-import { CREDIT_TYPE_I18N } from "@admin/constants/enums";
+import { CREDIT_TYPE_I18N, WITHDRAWAL_METHOD_I18N } from "@admin/constants/enums";
 import { PERMISSION } from "@admin/types";
 import { useAuthStore } from "@admin/stores/auth";
 import {
@@ -251,6 +251,16 @@ export default function WithdrawalsPage() {
           key: "credit_type",
           label: t("Credit Type"),
           render: (row) => t(CREDIT_TYPE_I18N[row.credit_type] ?? row.credit_type),
+        },
+        {
+          key: "withdrawal_method",
+          label: t("Method"),
+          render: (row) => t(WITHDRAWAL_METHOD_I18N[row.withdrawal_method] ?? row.withdrawal_method),
+        },
+        {
+          key: "bank_name",
+          label: t("Destination"),
+          render: (row) => row.bank_name ?? row.crypto_network_name ?? "\u2014",
         },
         {
           key: "amount",

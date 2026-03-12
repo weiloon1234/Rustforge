@@ -1,7 +1,11 @@
 pub mod audit_log;
 pub mod account;
+pub mod bank;
+pub mod company_bank_account;
+pub mod company_crypto_account;
 pub mod content_page;
 pub mod country;
+pub mod crypto_network;
 pub mod deposit;
 pub mod http_client_log;
 pub mod introducer_change;
@@ -22,10 +26,22 @@ use generated::permissions::Permission;
 use crate::contracts::datatable::admin::{
     audit_log::{ROUTE_PREFIX as AUDIT_LOG_ROUTE_PREFIX, SCOPED_KEY as AUDIT_LOG_SCOPED_KEY},
     account::{ROUTE_PREFIX as ACCOUNT_ROUTE_PREFIX, SCOPED_KEY as ACCOUNT_SCOPED_KEY},
+    bank::{ROUTE_PREFIX as BANK_ROUTE_PREFIX, SCOPED_KEY as BANK_SCOPED_KEY},
+    company_bank_account::{
+        ROUTE_PREFIX as COMPANY_BANK_ACCOUNT_ROUTE_PREFIX,
+        SCOPED_KEY as COMPANY_BANK_ACCOUNT_SCOPED_KEY,
+    },
+    company_crypto_account::{
+        ROUTE_PREFIX as COMPANY_CRYPTO_ACCOUNT_ROUTE_PREFIX,
+        SCOPED_KEY as COMPANY_CRYPTO_ACCOUNT_SCOPED_KEY,
+    },
     content_page::{
         ROUTE_PREFIX as CONTENT_PAGE_ROUTE_PREFIX, SCOPED_KEY as CONTENT_PAGE_SCOPED_KEY,
     },
     country::{ROUTE_PREFIX as COUNTRY_ROUTE_PREFIX, SCOPED_KEY as COUNTRY_SCOPED_KEY},
+    crypto_network::{
+        ROUTE_PREFIX as CRYPTO_NETWORK_ROUTE_PREFIX, SCOPED_KEY as CRYPTO_NETWORK_SCOPED_KEY,
+    },
     deposit::{ROUTE_PREFIX as DEPOSIT_ROUTE_PREFIX, SCOPED_KEY as DEPOSIT_SCOPED_KEY},
     http_client_log::{
         ROUTE_PREFIX as HTTP_CLIENT_LOG_ROUTE_PREFIX, SCOPED_KEY as HTTP_CLIENT_LOG_SCOPED_KEY,
@@ -54,8 +70,12 @@ use crate::internal::api::state::AppApiState;
 
 pub use audit_log::AuditLogDataTableAppHooks;
 pub use account::{build_admin_summary_output, AdminDataTableAppHooks};
+pub use bank::BankDataTableAppHooks;
+pub use company_bank_account::CompanyBankAccountDataTableAppHooks;
+pub use company_crypto_account::CompanyCryptoAccountDataTableAppHooks;
 pub use content_page::ContentPageDataTableAppHooks;
 pub use country::CountryDataTableAppHooks;
+pub use crypto_network::CryptoNetworkDataTableAppHooks;
 pub use deposit::DepositDataTableAppHooks;
 pub use http_client_log::HttpClientLogDataTableAppHooks;
 pub use user::{build_user_summary_output, UserDataTableAppHooks};
@@ -95,6 +115,22 @@ pub struct ScopedDatatableSpec {
     pub route_prefix: &'static str,
     pub register: fn(&mut DataTableRegistry, sqlx::PgPool),
     pub mount_routes: fn(AppApiState) -> ApiRouter,
+}
+
+fn bank_routes(state: AppApiState) -> ApiRouter {
+    bank::routes(state)
+}
+
+fn crypto_network_routes(state: AppApiState) -> ApiRouter {
+    crypto_network::routes(state)
+}
+
+fn company_bank_account_routes(state: AppApiState) -> ApiRouter {
+    company_bank_account::routes(state)
+}
+
+fn company_crypto_account_routes(state: AppApiState) -> ApiRouter {
+    company_crypto_account::routes(state)
 }
 
 fn audit_log_routes(state: AppApiState) -> ApiRouter {
@@ -215,6 +251,30 @@ pub static ADMIN_SCOPED_DATATABLES: &[ScopedDatatableSpec] = &[
         route_prefix: SQL_PROFILER_QUERY_ROUTE_PREFIX,
         register: sql_profiler_query::register_scoped,
         mount_routes: sql_profiler_query_routes,
+    },
+    ScopedDatatableSpec {
+        scoped_key: BANK_SCOPED_KEY,
+        route_prefix: BANK_ROUTE_PREFIX,
+        register: bank::register_scoped,
+        mount_routes: bank_routes,
+    },
+    ScopedDatatableSpec {
+        scoped_key: CRYPTO_NETWORK_SCOPED_KEY,
+        route_prefix: CRYPTO_NETWORK_ROUTE_PREFIX,
+        register: crypto_network::register_scoped,
+        mount_routes: crypto_network_routes,
+    },
+    ScopedDatatableSpec {
+        scoped_key: COMPANY_BANK_ACCOUNT_SCOPED_KEY,
+        route_prefix: COMPANY_BANK_ACCOUNT_ROUTE_PREFIX,
+        register: company_bank_account::register_scoped,
+        mount_routes: company_bank_account_routes,
+    },
+    ScopedDatatableSpec {
+        scoped_key: COMPANY_CRYPTO_ACCOUNT_SCOPED_KEY,
+        route_prefix: COMPANY_CRYPTO_ACCOUNT_ROUTE_PREFIX,
+        register: company_crypto_account::register_scoped,
+        mount_routes: company_crypto_account_routes,
     },
     ScopedDatatableSpec {
         scoped_key: DEPOSIT_SCOPED_KEY,

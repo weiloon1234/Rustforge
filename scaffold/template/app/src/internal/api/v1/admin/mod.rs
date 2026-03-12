@@ -5,9 +5,13 @@ use crate::internal::api::{datatable, state::AppApiState};
 
 mod account;
 mod auth;
+mod bank;
+mod company_bank_account;
+mod company_crypto_account;
 mod content_page;
 mod content_page_multipart;
 mod country;
+mod crypto_network;
 mod deposit;
 mod developer_logs;
 mod receipt_upload;
@@ -40,6 +44,10 @@ fn guarded_router(state: AppApiState) -> ApiRouter {
         .nest("/countries", country::router(state.clone()))
         .nest("/content_page", content_page::router(state.clone()))
         .nest("/uploads", tiptap_upload::router(state.clone()))
+        .nest("/banks", bank::router(state.clone()))
+        .nest("/crypto_networks", crypto_network::router(state.clone()))
+        .nest("/company_bank_accounts", company_bank_account::router(state.clone()))
+        .nest("/company_crypto_accounts", company_crypto_account::router(state.clone()))
         .nest("/deposits", deposit::router(state.clone()))
         .nest("/withdrawals", withdrawal::router(state.clone()))
         .nest("/developer/logs", developer_logs::router(state.clone()))

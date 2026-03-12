@@ -1,0 +1,25 @@
+[CryptoNetworkStatus]
+type = "enum"
+storage = "i16"
+variants = [
+  { name = "Enabled", value = 1 },
+  { name = "Disabled", value = 2 }
+]
+
+[model.crypto_network]
+table = "crypto_networks"
+pk = "id"
+pk_type = "i64"
+id_strategy = "snowflake"
+soft_delete = false
+localized = []
+fields = [
+  "id:i64",
+  "name:string",
+  "symbol:string",
+  "logo_url:Option<String>",
+  "status:CryptoNetworkStatus",
+  "sort_order:i32",
+  "created_at:datetime",
+  "updated_at:datetime"
+]

@@ -1,8 +1,12 @@
 pub mod audit;
 pub mod admin;
 pub mod admin_auth;
+pub mod bank;
+pub mod company_bank_account;
+pub mod company_crypto_account;
 pub mod content_page;
 pub mod country;
+pub mod crypto_network;
 pub mod deposit;
 pub mod introducer_change;
 pub mod user_auth;

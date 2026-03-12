@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { DepositDatatableRow } from "@admin/types";
-import { CREDIT_TYPE_I18N } from "@admin/constants/enums";
+import { CREDIT_TYPE_I18N, DEPOSIT_METHOD_I18N } from "@admin/constants/enums";
 import { PERMISSION } from "@admin/types";
 import { useAuthStore } from "@admin/stores/auth";
 import {
@@ -241,6 +241,16 @@ export default function DepositsPage() {
           key: "credit_type",
           label: t("Credit Type"),
           render: (row) => t(CREDIT_TYPE_I18N[row.credit_type] ?? row.credit_type),
+        },
+        {
+          key: "deposit_method",
+          label: t("Method"),
+          render: (row) => t(DEPOSIT_METHOD_I18N[row.deposit_method] ?? row.deposit_method),
+        },
+        {
+          key: "company_bank_account_name",
+          label: t("Account"),
+          render: (row) => row.company_bank_account_name ?? row.company_crypto_network_name ?? "\u2014",
         },
         {
           key: "amount",

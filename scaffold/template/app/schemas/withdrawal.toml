@@ -38,6 +38,12 @@ fields = [
   "admin_id:Option<i64>",
   "credit_type:CreditType",
   "withdrawal_method:WithdrawalMethod",
+  "bank_id:Option<i64>",
+  "bank_account_name:Option<String>",
+  "bank_account_number:Option<String>",
+  "crypto_network_id:Option<i64>",
+  "crypto_wallet_address:Option<String>",
+  "conversion_rate:Option<rust_decimal::Decimal>",
   "status:WithdrawalStatus",
   "amount:rust_decimal::Decimal",
   "fee:rust_decimal::Decimal",
@@ -50,4 +56,4 @@ fields = [
   "created_at:datetime",
   "updated_at:datetime"
 ]
-relations = ["admin:belongs_to:admin:admin_id:id"]
+relations = ["admin:belongs_to:admin:admin_id:id", "bank:belongs_to:bank:bank_id:id", "crypto_network:belongs_to:crypto_network:crypto_network_id:id"]

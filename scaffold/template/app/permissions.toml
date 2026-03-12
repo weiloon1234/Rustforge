@@ -119,6 +119,62 @@ group = "finance"
 description = "Process, approve or reject withdrawal requests."
 
 [[permissions]]
+key = "bank.read"
+guard = "admin"
+label = "Read Banks"
+group = "finance"
+description = "View bank list."
+
+[[permissions]]
+key = "bank.manage"
+guard = "admin"
+label = "Manage Banks"
+group = "finance"
+description = "Create, update, delete banks."
+
+[[permissions]]
+key = "crypto_network.read"
+guard = "admin"
+label = "Read Crypto Networks"
+group = "finance"
+description = "View crypto network list."
+
+[[permissions]]
+key = "crypto_network.manage"
+guard = "admin"
+label = "Manage Crypto Networks"
+group = "finance"
+description = "Create, update, delete crypto networks."
+
+[[permissions]]
+key = "company_bank_account.read"
+guard = "admin"
+label = "Read Company Bank Accounts"
+group = "finance"
+description = "View company bank accounts."
+
+[[permissions]]
+key = "company_bank_account.manage"
+guard = "admin"
+label = "Manage Company Bank Accounts"
+group = "finance"
+description = "Create, update, delete company bank accounts."
+
+[[permissions]]
+key = "company_crypto_account.read"
+guard = "admin"
+label = "Read Company Crypto Accounts"
+group = "finance"
+description = "View company crypto accounts."
+
+[[permissions]]
+key = "company_crypto_account.manage"
+guard = "admin"
+label = "Manage Company Crypto Accounts"
+group = "finance"
+description = "Create, update, delete company crypto accounts."
+
+[[permissions]]
 key = "export"
 guard = "admin"
 label = "Export Data"

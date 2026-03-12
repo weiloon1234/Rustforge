@@ -113,10 +113,21 @@ impl DepositDataTableHooks for DepositDataTableAppHooks {
                 .map(|a| serde_json::Value::String(a.username.clone()))
                 .unwrap_or(serde_json::Value::Null),
         );
-        // owner_name: resolve from owner_type + owner_id
-        // For User owner_type, we can join via user relation in the future.
-        // For now, set to null — frontend can display owner_id as fallback.
         record.insert("owner_name".into(), serde_json::Value::Null);
+        record.insert(
+            "company_bank_account_name".into(),
+            row.company_bank_account
+                .as_ref()
+                .map(|a| serde_json::Value::String(a.account_name.clone()))
+                .unwrap_or(serde_json::Value::Null),
+        );
+        record.insert(
+            "company_crypto_network_name".into(),
+            row.company_crypto_account
+                .as_ref()
+                .map(|a| serde_json::Value::String(a.wallet_address.clone()))
+                .unwrap_or(serde_json::Value::Null),
+        );
         Ok(record)
     }
 }
