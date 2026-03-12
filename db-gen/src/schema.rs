@@ -499,6 +499,11 @@ pub fn parse_field(raw: &str) -> FieldSpec {
             Some("#[serde(with = \"time::serde::rfc3339\")]"),
             None,
         ),
+        "Option<datetime>" => (
+            "Option<time::OffsetDateTime>".to_string(),
+            Some("#[serde(with = \"time::serde::rfc3339::option\")]"),
+            None,
+        ),
         "uuid" | "Uuid" => ("uuid::Uuid".to_string(), None, None),
         "hashed" => ("String".to_string(), None, Some(SpecialType::Hashed)), // "hashed" -> String in Db, but logic added
         other => (normalize_type(other), None, None),
@@ -513,7 +518,18 @@ pub fn parse_field(raw: &str) -> FieldSpec {
 }
 
 fn normalize_type(raw: &str) -> String {
-    match raw.trim() {
+    let trimmed = raw.trim();
+
+    // Handle Option<inner> wrapper — normalize the inner type, then re-wrap
+    if let Some(inner) = trimmed
+        .strip_prefix("Option<")
+        .and_then(|s| s.strip_suffix('>'))
+    {
+        return format!("Option<{}>", normalize_type(inner));
+    }
+
+    match trimmed {
+        "datetime" => "time::OffsetDateTime".to_string(),
         "uuid" | "Uuid" => "uuid::Uuid".to_string(),
         "string" => "String".to_string(),
         other => other.to_string(),

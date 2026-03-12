@@ -19,6 +19,7 @@ use core_db::platform::meta::types::MetaMap;
 use crate::generated::localized;
 use core_i18n::current_locale;
 use crate::generated::models::user::{UserCol, UserQuery, UserRow};
+use crate::generated::models::profile::{ProfileCol, ProfileQuery, ProfileRow};
 use crate::generated::localized::LocalizedMapHelper;
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};

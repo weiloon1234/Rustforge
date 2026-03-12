@@ -3363,6 +3363,19 @@ fn render_model(
                 .unwrap();
             }
         }
+        // Import column types for nested relation paths used in datatable filters
+        for rel_path in &relation_paths {
+            let target_mod = to_snake(&rel_path.target_model);
+            if imported_models.insert(target_mod.clone()) {
+                let target_title = to_title_case(&rel_path.target_model);
+                writeln!(
+                    imports,
+                    "use crate::generated::models::{}::{{{}Col, {}Query, {}Row}};",
+                    target_mod, target_title, target_title, target_title
+                )
+                .unwrap();
+            }
+        }
     }
     // Check if any field uses a custom type (not a built-in, no "::" in name)
     let builtin_types = [
