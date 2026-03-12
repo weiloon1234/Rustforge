@@ -3,7 +3,7 @@ use core_i18n::t;
 use core_web::error::AppError;
 use generated::models::{
     CreditTransactionType, CreditType, Deposit, DepositQuery, DepositReviewAction, DepositStatus,
-    DepositView, OwnerType, User, UserCreditTransaction,
+    DepositWithRelations, OwnerType, User, UserCreditTransaction,
 };
 use time::OffsetDateTime;
 
@@ -15,10 +15,9 @@ use crate::{
 pub async fn detail(
     state: &AppApiState,
     deposit_id: i64,
-) -> Result<DepositView, AppError> {
+) -> Result<DepositWithRelations, AppError> {
     DepositQuery::new(DbConn::pool(&state.db), None)
         .where_id(Op::Eq, deposit_id)
-        .with_admin()
         .first()
         .await
         .map_err(AppError::from)?
@@ -30,7 +29,7 @@ pub async fn review_deposit(
     admin_id: i64,
     deposit_id: i64,
     req: AdminDepositReviewInput,
-) -> Result<DepositView, AppError> {
+) -> Result<DepositWithRelations, AppError> {
     let deposit = DepositQuery::new(DbConn::pool(&state.db), None)
         .where_id(Op::Eq, deposit_id)
         .first()

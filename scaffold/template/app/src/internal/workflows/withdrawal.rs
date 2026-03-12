@@ -3,7 +3,7 @@ use core_i18n::t;
 use core_web::error::AppError;
 use generated::models::{
     CreditTransactionType, CreditType, OwnerType, User, UserCreditTransaction, Withdrawal,
-    WithdrawalQuery, WithdrawalReviewAction, WithdrawalStatus, WithdrawalView,
+    WithdrawalQuery, WithdrawalReviewAction, WithdrawalStatus, WithdrawalWithRelations,
 };
 use time::OffsetDateTime;
 
@@ -15,10 +15,9 @@ use crate::{
 pub async fn detail(
     state: &AppApiState,
     withdrawal_id: i64,
-) -> Result<WithdrawalView, AppError> {
+) -> Result<WithdrawalWithRelations, AppError> {
     WithdrawalQuery::new(DbConn::pool(&state.db), None)
         .where_id(Op::Eq, withdrawal_id)
-        .with_admin()
         .first()
         .await
         .map_err(AppError::from)?
@@ -30,7 +29,7 @@ pub async fn review_withdrawal(
     admin_id: i64,
     withdrawal_id: i64,
     req: AdminWithdrawalReviewInput,
-) -> Result<WithdrawalView, AppError> {
+) -> Result<WithdrawalWithRelations, AppError> {
     let withdrawal = WithdrawalQuery::new(DbConn::pool(&state.db), None)
         .where_id(Op::Eq, withdrawal_id)
         .first()

@@ -18,7 +18,6 @@ pub async fn detail(
 ) -> Result<CompanyBankAccountWithRelations, AppError> {
     CompanyBankAccountQuery::new(DbConn::pool(&state.db), None)
         .where_id(Op::Eq, id)
-        .with_bank()
         .first()
         .await
         .map_err(AppError::from)?
@@ -48,7 +47,7 @@ pub async fn create(
     validate_bank(state, bank_id).await?;
 
     let now = OffsetDateTime::now_utc();
-    let id = CompanyBankAccount::new(DbConn::pool(&state.db), None)
+    let row = CompanyBankAccount::new(DbConn::pool(&state.db), None)
         .insert()
         .set_bank_id(bank_id)
         .set_account_name(req.account_name)
@@ -61,7 +60,7 @@ pub async fn create(
         .await
         .map_err(AppError::from)?;
 
-    detail(state, id).await
+    detail(state, row.id).await
 }
 
 pub async fn update(
@@ -94,9 +93,7 @@ pub async fn update(
 
 pub async fn delete(state: &AppApiState, id: i64) -> Result<(), AppError> {
     let affected = CompanyBankAccount::new(DbConn::pool(&state.db), None)
-        .delete()
-        .where_id(Op::Eq, id)
-        .save()
+        .delete(id)
         .await
         .map_err(AppError::from)?;
 

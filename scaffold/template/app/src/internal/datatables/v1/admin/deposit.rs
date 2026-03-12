@@ -143,7 +143,7 @@ fn apply_keyword_filter<'db>(query: DepositQuery<'db>, value: &str) -> DepositQu
     }
     // Otherwise search by related_key
     let pattern = format!("%{trimmed}%");
-    query.where_related_key(Op::Like, pattern)
+    query.where_related_key(Op::Like, Some(pattern))
 }
 
 pub type AppDepositDataTable = DepositDataTable<DepositDataTableAppHooks>;

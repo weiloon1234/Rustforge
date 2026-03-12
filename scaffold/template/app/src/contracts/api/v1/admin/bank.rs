@@ -3,8 +3,9 @@ use generated::models::BankStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use validator::Validate;
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, TS)]
+#[derive(Debug, Clone, Deserialize, Validate, JsonSchema, TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminBankInput {
     pub country_iso2: String,

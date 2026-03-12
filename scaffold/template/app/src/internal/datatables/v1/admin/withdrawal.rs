@@ -141,7 +141,7 @@ fn apply_keyword_filter<'db>(query: WithdrawalQuery<'db>, value: &str) -> Withdr
         return query.where_id(Op::Eq, id);
     }
     let pattern = format!("%{trimmed}%");
-    query.where_related_key(Op::Like, pattern)
+    query.where_related_key(Op::Like, Some(pattern))
 }
 
 pub type AppWithdrawalDataTable = WithdrawalDataTable<WithdrawalDataTableAppHooks>;

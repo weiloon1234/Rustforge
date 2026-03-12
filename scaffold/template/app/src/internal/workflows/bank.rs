@@ -1,7 +1,7 @@
 use core_db::common::sql::{DbConn, Op};
 use core_i18n::t;
 use core_web::error::AppError;
-use generated::models::{Bank, BankQuery, BankStatus, BankView};
+use generated::models::{Bank, BankQuery, BankWithRelations};
 use time::OffsetDateTime;
 
 use crate::{
@@ -9,7 +9,7 @@ use crate::{
     internal::api::state::AppApiState,
 };
 
-pub async fn detail(state: &AppApiState, id: i64) -> Result<BankView, AppError> {
+pub async fn detail(state: &AppApiState, id: i64) -> Result<BankWithRelations, AppError> {
     BankQuery::new(DbConn::pool(&state.db), None)
         .where_id(Op::Eq, id)
         .first()
@@ -18,7 +18,7 @@ pub async fn detail(state: &AppApiState, id: i64) -> Result<BankView, AppError> 
         .ok_or_else(|| AppError::NotFound(t("Bank not found")))
 }
 
-pub async fn create(state: &AppApiState, req: AdminBankInput) -> Result<BankView, AppError> {
+pub async fn create(state: &AppApiState, req: AdminBankInput) -> Result<BankWithRelations, AppError> {
     // Validate country_iso2 exists
     let country_exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM countries WHERE iso2 = $1)",
@@ -33,7 +33,7 @@ pub async fn create(state: &AppApiState, req: AdminBankInput) -> Result<BankView
     }
 
     let now = OffsetDateTime::now_utc();
-    let id = Bank::new(DbConn::pool(&state.db), None)
+    let row = Bank::new(DbConn::pool(&state.db), None)
         .insert()
         .set_country_iso2(req.country_iso2)
         .set_name(req.name)
@@ -47,14 +47,14 @@ pub async fn create(state: &AppApiState, req: AdminBankInput) -> Result<BankView
         .await
         .map_err(AppError::from)?;
 
-    detail(state, id).await
+    detail(state, row.id).await
 }
 
 pub async fn update(
     state: &AppApiState,
     id: i64,
     req: AdminBankInput,
-) -> Result<BankView, AppError> {
+) -> Result<BankWithRelations, AppError> {
     // Validate country_iso2 exists
     let country_exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM countries WHERE iso2 = $1)",
@@ -91,9 +91,7 @@ pub async fn update(
 
 pub async fn delete(state: &AppApiState, id: i64) -> Result<(), AppError> {
     let affected = Bank::new(DbConn::pool(&state.db), None)
-        .delete()
-        .where_id(Op::Eq, id)
-        .save()
+        .delete(id)
         .await
         .map_err(AppError::from)?;
 

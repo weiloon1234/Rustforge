@@ -76,9 +76,9 @@ async fn create(
     Ok(ApiResponse::success(
         CryptoNetworkOutput {
             id: network.id.into(),
-            name: network.name,
-            symbol: network.symbol,
-            logo_url: network.logo_url,
+            name: network.name.clone(),
+            symbol: network.symbol.clone(),
+            logo_url: network.logo_url.clone(),
             status: network.status,
             sort_order: network.sort_order,
             created_at: network.created_at,
@@ -98,9 +98,9 @@ async fn detail(
     Ok(ApiResponse::success(
         CryptoNetworkOutput {
             id: network.id.into(),
-            name: network.name,
-            symbol: network.symbol,
-            logo_url: network.logo_url,
+            name: network.name.clone(),
+            symbol: network.symbol.clone(),
+            logo_url: network.logo_url.clone(),
             status: network.status,
             sort_order: network.sort_order,
             created_at: network.created_at,
@@ -121,9 +121,9 @@ async fn update(
     Ok(ApiResponse::success(
         CryptoNetworkOutput {
             id: network.id.into(),
-            name: network.name,
-            symbol: network.symbol,
-            logo_url: network.logo_url,
+            name: network.name.clone(),
+            symbol: network.symbol.clone(),
+            logo_url: network.logo_url.clone(),
             status: network.status,
             sort_order: network.sort_order,
             created_at: network.created_at,

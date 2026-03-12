@@ -18,7 +18,6 @@ pub async fn detail(
 ) -> Result<CompanyCryptoAccountWithRelations, AppError> {
     CompanyCryptoAccountQuery::new(DbConn::pool(&state.db), None)
         .where_id(Op::Eq, id)
-        .with_crypto_network()
         .first()
         .await
         .map_err(AppError::from)?
@@ -48,7 +47,7 @@ pub async fn create(
     validate_crypto_network(state, network_id).await?;
 
     let now = OffsetDateTime::now_utc();
-    let id = CompanyCryptoAccount::new(DbConn::pool(&state.db), None)
+    let row = CompanyCryptoAccount::new(DbConn::pool(&state.db), None)
         .insert()
         .set_crypto_network_id(network_id)
         .set_wallet_address(req.wallet_address)
@@ -61,7 +60,7 @@ pub async fn create(
         .await
         .map_err(AppError::from)?;
 
-    detail(state, id).await
+    detail(state, row.id).await
 }
 
 pub async fn update(
@@ -94,9 +93,7 @@ pub async fn update(
 
 pub async fn delete(state: &AppApiState, id: i64) -> Result<(), AppError> {
     let affected = CompanyCryptoAccount::new(DbConn::pool(&state.db), None)
-        .delete()
-        .where_id(Op::Eq, id)
-        .save()
+        .delete(id)
         .await
         .map_err(AppError::from)?;
 

@@ -73,10 +73,10 @@ async fn create(
     Ok(ApiResponse::success(
         BankOutput {
             id: bank.id.into(),
-            country_iso2: bank.country_iso2,
-            name: bank.name,
-            code: bank.code,
-            logo_url: bank.logo_url,
+            country_iso2: bank.country_iso2.clone(),
+            name: bank.name.clone(),
+            code: bank.code.clone(),
+            logo_url: bank.logo_url.clone(),
             status: bank.status,
             sort_order: bank.sort_order,
             created_at: bank.created_at,
@@ -96,10 +96,10 @@ async fn detail(
     Ok(ApiResponse::success(
         BankOutput {
             id: bank.id.into(),
-            country_iso2: bank.country_iso2,
-            name: bank.name,
-            code: bank.code,
-            logo_url: bank.logo_url,
+            country_iso2: bank.country_iso2.clone(),
+            name: bank.name.clone(),
+            code: bank.code.clone(),
+            logo_url: bank.logo_url.clone(),
             status: bank.status,
             sort_order: bank.sort_order,
             created_at: bank.created_at,
@@ -120,10 +120,10 @@ async fn update(
     Ok(ApiResponse::success(
         BankOutput {
             id: bank.id.into(),
-            country_iso2: bank.country_iso2,
-            name: bank.name,
-            code: bank.code,
-            logo_url: bank.logo_url,
+            country_iso2: bank.country_iso2.clone(),
+            name: bank.name.clone(),
+            code: bank.code.clone(),
+            logo_url: bank.logo_url.clone(),
             status: bank.status,
             sort_order: bank.sort_order,
             created_at: bank.created_at,

@@ -254,6 +254,11 @@ permission_checked_method_top_level!(
     patch_with
 );
 permission_checked_method_top_level!(
+    with_permission_check_put,
+    with_permission_check_put_with,
+    put_with
+);
+permission_checked_method_top_level!(
     with_permission_check_delete,
     with_permission_check_delete_with,
     delete_with

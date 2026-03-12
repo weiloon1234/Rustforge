@@ -1,7 +1,7 @@
 use core_db::common::sql::{DbConn, Op};
 use core_i18n::t;
 use core_web::error::AppError;
-use generated::models::{CryptoNetwork, CryptoNetworkQuery, CryptoNetworkView};
+use generated::models::{CryptoNetwork, CryptoNetworkQuery, CryptoNetworkWithRelations};
 use time::OffsetDateTime;
 
 use crate::{
@@ -9,7 +9,7 @@ use crate::{
     internal::api::state::AppApiState,
 };
 
-pub async fn detail(state: &AppApiState, id: i64) -> Result<CryptoNetworkView, AppError> {
+pub async fn detail(state: &AppApiState, id: i64) -> Result<CryptoNetworkWithRelations, AppError> {
     CryptoNetworkQuery::new(DbConn::pool(&state.db), None)
         .where_id(Op::Eq, id)
         .first()
@@ -21,9 +21,9 @@ pub async fn detail(state: &AppApiState, id: i64) -> Result<CryptoNetworkView, A
 pub async fn create(
     state: &AppApiState,
     req: AdminCryptoNetworkInput,
-) -> Result<CryptoNetworkView, AppError> {
+) -> Result<CryptoNetworkWithRelations, AppError> {
     let now = OffsetDateTime::now_utc();
-    let id = CryptoNetwork::new(DbConn::pool(&state.db), None)
+    let row = CryptoNetwork::new(DbConn::pool(&state.db), None)
         .insert()
         .set_name(req.name)
         .set_symbol(req.symbol)
@@ -36,14 +36,14 @@ pub async fn create(
         .await
         .map_err(AppError::from)?;
 
-    detail(state, id).await
+    detail(state, row.id).await
 }
 
 pub async fn update(
     state: &AppApiState,
     id: i64,
     req: AdminCryptoNetworkInput,
-) -> Result<CryptoNetworkView, AppError> {
+) -> Result<CryptoNetworkWithRelations, AppError> {
     let affected = CryptoNetwork::new(DbConn::pool(&state.db), None)
         .update()
         .where_id(Op::Eq, id)
@@ -66,9 +66,7 @@ pub async fn update(
 
 pub async fn delete(state: &AppApiState, id: i64) -> Result<(), AppError> {
     let affected = CryptoNetwork::new(DbConn::pool(&state.db), None)
-        .delete()
-        .where_id(Op::Eq, id)
-        .save()
+        .delete(id)
         .await
         .map_err(AppError::from)?;
 
