@@ -50,10 +50,11 @@ function CryptoNetworkForm({
   const { submit, busy, form } = useAutoForm(api, {
     url: networkId ? `crypto_networks/${networkId}` : "crypto_networks",
     method: networkId ? "put" : "post",
+    bodyType: "multipart",
     fields: [
       { name: "name", type: "text", label: t("Name"), required: true },
       { name: "symbol", type: "text", label: t("Symbol"), required: true },
-      { name: "logo_url", type: "text", label: t("Logo URL") },
+      { name: "logo", type: "file", label: t("Logo"), accept: "image/*" },
       {
         name: "status",
         type: "select",

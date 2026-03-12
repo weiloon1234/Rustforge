@@ -50,11 +50,12 @@ function BankForm({
   const { submit, busy, form } = useAutoForm(api, {
     url: bankId ? `banks/${bankId}` : "banks",
     method: bankId ? "put" : "post",
+    bodyType: "multipart",
     fields: [
       { name: "country_iso2", type: "text", label: t("Country ISO2"), required: true },
       { name: "name", type: "text", label: t("Name"), required: true },
       { name: "code", type: "text", label: t("Code") },
-      { name: "logo_url", type: "text", label: t("Logo URL") },
+      { name: "logo", type: "file", label: t("Logo"), accept: "image/*" },
       {
         name: "status",
         type: "select",

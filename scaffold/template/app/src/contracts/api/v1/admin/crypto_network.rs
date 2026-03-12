@@ -10,8 +10,6 @@ use validator::Validate;
 pub struct AdminCryptoNetworkInput {
     pub name: String,
     pub symbol: String,
-    #[serde(default)]
-    pub logo_url: Option<String>,
     pub status: CryptoNetworkStatus,
     #[serde(default)]
     pub sort_order: Option<i32>,

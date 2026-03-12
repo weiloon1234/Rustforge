@@ -40,6 +40,15 @@ impl DataTableScopedContract for AdminSqlProfilerRequestDataTableContract {
         vec![
             vec![
                 DataTableFilterFieldDto {
+                    field: "id".to_string(),
+                    filter_key: "f-id".to_string(),
+                    field_type: DataTableFilterFieldType::Text,
+                    label: "Request ID".to_string(),
+                    placeholder: Some("UUID".to_string()),
+                    description: None,
+                    options: None,
+                },
+                DataTableFilterFieldDto {
                     field: "request_path".to_string(),
                     filter_key: "f-like-request_path".to_string(),
                     field_type: DataTableFilterFieldType::Text,

@@ -1,4 +1,5 @@
 use core_db::common::sql::{DbConn, Op};
+use core_db::platform::attachments::types::AttachmentInput;
 use core_i18n::t;
 use core_web::error::AppError;
 use generated::models::{CryptoNetwork, CryptoNetworkQuery, CryptoNetworkWithRelations};
@@ -21,20 +22,23 @@ pub async fn detail(state: &AppApiState, id: i64) -> Result<CryptoNetworkWithRel
 pub async fn create(
     state: &AppApiState,
     req: AdminCryptoNetworkInput,
+    logo: Option<AttachmentInput>,
 ) -> Result<CryptoNetworkWithRelations, AppError> {
     let now = OffsetDateTime::now_utc();
-    let row = CryptoNetwork::new(DbConn::pool(&state.db), None)
+    let mut insert = CryptoNetwork::new(DbConn::pool(&state.db), None)
         .insert()
         .set_name(req.name)
         .set_symbol(req.symbol)
-        .set_logo_url(req.logo_url)
         .set_status(req.status)
         .set_sort_order(req.sort_order.unwrap_or(0))
         .set_created_at(now)
-        .set_updated_at(now)
-        .save()
-        .await
-        .map_err(AppError::from)?;
+        .set_updated_at(now);
+
+    if let Some(logo) = logo {
+        insert = insert.set_logo(logo);
+    }
+
+    let row = insert.save().await.map_err(AppError::from)?;
 
     detail(state, row.id).await
 }
@@ -43,19 +47,22 @@ pub async fn update(
     state: &AppApiState,
     id: i64,
     req: AdminCryptoNetworkInput,
+    logo: Option<AttachmentInput>,
 ) -> Result<CryptoNetworkWithRelations, AppError> {
-    let affected = CryptoNetwork::new(DbConn::pool(&state.db), None)
+    let mut update = CryptoNetwork::new(DbConn::pool(&state.db), None)
         .update()
         .where_id(Op::Eq, id)
         .set_name(req.name)
         .set_symbol(req.symbol)
-        .set_logo_url(req.logo_url)
         .set_status(req.status)
         .set_sort_order(req.sort_order.unwrap_or(0))
-        .set_updated_at(OffsetDateTime::now_utc())
-        .save()
-        .await
-        .map_err(AppError::from)?;
+        .set_updated_at(OffsetDateTime::now_utc());
+
+    if let Some(logo) = logo {
+        update = update.set_logo(logo);
+    }
+
+    let affected = update.save().await.map_err(AppError::from)?;
 
     if affected == 0 {
         return Err(AppError::NotFound(t("Crypto network not found")));

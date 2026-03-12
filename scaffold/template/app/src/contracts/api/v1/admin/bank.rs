@@ -12,8 +12,6 @@ pub struct AdminBankInput {
     pub name: String,
     #[serde(default)]
     pub code: Option<String>,
-    #[serde(default)]
-    pub logo_url: Option<String>,
     pub status: BankStatus,
     #[serde(default)]
     pub sort_order: Option<i32>,

@@ -1,7 +1,11 @@
 import { Eye } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
-import type { SqlProfilerRequestDatatableRow } from "@admin/types";
+import type {
+  SqlProfilerQueryDatatableRow,
+  SqlProfilerRequestDatatableRow,
+} from "@admin/types";
+import { api } from "@admin/api";
 import {
   Button,
   DataTable,
@@ -32,70 +36,104 @@ function durationBadgeClass(ms: number): string {
   return "text-red-700";
 }
 
+function operationBadgeClass(op: string): string {
+  switch (op.toUpperCase()) {
+    case "SELECT":
+      return "bg-emerald-100 text-emerald-700";
+    case "INSERT":
+      return "bg-blue-100 text-blue-700";
+    case "UPDATE":
+      return "bg-amber-100 text-amber-700";
+    case "DELETE":
+      return "bg-rose-100 text-rose-700";
+    default:
+      return "bg-gray-100 text-gray-700";
+  }
+}
+
+function formatDuration(us: number): string {
+  if (us < 1000) return `${us} µs`;
+  if (us < 1_000_000) return `${(us / 1000).toFixed(2)} ms`;
+  return `${(us / 1_000_000).toFixed(2)} s`;
+}
+
+function durationUsBadgeClass(us: number): string {
+  if (us < 1000) return "text-emerald-700";
+  if (us < 10000) return "text-amber-700";
+  return "text-red-700";
+}
+
+function QueriesModalContent({
+  requestId,
+}: {
+  requestId: string;
+}) {
+  const { t } = useTranslation();
+  const [queries, setQueries] = useState<SqlProfilerQueryDatatableRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api
+      .post("/datatable/sql-profiler-query/query", {
+        base: { page: 1, per_page: 100, include_meta: false },
+        "f-request_id": requestId,
+      })
+      .then((res) => setQueries(res.data.data?.records ?? []))
+      .catch(() => setQueries([]))
+      .finally(() => setLoading(false));
+  }, [requestId]);
+
+  if (loading) {
+    return <p className="text-sm text-muted">{t("Loading...")}</p>;
+  }
+
+  if (queries.length === 0) {
+    return <p className="text-sm text-muted">{t("No queries found.")}</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {queries.map((q, i) => (
+        <div
+          key={q.id}
+          className="rounded-lg border border-border bg-surface px-3 py-2 text-xs"
+        >
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-muted">#{i + 1}</span>
+            <span
+              className={`inline-block rounded-full px-2 py-0.5 font-medium ${operationBadgeClass(q.operation)}`}
+            >
+              {q.operation}
+            </span>
+            <span className="font-mono text-muted">{q.table_name}</span>
+            <span className={`ml-auto font-medium ${durationUsBadgeClass(Number(q.duration_us))}`}>
+              {formatDuration(Number(q.duration_us))}
+            </span>
+          </div>
+          <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all text-xs">
+            {q.sql}
+          </pre>
+          {q.binds && (
+            <pre className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap break-all text-xs text-muted">
+              {q.binds}
+            </pre>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function SqlProfilerRequestsPage() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
 
-  const openDetailModal = (row: SqlProfilerRequestDatatableRow) => {
-    useModalStore.getState().open({
-      title: t("SQL Profiler Request Detail"),
-      size: "lg",
-      content: (
-        <div className="space-y-4 text-sm">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-                {t("Request ID")}
-              </p>
-              <p className="break-all font-mono text-xs">{row.id}</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-                {t("Method")}
-              </p>
-              <p>{row.request_method}</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-                {t("Path")}
-              </p>
-              <p className="break-all">{row.request_path}</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-                {t("Total Queries")}
-              </p>
-              <p>{row.total_queries}</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-                {t("Total Duration")}
-              </p>
-              <p>{row.total_duration_ms.toFixed(2)} ms</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-                {t("Created At")}
-              </p>
-              <p>{formatDateTime(row.created_at)}</p>
-            </div>
-          </div>
-        </div>
-      ),
-      footer: (
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            onClick={() => {
-              useModalStore.getState().close();
-              navigate(
-                `/developer/sql-profiler-queries?f-request_id=${row.id}`,
-              );
-            }}
-            variant="primary"
-          >
-            {t("View Queries")}
-          </Button>
+  const openQueriesModal = useCallback(
+    (row: SqlProfilerRequestDatatableRow) => {
+      useModalStore.getState().open({
+        title: `${t("Queries")} — ${row.request_method} ${row.request_path}`,
+        size: "xl",
+        content: <QueriesModalContent requestId={row.id} />,
+        footer: (
           <Button
             type="button"
             onClick={() => useModalStore.getState().close()}
@@ -103,10 +141,11 @@ export default function SqlProfilerRequestsPage() {
           >
             {t("Close")}
           </Button>
-        </div>
-      ),
-    });
-  };
+        ),
+      });
+    },
+    [t],
+  );
 
   return (
     <DataTable<SqlProfilerRequestDatatableRow>
@@ -122,14 +161,26 @@ export default function SqlProfilerRequestsPage() {
           render: (row) => (
             <Button
               type="button"
-              onClick={() => openDetailModal(row)}
+              onClick={() => openQueriesModal(row)}
               variant="plain"
               size="sm"
               iconOnly
-              title={t("View Detail")}
+              title={t("View Queries")}
             >
               <Eye size={16} />
             </Button>
+          ),
+        },
+        {
+          key: "id",
+          label: t("Request ID"),
+          render: (row) => (
+            <span
+              className="max-w-[8rem] truncate font-mono text-xs"
+              title={row.id}
+            >
+              {row.id.slice(0, 8)}…
+            </span>
           ),
         },
         {

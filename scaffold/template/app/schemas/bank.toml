@@ -13,12 +13,12 @@ pk_type = "i64"
 id_strategy = "snowflake"
 soft_delete = false
 localized = []
+attachment = ["logo:image"]
 fields = [
   "id:i64",
   "country_iso2:string",
   "name:string",
   "code:Option<String>",
-  "logo_url:Option<String>",
   "status:BankStatus",
   "sort_order:i32",
   "created_at:datetime",

@@ -2,9 +2,7 @@
 type = "enum"
 storage = "i16"
 variants = [
-  { name = "User", value = 1 },
-  { name = "Merchant", value = 2 },
-  { name = "Agent", value = 3 }
+  { name = "User", value = 1 }
 ]
 
 [DepositMethod]

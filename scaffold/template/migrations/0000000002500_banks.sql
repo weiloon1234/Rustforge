@@ -3,7 +3,6 @@ CREATE TABLE banks (
     country_iso2 TEXT NOT NULL,
     name TEXT NOT NULL,
     code TEXT,
-    logo_url TEXT,
     status SMALLINT NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

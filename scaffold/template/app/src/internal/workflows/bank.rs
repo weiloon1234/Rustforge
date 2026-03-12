@@ -1,4 +1,5 @@
 use core_db::common::sql::{DbConn, Op};
+use core_db::platform::attachments::types::AttachmentInput;
 use core_i18n::t;
 use core_web::error::AppError;
 use generated::models::{Bank, BankQuery, BankWithRelations};
@@ -18,8 +19,11 @@ pub async fn detail(state: &AppApiState, id: i64) -> Result<BankWithRelations, A
         .ok_or_else(|| AppError::NotFound(t("Bank not found")))
 }
 
-pub async fn create(state: &AppApiState, req: AdminBankInput) -> Result<BankWithRelations, AppError> {
-    // Validate country_iso2 exists
+pub async fn create(
+    state: &AppApiState,
+    req: AdminBankInput,
+    logo: Option<AttachmentInput>,
+) -> Result<BankWithRelations, AppError> {
     let country_exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM countries WHERE iso2 = $1)",
     )
@@ -33,19 +37,21 @@ pub async fn create(state: &AppApiState, req: AdminBankInput) -> Result<BankWith
     }
 
     let now = OffsetDateTime::now_utc();
-    let row = Bank::new(DbConn::pool(&state.db), None)
+    let mut insert = Bank::new(DbConn::pool(&state.db), None)
         .insert()
         .set_country_iso2(req.country_iso2)
         .set_name(req.name)
         .set_code(req.code)
-        .set_logo_url(req.logo_url)
         .set_status(req.status)
         .set_sort_order(req.sort_order.unwrap_or(0))
         .set_created_at(now)
-        .set_updated_at(now)
-        .save()
-        .await
-        .map_err(AppError::from)?;
+        .set_updated_at(now);
+
+    if let Some(logo) = logo {
+        insert = insert.set_logo(logo);
+    }
+
+    let row = insert.save().await.map_err(AppError::from)?;
 
     detail(state, row.id).await
 }
@@ -54,8 +60,8 @@ pub async fn update(
     state: &AppApiState,
     id: i64,
     req: AdminBankInput,
+    logo: Option<AttachmentInput>,
 ) -> Result<BankWithRelations, AppError> {
-    // Validate country_iso2 exists
     let country_exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM countries WHERE iso2 = $1)",
     )
@@ -68,19 +74,21 @@ pub async fn update(
         return Err(AppError::BadRequest(t("Country not found")));
     }
 
-    let affected = Bank::new(DbConn::pool(&state.db), None)
+    let mut update = Bank::new(DbConn::pool(&state.db), None)
         .update()
         .where_id(Op::Eq, id)
         .set_country_iso2(req.country_iso2)
         .set_name(req.name)
         .set_code(req.code)
-        .set_logo_url(req.logo_url)
         .set_status(req.status)
         .set_sort_order(req.sort_order.unwrap_or(0))
-        .set_updated_at(OffsetDateTime::now_utc())
-        .save()
-        .await
-        .map_err(AppError::from)?;
+        .set_updated_at(OffsetDateTime::now_utc());
+
+    if let Some(logo) = logo {
+        update = update.set_logo(logo);
+    }
+
+    let affected = update.save().await.map_err(AppError::from)?;
 
     if affected == 0 {
         return Err(AppError::NotFound(t("Bank not found")));

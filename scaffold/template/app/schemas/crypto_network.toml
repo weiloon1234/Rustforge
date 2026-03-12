@@ -13,11 +13,11 @@ pk_type = "i64"
 id_strategy = "snowflake"
 soft_delete = false
 localized = []
+attachment = ["logo:image"]
 fields = [
   "id:i64",
   "name:string",
   "symbol:string",
-  "logo_url:Option<String>",
   "status:CryptoNetworkStatus",
   "sort_order:i32",
   "created_at:datetime",

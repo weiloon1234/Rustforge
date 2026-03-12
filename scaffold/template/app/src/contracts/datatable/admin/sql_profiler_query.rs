@@ -1,5 +1,5 @@
 use core_web::datatable::{
-    DataTableFilterFieldDto, DataTableFilterFieldType,
+    DataTableFilterFieldDto, DataTableFilterFieldType, DataTableFilterOptionDto,
     DataTableGenericEmailExportRequest, DataTableGenericQueryRequest, DataTableScopedContract,
 };
 use schemars::JsonSchema;
@@ -63,12 +63,12 @@ impl DataTableScopedContract for AdminSqlProfilerQueryDataTableContract {
             vec![
                 DataTableFilterFieldDto {
                     field: "operation".to_string(),
-                    filter_key: "f-like-operation".to_string(),
-                    field_type: DataTableFilterFieldType::Text,
+                    filter_key: "f-operation".to_string(),
+                    field_type: DataTableFilterFieldType::Select,
                     label: "Operation".to_string(),
-                    placeholder: Some("e.g. SELECT".to_string()),
+                    placeholder: Some("All operations".to_string()),
                     description: None,
-                    options: None,
+                    options: Some(operation_filter_options()),
                 },
                 DataTableFilterFieldDto {
                     field: "duration_us_min".to_string(),
@@ -91,4 +91,14 @@ impl DataTableScopedContract for AdminSqlProfilerQueryDataTableContract {
             ],
         ]
     }
+}
+
+fn operation_filter_options() -> Vec<DataTableFilterOptionDto> {
+    ["SELECT", "INSERT", "UPDATE", "DELETE"]
+        .iter()
+        .map(|op| DataTableFilterOptionDto {
+            label: op.to_string(),
+            value: op.to_string(),
+        })
+        .collect()
 }

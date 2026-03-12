@@ -2,7 +2,6 @@ CREATE TABLE crypto_networks (
     id BIGINT PRIMARY KEY CHECK (id > 0),
     name TEXT NOT NULL,
     symbol TEXT NOT NULL,
-    logo_url TEXT,
     status SMALLINT NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
