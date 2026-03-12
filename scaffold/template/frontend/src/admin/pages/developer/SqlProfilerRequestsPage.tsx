@@ -69,10 +69,11 @@ function buildBoundQuery(sql: string, binds: string): string {
   let result = sql;
   for (let i = values.length; i >= 1; i--) {
     const val = values[i - 1];
-    const isNumeric = /^-?\d+(\.\d+)?$/.test(val);
-    const replacement = isNumeric || val === "true" || val === "false" || val === "NULL"
-      ? val
-      : `'${val.replace(/'/g, "''")}'`;
+    // Rust Display already quotes strings ('value'), leaves numbers/bool/NULL bare.
+    // UUIDs and timestamps are bare but need quoting for valid SQL.
+    const isQuoted = val.startsWith("'") && val.endsWith("'");
+    const isBare = /^-?\d+(\.\d+)?$/.test(val) || val === "true" || val === "false" || val === "NULL";
+    const replacement = isQuoted || isBare ? val : `'${val}'`;
     result = result.replaceAll(`$${i}`, replacement);
   }
   return result;
