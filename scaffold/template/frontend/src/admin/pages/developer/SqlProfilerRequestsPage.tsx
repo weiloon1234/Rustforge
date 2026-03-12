@@ -2,7 +2,12 @@ import { Eye } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import type { SqlProfilerRequestDatatableRow } from "@admin/types";
-import { Button, DataTable, formatDateTime, useModalStore } from "@shared/components";
+import {
+  Button,
+  DataTable,
+  formatDateTime,
+  useModalStore,
+} from "@shared/components";
 
 function methodBadgeClass(method: string): string {
   switch (method.toUpperCase()) {
@@ -83,10 +88,11 @@ export default function SqlProfilerRequestsPage() {
             type="button"
             onClick={() => {
               useModalStore.getState().close();
-              navigate(`/developer/sql-profiler-queries?f-request_id=${row.id}`);
+              navigate(
+                `/developer/sql-profiler-queries?f-request_id=${row.id}`,
+              );
             }}
             variant="primary"
-            size="sm"
           >
             {t("View Queries")}
           </Button>
@@ -160,7 +166,9 @@ export default function SqlProfilerRequestsPage() {
           label: t("Duration (ms)"),
           cellClassName: "tabular-nums",
           render: (row) => (
-            <span className={`font-medium ${durationBadgeClass(row.total_duration_ms)}`}>
+            <span
+              className={`font-medium ${durationBadgeClass(row.total_duration_ms)}`}
+            >
               {row.total_duration_ms.toFixed(2)}
             </span>
           ),
