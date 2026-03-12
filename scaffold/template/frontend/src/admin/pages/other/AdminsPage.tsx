@@ -255,6 +255,7 @@ function EditAdminForm({
   const { submit, busy, form } = useAutoForm(api, {
     url: `admins/${admin.id}`,
     method: "patch",
+    extraPayload: { id: admin.id },
     fields: [
       {
         name: "username",

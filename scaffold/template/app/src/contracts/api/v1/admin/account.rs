@@ -32,15 +32,11 @@ pub struct CreateAdminInput {
 #[derive(TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct UpdateAdminInput {
-    #[serde(skip, default)]
-    __target_id: i64,
+    #[serde(default)]
+    pub id: SnowflakeId,
     #[serde(default)]
     #[rf(nested)]
-    #[rf(async_unique(
-        table = "admin",
-        column = "username",
-        ignore(column = "id", field = "__target_id")
-    ))]
+    #[rf(async_unique(table = "admin", column = "username", ignore = "id"))]
     pub username: Option<UsernameString>,
     #[serde(default)]
     #[rf(email)]
@@ -53,13 +49,6 @@ pub struct UpdateAdminInput {
     pub password: Option<String>,
     #[serde(default)]
     pub abilities: Option<Vec<Permission>>,
-}
-
-impl UpdateAdminInput {
-    pub fn with_target_id(mut self, id: i64) -> Self {
-        self.__target_id = id;
-        self
-    }
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]

@@ -1847,6 +1847,19 @@ fn parse_async_db_rule(list: &MetaList, kind: AsyncDbRuleKind) -> syn::Result<As
             Meta::NameValue(nv) if nv.path.is_ident("message") || nv.path.is_ident("code") => {
                 // Parsed at the parent rf(...) attribute level so overrides can be shared.
             }
+            Meta::NameValue(nv) if nv.path.is_ident("ignore") => {
+                if !matches!(kind, AsyncDbRuleKind::Unique) {
+                    return Err(syn::Error::new_spanned(
+                        nv,
+                        "ignore is only supported for async_unique(...)",
+                    ));
+                }
+                let name = lit_str_from_expr(&nv.value, "ignore")?.value();
+                modifiers.push(AsyncDbModifier::Ignore {
+                    column: name.clone(),
+                    source: AsyncDbValueSource::Field(name),
+                });
+            }
             Meta::List(inner) if inner.path.is_ident("ignore") => {
                 if !matches!(kind, AsyncDbRuleKind::Unique) {
                     return Err(syn::Error::new_spanned(

@@ -117,7 +117,7 @@ async fn update(
     Path(id): Path<i64>,
     CleanJson(req): CleanJson<UpdateUserInput>,
 ) -> Result<ApiResponse<UserManageOutput>, AppError> {
-    let req = validate_update_input(&state, id, req).await?;
+    let req = validate_update_input(&state, req).await?;
     let user = workflow::update(&state, id, req).await?;
     Ok(ApiResponse::success(
         UserManageOutput::from(user),
@@ -185,10 +185,9 @@ async fn validate_create_input(
 
 async fn validate_update_input(
     state: &AppApiState,
-    id: i64,
     req: UpdateUserInput,
 ) -> Result<UpdateUserInput, AppError> {
-    let req = req.with_target_id(id).normalize();
+    let req = req.normalize();
     if let Err(e) = req.validate() {
         return Err(AppError::Validation {
             message: t("Validation failed"),

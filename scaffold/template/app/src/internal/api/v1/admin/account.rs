@@ -5,7 +5,7 @@ use core_web::{
     authz::PermissionMode,
     contracts::AsyncContractJson,
     error::AppError,
-    extract::{validation::transform_validation_errors, AsyncValidate, CleanJson},
+    extract::CleanJson,
     openapi::{
         with_permission_check_delete_with, with_permission_check_get_with,
         with_permission_check_patch_with, with_permission_check_post_with, ApiRouter,
@@ -13,7 +13,6 @@ use core_web::{
     response::ApiResponse,
 };
 use generated::{guards::AdminGuard, permissions::Permission};
-use validator::Validate;
 
 use crate::{
     contracts::api::v1::admin::account::{
@@ -110,9 +109,8 @@ async fn update(
     State(state): State<AppApiState>,
     auth: AuthUser<AdminGuard>,
     Path(id): Path<i64>,
-    CleanJson(req): CleanJson<UpdateAdminInput>,
+    AsyncContractJson(req): AsyncContractJson<UpdateAdminInput>,
 ) -> Result<ApiResponse<AdminOutput>, AppError> {
-    let req = validate_update_input(&state, id, req).await?;
     let admin = workflow::update(&state, &auth, id, req).await?;
     Ok(ApiResponse::success(
         AdminOutput::from(admin),
@@ -155,25 +153,4 @@ async fn batch_resolve(
         AdminBatchResolveOutput { entries },
         "ok",
     ))
-}
-
-async fn validate_update_input(
-    state: &AppApiState,
-    id: i64,
-    req: UpdateAdminInput,
-) -> Result<UpdateAdminInput, AppError> {
-    let req = req.with_target_id(id);
-    if let Err(e) = req.validate() {
-        return Err(AppError::Validation {
-            message: t("Validation failed"),
-            errors: transform_validation_errors(e),
-        });
-    }
-    if let Err(e) = req.validate_async(&state.db).await {
-        return Err(AppError::Validation {
-            message: t("Validation failed"),
-            errors: transform_validation_errors(e),
-        });
-    }
-    Ok(req)
 }

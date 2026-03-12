@@ -215,6 +215,7 @@ function EditUserForm({
   const { submit, busy, form } = useAutoForm(api, {
     url: `users/${user.id}`,
     method: "patch",
+    extraPayload: { id: user.id },
     fields: [
       {
         name: "username",

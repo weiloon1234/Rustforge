@@ -35,15 +35,11 @@ pub struct CreateUserInput {
 #[derive(TS)]
 #[ts(export, export_to = "admin/types/")]
 pub struct UpdateUserInput {
-    #[serde(skip, default)]
-    __target_id: i64,
+    #[serde(default)]
+    pub id: SnowflakeId,
     #[serde(default)]
     #[rf(nested)]
-    #[rf(async_unique(
-        table = "users",
-        column = "username",
-        ignore(column = "id", field = "__target_id")
-    ))]
+    #[rf(async_unique(table = "users", column = "username", ignore = "id"))]
     pub username: Option<UsernameString>,
     #[serde(default)]
     #[rf(email)]
@@ -69,11 +65,6 @@ impl CreateUserInput {
 }
 
 impl UpdateUserInput {
-    pub fn with_target_id(mut self, id: i64) -> Self {
-        self.__target_id = id;
-        self
-    }
-
     pub fn normalize(mut self) -> Self {
         self.email = self.email.map_value(|v| v.to_ascii_lowercase());
         self
