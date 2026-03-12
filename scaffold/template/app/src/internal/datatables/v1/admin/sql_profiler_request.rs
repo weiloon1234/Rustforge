@@ -3,7 +3,7 @@ use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
-use generated::models::{SqlProfilerRequestDataTable, SqlProfilerRequestDataTableHooks};
+use generated::models::{SqlProfilerRequestDataTable, SqlProfilerRequestDataTableConfig, SqlProfilerRequestDataTableHooks};
 
 use crate::contracts::datatable::admin::sql_profiler_request::{
     AdminSqlProfilerRequestDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
@@ -34,7 +34,12 @@ fn is_developer_actor(ctx: &DataTableContext) -> bool {
 pub type AppSqlProfilerRequestDataTable = SqlProfilerRequestDataTable<SqlProfilerRequestDataTableAppHooks>;
 
 pub fn app_sql_profiler_request_datatable(db: sqlx::PgPool) -> AppSqlProfilerRequestDataTable {
-    SqlProfilerRequestDataTable::new(db).with_hooks(SqlProfilerRequestDataTableAppHooks::default())
+    SqlProfilerRequestDataTable::new(db)
+        .with_hooks(SqlProfilerRequestDataTableAppHooks::default())
+        .with_config(SqlProfilerRequestDataTableConfig {
+            default_sorting_column: "created_at",
+            ..SqlProfilerRequestDataTableConfig::default()
+        })
 }
 
 pub fn register_scoped(registry: &mut DataTableRegistry, db: sqlx::PgPool) {

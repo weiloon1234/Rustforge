@@ -1,4 +1,4 @@
-import { Eye } from "lucide-react";
+import { Copy, Eye } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
@@ -63,6 +63,21 @@ function durationUsBadgeClass(us: number): string {
   return "text-red-700";
 }
 
+function buildBoundQuery(sql: string, binds: string): string {
+  if (!binds) return sql;
+  const values = binds.split(", ");
+  let result = sql;
+  for (let i = values.length; i >= 1; i--) {
+    const val = values[i - 1];
+    const isNumeric = /^-?\d+(\.\d+)?$/.test(val);
+    const replacement = isNumeric || val === "true" || val === "false" || val === "NULL"
+      ? val
+      : `'${val.replace(/'/g, "''")}'`;
+    result = result.replaceAll(`$${i}`, replacement);
+  }
+  return result;
+}
+
 function QueriesModalContent({
   requestId,
 }: {
@@ -109,6 +124,16 @@ function QueriesModalContent({
             <span className={`ml-auto font-medium ${durationUsBadgeClass(Number(q.duration_us))}`}>
               {formatDuration(Number(q.duration_us))}
             </span>
+            <button
+              type="button"
+              className="ml-1 rounded p-1 text-muted hover:bg-surface-hover hover:text-foreground"
+              title={t("Copy query with values")}
+              onClick={() => {
+                navigator.clipboard.writeText(buildBoundQuery(q.sql, q.binds));
+              }}
+            >
+              <Copy size={14} />
+            </button>
           </div>
           <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all text-xs">
             {q.sql}
@@ -174,6 +199,7 @@ export default function SqlProfilerRequestsPage() {
         {
           key: "id",
           label: t("Request ID"),
+          sortable: false,
           render: (row) => (
             <span
               className="max-w-[8rem] truncate font-mono text-xs"
