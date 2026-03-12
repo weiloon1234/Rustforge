@@ -2,7 +2,7 @@ CREATE TABLE withdrawals (
     id BIGINT PRIMARY KEY CHECK (id > 0),
     owner_type SMALLINT NOT NULL,
     owner_id BIGINT NOT NULL,
-    admin_id BIGINT REFERENCES admins(id),
+    admin_id BIGINT REFERENCES admin(id),
     credit_type SMALLINT NOT NULL,
     withdrawal_method SMALLINT NOT NULL,
     bank_id BIGINT,
