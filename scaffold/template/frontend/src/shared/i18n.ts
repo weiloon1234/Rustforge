@@ -54,6 +54,21 @@ function transformParams(
   return result;
 }
 
+/**
+ * i18next postProcessor that handles Rust-style `:param` placeholders
+ * in fallback values (when a key is missing from the JSON and the key
+ * itself is returned as the translation).
+ */
+const rustParamPostProcessor = {
+  type: "postProcessor" as const,
+  name: "rustParams",
+  process(value: string, _key: string | string[], options: Record<string, unknown>) {
+    return value.replace(/:([a-zA-Z_]+)/g, (match, param) => {
+      return options[param] !== undefined ? String(options[param]) : match;
+    });
+  },
+};
+
 export async function initI18n(): Promise<typeof i18n> {
   if (i18n.isInitialized) return i18n;
   if (initPromise) return initPromise;
@@ -67,15 +82,19 @@ export async function initI18n(): Promise<typeof i18n> {
       zh: { translation: transformParams(zh) },
     };
 
-    await i18n.use(initReactI18next).init({
-      lng: runtimeConfig.i18n.defaultLocale,
-      fallbackLng: runtimeConfig.i18n.defaultLocale,
-      supportedLngs: runtimeConfig.i18n.supportedLocales,
-      keySeparator: false,
-      nsSeparator: false,
-      interpolation: { escapeValue: false },
-      resources,
-    });
+    await i18n
+      .use(rustParamPostProcessor)
+      .use(initReactI18next)
+      .init({
+        lng: runtimeConfig.i18n.defaultLocale,
+        fallbackLng: runtimeConfig.i18n.defaultLocale,
+        supportedLngs: runtimeConfig.i18n.supportedLocales,
+        keySeparator: false,
+        nsSeparator: false,
+        interpolation: { escapeValue: false },
+        postProcess: ["rustParams"],
+        resources,
+      });
 
     return i18n;
   })();

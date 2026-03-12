@@ -70,7 +70,7 @@ export function createAuthStore<A extends Account = Account>(
           set({ account } as Partial<AuthState<A>>),
 
         setToken: (token: string) =>
-          set({ token } as Partial<AuthState<A>>),
+          set({ token, isInitialized: false } as Partial<AuthState<A>>),
 
         login: async (credentials: Record<string, unknown>) => {
           set({ isLoading: true, error: null } as Partial<AuthState<A>>);
