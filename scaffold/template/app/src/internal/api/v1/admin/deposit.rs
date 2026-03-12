@@ -21,7 +21,7 @@ use super::receipt_upload::{build_attachment_url, parse_receipt_multipart, valid
 pub fn router(state: AppApiState) -> ApiRouter {
     ApiRouter::new()
         .api_route(
-            "/:id/review",
+            "/{id}/review",
             with_permission_check_post_with(
                 review_deposit,
                 AdminGuard,
@@ -31,7 +31,7 @@ pub fn router(state: AppApiState) -> ApiRouter {
             ),
         )
         .api_route(
-            "/:id/upload-receipt",
+            "/{id}/upload-receipt",
             with_permission_check_post_with(
                 upload_receipt,
                 AdminGuard,

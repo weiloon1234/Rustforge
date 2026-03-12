@@ -33,7 +33,7 @@ pub fn router(state: AppApiState) -> ApiRouter {
             ),
         )
         .api_route(
-            "/:id",
+            "/{id}",
             with_permission_check_get_with(
                 detail,
                 AdminGuard,
@@ -46,7 +46,7 @@ pub fn router(state: AppApiState) -> ApiRouter {
             ),
         )
         .api_route(
-            "/:id",
+            "/{id}",
             with_permission_check_put_with(
                 update,
                 AdminGuard,
@@ -56,7 +56,7 @@ pub fn router(state: AppApiState) -> ApiRouter {
             ),
         )
         .api_route(
-            "/:id",
+            "/{id}",
             with_permission_check_delete_with(
                 delete,
                 AdminGuard,
