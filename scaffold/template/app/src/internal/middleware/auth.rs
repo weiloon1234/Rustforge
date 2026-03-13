@@ -11,7 +11,7 @@ use generated::guards::AdminGuard;
 use generated::guards::UserGuard;
 
 use crate::internal::api::state::AppApiState;
-use crate::internal::workflows::audit::AuditObserver;
+use crate::internal::observers::model::AppModelObserver;
 
 pub async fn require_admin(
     state: State<AppApiState>,
@@ -43,10 +43,7 @@ pub async fn require_admin_with_audit(
     request.extensions_mut().insert(auth_user);
 
     // Run the rest of the request with the audit observer in scope
-    let observer = Arc::new(AuditObserver {
-        db,
-        admin_id,
-    });
+    let observer = Arc::new(AppModelObserver::new(db, admin_id));
 
     let response = scope_observer(observer, || next.run(request)).await;
     Ok(response)

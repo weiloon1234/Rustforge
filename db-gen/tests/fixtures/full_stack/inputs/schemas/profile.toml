@@ -1,4 +1,0 @@
-[model.profile]
-table = "profiles"
-fields = ["id:i64", "display_name:string"]
-localized = ["display_name"]

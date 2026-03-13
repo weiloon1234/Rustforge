@@ -4,8 +4,8 @@ use serde::de::DeserializeOwned;
 use validator::Validate;
 
 use crate::error::AppError;
-pub use crate::extract::validated_json::GetDb;
 use crate::extract::json_cleaner::clean_and_deserialize;
+pub use crate::extract::validated_json::GetDb;
 use crate::extract::validation::{
     apply_json_request_body_schema, transform_validation_errors, AsyncValidate,
 };

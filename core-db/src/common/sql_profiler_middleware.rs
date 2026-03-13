@@ -9,11 +9,7 @@ use crate::platform::sql_profiler::service::flush_profiler;
 /// Axum middleware that wraps each request in a profiler collector scope.
 /// When the request completes, collected queries are flushed to the database
 /// in a background task.
-pub async fn sql_profiler_layer(
-    pool: Arc<PgPool>,
-    request: Request,
-    next: Next,
-) -> Response {
+pub async fn sql_profiler_layer(pool: Arc<PgPool>, request: Request, next: Next) -> Response {
     if !is_sql_profiler_enabled() {
         return next.run(request).await;
     }

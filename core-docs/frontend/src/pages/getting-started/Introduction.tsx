@@ -151,8 +151,8 @@ export function Introduction() {
                             <h3 className="font-semibold text-gray-900">ActiveRecord</h3>
                         </div>
                         <p className="text-sm text-gray-500">
-                            Powerful <code>sqlx</code> wrapper. Define schemas in TOML, get
-                            structs & queries for free.
+                            Powerful <code>sqlx</code> wrapper. Define model sources in Rust,
+                            get typed builders and queries for free.
                         </p>
                     </div>
 

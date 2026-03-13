@@ -121,7 +121,7 @@ export function FrameworkFeatures() {
                 <ul>
                     <li>
                         <strong>Model features:</strong> meta, attachments, localized fields, relations,
-                        computed/extension traits, enum explained fields.
+                        computed/model methods, enum explained fields.
                     </li>
                     <li>
                         <strong>Transport features:</strong> typed contracts, guard/authz helpers,

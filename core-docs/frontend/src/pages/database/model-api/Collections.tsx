@@ -22,7 +22,7 @@ export function ModelApiCollections() {
                         {
                             method: 'ids()',
                             returns: 'Vec<PK>',
-                            notes: 'Collect primary key values using the actual schema-defined PK type.',
+                            notes: 'Collect primary key values using the actual model-source PK type.',
                         },
                         {
                             method: 'pluck(f)',

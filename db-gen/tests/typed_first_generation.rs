@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use db_gen::{
@@ -20,43 +20,68 @@ fn temp_dir(prefix: &str) -> PathBuf {
     dir
 }
 
+fn write_file(path: impl AsRef<Path>, contents: &str) {
+    let path = path.as_ref();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("failed to create parent dir");
+    }
+    fs::write(path, contents).expect("failed to write file");
+}
+
+fn write_basic_configs(root: &Path, supported_locales: &[&str]) {
+    let supported = supported_locales
+        .iter()
+        .map(|locale| format!("\"{locale}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    write_file(
+        root.join("configs.toml"),
+        &format!(
+            "[languages]\ndefault = \"{}\"\nsupported = [{}]\n",
+            supported_locales
+                .first()
+                .copied()
+                .expect("supported locales must not be empty"),
+            supported
+        ),
+    );
+}
+
 #[test]
 fn generated_enum_filter_options_use_variant_labels_and_storage_values() {
     let root = temp_dir("enum_filter_options");
-    let schema_dir = root.join("schemas");
+    let models_dir = root.join("models");
     let out_dir = root.join("out");
-    fs::create_dir_all(&schema_dir).expect("failed to create schemas dir");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
     fs::create_dir_all(&out_dir).expect("failed to create out dir");
 
-    fs::write(
-        schema_dir.join("enums.toml"),
+    write_file(
+        models_dir.join("example.rs"),
         r#"
-[AdminType]
-type = "enum"
-storage = "string"
-variants = ["Developer", "SuperAdmin", "Admin"]
+#[rf_db_enum(storage = "string")]
+pub enum AdminType {
+    Developer,
+    SuperAdmin,
+    Admin,
+}
 
-[ContentPageSystemFlag]
-type = "enum"
-storage = "i16"
-variants = [
-  { name = "No", value = 0 },
-  { name = "Yes", value = 1 },
-]
+#[rf_db_enum(storage = "i16")]
+pub enum ContentPageSystemFlag {
+    No = 0,
+    Yes = 1,
+}
 
-[model.example]
-table = "examples"
-fields = [
-  "id:i64",
-  "admin_type:AdminType",
-  "is_system:ContentPageSystemFlag"
-]
+#[rf_model(table = "examples")]
+pub struct Example {
+    pub id: i64,
+    pub admin_type: AdminType,
+    pub is_system: ContentPageSystemFlag,
+}
 "#,
-    )
-    .expect("failed to write schema");
+    );
 
     let parsed_schema = schema::load(
-        schema_dir
+        models_dir
             .to_str()
             .expect("schema path should be valid utf-8"),
     )
@@ -78,12 +103,8 @@ fields = [
     assert!(enums_rs.contains("pub fn from_storage(raw: &str) -> Option<Self> {"));
     assert!(enums_rs.contains("pub const fn i18n_key(self) -> &'static str {"));
     assert!(enums_rs.contains("pub fn explained_label(self) -> String {"));
-
-    // String enum: label is variant name, value is storage value.
     assert!(enums_rs.contains("Self::Developer => \"Developer\","));
     assert!(enums_rs.contains("Self::Developer => \"developer\","));
-
-    // Integer enum: label is variant name, value is numeric storage string.
     assert!(enums_rs.contains("Self::No => \"No\","));
     assert!(enums_rs.contains("Self::No => \"0\","));
 
@@ -91,189 +112,61 @@ fields = [
 }
 
 #[test]
-fn generated_models_use_typed_first_api_with_explicit_unsafe_escape_hatch() {
-    let root = temp_dir("typed_first");
-    let schema_dir = root.join("schemas");
+fn generated_models_copy_helper_items_plain_methods_and_computed_fields() {
+    let root = temp_dir("custom_methods");
+    let models_dir = root.join("models");
     let out_dir = root.join("out");
-    fs::create_dir_all(&schema_dir).expect("failed to create schemas dir");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
     fs::create_dir_all(&out_dir).expect("failed to create out dir");
+    write_basic_configs(&root, &["en"]);
 
-    fs::write(
-        root.join("configs.toml"),
+    write_file(
+        models_dir.join("article.rs"),
         r#"
-[languages]
-default = "en"
-supported = ["en"]
-"#,
-    )
-    .expect("failed to write configs");
-
-    fs::write(
-        schema_dir.join("article.toml"),
-        r#"
-[ArticleStatus]
-type = "enum"
-storage = "string"
-variants = ["Draft", "Published"]
-
-[model.article]
-table = "articles"
-pk = "id"
-fields = [
-  "id:i64",
-  "title:string",
-  "status:ArticleStatus",
-  "views:i64",
-  "created_at:datetime",
-  "updated_at:datetime"
-]
-meta = ["flags:bool", "extra:json"]
-"#,
-    )
-    .expect("failed to write schema");
-
-    let configs_path = root.join("configs.toml");
-    let schemas_path = schema_dir.clone();
-    let (cfgs, _) = config::load(
-        configs_path
-            .to_str()
-            .expect("configs path should be valid utf-8"),
-    )
-    .expect("failed to load config");
-    let parsed_schema = schema::load(
-        schemas_path
-            .to_str()
-            .expect("schema path should be valid utf-8"),
-    )
-    .expect("failed to load schema");
-
-    generate_enums(&parsed_schema, &out_dir).expect("enum generation should succeed");
-    generate_models(&parsed_schema, &cfgs, &out_dir).expect("model generation should succeed");
-
-    let mod_rs = fs::read_to_string(out_dir.join("mod.rs")).expect("mod.rs should exist");
-    let enums_rs = fs::read_to_string(out_dir.join("enums.rs")).expect("enums.rs should exist");
-    let article_rs =
-        fs::read_to_string(out_dir.join("article.rs")).expect("article.rs should exist");
-
-    assert!(mod_rs.contains("pub mod enums;"));
-    assert!(mod_rs.contains("pub use enums::*;"));
-    assert!(enums_rs.contains("pub enum ArticleStatus"));
-    assert!(mod_rs.contains(
-        "pub use article::{Article, ArticleView, ArticleWithRelations, ArticleQuery, ArticleInsert, ArticleUpdate, ArticleCol, ArticleViewsExt, ArticleTableAdapter, ArticleDataTable, ArticleDataTableConfig, ArticleDataTableHooks, ArticleDefaultDataTableHooks};"
-    ));
-    assert!(!mod_rs.contains("pub use article::*;"));
-
-    assert!(article_rs.contains("pub struct Article<'db>"));
-    assert!(!article_rs.contains("pub struct ArticleModel<'db>"));
-    assert!(article_rs.contains("#[derive(Clone)]\npub struct ArticleQuery<'db>"));
-    assert!(article_rs.contains("pub struct ArticleTableAdapter;"));
-    assert!(article_rs.contains("pub struct ArticleDataTableConfig {"));
-    assert!(article_rs.contains("pub trait ArticleDataTableHooks: Send + Sync + 'static {"));
-    assert!(article_rs.contains("fn map_row(&self, _row: &mut ArticleWithRelations"));
-    assert!(article_rs.contains("fn default_row_to_record(&self, row: ArticleWithRelations)"));
-    assert!(article_rs.contains("fn row_to_record(&self, row: ArticleWithRelations"));
-    assert!(article_rs.contains("pub struct ArticleDataTable<H = ArticleDefaultDataTableHooks> where H: ArticleDataTableHooks {"));
-    assert!(article_rs
-        .contains("impl<H: ArticleDataTableHooks> AutoDataTable for ArticleDataTable<H> {"));
-    assert!(article_rs.contains("impl GeneratedTableAdapter for ArticleTableAdapter {"));
-    assert!(article_rs.contains("type Query<'db> = ArticleQuery<'db>;"));
-    assert!(article_rs.contains("fn apply_auto_filter<'db>(&self, query: ArticleQuery<'db>, filter: &ParsedFilter, value: &str)"));
-    assert!(article_rs.contains("fn apply_cursor<'db>(&self, query: ArticleQuery<'db>, column: &str, dir: SortDirection, cursor: &str)"));
-    assert!(article_rs
-        .contains("fn cursor_from_row(&self, row: &ArticleWithRelations, column: &str) -> Option<String>"));
-    assert!(article_rs.contains("let per_page = resolve_per_page(per_page);"));
-    assert!(!article_rs.contains("std::env::var(\"DEFAULT_PER_PAGE\")"));
-
-    // Raw SQL is not on the default fluent surface.
-    assert!(!article_rs.contains("pub fn where_raw<T: Into<BindValue>>"));
-    assert!(!article_rs.contains("pub fn select_raw(mut self, sql: impl Into<String>) -> Self"));
-    assert!(!article_rs.contains("pub fn add_select_raw(mut self, sql: impl Into<String>) -> Self"));
-    assert!(!article_rs.contains("pub fn order_by_raw(mut self, sql: impl Into<String>) -> Self"));
-    assert!(!article_rs.contains("pub fn group_by_raw(mut self, sql: impl Into<String>) -> Self"));
-
-    // Unsafe escape hatch is explicitly available.
-    assert!(article_rs.contains("pub fn unsafe_sql(self) -> ArticleUnsafeQuery<'db>"));
-    assert!(article_rs.contains("pub struct ArticleUnsafeQuery<'db>"));
-    assert!(article_rs.contains("pub struct ArticleUnsafeUpdate<'db>"));
-    assert!(article_rs.contains("#[doc(hidden)]\npub struct ArticleUnsafeQuery<'db>"));
-    assert!(article_rs.contains("#[doc(hidden)]\npub struct ArticleUnsafeUpdate<'db>"));
-    assert!(article_rs.contains("#[doc(hidden)]\npub struct ArticleRow {"));
-    assert!(article_rs.contains("#[doc(hidden)]\npub struct ArticleJson {"));
-    assert!(article_rs.contains("pub fn where_raw(mut self, clause: RawClause) -> Self"));
-    assert!(article_rs.contains("pub fn done(self) -> ArticleQuery<'db>"));
-    assert!(article_rs.contains("pub fn where_key(self, id: i64) -> Self"));
-    assert!(article_rs
-        .contains("pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self"));
-    assert!(article_rs.contains("pub async fn first_or_fail(self) -> Result<ArticleWithRelations>"));
-    assert!(article_rs.contains("pub async fn find_or_fail(self, id: i64) -> Result<ArticleWithRelations>"));
-    assert!(article_rs.contains("pub trait ArticleViewsExt {"));
-    assert!(article_rs.contains("impl ArticleViewsExt for Vec<ArticleView> {"));
-    assert!(article_rs.contains("use core_db::common::collection::TypedCollectionExt;"));
-    assert!(article_rs.contains("DbConn::Pool(pool) => {"));
-    assert!(article_rs.contains("let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));"));
-    assert!(article_rs.contains("let db = DbConn::tx(tx_lock.clone());"));
-    assert!(article_rs.contains("self.save_with_db(db).await?"));
-    assert!(!article_rs.contains("pub async fn returning_row"));
-    assert!(!article_rs.contains("pub async fn returning_view"));
-
-    // Module path correctness for relation imports.
-    assert!(!article_rs.contains("crate::generated_models::"));
-
-    // Typed meta accessors are generated on views.
-    assert!(article_rs.contains("pub fn meta_flags(&self) -> Option<bool>"));
-    assert!(article_rs.contains(
-        "pub fn meta_extra_as<T: serde::de::DeserializeOwned>(&self) -> anyhow::Result<Option<T>>"
-    ));
-    assert!(article_rs.contains("pub fn set_meta_flags(mut self, val: bool) -> Self"));
-    assert!(article_rs.contains(
-        "pub fn set_meta_extra_as<T: serde::Serialize>(mut self, val: &T) -> anyhow::Result<Self>"
-    ));
-
-    // i64 PK default strategy is snowflake.
-    assert!(article_rs.contains("binds.push(generate_snowflake_i64().into());"));
-    assert!(article_rs.contains("matches!(c, ArticleCol::Id)"));
-    assert!(article_rs.contains("pub status_explained: String,"));
-    assert!(article_rs.contains("status_explained: row.status.explained_label(),"));
-    assert!(article_rs
-        .contains("record.insert(\"id\".to_string(), serde_json::Value::String(id_text));"));
-
-    fs::remove_dir_all(root).expect("failed to remove temp dir");
+pub struct SpecialDto {
+    pub label: String,
 }
 
-#[test]
-fn generated_update_paths_use_primary_key_type_for_target_ids() {
-    let root = temp_dir("uuid_update_targets");
-    let schema_dir = root.join("schemas");
-    let out_dir = root.join("out");
-    fs::create_dir_all(&schema_dir).expect("failed to create schemas dir");
-    fs::create_dir_all(&out_dir).expect("failed to create out dir");
+pub const SPECIAL_PREFIX: &str = "special";
 
-    fs::write(
-        root.join("configs.toml"),
-        r#"
-[languages]
-default = "en"
-supported = ["en"]
-"#,
-    )
-    .expect("failed to write configs");
+pub fn build_special(label: &str) -> SpecialDto {
+    SpecialDto {
+        label: format!("{SPECIAL_PREFIX}:{label}"),
+    }
+}
 
-    fs::write(
-        schema_dir.join("session.toml"),
-        r#"
-[model.session]
-table = "sessions"
-pk = "id"
-id_strategy = "manual"
-fields = [
-  "id:uuid::Uuid",
-  "name:string",
-  "updated_at:datetime"
-]
-meta = ["flag:bool"]
+#[rf_db_enum(storage = "string")]
+pub enum ArticleStatus {
+    Draft,
+    Published,
+}
+
+#[rf_model(table = "articles")]
+pub struct Article {
+    pub id: i64,
+    pub title: Localized<String>,
+    pub status: ArticleStatus,
+    pub created_at: time::OffsetDateTime,
+    pub updated_at: time::OffsetDateTime,
+}
+
+#[rf_view_impl]
+impl ArticleView {
+    pub fn to_special_dto(&self) -> SpecialDto {
+        build_special(&self.identity())
+    }
+
+    pub fn is_published(&self) -> bool {
+        matches!(self.status, ArticleStatus::Published)
+    }
+
+    #[rf_computed]
+    pub fn identity(&self) -> String {
+        format!("article:{}", self.id)
+    }
+}
 "#,
-    )
-    .expect("failed to write schema");
+    );
 
     let (cfgs, _) = config::load(
         root.join("configs.toml")
@@ -282,77 +175,7 @@ meta = ["flag:bool"]
     )
     .expect("failed to load config");
     let parsed_schema = schema::load(
-        schema_dir
-            .to_str()
-            .expect("schema path should be valid utf-8"),
-    )
-    .expect("failed to load schema");
-
-    generate_models(&parsed_schema, &cfgs, &out_dir).expect("model generation should succeed");
-
-    let session_rs =
-        fs::read_to_string(out_dir.join("session.rs")).expect("session.rs should exist");
-
-    assert!(session_rs.contains(
-        "let mut select_q = sqlx::query_scalar::<_, uuid::Uuid>(&select_sql);"
-    ));
-    assert!(session_rs.contains(
-        "localized::upsert_meta_many(db.clone(), localized::SESSION_OWNER_TYPE, id.clone(), &self.meta).await?;"
-    ));
-    assert!(!session_rs.contains(
-        "localized::upsert_meta_many(db.clone(), localized::SESSION_OWNER_TYPE, *id, &self.meta).await?;"
-    ));
-
-    fs::remove_dir_all(root).expect("failed to remove temp dir");
-}
-
-#[test]
-fn generated_models_support_custom_meta_shape_without_cast_helper() {
-    let root = temp_dir("meta_custom_shape");
-    let schema_dir = root.join("schemas");
-    let out_dir = root.join("out");
-    fs::create_dir_all(&schema_dir).expect("failed to create schemas dir");
-    fs::create_dir_all(&out_dir).expect("failed to create out dir");
-
-    fs::write(
-        root.join("configs.toml"),
-        r#"
-[languages]
-default = "en"
-supported = ["en"]
-"#,
-    )
-    .expect("failed to write configs");
-
-    fs::write(
-        schema_dir.join("article.toml"),
-        r#"
-[ArticleStatus]
-type = "enum"
-storage = "string"
-variants = ["Draft", "Published"]
-
-[model.article]
-table = "articles"
-pk = "id"
-fields = [
-  "id:i64",
-  "title:string",
-  "status:ArticleStatus"
-]
-meta = ["extra:ExtraMeta"]
-"#,
-    )
-    .expect("failed to write schema");
-
-    let (cfgs, _) = config::load(
-        root.join("configs.toml")
-            .to_str()
-            .expect("configs path should be valid utf-8"),
-    )
-    .expect("failed to load config");
-    let parsed_schema = schema::load(
-        schema_dir
+        models_dir
             .to_str()
             .expect("schema path should be valid utf-8"),
     )
@@ -364,63 +187,92 @@ meta = ["extra:ExtraMeta"]
     let article_rs =
         fs::read_to_string(out_dir.join("article.rs")).expect("article.rs should exist");
 
-    assert!(article_rs.contains("use crate::extensions::article::types::*;"));
-    assert!(article_rs.contains("pub fn meta_extra(&self) -> anyhow::Result<Option<ExtraMeta>>"));
-    assert!(article_rs
-        .contains("pub fn set_meta_extra(mut self, val: &ExtraMeta) -> anyhow::Result<Self>"));
+    assert!(article_rs.contains("pub struct SpecialDto"));
+    assert!(article_rs.contains("pub const SPECIAL_PREFIX"));
+    assert!(article_rs.contains("\"special\""));
+    assert!(article_rs.contains("pub fn build_special"));
+    assert!(article_rs.contains("pub fn to_special_dto"));
+    assert!(article_rs.contains("-> SpecialDto"));
+    assert!(article_rs.contains("pub fn is_published"));
+    assert!(article_rs.contains("pub fn identity"));
+    assert!(article_rs.contains("identity: self.identity(),"));
+    assert!(article_rs.contains("pub identity: String,"));
+    assert!(!article_rs.contains("crate::extensions::"));
 
     fs::remove_dir_all(root).expect("failed to remove temp dir");
+}
+
+#[test]
+fn framework_models_load_from_core_db_single_source_of_truth() {
+    let framework_paths = schema::framework_model_source_paths_from_core_db();
+    let parsed_schema = schema::load_framework_from_paths(&framework_paths)
+        .expect("failed to load framework model sources");
+
+    for model in [
+        "attachment",
+        "localized",
+        "meta",
+        "country",
+        "sql_profiler_request",
+        "sql_profiler_query",
+        "failed_job",
+        "outbox_job",
+        "personal_access_token",
+        "webhook_log",
+        "http_client_log",
+    ] {
+        assert!(
+            parsed_schema.models.contains_key(model),
+            "missing framework model: {model}"
+        );
+    }
 }
 
 #[test]
 fn generated_models_support_nested_relation_filter_paths() {
     let root = temp_dir("nested_rel_filters");
-    let schema_dir = root.join("schemas");
+    let models_dir = root.join("models");
     let out_dir = root.join("out");
-    fs::create_dir_all(&schema_dir).expect("failed to create schemas dir");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
     fs::create_dir_all(&out_dir).expect("failed to create out dir");
+    write_basic_configs(&root, &["en"]);
 
-    fs::write(
-        root.join("configs.toml"),
+    write_file(
+        models_dir.join("profile.rs"),
         r#"
-[languages]
-default = "en"
-supported = ["en"]
+#[rf_model(table = "profiles")]
+pub struct Profile {
+    pub id: i64,
+    pub display_name: String,
+}
 "#,
-    )
-    .expect("failed to write configs");
-
-    fs::write(
-        schema_dir.join("profile.toml"),
+    );
+    write_file(
+        models_dir.join("user.rs"),
         r#"
-[model.profile]
-table = "profiles"
-fields = ["id:i64", "display_name:string"]
+#[rf_model(table = "users")]
+pub struct User {
+    pub id: i64,
+    pub name: String,
+    pub profile_id: i64,
+    #[rf(foreign_key = "profile_id")]
+    pub profile: BelongsTo<Profile>,
+}
 "#,
-    )
-    .expect("failed to write profile schema");
-
-    fs::write(
-        schema_dir.join("user.toml"),
+    );
+    write_file(
+        models_dir.join("article.rs"),
         r#"
-[model.user]
-table = "users"
-fields = ["id:i64", "name:string", "profile_id:i64"]
-relations = ["profile:belongs_to:profile:profile_id:id"]
+#[rf_model(table = "articles")]
+pub struct Article {
+    pub id: i64,
+    pub title: String,
+    pub author_id: i64,
+    #[rf(foreign_key = "author_id")]
+    pub author: BelongsTo<User>,
+}
 "#,
-    )
-    .expect("failed to write user schema");
-
-    fs::write(
-        schema_dir.join("article.toml"),
-        r#"
-[model.article]
-table = "articles"
-fields = ["id:i64", "title:string", "author_id:i64"]
-relations = ["author:belongs_to:user:author_id:id"]
-"#,
-    )
-    .expect("failed to write article schema");
+    );
 
     let (cfgs, _) = config::load(
         root.join("configs.toml")
@@ -429,7 +281,7 @@ relations = ["author:belongs_to:user:author_id:id"]
     )
     .expect("failed to load config");
     let parsed_schema = schema::load(
-        schema_dir
+        models_dir
             .to_str()
             .expect("schema path should be valid utf-8"),
     )
@@ -453,25 +305,87 @@ relations = ["author:belongs_to:user:author_id:id"]
 }
 
 #[test]
+fn generated_models_handle_optional_self_has_many_without_self_imports() {
+    let root = temp_dir("self_has_many");
+    let models_dir = root.join("models");
+    let out_dir = root.join("out");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
+    fs::create_dir_all(&out_dir).expect("failed to create out dir");
+    write_basic_configs(&root, &["en"]);
+
+    write_file(
+        models_dir.join("user.rs"),
+        r#"
+#[rf_db_enum(storage = "i16")]
+pub enum UserBanStatus {
+    No = 0,
+    Yes = 1,
+}
+
+#[rf_model(table = "users")]
+pub struct User {
+    pub id: i64,
+    pub username: String,
+    pub introducer_user_id: Option<i64>,
+    pub ban: UserBanStatus,
+    pub credit_1: rust_decimal::Decimal,
+    pub created_at: time::OffsetDateTime,
+    pub updated_at: time::OffsetDateTime,
+    #[rf(foreign_key = "introducer_user_id")]
+    pub introducer: BelongsTo<User>,
+    #[rf(foreign_key = "introducer_user_id")]
+    pub downlines: HasMany<User>,
+}
+"#,
+    );
+
+    let (cfgs, _) = config::load(
+        root.join("configs.toml")
+            .to_str()
+            .expect("configs path should be valid utf-8"),
+    )
+    .expect("failed to load config");
+    let parsed_schema = schema::load(
+        models_dir
+            .to_str()
+            .expect("schema path should be valid utf-8"),
+    )
+    .expect("failed to load schema");
+
+    generate_enums(&parsed_schema, &out_dir).expect("enum generation should succeed");
+    generate_models(&parsed_schema, &cfgs, &out_dir).expect("model generation should succeed");
+
+    let user_rs = fs::read_to_string(out_dir.join("user.rs")).expect("user.rs should exist");
+
+    assert!(!user_rs.contains("use crate::generated::models::user::{UserCol, UserQuery, UserRow};"));
+    assert!(user_rs.contains(
+        "if let Some(fk_val) = row.introducer_user_id.clone() { map.entry(fk_val).or_default().push(row); }"
+    ));
+
+    fs::remove_dir_all(root).expect("failed to remove temp dir");
+}
+
+#[test]
 fn generate_datatable_skeletons_creates_app_stubs_without_overwriting_existing_files() {
     let root = temp_dir("datatable_stubs");
-    let schema_dir = root.join("schemas");
-    let out_dir = root.join("models").join("src").join("datatables");
-    fs::create_dir_all(&schema_dir).expect("failed to create schemas dir");
+    let models_dir = root.join("models");
+    let out_dir = root.join("app").join("src").join("datatables");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
     fs::create_dir_all(&out_dir).expect("failed to create out dir");
 
-    fs::write(
-        schema_dir.join("article.toml"),
+    write_file(
+        models_dir.join("article.rs"),
         r#"
-[model.article]
-table = "articles"
-fields = ["id:i64", "title:string"]
+#[rf_model(table = "articles")]
+pub struct Article {
+    pub id: i64,
+    pub title: String,
+}
 "#,
-    )
-    .expect("failed to write schema");
+    );
 
     let parsed_schema = schema::load(
-        schema_dir
+        models_dir
             .to_str()
             .expect("schema path should be valid utf-8"),
     )
@@ -507,16 +421,7 @@ fn generate_auth_always_emits_guard_agnostic_resolvers() {
     let root = temp_dir("auth_resolver");
     let out_dir = root.join("out");
     fs::create_dir_all(&out_dir).expect("failed to create out dir");
-
-    fs::write(
-        root.join("configs.toml"),
-        r#"
-[languages]
-default = "en"
-supported = ["en"]
-"#,
-    )
-    .expect("failed to write configs");
+    write_basic_configs(&root, &["en"]);
 
     let (cfgs, _) = config::load(
         root.join("configs.toml")
@@ -541,56 +446,108 @@ supported = ["en"]
 }
 
 #[test]
-fn generated_models_support_locale_filter_variants() {
-    let root = temp_dir("locale_filters");
-    let schema_dir = root.join("schemas");
+fn schema_load_rejects_invalid_computed_signature() {
+    let root = temp_dir("invalid_computed");
+    let models_dir = root.join("models");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
+
+    write_file(
+        models_dir.join("article.rs"),
+        r#"
+#[rf_model(table = "articles")]
+pub struct Article {
+    pub id: i64,
+    pub title: String,
+}
+
+#[rf_view_impl]
+impl ArticleView {
+    #[rf_computed]
+    pub fn identity(&self, prefix: &str) -> String {
+        format!("{prefix}:{}", self.id)
+    }
+}
+"#,
+    );
+
+    let err = schema::load(
+        models_dir
+            .to_str()
+            .expect("schema path should be valid utf-8"),
+    )
+    .expect_err("schema load should reject invalid computed method");
+    let err_text = err.to_string();
+
+    assert!(err_text.contains("#[rf_computed] method 'identity'"));
+    assert!(err_text.contains("must not take extra arguments"));
+
+    fs::remove_dir_all(root).expect("failed to remove temp dir");
+}
+
+#[test]
+fn schema_load_rejects_unsupported_enum_storage() {
+    let root = temp_dir("invalid_enum_storage");
+    let models_dir = root.join("models");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
+
+    write_file(
+        models_dir.join("article.rs"),
+        r#"
+#[rf_db_enum(storage = "uuid")]
+pub enum ArticleStatus {
+    Draft,
+    Published,
+}
+
+#[rf_model(table = "articles")]
+pub struct Article {
+    pub id: i64,
+    pub status: ArticleStatus,
+}
+"#,
+    );
+
+    let err = schema::load(
+        models_dir
+            .to_str()
+            .expect("schema path should be valid utf-8"),
+    )
+    .expect_err("schema load should reject unsupported enum storage");
+    let err_text = err.to_string();
+
+    assert!(err_text.contains("uses unsupported storage 'uuid'"));
+
+    fs::remove_dir_all(root).expect("failed to remove temp dir");
+}
+
+#[test]
+fn generated_models_emit_lifecycle_payloads_and_model_keys() {
+    let root = temp_dir("observer_payloads");
+    let models_dir = root.join("models");
     let out_dir = root.join("out");
-    fs::create_dir_all(&schema_dir).expect("failed to create schemas dir");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
     fs::create_dir_all(&out_dir).expect("failed to create out dir");
+    write_basic_configs(&root, &["en"]);
 
-    fs::write(
-        root.join("configs.toml"),
+    write_file(
+        models_dir.join("article.rs"),
         r#"
-[languages]
-default = "en"
-supported = ["en", "zh"]
-"#,
-    )
-    .expect("failed to write configs");
+#[rf_db_enum(storage = "string")]
+pub enum ArticleStatus {
+    Draft,
+    Published,
+}
 
-    fs::write(
-        schema_dir.join("profile.toml"),
-        r#"
-[model.profile]
-table = "profiles"
-fields = ["id:i64", "display_name:string"]
-localized = ["display_name"]
+#[rf_model(table = "articles")]
+pub struct Article {
+    pub id: i64,
+    pub status: ArticleStatus,
+    pub title: Option<String>,
+    pub created_at: time::OffsetDateTime,
+    pub updated_at: time::OffsetDateTime,
+}
 "#,
-    )
-    .expect("failed to write profile schema");
-
-    fs::write(
-        schema_dir.join("user.toml"),
-        r#"
-[model.user]
-table = "users"
-fields = ["id:i64", "profile_id:i64", "name:string"]
-relations = ["profile:belongs_to:profile:profile_id:id"]
-"#,
-    )
-    .expect("failed to write user schema");
-
-    fs::write(
-        schema_dir.join("article.toml"),
-        r#"
-[model.article]
-table = "articles"
-fields = ["id:i64", "author_id:i64", "title:string"]
-localized = ["title"]
-relations = ["author:belongs_to:user:author_id:id"]
-"#,
-    )
-    .expect("failed to write article schema");
+    );
 
     let (cfgs, _) = config::load(
         root.join("configs.toml")
@@ -599,7 +556,7 @@ relations = ["author:belongs_to:user:author_id:id"]
     )
     .expect("failed to load config");
     let parsed_schema = schema::load(
-        schema_dir
+        models_dir
             .to_str()
             .expect("schema path should be valid utf-8"),
     )
@@ -610,55 +567,79 @@ relations = ["author:belongs_to:user:author_id:id"]
 
     let article_rs =
         fs::read_to_string(out_dir.join("article.rs")).expect("article.rs should exist");
+    let mod_rs = fs::read_to_string(out_dir.join("mod.rs")).expect("mod.rs should exist");
 
-    assert!(article_rs.contains("ParsedFilter::LocaleEq { column }"));
-    assert!(article_rs.contains("ParsedFilter::LocaleLike { column }"));
-    assert!(article_rs.contains("ParsedFilter::LocaleHas { relation, column }"));
-    assert!(article_rs.contains("ParsedFilter::LocaleHasLike { relation, column }"));
-    assert!(article_rs.contains("localized::ARTICLE_OWNER_TYPE"));
-    assert!(article_rs.contains("f-locale-<col>"));
-    assert!(article_rs.contains("f-locale-has-<relation>-<col>"));
-    assert!(article_rs.contains("(\"author__profile\", \"display_name\") => Ok(Some("));
+    assert!(article_rs.contains("pub struct ArticleCreateInput"));
+    assert!(article_rs.contains("pub struct ArticleUpdateChanges"));
+    assert!(article_rs.contains("pub const MODEL_KEY: &'static str = \"article\";"));
+    assert!(article_rs.contains("observer.on_creating(&event, &data).await?;"));
+    assert!(article_rs.contains("observer.on_updating(&event, &old_data, &changes_data).await?;"));
+    assert!(article_rs.contains("observer.on_deleting(&event, &old_data).await?;"));
+    assert!(article_rs.contains("observer.on_created(&event, &data).await"));
+    assert!(article_rs.contains("observer.on_updated(&event, &old_data, &new_data).await"));
+    assert!(article_rs.contains("observer.on_deleted(&event, &old_data).await"));
+    assert!(article_rs.contains("record_key: Some(format!(\"{}\", row.id))"));
+    assert!(article_rs.contains("record_key: Some(format!(\"{}\", old_row.id))"));
+    assert!(article_rs.contains("let data = serde_json::to_value(create_input)?;"));
+    assert!(article_rs.contains("match serde_json::to_value(&row)"));
+    assert!(article_rs.contains("let value = match bind {"));
+    assert!(article_rs.contains("FieldInput::Set(value)"));
+    assert!(article_rs.contains("FieldChange::Assign(value)"));
+    assert!(mod_rs.contains("ArticleCreateInput"));
+    assert!(mod_rs.contains("ArticleUpdateChanges"));
+    assert!(mod_rs.contains("ArticleRow"));
 
     fs::remove_dir_all(root).expect("failed to remove temp dir");
 }
 
 #[test]
-fn schema_load_rejects_legacy_multilang_key() {
-    let root = temp_dir("legacy_multilang_key");
-    let schema_dir = root.join("schemas");
-    fs::create_dir_all(&schema_dir).expect("failed to create schemas dir");
+fn observe_false_suppresses_generated_observer_hooks() {
+    let root = temp_dir("observe_false");
+    let models_dir = root.join("models");
+    let out_dir = root.join("out");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
+    fs::create_dir_all(&out_dir).expect("failed to create out dir");
+    write_basic_configs(&root, &["en"]);
 
-    let legacy_schema = r#"
-[model.article]
-table = "articles"
-fields = ["id:i64", "title:string"]
-multilang = ["title"]
-"#;
+    write_file(
+        models_dir.join("session.rs"),
+        r#"
+#[rf_model(table = "sessions", observe = false)]
+pub struct Session {
+    pub id: String,
+    pub user_id: i64,
+    pub created_at: time::OffsetDateTime,
+}
+"#,
+    );
 
-    fs::write(schema_dir.join("article.toml"), legacy_schema).expect("failed to write schema");
-
-    let dir_err = schema::load(
-        schema_dir
+    let (cfgs, _) = config::load(
+        root.join("configs.toml")
+            .to_str()
+            .expect("configs path should be valid utf-8"),
+    )
+    .expect("failed to load config");
+    let parsed_schema = schema::load(
+        models_dir
             .to_str()
             .expect("schema path should be valid utf-8"),
     )
-    .expect_err("directory schema load should reject legacy key");
-    let dir_err_text = dir_err.to_string();
-    assert!(dir_err_text.contains("Schema key 'multilang' is removed; use 'localized'"));
-    assert!(dir_err_text.contains("model: article"));
+    .expect("failed to load schema");
 
-    let single_schema = root.join("single_schema.toml");
-    fs::write(&single_schema, legacy_schema).expect("failed to write single schema file");
-    let file_err = schema::load(
-        single_schema
-            .to_str()
-            .expect("single schema path should be valid utf-8"),
-    )
-    .expect_err("single-file schema load should reject legacy key");
-    let file_err_text = file_err.to_string();
-    assert!(file_err_text.contains("Schema key 'multilang' is removed; use 'localized'"));
-    assert!(file_err_text.contains("model: article"));
+    generate_models(&parsed_schema, &cfgs, &out_dir).expect("model generation should succeed");
+
+    let session_rs =
+        fs::read_to_string(out_dir.join("session.rs")).expect("session.rs should exist");
+
+    assert!(session_rs.contains("pub const MODEL_KEY: &'static str = \"session\";"));
+    assert!(!session_rs.contains("try_get_observer"));
+    assert!(!session_rs.contains("ModelEvent"));
+    assert!(!session_rs.contains("observer.on_creating"));
+    assert!(!session_rs.contains("observer.on_created"));
+    assert!(!session_rs.contains("observer.on_updating"));
+    assert!(!session_rs.contains("observer.on_updated"));
+    assert!(!session_rs.contains("observer.on_deleting"));
+    assert!(!session_rs.contains("observer.on_deleted"));
 
     fs::remove_dir_all(root).expect("failed to remove temp dir");
 }

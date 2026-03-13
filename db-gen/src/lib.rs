@@ -19,4 +19,8 @@ pub use gen_localized::generate_localized;
 pub use gen_models::{generate_models, generate_models_with_options, GenerateModelsOptions};
 pub use gen_permissions::generate_permissions;
 pub use permissions::load_permissions;
-pub use schema::{load_framework, load_with_framework, Schema};
+pub use schema::{
+    framework_model_source_paths_from_core_db, load_framework, load_framework_from_paths,
+    load_framework_from_sources, load_with_framework, load_with_framework_from_paths,
+    load_with_framework_from_sources, FrameworkModelSource, Schema,
+};

@@ -67,7 +67,7 @@ export function ModelApiColumns() {
                 <h2>Cross-links</h2>
                 <ul>
                     <li><a href="#/model-api-query">`XxxQuery`</a> for the full query-builder surface.</li>
-                    <li><a href="#/schema">Schema Definition</a> for the field list that generates the enum.</li>
+                    <li><a href="#/schema">Model Source Definition</a> for the field list that generates the enum.</li>
                     <li><a href="#/model-api-unsafe">Unsafe SQL</a> for the explicit fallback when enum-based composition is still not enough.</li>
                 </ul>
             </div>

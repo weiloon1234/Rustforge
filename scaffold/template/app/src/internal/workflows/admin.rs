@@ -2,7 +2,6 @@ use core_db::common::sql::{generate_snowflake_i64, DbConn, Op};
 use core_i18n::t;
 use core_web::{auth::AuthUser, error::AppError, Patch};
 use generated::{
-    extensions::admin::types::AdminViewPermissionExt,
     guards::AdminGuard,
     models::{Admin, AdminType, AdminView},
     permissions::Permission,
@@ -149,24 +148,6 @@ pub async fn remove(
         return Err(AppError::NotFound(t("Admin not found")));
     }
     Ok(())
-}
-
-pub async fn batch_resolve_names(
-    state: &AppApiState,
-    ids: &[i64],
-) -> Result<Vec<(i64, String, String)>, AppError> {
-    if ids.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut results = Vec::new();
-    for &id in ids {
-        if let Ok(Some(admin)) = Admin::new(DbConn::pool(&state.db), None).find(id).await {
-            let admin = admin.into_row();
-            results.push((admin.id, admin.username, admin.name));
-        }
-    }
-    Ok(results)
 }
 
 fn normalize_email_value(email: &str) -> Option<String> {

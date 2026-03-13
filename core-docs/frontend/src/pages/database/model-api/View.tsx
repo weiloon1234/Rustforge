@@ -4,7 +4,7 @@ export function ModelApiView() {
     return (
         <div className="space-y-8">
             <div className="space-y-3">
-                <h1 className="text-4xl font-extrabold text-gray-900">`XxxView` &amp; Extensions</h1>
+                <h1 className="text-4xl font-extrabold text-gray-900">`XxxView` &amp; Model Methods</h1>
                 <p className="text-xl text-gray-500">
                     Hydrated app-facing read model plus the intended extension point for computed helpers.
                 </p>
@@ -14,7 +14,7 @@ export function ModelApiView() {
                 <p>
                     <code>XxxView</code> is the stable app-facing model. It already includes hydrated framework
                     features such as localized values, meta bags, attachments, and generated helper methods.
-                    App-specific computed values should extend <code>XxxView</code>, not the raw DB row type.
+                    App-specific computed values should be added on <code>XxxView</code>, not the raw DB row type.
                 </p>
 
                 <MethodTable
@@ -49,15 +49,12 @@ export function ModelApiView() {
 
                 <h2>Use `XxxView` as the extension surface</h2>
                 <p>
-                    Put app-specific helpers in <code>generated/src/extensions.rs</code>. This keeps DB row shapes,
-                    generated code, and manual app semantics separated cleanly.
+                    Put app-specific helpers in <code>app/models/&lt;model&gt;.rs</code> inside <code>#[rf_view_impl]</code> or <code>#[rf_with_relations_impl]</code>. This keeps DB row shapes,
+                    generated code, and manual app semantics in one source of truth.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`pub trait AdminViewComputedExt {
-    fn identity(&self) -> String;
-}
-
-impl AdminViewComputedExt for AdminView {
+                    <code className="language-rust">{`#[rf_view_impl]
+impl AdminView {
     fn identity(&self) -> String {
         admin_identity(
             Some(self.username.as_str()),
@@ -78,7 +75,7 @@ impl AdminViewComputedExt for AdminView {
                         <code>XxxJson</code>: output projection, not the primary place for business helpers.
                     </li>
                     <li>
-                        Handler-local mapping code for every request: move reusable logic into view extensions instead.
+                        Handler-local mapping code for every request: move reusable logic into view methods instead.
                     </li>
                 </ul>
 

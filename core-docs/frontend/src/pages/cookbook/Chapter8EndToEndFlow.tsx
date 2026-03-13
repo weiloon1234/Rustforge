@@ -13,7 +13,7 @@ export function Chapter8EndToEndFlow() {
                     Recipe: Build an End-to-End Flow
                 </h1>
                 <p className="text-xl text-gray-500">
-                    Trace one real feature from schema and generated models through contracts, workflows, admin UI, datatable export, and runtime bootstrap.
+                    Trace one real feature from model source and generated models through contracts, workflows, admin UI, datatable export, and runtime bootstrap.
                 </p>
             </div>
 
@@ -25,9 +25,9 @@ export function Chapter8EndToEndFlow() {
 
                 <h2>Step 1: Start from the model source of truth</h2>
                 <ul>
-                    <li>Framework schema owns <code>countries</code>.</li>
+                    <li>Framework model source owns <code>Country</code> and the <code>countries</code> table mapping.</li>
                     <li>Primary key is <code>iso2</code>, not a numeric ID.</li>
-                    <li>Admin app code consumes the generated country model API rather than inventing a parallel schema or repository shape.</li>
+                    <li>Admin app code consumes the generated country model API rather than inventing a parallel model definition or repository shape.</li>
                 </ul>
                 <p>
                     That gives the vertical slice a stable base before any HTTP or frontend layer exists.

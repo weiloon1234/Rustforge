@@ -96,14 +96,12 @@ fn validation_message(error: &ValidationError) -> String {
                     "Must be between :lo and :hi.",
                     &[("lo", &lo.to_string()), ("hi", &hi.to_string())],
                 ),
-                (Some(lo), None) => core_i18n::t_args(
-                    "Must be at least :lo.",
-                    &[("lo", &lo.to_string())],
-                ),
-                (None, Some(hi)) => core_i18n::t_args(
-                    "Must be at most :hi.",
-                    &[("hi", &hi.to_string())],
-                ),
+                (Some(lo), None) => {
+                    core_i18n::t_args("Must be at least :lo.", &[("lo", &lo.to_string())])
+                }
+                (None, Some(hi)) => {
+                    core_i18n::t_args("Must be at most :hi.", &[("hi", &hi.to_string())])
+                }
                 _ => core_i18n::t("Out of range."),
             }
         }

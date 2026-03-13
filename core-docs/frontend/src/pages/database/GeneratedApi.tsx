@@ -3,7 +3,7 @@ const menu = [
     ['#/model-api-query', 'XxxQuery'],
     ['#/model-api-insert', 'XxxInsert'],
     ['#/model-api-update', 'XxxUpdate'],
-    ['#/model-api-view', 'XxxView & Extensions'],
+    ['#/model-api-view', 'XxxView & Model Methods'],
     ['#/model-api-columns', 'XxxCol & Filtering'],
     ['#/model-api-relations', 'Relations & Joins'],
     ['#/model-api-unsafe', 'Unsafe SQL'],
@@ -25,15 +25,15 @@ export function GeneratedApi() {
                 <h2>SSOT ladder</h2>
                 <ol>
                     <li>
-                        <strong>Schema SSOT:</strong> <code>app/schemas/*.toml</code> defines fields, enums,
+                        <strong>Model SSOT:</strong> <code>app/models/*.rs</code> defines fields, enums,
                         relations, localized/meta/attachment behavior, and datatable scaffolding.
                     </li>
                     <li>
                         <strong>Generated API:</strong> db-gen emits typed Rust APIs and TS-exportable types.
                     </li>
                     <li>
-                        <strong>Manual extension surface:</strong> app code extends <code>XxxView</code> and
-                        related app-facing types in <code>generated/src/extensions.rs</code>.
+                        <strong>Manual extension surface:</strong> app code adds <code>XxxView</code> and <code>XxxWithRelations</code>
+                        methods in <code>app/models/*.rs</code> via <code>#[rf_view_impl]</code> and <code>#[rf_with_relations_impl]</code>.
                     </li>
                 </ol>
 
@@ -54,7 +54,7 @@ XxxViewsExt   // collection helpers`}</code>
                 <p>
                     Raw row and unsafe helper internals remain generated, but they are implementation detail
                     surfaces. App code should prefer <code>XxxView</code>, typed query/update builders, and
-                    extension traits.
+                    generated model methods.
                 </p>
                 <ul>
                     <li><code>XxxRow</code>: raw DB shape.</li>
@@ -82,7 +82,7 @@ XxxViewsExt   // collection helpers`}</code>
                         datatable/view JSON surfaces.
                     </li>
                     <li>
-                        PK handling follows the schema-defined PK type. Do not assume every model uses
+                        PK handling follows the model-source PK type. Do not assume every model uses
                         numeric IDs.
                     </li>
                     <li>
@@ -94,7 +94,7 @@ XxxViewsExt   // collection helpers`}</code>
                 <h2>Cross-links</h2>
                 <ul>
                     <li>
-                        <a href="#/schema">Schema Definition</a> for the generation inputs.
+                        <a href="#/schema">Model Source Definition</a> for the generation inputs.
                     </li>
                     <li>
                         <a href="#/db-gen">Code Generation</a> for generator ownership and build flow.

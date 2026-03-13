@@ -1,3 +1,0 @@
-pub mod deposit;
-pub mod user_credit_transaction;
-pub mod withdrawal;

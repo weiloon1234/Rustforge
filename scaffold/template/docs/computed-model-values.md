@@ -4,37 +4,30 @@ Use this when you need derived/read-only fields or custom methods on generated `
 
 ## Where to implement
 
-File: `app/src/internal/extensions/{model_name}.rs`
+File: `app/models/{model_name}.rs`
 
-- Extend `XxxView` (the app-facing generated model), not `XxxRow` (internal raw DB shape).
-- Define an extension trait in your file and implement it on the generated View type.
-- Register each file in `app/src/internal/extensions/mod.rs`.
+- Put methods directly inside `#[rf_view_impl] impl XxxView` or `#[rf_with_relations_impl] impl XxxWithRelations`.
+- Plain methods stay callable as normal generated methods.
+- `#[rf_computed]` is only for methods that should also be exported into generated JSON shapes.
 
-## Example: `UserCreditTransactionViewExt`
+## Example: `UserCreditTransactionView`
 
-File: `app/src/internal/extensions/user_credit_transaction.rs`
+File: `app/models/user_credit_transaction.rs`
 
 ```rust
-use generated::models::UserCreditTransactionView;
-
-pub trait UserCreditTransactionViewExt {
-    fn enrich_transaction_type_explained(&mut self);
-}
-
-impl UserCreditTransactionViewExt for UserCreditTransactionView {
-    fn enrich_transaction_type_explained(&mut self) {
-        // custom_description → params interpolation → keep default
+#[rf_view_impl]
+impl UserCreditTransactionView {
+    pub fn enrich_transaction_type_explained(&mut self) {
+        // custom_description -> params interpolation -> keep default
     }
 }
 ```
 
 ## Consume in datatables
 
-Import the trait and call on the `WithRelations` row (which `DerefMut`s to `View`):
+Call the generated method directly on the `WithRelations` row (which `DerefMut`s to `View`):
 
 ```rust
-use crate::internal::extensions::user_credit_transaction::UserCreditTransactionViewExt;
-
 fn map_row(&self, row: &mut UserCreditTransactionWithRelations, ..) -> anyhow::Result<()> {
     row.enrich_transaction_type_explained();
     Ok(())
@@ -43,17 +36,15 @@ fn map_row(&self, row: &mut UserCreditTransactionWithRelations, ..) -> anyhow::R
 
 ## Consume in API handlers / workflows
 
-Same pattern — import the trait, call on the View:
+Same pattern: call on the generated View directly.
 
 ```rust
-use crate::internal::extensions::admin::AdminViewExt;
-
 let identity = admin_view.identity();
 ```
 
 ## Expose to API DTOs
 
-Add computed field on output contracts and map from the View:
+Add computed field on output contracts and map from the View, or mark the method `#[rf_computed]` if it should also be emitted by generated `to_json()` output.
 
 ```rust
 identity: admin.identity(),
@@ -75,6 +66,7 @@ This does **not** require adding a visible datatable column. UI can choose wheth
 ## Verification
 
 ```bash
+cargo check -p generated
 cargo check -p app
 make gen-types
 ```

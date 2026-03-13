@@ -98,7 +98,9 @@ impl FileUpload {
     ) -> anyhow::Result<core_db::platform::attachments::types::AttachmentInput> {
         let ext = self.extension();
         let key = core_db::platform::attachments::service::build_object_key(entity, field, ext);
-        storage.put(&key, self.bytes.clone(), &self.content_type).await?;
+        storage
+            .put(&key, self.bytes.clone(), &self.content_type)
+            .await?;
         Ok(core_db::platform::attachments::types::AttachmentInput::new(
             key,
             self.content_type.clone(),

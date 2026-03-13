@@ -7,88 +7,70 @@ type ModelKeyRow = {
 
 const MODEL_KEYS: ModelKeyRow[] = [
     {
-        key: 'table',
-        syntax: 'table = "articles"',
-        defaultValue: 'snake_case(model key)',
-        remarks: 'Database table name.',
+        key: '#[rf_model(table = ...)]',
+        syntax: '#[rf_model(table = "articles", soft_delete)]',
+        defaultValue: 'table = snake_case(struct name)',
+        remarks: 'Model-level table name and flags such as soft delete.',
     },
     {
-        key: 'pk',
-        syntax: 'pk = "iso2"',
-        defaultValue: 'id',
-        remarks: 'Primary key column name.',
+        key: '#[rf(pk(strategy = ...))]',
+        syntax: '#[rf(pk(strategy = "snowflake"))] pub id: i64',
+        defaultValue: 'field named id',
+        remarks: 'Primary key marker and optional ID strategy.',
     },
     {
-        key: 'pk_type',
-        syntax: 'pk_type = "String"',
-        defaultValue: 'i64',
-        remarks: 'Rust primary key type used by generated APIs and relations.',
+        key: '#[rf_db_enum(storage = ...)]',
+        syntax: '#[rf_db_enum(storage = "string")]',
+        defaultValue: 'n/a',
+        remarks: 'Enum storage format for generated DB/API helpers.',
     },
     {
-        key: 'id_strategy',
-        syntax: 'id_strategy = "snowflake" | "manual"',
-        defaultValue: 'snowflake for i64 id, otherwise manual',
-        remarks: 'Strategy follows actual PK type constraints; do not assume every model is snowflake-backed.',
+        key: 'Localized<T>',
+        syntax: 'pub title: Localized<String>',
+        defaultValue: 'n/a',
+        remarks: 'Locale-aware field with generated translation helpers.',
     },
     {
-        key: 'fields',
-        syntax: 'fields = ["id:i64", "title:string"]',
-        defaultValue: '[]',
-        remarks: 'Base DB fields.',
+        key: 'Meta<T>',
+        syntax: 'pub seo_title: Meta<String>',
+        defaultValue: 'n/a',
+        remarks: 'Typed meta readers and writers on generated APIs.',
     },
     {
-        key: 'localized',
-        syntax: 'localized = ["title", "summary"]',
-        defaultValue: '[]',
-        remarks: 'Generates locale-aware field APIs and translation bags.',
+        key: 'Attachment / Attachments',
+        syntax: '#[rf(kind = "image")] pub cover: Attachment',
+        defaultValue: 'n/a',
+        remarks: 'Single or multiple attachment slots tied to config attachment types.',
     },
     {
-        key: 'meta',
-        syntax: 'meta = ["seo_title:string", "flags:json"]',
-        defaultValue: '[]',
-        remarks: 'Generates typed meta readers/writers on app-facing model APIs.',
+        key: 'BelongsTo<T> / HasMany<T>',
+        syntax: '#[rf(foreign_key = "author_id")] pub author: BelongsTo<User>',
+        defaultValue: 'n/a',
+        remarks: 'Typed relation metadata for query helpers and relation loading.',
     },
     {
-        key: 'attachment',
-        syntax: 'attachment = ["cover:image"]',
-        defaultValue: '[]',
-        remarks: 'Single attachment slots.',
+        key: '#[rf(hidden)]',
+        syntax: '#[rf(hidden)] pub internal_notes: Option<String>',
+        defaultValue: 'visible',
+        remarks: 'Exclude a field from generated JSON projections.',
     },
     {
-        key: 'attachments',
-        syntax: 'attachments = ["gallery:image"]',
-        defaultValue: '[]',
-        remarks: 'Multi attachment slots.',
+        key: '#[rf_view_impl]',
+        syntax: '#[rf_view_impl] impl ArticleView { ... }',
+        defaultValue: 'n/a',
+        remarks: 'Adds plain generated methods directly onto XxxView.',
     },
     {
-        key: 'relations',
-        syntax: 'relations = ["country:belongs_to:Country:country_iso2:iso2"]',
-        defaultValue: '[]',
-        remarks: 'Relation format: name:kind:target_model:foreign_key:local_key.',
+        key: '#[rf_computed]',
+        syntax: '#[rf_computed] pub fn status_label(&self) -> String',
+        defaultValue: 'plain method only',
+        remarks: 'Also exports the method value into generated JSON projections.',
     },
     {
-        key: 'touch',
-        syntax: 'touch = ["category"]',
-        defaultValue: '[]',
-        remarks: 'Touch parent updated_at after child writes.',
-    },
-    {
-        key: 'computed',
-        syntax: 'computed = ["status_label:String"]',
-        defaultValue: '[]',
-        remarks: 'Computed app-facing output fields implemented through extension traits.',
-    },
-    {
-        key: 'hidden',
-        syntax: 'hidden = ["internal_notes"]',
-        defaultValue: '[]',
-        remarks: 'Exclude fields from generated JSON projection.',
-    },
-    {
-        key: 'soft_delete',
-        syntax: 'soft_delete = true',
-        defaultValue: 'false',
-        remarks: 'Enable deleted_at-aware query/update behavior.',
+        key: '#[rf_with_relations_impl]',
+        syntax: '#[rf_with_relations_impl] impl ArticleWithRelations { ... }',
+        defaultValue: 'n/a',
+        remarks: 'Adds methods on relation-loaded read models.',
     },
 ]
 
@@ -96,47 +78,47 @@ export function Schema() {
     return (
         <div className="space-y-10">
             <div className="space-y-4">
-                <h1 className="text-4xl font-extrabold text-gray-900">Schema Definition</h1>
+                <h1 className="text-4xl font-extrabold text-gray-900">Model Source Definition</h1>
                 <p className="text-xl text-gray-500">
-                    TOML schema surface for db-gen, including layered framework/app ownership and typed model behavior.
+                    Rust model-source surface for db-gen, including layered framework/app ownership and typed model behavior.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
-                <h2>Schema SSOT</h2>
+                <h2>Model-Source SSOT</h2>
                 <ul>
                     <li>
-                        App schema lives in <code>app/schemas/*.toml</code>.
+                        App model source lives in <code>app/models/*.rs</code>.
                     </li>
                     <li>
-                        Framework-owned models also come from schema, but are layered in by the framework build.
+                        Framework-owned models also come from Rust model sources, layered in by the framework build.
                     </li>
                     <li>
                         Duplicate model or enum names across framework/app layers are a hard error.
                     </li>
                     <li>
-                        Generated files are outputs only. Change schema, then regenerate.
+                        Generated files are outputs only. Change model source, then regenerate.
                     </li>
                 </ul>
 
                 <h2>Enum definitions</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-toml">{`[AdminType]
-type = "enum"
-storage = "string"
-variants = ["Developer", "SuperAdmin", "Admin"]
+                    <code className="language-rust">{`#[rf_db_enum(storage = "string")]
+pub enum AdminType {
+    Developer,
+    SuperAdmin,
+    Admin,
+}
 
-[PublishState]
-type = "enum"
-storage = "i16"
-variants = [
-  { name = "Draft", value = 0 },
-  { name = "Published", value = 1 },
-  { name = "Archived", value = 2 },
-]`}</code>
+#[rf_db_enum(storage = "i16")]
+pub enum PublishState {
+    Draft = 0,
+    Published = 1,
+    Archived = 2,
+}`}</code>
                 </pre>
 
-                <h2>Model key reference</h2>
+                <h2>Model source reference</h2>
                 <div className="not-prose overflow-x-auto">
                     <table className="min-w-full text-sm border-collapse border border-gray-200">
                         <thead className="bg-gray-50">
@@ -167,71 +149,80 @@ variants = [
                 <h2>Current important rules</h2>
                 <ul>
                     <li>
-                        PK behavior follows the schema-defined <code>pk</code> and <code>pk_type</code>; do not hardcode
+                        PK behavior follows the model field type and optional <code>#[rf(pk(...))]</code>; do not hardcode
                         <code>i64</code> assumptions in app code.
                     </li>
                     <li>
-                        <code>computed</code> fields are implemented in <code>generated/src/extensions.rs</code>, not in generated files.
+                        <code>#[rf_computed]</code> methods live in <code>#[rf_view_impl]</code> blocks inside <code>app/models/*.rs</code>.
                     </li>
                     <li>
-                        Country linkage should use <code>country_iso2</code> and the country schema key, not a parallel manual convention.
+                        Country linkage should use <code>country_iso2</code> and the country model field, not a parallel manual convention.
                     </li>
                     <li>
-                        Relation helpers and model APIs are generated from schema. Prefer them over hand-built query conventions.
+                        Relation helpers and model APIs are generated from model source. Prefer them over hand-built query conventions.
                     </li>
                 </ul>
 
                 <h2>Complete example</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-toml">{`[ArticleStatus]
-type = "enum"
-storage = "string"
-variants = ["Draft", "Published", "Archived"]
+                    <code className="language-rust">{`#[rf_db_enum(storage = "string")]
+pub enum ArticleStatus {
+    Draft,
+    Published,
+    Archived,
+}
 
-[model.article_category]
-table = "article_categories"
-pk = "id"
-pk_type = "i64"
-id_strategy = "snowflake"
-fields = ["id:i64", "status:ArticleStatus"]
-localized = ["name"]
-soft_delete = true
-relations = ["articles:has_many:article:category_id:id"]
+#[rf_model(table = "article_categories", soft_delete)]
+pub struct ArticleCategory {
+    pub id: i64,
+    pub status: ArticleStatus,
+    pub name: Localized<String>,
+    #[rf(foreign_key = "category_id")]
+    pub articles: HasMany<Article>,
+}
 
-[model.article]
-table = "articles"
-pk = "id"
-pk_type = "i64"
-id_strategy = "snowflake"
-fields = [
-  "id:i64",
-  "category_id:i64",
-  "status:ArticleStatus",
-  "slug:string",
-  "published_at:datetime",
-]
-localized = ["title", "summary"]
-meta = ["seo_title:string", "reading_minutes:i32", "flags:json"]
-attachment = ["cover:image"]
-attachments = ["galleries:image"]
-relations = ["category:belongs_to:article_category:category_id:id"]
-touch = ["category"]
-hidden = ["category_id"]
-computed = ["status_label:String"]
-soft_delete = true`}</code>
+#[rf_model(table = "articles", soft_delete)]
+pub struct Article {
+    pub id: i64,
+    pub category_id: i64,
+    pub status: ArticleStatus,
+    pub slug: String,
+    pub published_at: Option<time::OffsetDateTime>,
+    pub title: Localized<String>,
+    pub summary: Localized<String>,
+    pub seo_title: Meta<String>,
+    pub reading_minutes: Meta<i32>,
+    pub flags: Meta<serde_json::Value>,
+    #[rf(kind = "image")]
+    pub cover: Attachment,
+    #[rf(kind = "image")]
+    pub galleries: Attachments,
+    #[rf(hidden)]
+    pub internal_notes: Option<String>,
+    #[rf(foreign_key = "category_id", touch)]
+    pub category: BelongsTo<ArticleCategory>,
+}
+
+#[rf_view_impl]
+impl ArticleView {
+    #[rf_computed]
+    pub fn status_label(&self) -> String {
+        self.status.explained_label()
+    }
+}`}</code>
                 </pre>
 
                 <h2>Cross-links</h2>
                 <ul>
                     <li>
-                        <a href="#/db-gen">Code Generation</a> for how schema is turned into APIs.
+                        <a href="#/db-gen">Code Generation</a> for how model sources are turned into APIs.
                     </li>
                     <li>
-                        <a href="#/model-api-view">`XxxView` &amp; Extensions</a> for computed field extension rules.
+                        <a href="#/model-api-view">`XxxView` &amp; model methods</a> for computed field rules.
                     </li>
                     <li>
                         <a href="#/feature-localized-relations">Localized &amp; Relationships</a> and{' '}
-                        <a href="#/feature-attachments">Attachments</a> for feature-specific schema behavior.
+                        <a href="#/feature-attachments">Attachments</a> for feature-specific model-source behavior.
                     </li>
                 </ul>
             </div>

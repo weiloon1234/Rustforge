@@ -103,7 +103,10 @@ async fn retry_failed_job(
     };
 
     let (queue_name, payload) = match row {
-        Some(r) => { let r = r.into_row(); (r.queue, r.payload) },
+        Some(r) => {
+            let r = r.into_row();
+            (r.queue, r.payload)
+        }
         None => return (StatusCode::NOT_FOUND, "Job not found").into_response(),
     };
 

@@ -11,35 +11,34 @@ export function LocalizedRelationsFeature() {
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">Localized &amp; Relationships</h1>
                 <p className="text-xl text-gray-500">
-                    Localized field storage, locale-aware view hydration, and typed relation helpers generated from schema.
+                    Localized field storage, locale-aware view hydration, and typed relation helpers generated from model source.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
                 <h2>Where the SSOT lives</h2>
                 <p>
-                    Both localized fields and relations are declared in <code>app/schemas/*.toml</code>. Generation
+                    Both localized fields and relations are declared in <code>app/models/*.rs</code>. Generation
                     owns the typed insert/update/query/view APIs from those declarations. App code should not rebuild
                     the same relation or locale semantics manually.
                 </p>
 
-                <h2>Schema example</h2>
+                <h2>Model source example</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-toml">{`[model.article]
-fields = [
-  "id:i64",
-  "author_id:i64",
-  "status:ArticleStatus",
-  "created_at:datetime",
-  "updated_at:datetime"
-]
-
-localized = ["title", "summary"]
-
-relations = [
-  "author:belongs_to:User:author_id:id",
-  "comments:has_many:Comment:article_id:id"
-]`}</code>
+                    <code className="language-rust">{`#[rf_model(table = "articles")]
+pub struct Article {
+    pub id: i64,
+    pub author_id: i64,
+    pub status: ArticleStatus,
+    pub created_at: time::OffsetDateTime,
+    pub updated_at: time::OffsetDateTime,
+    pub title: Localized<String>,
+    pub summary: Localized<String>,
+    #[rf(foreign_key = "author_id")]
+    pub author: BelongsTo<User>,
+    #[rf(foreign_key = "article_id")]
+    pub comments: HasMany<Comment>,
+}`}</code>
                 </pre>
 
                 <h2>Localized runtime surface</h2>
@@ -113,7 +112,7 @@ for item in rows {
 
                 <h2>Typed-first rules</h2>
                 <ul>
-                    <li>Declare localized fields and relations in schema, not as ad-hoc workflow conventions.</li>
+                    <li>Declare localized fields and relations in model source, not as ad-hoc workflow conventions.</li>
                     <li>Use generated relation helpers before reaching for manual SQL joins.</li>
                     <li>
                         Keep localized values in Rust/TS shared types instead of duplicating translation bag shapes.

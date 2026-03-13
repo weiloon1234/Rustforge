@@ -10,8 +10,7 @@ use core_web::{
 };
 use generated::{
     guards::AdminGuard,
-    models::{Admin, AdminQuery, AdminType, AdminView},
-    permissions::Permission,
+    models::{admin::admin_permissions, Admin, AdminQuery, AdminType, AdminView},
 };
 
 use crate::contracts::api::v1::admin::auth::{
@@ -31,33 +30,6 @@ pub fn resolve_scope_grant(admin: &AdminView) -> TokenScopeGrant {
             }
         }
     }
-}
-
-fn admin_permissions(admin: &AdminView) -> Vec<String> {
-    let mut out = Vec::new();
-
-    if let Some(items) = admin.abilities.as_array() {
-        for item in items {
-            let Some(raw) = item.as_str() else {
-                continue;
-            };
-            let value = raw.trim();
-            if value.is_empty() {
-                continue;
-            }
-            if value == "*" {
-                out.push("*".to_string());
-                continue;
-            }
-            if let Some(permission) = Permission::from_str(value) {
-                out.push(permission.as_str().to_string());
-            }
-        }
-    }
-
-    out.sort();
-    out.dedup();
-    out
 }
 
 pub async fn login(

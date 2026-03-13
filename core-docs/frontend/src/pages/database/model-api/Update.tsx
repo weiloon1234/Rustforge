@@ -22,7 +22,7 @@ export function ModelApiUpdate() {
                         {
                             method: 'where_<field>(op, value) / where_key(id)',
                             returns: 'Self',
-                            notes: 'Typed target-row selection using the same schema-generated field and PK awareness as queries.',
+                            notes: 'Typed target-row selection using the same model-source-generated field and PK awareness as queries.',
                         },
                         {
                             method: 'set_<field>(value)',
@@ -65,7 +65,7 @@ export function ModelApiUpdate() {
 
                 <h2>Important current behavior</h2>
                 <ul>
-                    <li>Target-row handling follows the schema-defined PK type. Update-side helper flows must not assume numeric IDs.</li>
+                    <li>Target-row handling follows the model-source PK type. Update-side helper flows must not assume numeric IDs.</li>
                     <li>Bulk updates are supported, but app workflows should still own domain rules such as who is allowed to mutate which rows.</li>
                     <li>If update semantics need omitted vs null vs value distinction, keep that in request contracts with <a href="#/requests"><code>Patch&lt;T&gt;</code></a>; <code>XxxUpdate</code> is the model mutation layer, not the HTTP contract layer.</li>
                 </ul>

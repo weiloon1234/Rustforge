@@ -1,5 +1,5 @@
 // AUTO-GENERATED FILE — DO NOT EDIT
-// Generated from TOML schema enum definitions
+// Generated from Rust model source enum definitions
 
 #[derive(Debug, Clone, Copy)]
 pub struct SchemaEnumTsMeta {

@@ -7,7 +7,13 @@ use std::path::PathBuf;
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
-    let schema = db_gen::load_framework().expect("failed to load embedded framework schemas");
+    let framework_paths = db_gen::framework_model_source_paths_from_core_db();
+    for path in &framework_paths {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
+
+    let schema = db_gen::load_framework_from_paths(&framework_paths)
+        .expect("failed to load framework model sources");
 
     let cfgs = db_gen::config::ConfigsFile {
         languages: db_gen::config::Locales {

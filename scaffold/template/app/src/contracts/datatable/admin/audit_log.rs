@@ -21,8 +21,7 @@ pub struct AuditLogDatatableRow {
     pub action: AuditAction,
     pub action_explained: String,
     pub table_name: String,
-    #[ts(type = "string")]
-    pub record_id: i64,
+    pub record_key: String,
     #[ts(type = "Record<string, unknown> | null")]
     pub old_data: Option<serde_json::Value>,
     #[ts(type = "Record<string, unknown> | null")]
@@ -104,10 +103,10 @@ impl DataTableScopedContract for AdminAuditLogDataTableContract {
                     options: Some(AuditAction::datatable_filter_options()),
                 },
                 DataTableFilterFieldDto {
-                    field: "record_id".to_string(),
-                    filter_key: "f-record_id".to_string(),
+                    field: "record_key".to_string(),
+                    filter_key: "f-record_key".to_string(),
                     field_type: DataTableFilterFieldType::Text,
-                    label: "Record ID".to_string(),
+                    label: "Record Key".to_string(),
                     placeholder: Some("Exact match".to_string()),
                     description: None,
                     options: None,

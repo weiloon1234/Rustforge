@@ -1,5 +1,5 @@
 // AUTO-GENERATED FILE — DO NOT EDIT
-// Generated from app/schemas to bootstrap app-level datatable hooks.
+// Generated from app/models to bootstrap app-level datatable hooks.
 
 {{module_exports}}
 

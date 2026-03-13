@@ -18,24 +18,25 @@ export function MetaFeature() {
             <div className="prose prose-orange max-w-none">
                 <h2>Where the SSOT lives</h2>
                 <p>
-                    Meta fields are declared in <code>app/schemas/*.toml</code>. The generated model API owns the
+                    Meta fields are declared in <code>app/models/*.rs</code>. The generated model API owns the
                     typed write and read helpers from that declaration. App code should not duplicate the same
                     field catalog in workflows or frontend constants.
                 </p>
 
-                <h2>Schema example</h2>
+                <h2>Model source example</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-toml">{`[model.article]
-fields = ["id:i64", "status:ArticleStatus"]
-meta = [
-  "seo_title:string",
-  "is_featured:bool",
-  "priority:i32",
-  "score:i64",
-  "confidence:f64",
-  "extra:ExtraMeta",
-  "published_at:datetime"
-]`}</code>
+                    <code className="language-rust">{`#[rf_model(table = "articles")]
+pub struct Article {
+    pub id: i64,
+    pub status: ArticleStatus,
+    pub seo_title: Meta<String>,
+    pub is_featured: Meta<bool>,
+    pub priority: Meta<i32>,
+    pub score: Meta<i64>,
+    pub confidence: Meta<f64>,
+    pub extra: Meta<ExtraMeta>,
+    pub published_at: Meta<time::OffsetDateTime>,
+}`}</code>
                 </pre>
 
                 <h2>Generated runtime surface</h2>
@@ -58,9 +59,8 @@ meta = [
 
                 <h2>Typed custom shapes</h2>
                 <p>
-                    For schema-declared custom types such as <code>extra:ExtraMeta</code>, define the Rust type in
-                    the extension module that owns app-facing types instead of scattering private JSON structs across
-                    handlers.
+                    For model-declared custom types such as <code>extra: Meta&lt;ExtraMeta&gt;</code>, define the
+                    Rust type in the same model source file instead of scattering private JSON structs across handlers.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`#[derive(serde::Serialize, serde::Deserialize)]
@@ -98,14 +98,14 @@ pub struct ExtraMeta {
 
                 <h2>Typed-first rule</h2>
                 <p>
-                    Prefer declaring expected meta keys in schema and using generated typed methods. Reach for raw
+                    Prefer declaring expected meta keys in model source and using generated typed methods. Reach for raw
                     <code>view.meta</code> only when the key is genuinely dynamic and not part of the stable model contract.
                 </p>
 
                 <h2>Cross-links</h2>
                 <ul>
                     <li>
-                        <a href="#/model-api-view">`XxxView` &amp; Extensions</a> for the app-facing model surface.
+                        <a href="#/model-api-view">`XxxView` &amp; model methods</a> for the app-facing model surface.
                     </li>
                     <li>
                         <a href="#/model-api-features">Framework Features on Models</a> for how meta combines with localized and attachments.

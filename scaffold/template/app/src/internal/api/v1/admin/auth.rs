@@ -16,7 +16,6 @@ use core_web::{
     response::ApiResponse,
     utils::cookie,
 };
-use generated::extensions::admin::types::AdminViewComputedExt;
 use generated::guards::AdminGuard;
 use std::ops::Deref;
 use time::Duration;

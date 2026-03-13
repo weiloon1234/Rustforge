@@ -504,9 +504,7 @@ fn render_localized_input_from_map_fields(locales: &Locales) -> String {
         .supported
         .iter()
         .map(|lang| {
-            format!(
-                "            {lang}: map.get(\"{lang}\").filter(|s| !s.is_empty()).cloned(),"
-            )
+            format!("            {lang}: map.get(\"{lang}\").filter(|s| !s.is_empty()).cloned(),")
         })
         .collect::<Vec<_>>()
         .join("\n")

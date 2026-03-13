@@ -5,7 +5,6 @@ use core_web::{
     authz::PermissionMode,
     contracts::AsyncContractJson,
     error::AppError,
-    extract::CleanJson,
     openapi::{
         with_permission_check_delete_with, with_permission_check_get_with,
         with_permission_check_patch_with, with_permission_check_post_with, ApiRouter,
@@ -16,7 +15,6 @@ use generated::{guards::AdminGuard, permissions::Permission};
 
 use crate::{
     contracts::api::v1::admin::account::{
-        AdminBatchResolveEntry, AdminBatchResolveInput, AdminBatchResolveOutput,
         AdminDeleteOutput, AdminOutput, CreateAdminInput, UpdateAdminInput,
     },
     internal::{api::state::AppApiState, workflows::admin as workflow},
@@ -60,23 +58,6 @@ pub fn router(state: AppApiState) -> ApiRouter {
                 [Permission::AdminManage.as_str()],
                 |op| op.summary("Delete admin").tag("Admin Account"),
             )),
-        )
-        .api_route(
-            "/batch_resolve",
-            with_permission_check_post_with(
-                batch_resolve,
-                AdminGuard,
-                PermissionMode::Any,
-                [
-                    Permission::AdminRead.as_str(),
-                    Permission::AdminManage.as_str(),
-                    Permission::AuditLogRead.as_str(),
-                ],
-                |op| {
-                    op.summary("Batch resolve admin IDs to names")
-                        .tag("Admin Account")
-                },
-            ),
         )
         .with_state(state)
 }
@@ -127,30 +108,5 @@ async fn remove(
     Ok(ApiResponse::success(
         AdminDeleteOutput { deleted: true },
         &t("Admin deleted"),
-    ))
-}
-
-async fn batch_resolve(
-    State(state): State<AppApiState>,
-    _auth: AuthUser<AdminGuard>,
-    CleanJson(req): CleanJson<AdminBatchResolveInput>,
-) -> Result<ApiResponse<AdminBatchResolveOutput>, AppError> {
-    let parsed_ids: Vec<i64> = req
-        .ids
-        .iter()
-        .filter_map(|s| s.parse::<i64>().ok())
-        .collect();
-    let results = workflow::batch_resolve_names(&state, &parsed_ids).await?;
-    let entries: Vec<AdminBatchResolveEntry> = results
-        .into_iter()
-        .map(|(id, username, name)| AdminBatchResolveEntry {
-            id: id.into(),
-            username,
-            name,
-        })
-        .collect();
-    Ok(ApiResponse::success(
-        AdminBatchResolveOutput { entries },
-        "ok",
     ))
 }

@@ -15,7 +15,10 @@ pub async fn flush_profiler(
     }
 
     let total_queries = queries.len() as i32;
-    let total_duration_ms: f64 = queries.iter().map(|q| q.duration.as_secs_f64() * 1000.0).sum();
+    let total_duration_ms: f64 = queries
+        .iter()
+        .map(|q| q.duration.as_secs_f64() * 1000.0)
+        .sum();
 
     // Insert request row
     sqlx::query(

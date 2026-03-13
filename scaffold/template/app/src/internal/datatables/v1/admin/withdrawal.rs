@@ -5,19 +5,12 @@ use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
-use generated::{
-    models::{
-        CreditType, OwnerType, WithdrawalDataTable, WithdrawalDataTableHooks, WithdrawalMethod,
-        WithdrawalQuery, WithdrawalStatus,
-    },
-    permissions::Permission,
-};
+use generated::{models::*, permissions::Permission};
 
 use crate::contracts::datatable::admin::withdrawal::{
     AdminWithdrawalDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
 };
 use crate::internal::datatables::v1::admin::authorize_with_optional_export;
-use crate::internal::extensions::withdrawal::WithdrawalViewExt;
 
 #[derive(Default, Clone)]
 pub struct WithdrawalDataTableAppHooks;

@@ -24,7 +24,7 @@ const AUDIT_LOG_SORTABLE_COLUMNS: [&str; 6] = [
     "admin_id",
     "action",
     "table_name",
-    "record_id",
+    "record_key",
     "created_at",
 ];
 
@@ -70,8 +70,8 @@ const AUDIT_LOG_COLUMN_DESCRIPTORS: [DataTableColumnDescriptor; 9] = [
         filter_ops: &["eq", "like"],
     },
     DataTableColumnDescriptor {
-        name: "record_id",
-        label: "Record ID",
+        name: "record_key",
+        label: "Record Key",
         data_type: "string",
         sortable: true,
         localized: false,
@@ -108,7 +108,7 @@ pub struct AuditLogQueryState {
     keyword: Option<String>,
     table_name: Option<String>,
     action: Option<AuditAction>,
-    record_id: Option<i64>,
+    record_key: Option<String>,
     date_from: Option<time::OffsetDateTime>,
     date_to: Option<time::OffsetDateTime>,
     sorting_column: AuditLogCol,
@@ -121,7 +121,7 @@ impl Default for AuditLogQueryState {
             keyword: None,
             table_name: None,
             action: None,
-            record_id: None,
+            record_key: None,
             date_from: None,
             date_to: None,
             sorting_column: AuditLogCol::Id,
@@ -228,7 +228,7 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
                         action: r.row.action,
                         action_explained: r.row.action_explained,
                         table_name: r.row.table_name,
-                        record_id: r.row.record_id,
+                        record_key: r.row.record_key,
                         old_data: r.row.old_data,
                         new_data: r.row.new_data,
                         created_at: format_rfc3339(r.row.created_at),
@@ -280,8 +280,8 @@ impl AuditLogDataTableAppHooks {
                 query.action = AuditAction::from_storage(trimmed);
                 Some(query)
             }
-            "f-record_id" => {
-                query.record_id = trimmed.parse::<i64>().ok();
+            "f-record_key" => {
+                query.record_key = Some(trimmed.to_string());
                 Some(query)
             }
             "f-date-from-created_at" => {
@@ -402,8 +402,8 @@ fn apply_audit_log_filters<'db>(
         query = query.where_action(Op::Eq, action);
     }
 
-    if let Some(record_id) = filters.record_id {
-        query = query.where_record_id(Op::Eq, record_id);
+    if let Some(record_key) = &filters.record_key {
+        query = query.where_record_key(Op::Eq, record_key.clone());
     }
 
     if let Some(ts) = filters.date_from {
@@ -430,7 +430,7 @@ fn normalize_sort_column(value: &str) -> Option<AuditLogCol> {
         "admin_id" => Some(AuditLogCol::AdminId),
         "action" => Some(AuditLogCol::Action),
         "table_name" => Some(AuditLogCol::TableName),
-        "record_id" => Some(AuditLogCol::RecordId),
+        "record_key" => Some(AuditLogCol::RecordKey),
         "created_at" => Some(AuditLogCol::CreatedAt),
         _ => None,
     }

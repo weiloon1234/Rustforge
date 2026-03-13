@@ -5,19 +5,12 @@ use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
-use generated::{
-    models::{
-        CreditType, DepositDataTable, DepositDataTableHooks, DepositMethod, DepositQuery,
-        DepositStatus, OwnerType,
-    },
-    permissions::Permission,
-};
+use generated::{models::*, permissions::Permission};
 
 use crate::contracts::datatable::admin::deposit::{
     AdminDepositDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
 };
 use crate::internal::datatables::v1::admin::authorize_with_optional_export;
-use crate::internal::extensions::deposit::DepositViewExt;
 
 #[derive(Default, Clone)]
 pub struct DepositDataTableAppHooks;

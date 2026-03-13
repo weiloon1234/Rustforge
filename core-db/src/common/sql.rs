@@ -79,27 +79,84 @@ impl std::fmt::Display for BindValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::I16(v) => write!(f, "{v}"),
-            Self::I16Opt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::I16Opt(v) => match v {
+                Some(v) => write!(f, "{v}"),
+                None => write!(f, "NULL"),
+            },
             Self::I32(v) => write!(f, "{v}"),
-            Self::I32Opt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::I32Opt(v) => match v {
+                Some(v) => write!(f, "{v}"),
+                None => write!(f, "NULL"),
+            },
             Self::I64(v) => write!(f, "{v}"),
-            Self::I64Opt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::I64Opt(v) => match v {
+                Some(v) => write!(f, "{v}"),
+                None => write!(f, "NULL"),
+            },
             Self::F64(v) => write!(f, "{v}"),
-            Self::F64Opt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::F64Opt(v) => match v {
+                Some(v) => write!(f, "{v}"),
+                None => write!(f, "NULL"),
+            },
             Self::Decimal(v) => write!(f, "{v}"),
-            Self::DecimalOpt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::DecimalOpt(v) => match v {
+                Some(v) => write!(f, "{v}"),
+                None => write!(f, "NULL"),
+            },
             Self::Bool(v) => write!(f, "{v}"),
-            Self::BoolOpt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::BoolOpt(v) => match v {
+                Some(v) => write!(f, "{v}"),
+                None => write!(f, "NULL"),
+            },
             Self::String(v) => write!(f, "'{v}'"),
-            Self::StringOpt(v) => match v { Some(v) => write!(f, "'{v}'"), None => write!(f, "NULL") },
-            Self::StringArray(v) => write!(f, "[{}]", v.iter().map(|s| format!("'{s}'")).collect::<Vec<_>>().join(", ")),
-            Self::StringArrayOpt(v) => match v { Some(v) => write!(f, "[{}]", v.iter().map(|s| format!("'{s}'")).collect::<Vec<_>>().join(", ")), None => write!(f, "NULL") },
-            Self::Time(v) => write!(f, "{}", v.format(&time::format_description::well_known::Rfc3339).unwrap_or_else(|_| format!("{v:?}"))),
-            Self::TimeOpt(v) => match v { Some(v) => write!(f, "{}", v.format(&time::format_description::well_known::Rfc3339).unwrap_or_else(|_| format!("{v:?}"))), None => write!(f, "NULL") },
+            Self::StringOpt(v) => match v {
+                Some(v) => write!(f, "'{v}'"),
+                None => write!(f, "NULL"),
+            },
+            Self::StringArray(v) => write!(
+                f,
+                "[{}]",
+                v.iter()
+                    .map(|s| format!("'{s}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Self::StringArrayOpt(v) => match v {
+                Some(v) => write!(
+                    f,
+                    "[{}]",
+                    v.iter()
+                        .map(|s| format!("'{s}'"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                None => write!(f, "NULL"),
+            },
+            Self::Time(v) => write!(
+                f,
+                "{}",
+                v.format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_else(|_| format!("{v:?}"))
+            ),
+            Self::TimeOpt(v) => match v {
+                Some(v) => write!(
+                    f,
+                    "{}",
+                    v.format(&time::format_description::well_known::Rfc3339)
+                        .unwrap_or_else(|_| format!("{v:?}"))
+                ),
+                None => write!(f, "NULL"),
+            },
             Self::Uuid(v) => write!(f, "{v}"),
-            Self::UuidOpt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::UuidOpt(v) => match v {
+                Some(v) => write!(f, "{v}"),
+                None => write!(f, "NULL"),
+            },
             Self::Json(v) => write!(f, "{v}"),
-            Self::JsonOpt(v) => match v { Some(v) => write!(f, "{v}"), None => write!(f, "NULL") },
+            Self::JsonOpt(v) => match v {
+                Some(v) => write!(f, "{v}"),
+                None => write!(f, "NULL"),
+            },
         }
     }
 }
@@ -478,7 +535,10 @@ impl Clone for SqlProfilerCollector {
         Self {
             request_id: self.request_id,
             queries: std::sync::Mutex::new(
-                self.queries.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+                self.queries
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone(),
             ),
         }
     }
@@ -510,7 +570,13 @@ tokio::task_local! {
 
 /// Record a query to the current request's collector (if active).
 /// Called from generated profiler code.
-pub fn record_profiled_query(table_name: &str, operation: &str, sql: &str, binds: &str, duration: Duration) {
+pub fn record_profiled_query(
+    table_name: &str,
+    operation: &str,
+    sql: &str,
+    binds: &str,
+    duration: Duration,
+) {
     if !is_sql_profiler_enabled() {
         return;
     }

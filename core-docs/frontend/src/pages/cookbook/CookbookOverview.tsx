@@ -59,7 +59,7 @@ export function CookbookOverview() {
                 <h2>Single sources of truth</h2>
                 <ul>
                     <li>
-                        Schema SSOT: <code>app/schemas/*.toml</code>
+                        Model SSOT: <code>app/models/*.rs</code>
                     </li>
                     <li>
                         Permission SSOT: <code>app/permissions.toml</code>
@@ -69,7 +69,7 @@ export function CookbookOverview() {
                         <code>app/src/contracts/datatable/*</code>
                     </li>
                     <li>
-                        Generated extension surface: <code>generated/src/extensions.rs</code>
+                        Generated view method surface: <code>app/models/*.rs</code> via <code>#[rf_view_impl]</code>
                     </li>
                     <li>
                         Starter-only operational guides: <code>scaffold/template/docs/*</code>

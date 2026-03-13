@@ -461,8 +461,12 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
                 }
             };
             let block = match optional_kind {
-                OptionalLikeKind::Option => quote! { if let Some(value) = &self.#field_ident { #body } },
-                OptionalLikeKind::Patch => quote! { if let Some(value) = self.#field_ident.as_value() { #body } },
+                OptionalLikeKind::Option => {
+                    quote! { if let Some(value) = &self.#field_ident { #body } }
+                }
+                OptionalLikeKind::Patch => {
+                    quote! { if let Some(value) = self.#field_ident.as_value() { #body } }
+                }
                 OptionalLikeKind::Required => quote! { let value = &self.#field_ident; #body },
             };
             async_validate_blocks.push(block);
@@ -497,7 +501,11 @@ fn expand_rustforge_contract(mut item: ItemStruct) -> syn::Result<TokenStream2> 
             });
 
             let (msg, code) = rf_cfg.message_code_for("attachment");
-            generated_validate_attrs.push(build_validate_custom_fn_attr(&helper_ident, &msg, &code)?);
+            generated_validate_attrs.push(build_validate_custom_fn_attr(
+                &helper_ident,
+                &msg,
+                &code,
+            )?);
 
             // Auto-inject serde attrs for multipart: skip JSON deser, default to empty
             original_field_attrs.push(mk_attr(quote! { #[serde(skip_deserializing)] })?);

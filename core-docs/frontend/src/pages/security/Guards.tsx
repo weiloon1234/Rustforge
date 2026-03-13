@@ -111,7 +111,7 @@ pub fn router(state: AppApiState) -> ApiRouter<AppApiState> {
                 </p>
                 <ul>
                     <li>
-                        Backend: use <code>ensure_permissions</code>, route helpers, or app-facing permission extension traits.
+                        Backend: use <code>ensure_permissions</code>, route helpers, or app-facing permission methods on generated views.
                     </li>
                     <li>
                         Frontend: keep raw <code>string[]</code> scopes because wildcard matching works on the

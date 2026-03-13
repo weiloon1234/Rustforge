@@ -6,14 +6,14 @@ export function ModelApiInsert() {
             <div className="space-y-3">
                 <h1 className="text-4xl font-extrabold text-gray-900">`XxxInsert`</h1>
                 <p className="text-xl text-gray-500">
-                    Typed create builder generated from schema, including feature-aware writes for localized, meta, and attachments.
+                    Typed create builder generated from Rust model sources, including feature-aware writes for localized, meta, and attachments.
                 </p>
             </div>
 
             <div className="prose prose-orange max-w-none">
                 <h2>What `XxxInsert` is for</h2>
                 <p>
-                    Use <code>XxxInsert</code> when app code is creating model-owned data. It is the generated write surface for normal create flows. It understands the schema-defined field types and optional framework features, so workflows do not need handwritten insert SQL for standard cases.
+                    Use <code>XxxInsert</code> when app code is creating model-owned data. It is the generated write surface for normal create flows. It understands the model-source-defined field types and optional framework features, so workflows do not need handwritten insert SQL for standard cases.
                 </p>
 
                 <h2>Main insert surface</h2>
@@ -22,7 +22,7 @@ export function ModelApiInsert() {
                         {
                             method: 'set_<field>(value)',
                             returns: 'Self',
-                            notes: 'Typed field setters generated from schema fields and enum/value types.',
+                            notes: 'Typed field setters generated from model-source fields and enum/value types.',
                         },
                         {
                             method: 'set_<localized>_lang(locale, value)',
@@ -49,7 +49,7 @@ export function ModelApiInsert() {
 
                 <h2>What `save()` owns</h2>
                 <ul>
-                    <li>Insert the base row using the schema-defined PK strategy and field types.</li>
+                    <li>Insert the base row using the model-source PK strategy and field types.</li>
                     <li>Persist localized/meta/attachment side tables when the model enables those features.</li>
                     <li>Return the app-facing <code>XxxView</code>, not the raw DB row.</li>
                 </ul>

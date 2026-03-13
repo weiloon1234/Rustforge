@@ -33,13 +33,41 @@ fn assert_ok(output: &std::process::Output, context: &str) {
 }
 
 fn run_cargo_check(output: &Path, package: &str) -> std::process::Output {
-    Command::new("cargo")
-        .arg("check")
-        .arg("-p")
-        .arg(package)
-        .current_dir(output)
-        .output()
-        .expect("failed to run cargo check")
+    let mut cmd = Command::new("cargo");
+    cmd.arg("check").arg("-p").arg(package).current_dir(output);
+    apply_local_rustforge_patches(&mut cmd);
+    cmd.output().expect("failed to run cargo check")
+}
+
+fn apply_local_rustforge_patches(cmd: &mut Command) {
+    const GIT_SOURCE: &str = "https://github.com/weiloon1234/Rustforge.git";
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir
+        .parent()
+        .expect("scaffold crate should live under repo root");
+
+    for crate_name in [
+        "bootstrap",
+        "core-config",
+        "core-db",
+        "core-datatable",
+        "core-i18n",
+        "core-jobs",
+        "core-mailer",
+        "core-notify",
+        "core-realtime",
+        "core-web",
+        "db-gen",
+        "rustforge-contract-macros",
+        "rustforge-contract-meta",
+    ] {
+        let path = repo_root.join(crate_name);
+        let patch = format!(
+            "patch.\"{GIT_SOURCE}\".{crate_name}.path=\"{}\"",
+            path.display()
+        );
+        cmd.arg("--config").arg(patch);
+    }
 }
 
 #[test]

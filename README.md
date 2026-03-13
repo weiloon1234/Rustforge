@@ -27,7 +27,7 @@ Do not treat these as parallel manuals. The framework docs app is the canonical 
 | `core-notify/` | Notification channel abstraction and notifiable contracts. | Implement app notification payloads/notifiable targets, then dispatch via channel implementations. |
 | `core-realtime/` | WebSocket server state, auth hooks, channel policy, presence, publisher/subscriber, durable replay. | Build websocket server in starter binary with `ws_handler` + `WsServerState`; publish events from API/worker. |
 | `core-web/` | Shared web primitives: auth/authz, OpenAPI router, extractors, response/error types, rules, middleware, datatable routes. | Use `ApiRouter`, `ValidatedJson`, `ApiResponse`, auth/authz helpers in starter API modules. |
-| `db-gen/` | Schema/config/permission-driven code generation for models/guards/localized/permissions/datatable stubs. | Starter `generated/build.rs` calls this crate from `app/schemas`, `app/permissions.toml`, `app/configs.toml`. |
+| `db-gen/` | Rust-model/config/permission-driven code generation for models/guards/localized/permissions/datatable stubs. | Starter `generated/build.rs` calls this crate from `app/models`, `app/permissions.toml`, `app/configs.toml`. |
 | `scaffold/` | CLI generator for starter repository skeleton. | Run once to create new consumer project (`--output ... --force`). |
 | `vendor/` | Vendored crates patched at workspace level (currently validator). | Used automatically by Cargo via `[patch.crates-io]`. |
 
@@ -102,7 +102,7 @@ Static asset publish (from starter console):
 ### 4. Keep starter single sources of truth
 
 - `app/configs.toml` (languages/auth/realtime static config)
-- `app/schemas/*.toml` (model/enums SSOT)
+- `app/models/*.rs` (model/enums/helper methods SSOT)
 - `app/permissions.toml` (permission catalog SSOT)
 - `migrations/*.sql` (SQL state)
 - `i18n/{lang}.json` (project-owned translation catalogs)

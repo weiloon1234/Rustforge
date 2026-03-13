@@ -25,7 +25,7 @@ export function AttachmentsFeature() {
                         <code>app/configs.toml</code> declares attachment types and validation rules.
                     </li>
                     <li>
-                        <code>app/schemas/*.toml</code> declares which model fields are single or multi attachment slots.
+                        <code>app/models/*.rs</code> declares which model fields are single or multi attachment slots.
                     </li>
                 </ul>
                 <p>
@@ -33,9 +33,9 @@ export function AttachmentsFeature() {
                     into generated setters instead of manually writing attachment rows.
                 </p>
 
-                <h2>Config + schema example</h2>
+                <h2>Config + model source example</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-toml">{`# app/configs.toml
+                    <code className="language-text">{`# app/configs.toml
 [attachment_type.image]
 allowed = ["image/jpeg", "image/png", "image/webp"]
 [attachment_type.image.resize]
@@ -43,11 +43,16 @@ width = 1920
 height = 1080
 quality = 82
 
-# app/schemas/article.toml
-[model.article]
-fields = ["id:i64", "status:ArticleStatus"]
-attachment = ["cover:image"]
-attachments = ["gallery:image"]`}</code>
+# app/models/article.rs
+#[rf_model(table = "articles")]
+pub struct Article {
+    pub id: i64,
+    pub status: ArticleStatus,
+    #[rf(kind = "image")]
+    pub cover: Attachment,
+    #[rf(kind = "image")]
+    pub gallery: Attachments,
+}`}</code>
                 </pre>
 
                 <h2>Generated runtime surface</h2>

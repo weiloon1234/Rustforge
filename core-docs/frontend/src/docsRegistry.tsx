@@ -141,7 +141,7 @@ export const docsSections: DocsSection[] = [
     {
         title: 'Database & Models',
         items: [
-            { title: 'Schema Definition', href: '#/schema', component: Schema },
+            { title: 'Model Source Definition', href: '#/schema', component: Schema },
             { title: 'Code Generation', href: '#/db-gen', component: DbGen },
             { title: 'Model API Overview', href: '#/model-api', component: GeneratedApi },
             { title: 'Xxx (Facade)', href: '#/model-api-facade', component: ModelApiFacade },

@@ -1,5 +1,5 @@
 // AUTO-GENERATED FILE — DO NOT EDIT
-// Generated from TOML schema enum definitions
+// Generated from Rust model source enum definitions
 
 #[derive(Debug, Clone, Copy)]
 pub struct SchemaEnumTsMeta {
@@ -416,6 +416,405 @@ impl sqlx::Type<sqlx::Postgres> for AuditAction {
 
 impl From<AuditAction> for core_db::common::sql::BindValue {
     fn from(v: AuditAction) -> Self {
+        core_db::common::sql::BindValue::I64(v as i64)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[repr(i16)]
+pub enum BankStatus {
+    #[serde(rename = "1")]
+    Enabled = 1,
+    #[serde(rename = "2")]
+    Disabled = 2,
+}
+
+impl Default for BankStatus {
+    fn default() -> Self {
+        Self::Enabled
+    }
+}
+
+impl ts_rs::TS for BankStatus {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "BankStatus".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("BankStatus cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type BankStatus = \"1\" | \"2\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl BankStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Enabled => "1",
+            Self::Disabled => "2",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Enabled => "Enabled",
+            Self::Disabled => "Disabled",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            1 => Some(Self::Enabled),
+            2 => Some(Self::Disabled),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Enabled => "enum.bank_status.enabled",
+            Self::Disabled => "enum.bank_status.disabled",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::Enabled, Self::Disabled]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for BankStatus {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for BankStatus {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match num {
+            1 => Ok(Self::Enabled),
+            2 => Ok(Self::Disabled),
+            _ => Err(format!("Invalid BankStatus: {}", num).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for BankStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<BankStatus> for core_db::common::sql::BindValue {
+    fn from(v: BankStatus) -> Self {
+        core_db::common::sql::BindValue::I64(v as i64)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[repr(i16)]
+pub enum CompanyBankAccountStatus {
+    #[serde(rename = "1")]
+    Enabled = 1,
+    #[serde(rename = "2")]
+    Disabled = 2,
+}
+
+impl Default for CompanyBankAccountStatus {
+    fn default() -> Self {
+        Self::Enabled
+    }
+}
+
+impl ts_rs::TS for CompanyBankAccountStatus {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "CompanyBankAccountStatus".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("CompanyBankAccountStatus cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type CompanyBankAccountStatus = \"1\" | \"2\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl CompanyBankAccountStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Enabled => "1",
+            Self::Disabled => "2",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Enabled => "Enabled",
+            Self::Disabled => "Disabled",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            1 => Some(Self::Enabled),
+            2 => Some(Self::Disabled),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Enabled => "enum.company_bank_account_status.enabled",
+            Self::Disabled => "enum.company_bank_account_status.disabled",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::Enabled, Self::Disabled]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for CompanyBankAccountStatus {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for CompanyBankAccountStatus {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match num {
+            1 => Ok(Self::Enabled),
+            2 => Ok(Self::Disabled),
+            _ => Err(format!("Invalid CompanyBankAccountStatus: {}", num).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for CompanyBankAccountStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<CompanyBankAccountStatus> for core_db::common::sql::BindValue {
+    fn from(v: CompanyBankAccountStatus) -> Self {
+        core_db::common::sql::BindValue::I64(v as i64)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[repr(i16)]
+pub enum CompanyCryptoAccountStatus {
+    #[serde(rename = "1")]
+    Enabled = 1,
+    #[serde(rename = "2")]
+    Disabled = 2,
+}
+
+impl Default for CompanyCryptoAccountStatus {
+    fn default() -> Self {
+        Self::Enabled
+    }
+}
+
+impl ts_rs::TS for CompanyCryptoAccountStatus {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "CompanyCryptoAccountStatus".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("CompanyCryptoAccountStatus cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type CompanyCryptoAccountStatus = \"1\" | \"2\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl CompanyCryptoAccountStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Enabled => "1",
+            Self::Disabled => "2",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Enabled => "Enabled",
+            Self::Disabled => "Disabled",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            1 => Some(Self::Enabled),
+            2 => Some(Self::Disabled),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Enabled => "enum.company_crypto_account_status.enabled",
+            Self::Disabled => "enum.company_crypto_account_status.disabled",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::Enabled, Self::Disabled]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for CompanyCryptoAccountStatus {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for CompanyCryptoAccountStatus {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match num {
+            1 => Ok(Self::Enabled),
+            2 => Ok(Self::Disabled),
+            _ => Err(format!("Invalid CompanyCryptoAccountStatus: {}", num).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for CompanyCryptoAccountStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<CompanyCryptoAccountStatus> for core_db::common::sql::BindValue {
+    fn from(v: CompanyCryptoAccountStatus) -> Self {
         core_db::common::sql::BindValue::I64(v as i64)
     }
 }
@@ -1128,6 +1527,664 @@ impl From<CreditType> for core_db::common::sql::BindValue {
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[repr(i16)]
+pub enum CryptoNetworkStatus {
+    #[serde(rename = "1")]
+    Enabled = 1,
+    #[serde(rename = "2")]
+    Disabled = 2,
+}
+
+impl Default for CryptoNetworkStatus {
+    fn default() -> Self {
+        Self::Enabled
+    }
+}
+
+impl ts_rs::TS for CryptoNetworkStatus {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "CryptoNetworkStatus".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("CryptoNetworkStatus cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type CryptoNetworkStatus = \"1\" | \"2\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl CryptoNetworkStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Enabled => "1",
+            Self::Disabled => "2",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Enabled => "Enabled",
+            Self::Disabled => "Disabled",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            1 => Some(Self::Enabled),
+            2 => Some(Self::Disabled),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Enabled => "enum.crypto_network_status.enabled",
+            Self::Disabled => "enum.crypto_network_status.disabled",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::Enabled, Self::Disabled]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for CryptoNetworkStatus {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for CryptoNetworkStatus {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match num {
+            1 => Ok(Self::Enabled),
+            2 => Ok(Self::Disabled),
+            _ => Err(format!("Invalid CryptoNetworkStatus: {}", num).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for CryptoNetworkStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<CryptoNetworkStatus> for core_db::common::sql::BindValue {
+    fn from(v: CryptoNetworkStatus) -> Self {
+        core_db::common::sql::BindValue::I64(v as i64)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[repr(i16)]
+pub enum DepositMethod {
+    #[serde(rename = "1")]
+    Manual = 1,
+}
+
+impl Default for DepositMethod {
+    fn default() -> Self {
+        Self::Manual
+    }
+}
+
+impl ts_rs::TS for DepositMethod {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "DepositMethod".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("DepositMethod cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type DepositMethod = \"1\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl DepositMethod {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "1",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Manual => "Manual",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            1 => Some(Self::Manual),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Manual => "enum.deposit_method.manual",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::Manual]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for DepositMethod {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for DepositMethod {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match num {
+            1 => Ok(Self::Manual),
+            _ => Err(format!("Invalid DepositMethod: {}", num).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for DepositMethod {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<DepositMethod> for core_db::common::sql::BindValue {
+    fn from(v: DepositMethod) -> Self {
+        core_db::common::sql::BindValue::I64(v as i64)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[repr(i16)]
+pub enum DepositReviewAction {
+    #[serde(rename = "1")]
+    Approve = 1,
+    #[serde(rename = "2")]
+    Reject = 2,
+}
+
+impl Default for DepositReviewAction {
+    fn default() -> Self {
+        Self::Approve
+    }
+}
+
+impl ts_rs::TS for DepositReviewAction {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "DepositReviewAction".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("DepositReviewAction cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type DepositReviewAction = \"1\" | \"2\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl DepositReviewAction {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Approve => "1",
+            Self::Reject => "2",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Approve => "Approve",
+            Self::Reject => "Reject",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            1 => Some(Self::Approve),
+            2 => Some(Self::Reject),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Approve => "enum.deposit_review_action.approve",
+            Self::Reject => "enum.deposit_review_action.reject",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::Approve, Self::Reject]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for DepositReviewAction {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for DepositReviewAction {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match num {
+            1 => Ok(Self::Approve),
+            2 => Ok(Self::Reject),
+            _ => Err(format!("Invalid DepositReviewAction: {}", num).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for DepositReviewAction {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<DepositReviewAction> for core_db::common::sql::BindValue {
+    fn from(v: DepositReviewAction) -> Self {
+        core_db::common::sql::BindValue::I64(v as i64)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[repr(i16)]
+pub enum DepositStatus {
+    #[serde(rename = "1")]
+    Pending = 1,
+    #[serde(rename = "2")]
+    Approved = 2,
+    #[serde(rename = "3")]
+    Rejected = 3,
+}
+
+impl Default for DepositStatus {
+    fn default() -> Self {
+        Self::Pending
+    }
+}
+
+impl ts_rs::TS for DepositStatus {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "DepositStatus".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("DepositStatus cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type DepositStatus = \"1\" | \"2\" | \"3\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl DepositStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "1",
+            Self::Approved => "2",
+            Self::Rejected => "3",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Pending => "Pending",
+            Self::Approved => "Approved",
+            Self::Rejected => "Rejected",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            1 => Some(Self::Pending),
+            2 => Some(Self::Approved),
+            3 => Some(Self::Rejected),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Pending => "enum.deposit_status.pending",
+            Self::Approved => "enum.deposit_status.approved",
+            Self::Rejected => "enum.deposit_status.rejected",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::Pending, Self::Approved, Self::Rejected]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for DepositStatus {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for DepositStatus {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match num {
+            1 => Ok(Self::Pending),
+            2 => Ok(Self::Approved),
+            3 => Ok(Self::Rejected),
+            _ => Err(format!("Invalid DepositStatus: {}", num).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for DepositStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<DepositStatus> for core_db::common::sql::BindValue {
+    fn from(v: DepositStatus) -> Self {
+        core_db::common::sql::BindValue::I64(v as i64)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[repr(i16)]
+pub enum OwnerType {
+    #[serde(rename = "1")]
+    User = 1,
+}
+
+impl Default for OwnerType {
+    fn default() -> Self {
+        Self::User
+    }
+}
+
+impl ts_rs::TS for OwnerType {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "OwnerType".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("OwnerType cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type OwnerType = \"1\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl OwnerType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "1",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::User => "User",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            1 => Some(Self::User),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::User => "enum.owner_type.user",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::User]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for OwnerType {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for OwnerType {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match num {
+            1 => Ok(Self::User),
+            _ => Err(format!("Invalid OwnerType: {}", num).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for OwnerType {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<OwnerType> for core_db::common::sql::BindValue {
+    fn from(v: OwnerType) -> Self {
+        core_db::common::sql::BindValue::I64(v as i64)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub enum PersonalAccessTokenKind {
     #[serde(rename = "access")]
     Access,
@@ -1399,16 +2456,440 @@ impl From<UserBanStatus> for core_db::common::sql::BindValue {
 }
 
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[repr(i16)]
+pub enum WithdrawalMethod {
+    #[serde(rename = "1")]
+    Manual = 1,
+}
+
+impl Default for WithdrawalMethod {
+    fn default() -> Self {
+        Self::Manual
+    }
+}
+
+impl ts_rs::TS for WithdrawalMethod {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "WithdrawalMethod".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("WithdrawalMethod cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type WithdrawalMethod = \"1\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl WithdrawalMethod {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "1",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Manual => "Manual",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            1 => Some(Self::Manual),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Manual => "enum.withdrawal_method.manual",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::Manual]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for WithdrawalMethod {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for WithdrawalMethod {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match num {
+            1 => Ok(Self::Manual),
+            _ => Err(format!("Invalid WithdrawalMethod: {}", num).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for WithdrawalMethod {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<WithdrawalMethod> for core_db::common::sql::BindValue {
+    fn from(v: WithdrawalMethod) -> Self {
+        core_db::common::sql::BindValue::I64(v as i64)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[repr(i16)]
+pub enum WithdrawalReviewAction {
+    #[serde(rename = "1")]
+    Process = 1,
+    #[serde(rename = "2")]
+    Approve = 2,
+    #[serde(rename = "3")]
+    Reject = 3,
+}
+
+impl Default for WithdrawalReviewAction {
+    fn default() -> Self {
+        Self::Process
+    }
+}
+
+impl ts_rs::TS for WithdrawalReviewAction {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "WithdrawalReviewAction".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("WithdrawalReviewAction cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type WithdrawalReviewAction = \"1\" | \"2\" | \"3\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl WithdrawalReviewAction {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Process => "1",
+            Self::Approve => "2",
+            Self::Reject => "3",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Process => "Process",
+            Self::Approve => "Approve",
+            Self::Reject => "Reject",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            1 => Some(Self::Process),
+            2 => Some(Self::Approve),
+            3 => Some(Self::Reject),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Process => "enum.withdrawal_review_action.process",
+            Self::Approve => "enum.withdrawal_review_action.approve",
+            Self::Reject => "enum.withdrawal_review_action.reject",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::Process, Self::Approve, Self::Reject]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for WithdrawalReviewAction {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for WithdrawalReviewAction {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match num {
+            1 => Ok(Self::Process),
+            2 => Ok(Self::Approve),
+            3 => Ok(Self::Reject),
+            _ => Err(format!("Invalid WithdrawalReviewAction: {}", num).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for WithdrawalReviewAction {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<WithdrawalReviewAction> for core_db::common::sql::BindValue {
+    fn from(v: WithdrawalReviewAction) -> Self {
+        core_db::common::sql::BindValue::I64(v as i64)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[repr(i16)]
+pub enum WithdrawalStatus {
+    #[serde(rename = "1")]
+    Pending = 1,
+    #[serde(rename = "2")]
+    Processing = 2,
+    #[serde(rename = "3")]
+    Approved = 3,
+    #[serde(rename = "4")]
+    Rejected = 4,
+}
+
+impl Default for WithdrawalStatus {
+    fn default() -> Self {
+        Self::Pending
+    }
+}
+
+impl ts_rs::TS for WithdrawalStatus {
+    type WithoutGenerics = Self;
+
+    fn name() -> String {
+        "WithdrawalStatus".to_string()
+    }
+
+    fn inline() -> String {
+        Self::name()
+    }
+
+    fn inline_flattened() -> String {
+        panic!("WithdrawalStatus cannot be flattened")
+    }
+
+    fn decl() -> String {
+        "type WithdrawalStatus = \"1\" | \"2\" | \"3\" | \"4\";".to_string()
+    }
+
+    fn decl_concrete() -> String {
+        Self::decl()
+    }
+}
+
+impl WithdrawalStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "1",
+            Self::Processing => "2",
+            Self::Approved => "3",
+            Self::Rejected => "4",
+        }
+    }
+
+    pub const fn as_label(self) -> &'static str {
+        match self {
+            Self::Pending => "Pending",
+            Self::Processing => "Processing",
+            Self::Approved => "Approved",
+            Self::Rejected => "Rejected",
+        }
+    }
+
+    pub fn from_storage(raw: &str) -> Option<Self> {
+        let value = raw.trim().parse::<i64>().ok()?;
+        match value {
+            1 => Some(Self::Pending),
+            2 => Some(Self::Processing),
+            3 => Some(Self::Approved),
+            4 => Some(Self::Rejected),
+            _ => None,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Pending => "enum.withdrawal_status.pending",
+            Self::Processing => "enum.withdrawal_status.processing",
+            Self::Approved => "enum.withdrawal_status.approved",
+            Self::Rejected => "enum.withdrawal_status.rejected",
+        }
+    }
+
+    pub fn explained_label(self) -> String {
+        let i18n_key = self.i18n_key();
+        let translated_key = core_i18n::t(i18n_key);
+        if translated_key != i18n_key {
+            return translated_key;
+        }
+        let fallback_label = self.as_label();
+        let translated_label = core_i18n::t(fallback_label);
+        if translated_label != fallback_label {
+            return translated_label;
+        }
+        fallback_label.to_string()
+    }
+
+    pub const fn variants() -> &'static [Self] {
+        &[Self::Pending, Self::Processing, Self::Approved, Self::Rejected]
+    }
+
+    pub fn datatable_filter_options() -> Vec<core_web::datatable::DataTableFilterOptionDto> {
+        Self::variants()
+            .iter()
+            .map(|v| {
+                let label = (*v).explained_label();
+                let value = (*v).as_str();
+                core_web::datatable::DataTableFilterOptionDto {
+                    label,
+                    value: value.to_string(),
+                }
+            })
+            .collect()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for WithdrawalStatus {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        <i16 as sqlx::Encode<sqlx::Postgres>>::encode_by_ref(&(*self as i16), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for WithdrawalStatus {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let num = <i16 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match num {
+            1 => Ok(Self::Pending),
+            2 => Ok(Self::Processing),
+            3 => Ok(Self::Approved),
+            4 => Ok(Self::Rejected),
+            _ => Err(format!("Invalid WithdrawalStatus: {}", num).into()),
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for WithdrawalStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i16 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<WithdrawalStatus> for core_db::common::sql::BindValue {
+    fn from(v: WithdrawalStatus) -> Self {
+        core_db::common::sql::BindValue::I64(v as i64)
+    }
+}
+
+
 
 pub const SCHEMA_ENUM_TS_META: &[SchemaEnumTsMeta] = &[
     SchemaEnumTsMeta { name: "AdjustableCreditType", variants: &["1"] },
     SchemaEnumTsMeta { name: "AdminType", variants: &["developer", "superadmin", "admin"] },
     SchemaEnumTsMeta { name: "AuditAction", variants: &["1", "2", "3"] },
+    SchemaEnumTsMeta { name: "BankStatus", variants: &["1", "2"] },
+    SchemaEnumTsMeta { name: "CompanyBankAccountStatus", variants: &["1", "2"] },
+    SchemaEnumTsMeta { name: "CompanyCryptoAccountStatus", variants: &["1", "2"] },
     SchemaEnumTsMeta { name: "ContentPageSystemFlag", variants: &["0", "1"] },
     SchemaEnumTsMeta { name: "CountryIsDefault", variants: &["0", "1"] },
     SchemaEnumTsMeta { name: "CountryStatus", variants: &["enabled", "disabled"] },
     SchemaEnumTsMeta { name: "CreditTransactionType", variants: &["101", "102", "201", "202", "301", "302", "401"] },
     SchemaEnumTsMeta { name: "CreditType", variants: &["1", "2"] },
+    SchemaEnumTsMeta { name: "CryptoNetworkStatus", variants: &["1", "2"] },
+    SchemaEnumTsMeta { name: "DepositMethod", variants: &["1"] },
+    SchemaEnumTsMeta { name: "DepositReviewAction", variants: &["1", "2"] },
+    SchemaEnumTsMeta { name: "DepositStatus", variants: &["1", "2", "3"] },
+    SchemaEnumTsMeta { name: "OwnerType", variants: &["1"] },
     SchemaEnumTsMeta { name: "PersonalAccessTokenKind", variants: &["access", "refresh"] },
     SchemaEnumTsMeta { name: "UserBanStatus", variants: &["0", "1"] },
+    SchemaEnumTsMeta { name: "WithdrawalMethod", variants: &["1"] },
+    SchemaEnumTsMeta { name: "WithdrawalReviewAction", variants: &["1", "2", "3"] },
+    SchemaEnumTsMeta { name: "WithdrawalStatus", variants: &["1", "2", "3", "4"] },
 ];

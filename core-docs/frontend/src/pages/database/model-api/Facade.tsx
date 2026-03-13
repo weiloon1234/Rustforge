@@ -13,14 +13,14 @@ export function ModelApiFacade() {
             <div className="prose prose-orange max-w-none">
                 <h2>What the facade is for</h2>
                 <p>
-                    Every schema model gets an <code>Xxx</code> facade. App code should start from this type instead of constructing ad hoc repositories or handwritten SQL helpers for normal model work. The facade carries the DB connection and optional runtime context such as attachment base URL.
+                    Every Rust model source gets an <code>Xxx</code> facade. App code should start from this type instead of constructing ad hoc repositories or handwritten SQL helpers for normal model work. The facade carries the DB connection and optional runtime context such as attachment base URL.
                 </p>
 
                 <h2>Where it sits in the SSOT ladder</h2>
                 <ul>
-                    <li><strong>Schema SSOT:</strong> fields, relations, PK type, and framework features come from schema TOML.</li>
+                    <li><strong>Model-source SSOT:</strong> fields, relations, PK type, and framework features come from Rust model sources in <code>app/models/*.rs</code> plus framework model sources.</li>
                     <li><strong>Generated facade:</strong> <code>Xxx</code> is the generated model entrypoint for those capabilities.</li>
-                    <li><strong>Manual app extension:</strong> computed values belong on <a href="#/model-api-view"><code>XxxView</code> extensions</a>, not on a forked facade.</li>
+                    <li><strong>Manual app extension:</strong> computed values and view helpers belong on <a href="#/model-api-view"><code>XxxView</code> methods</a>, not on a forked facade.</li>
                 </ul>
 
                 <h2>Main facade methods</h2>
@@ -34,7 +34,7 @@ export function ModelApiFacade() {
                         {
                             method: 'query()',
                             returns: 'XxxQuery',
-                            notes: 'Typed read/query builder generated from schema fields and relations.',
+                            notes: 'Typed read/query builder generated from model-source fields and relations.',
                         },
                         {
                             method: 'insert()',
@@ -49,7 +49,7 @@ export function ModelApiFacade() {
                         {
                             method: 'find(id) / find_or_fail(id)',
                             returns: 'Result<Option<XxxView>> / Result<XxxView>',
-                            notes: 'Primary-key lookup helpers using the actual schema PK type.',
+                            notes: 'Primary-key lookup helpers using the actual model-source PK type.',
                         },
                         {
                             method: 'delete(id) / restore(id)',

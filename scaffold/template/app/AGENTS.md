@@ -10,7 +10,7 @@ Design rules:
 
 ## SSOT Files
 
-- `schemas/*.toml` — schema-defined models/enums.
+- `models/*.rs` — schema-defined models/enums/helper methods for generated Views.
 - `permissions.toml` — permission catalog.
 - `configs.toml` — auth/language/realtime/CORS config.
 - `../i18n/*.json` — translation keys and values.
@@ -34,7 +34,6 @@ Generated outputs are produced from these inputs (plus build-time codegen) and c
 - `src/internal/workflows/` — business/domain logic.
 - `src/internal/datatables/` — datatable runtime wiring and hooks.
 - `src/internal/jobs/` — async worker jobs and schedules.
-- `src/internal/extensions/` — computed values and custom methods on generated View types.
 - `src/internal/middleware/` — custom request middleware.
 - `src/internal/realtime/` — websocket channel policy.
 - `src/validation/` — sync/async validation helpers.
@@ -51,7 +50,7 @@ When a shared runtime dependency is needed in handlers/datatables/workflows, add
 
 Use this when the domain is schema-driven.
 
-1. Add or update model/enum in `schemas/{domain}.toml`.
+1. Add or update model/enum in `models/{domain}.rs`.
 2. Add matching SQL migration in `../migrations/{timestamp}_{name}.sql`.
 3. Add/adjust permissions in `permissions.toml`.
 4. Add contracts in `src/contracts/api/v1/{portal}/{domain}.rs`.

@@ -361,7 +361,10 @@ mod tests {
 
     #[test]
     fn template_files_exclude_template_lockfile() {
-        let paths: Vec<_> = template_files().into_iter().map(|file| file.path()).collect();
+        let paths: Vec<_> = template_files()
+            .into_iter()
+            .map(|file| file.path())
+            .collect();
         assert!(
             !paths.contains(&Path::new("Cargo.lock")),
             "template lockfile must never ship in scaffold output"

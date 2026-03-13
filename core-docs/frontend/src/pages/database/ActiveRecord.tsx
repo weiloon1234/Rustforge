@@ -140,10 +140,15 @@ model.query()
                 {/* Localized Fields */}
                 <h2>Localized Fields</h2>
                 <p>
-                    For fields listed in <code>localized = ["field_name"]</code> in schema, the
-                    generated model provides strongly typed setters using the <code>Locale</code>{' '}
-                    enum.
+                    For fields declared as <code>Localized&lt;T&gt;</code> in <code>app/models/*.rs</code>,
+                    the generated model provides strongly typed setters using the <code>Locale</code> enum.
                 </p>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
+                    <code className="language-rust">{`#[rf_model(table = "articles")]
+pub struct Article {
+    pub title: Localized<String>,
+}`}</code>
+                </pre>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
                     <code className="language-rust">{`use crate::generated::localized::Locale;
 

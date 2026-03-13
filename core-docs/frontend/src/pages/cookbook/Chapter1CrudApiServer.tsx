@@ -27,7 +27,7 @@ export function Chapter1CrudApiServer() {
                 <h2>Scaffold Now (verified)</h2>
                 <ul>
                     <li>
-                        Schema baseline: <code>app/schemas/admin.toml</code>
+                        Model baseline: <code>app/models/admin.rs</code>
                     </li>
                     <li>
                         DTO contracts: <code>app/src/contracts/api/v1/admin/*.rs</code>
@@ -76,7 +76,7 @@ pub fn routes(state: AppApiState) -> ApiRouter<AppApiState> {
                     For a new domain (example article/category), keep the same layering and only add new modules.
                 </p>
                 <ul>
-                    <li>Add schema file(s) under <code>app/schemas/*.toml</code>.</li>
+                    <li>Add model file(s) under <code>app/models/*.rs</code>.</li>
                     <li>Add migration SQL under <code>migrations/</code>.</li>
                     <li>Add DTOs under <code>app/src/contracts/api/v1/&lt;portal&gt;/</code>.</li>
                     <li>
@@ -90,12 +90,12 @@ pub fn routes(state: AppApiState) -> ApiRouter<AppApiState> {
 
                 <h2>Computed Model Value (Scaffold Now)</h2>
                 <p>
-                    Put computed/read-only fields on <code>AdminView</code> extension methods, not on raw
+                    Put computed/read-only fields on <code>AdminView</code> methods in the model source file, not on raw
                     <code> AdminRow</code>.
                 </p>
                 <ul>
                     <li>
-                        Extension point: <code>generated/src/extensions.rs</code>
+                        Extension point: <code>app/models/admin.rs</code> with <code>#[rf_view_impl]</code>
                     </li>
                     <li>
                         API contract mapping: <code>app/src/contracts/api/v1/admin/*.rs</code>
@@ -105,9 +105,7 @@ pub fn routes(state: AppApiState) -> ApiRouter<AppApiState> {
                     </li>
                 </ul>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`use generated::extensions::admin::types::AdminViewComputedExt;
-
-impl From<generated::models::AdminView> for AdminOutput {
+                    <code className="language-rust">{`impl From<generated::models::AdminView> for AdminOutput {
     fn from(value: generated::models::AdminView) -> Self {
         Self {
             id: value.id,

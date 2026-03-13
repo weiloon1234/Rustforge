@@ -592,11 +592,11 @@ exportIgnoreColumns={['id']}`}</code>
                     <tbody>
                         <tr>
                             <td>Filters and sorting are mostly column-driven.</td>
-                            <td>The source table is not an app schema model or the query shape is unusually custom.</td>
+                            <td>The source table is not backed by an app model source or the query shape is unusually custom.</td>
                         </tr>
                         <tr>
                             <td>You can express access rules with generated query hooks.</td>
-                            <td>You need special joins, summary-only rows, or a framework-owned source without an app schema contract.</td>
+                            <td>You need special joins, summary-only rows, or a framework-owned source without an app model-source contract.</td>
                         </tr>
                         <tr>
                             <td>You want generator-owned row/view types and table adapters.</td>

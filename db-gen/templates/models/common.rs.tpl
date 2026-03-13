@@ -1,5 +1,19 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub enum FieldInput<T> {
+    #[default]
+    Unset,
+    Set(T),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FieldChange<T> {
+    Assign(T),
+    Increment(T),
+    Decrement(T),
+}
+
 pub fn renumber_placeholders(sql: &str, start: usize) -> String {
     let mut out = String::with_capacity(sql.len() + 8);
     let mut i = 0;
@@ -28,4 +42,8 @@ pub struct Page<T> {
     pub per_page: i64,
     pub current_page: i64,
     pub last_page: i64,
+}
+
+pub fn log_observer_error(hook: &str, model: &str, err: &dyn std::fmt::Display) {
+    eprintln!("model observer hook '{hook}' failed for model '{model}': {err}");
 }

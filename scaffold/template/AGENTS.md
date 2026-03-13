@@ -9,7 +9,7 @@ This is the scaffold root instruction index.
 
 ## Single Source of Truth
 
-- `app/schemas/*.toml` — model/enum schema definitions.
+- `app/models/*.rs` — model/enum definitions and generated View helpers.
 - `app/permissions.toml` — permission catalog.
 - `app/configs.toml` — auth/languages/realtime/CORS config.
 - `i18n/*.json` — all user-facing translations.

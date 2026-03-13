@@ -9,9 +9,7 @@ use core_web::{
     openapi::{aide::axum::routing::post_with, ApiRouter},
     response::ApiResponse,
 };
-use generated::{
-    extensions::admin::types::AdminViewPermissionExt, guards::AdminGuard, permissions::Permission,
-};
+use generated::{guards::AdminGuard, permissions::Permission};
 use uuid::Uuid;
 
 use crate::{

@@ -6,8 +6,7 @@ use core_web::datatable::{
 };
 use core_web::openapi::ApiRouter;
 use generated::{
-    extensions::admin::types::admin_identity,
-    models::{Admin, AdminCol, AdminDataTable, AdminDataTableHooks, AdminQuery, AdminType},
+    models::{admin::admin_identity, *},
     permissions::Permission,
 };
 
@@ -66,17 +65,6 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         let mut record = self.default_row_to_record(row)?;
-
-        if let Some(abilities_val) = record.get("abilities").cloned() {
-            let strings: Vec<String> = match abilities_val {
-                serde_json::Value::Array(items) => items
-                    .into_iter()
-                    .filter_map(|item| item.as_str().map(ToString::to_string))
-                    .collect(),
-                _ => Vec::new(),
-            };
-            record.insert("abilities".to_string(), serde_json::to_value(strings)?);
-        }
 
         let username = record
             .get("username")

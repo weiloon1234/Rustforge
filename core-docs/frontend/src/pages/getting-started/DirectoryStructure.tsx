@@ -48,7 +48,7 @@ export function DirectoryStructure() {
 ├── app/
 │   ├── configs.toml
 │   ├── permissions.toml
-│   ├── schemas/
+│   ├── models/
 │   └── src/
 │       ├── bin/
 │       ├── contracts/
@@ -61,7 +61,7 @@ export function DirectoryStructure() {
                 <h3 className="text-lg font-bold text-gray-900 mt-8 mb-2">Single Source of Truth</h3>
                 <ul className="list-disc pl-5 space-y-2 text-gray-700">
                     <li>
-                        Schema: <code>app/schemas/*.toml</code>
+                        Models: <code>app/models/*.rs</code>
                     </li>
                     <li>
                         Permissions: <code>app/permissions.toml</code>

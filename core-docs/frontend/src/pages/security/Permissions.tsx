@@ -111,7 +111,7 @@ core_web::authz::ensure_permissions(
 )?;`}</code>
                 </pre>
                 <p>
-                    For app-facing helpers, add typed permission extension methods in <code>generated/src/extensions.rs</code> so workflows can call <code>auth.user.has_permission(...)</code> instead of scattering matcher details.
+                    For app-facing helpers, add typed permission methods in <code>app/models/admin.rs</code> via <code>#[rf_view_impl]</code> so workflows can call <code>auth.user.has_permission(...)</code> instead of scattering matcher details.
                 </p>
 
                 <h2>Frontend typed checks</h2>

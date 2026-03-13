@@ -4,7 +4,7 @@ export function DbGen() {
             <div className="space-y-4">
                 <h1 className="text-4xl font-extrabold text-gray-900">Code Generation (db-gen)</h1>
                 <p className="text-xl text-gray-500">
-                    Build-time generation from layered framework + app schema/config/permission sources.
+                    Build-time generation from layered framework + app model/config/permission sources.
                 </p>
             </div>
 
@@ -19,10 +19,10 @@ export function DbGen() {
                 <h2>Input sources</h2>
                 <ul>
                     <li>
-                        Framework schemas embedded by the framework build
+                        Framework model sources embedded by the framework build
                     </li>
                     <li>
-                        App schemas from <code>app/schemas/*.toml</code>
+                        App model sources from <code>app/models/*.rs</code>
                     </li>
                     <li>
                         Permissions from <code>app/permissions.toml</code>
@@ -38,7 +38,7 @@ export function DbGen() {
                 <h2>Build flow</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
                     <code className="language-rust">{`// scaffold/template/generated/build.rs
-let schema = load_layered_schema(app_schemas_dir)?;
+let schema = db_gen::load_with_framework(app_models_dir)?;
 let permissions = db_gen::load_permissions("app/permissions.toml")?;
 let (cfgs, _) = db_gen::config::load("app/configs.toml")?;
 
@@ -69,7 +69,7 @@ db_gen::generate_localized(&cfgs.languages, &cfgs, &schema, out_dir)?;`}</code>
                 <h2>What stays manual</h2>
                 <ul>
                     <li>
-                        <code>generated/src/extensions.rs</code> for app-facing extension methods and computed helpers
+                        app-facing helper items and <code>XxxView</code> / <code>XxxWithRelations</code> methods in <code>app/models/*.rs</code>
                     </li>
                     <li>
                         app datatable runtime hooks and route registration
@@ -83,7 +83,7 @@ db_gen::generate_localized(&cfgs.languages, &cfgs, &schema, out_dir)?;`}</code>
                 <ul>
                     <li>Template-driven file structure, not giant file-sized string dumps</li>
                     <li>Typed-first API generation</li>
-                    <li>Schema-defined PK type respected everywhere</li>
+                    <li>Model-defined PK type respected everywhere</li>
                     <li>Framework and app inputs treated as layered SSOT, not separate manual systems</li>
                 </ul>
 
@@ -97,7 +97,7 @@ make gen-types`}</code>
                 <h2>Cross-links</h2>
                 <ul>
                     <li>
-                        <a href="#/schema">Schema Definition</a> for the TOML input surface.
+                        <a href="#/schema">Model Source Definition</a> for the Rust model-source input surface.
                     </li>
                     <li>
                         <a href="#/model-api">Model API Overview</a> for the generated output surface.

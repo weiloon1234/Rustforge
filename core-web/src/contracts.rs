@@ -2,11 +2,11 @@ use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Serialize};
 use validator::Validate;
 
+pub use crate::extract::file_upload::FileUpload;
+pub use crate::extract::{AsyncContractMultipart, ContractMultipart, MultipartContract};
 use crate::extract::{AsyncValidatedJson, ValidatedJson};
 pub use crate::Patch;
 pub use rustforge_contract_macros::rustforge_contract;
-pub use crate::extract::file_upload::FileUpload;
-pub use crate::extract::{ContractMultipart, AsyncContractMultipart, MultipartContract};
 
 /// Generate a transparent `String` newtype wrapper for reusable request-contract semantics.
 ///
@@ -206,10 +206,7 @@ where
 {
     type Rejection = crate::error::AppError;
 
-    async fn from_request(
-        req: axum::extract::Request,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
         let inner = ValidatedJson::<T>::from_request(req, state).await?;
         Ok(ContractJson(inner.0))
     }
@@ -241,10 +238,7 @@ where
 {
     type Rejection = crate::error::AppError;
 
-    async fn from_request(
-        req: axum::extract::Request,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
         let inner = AsyncValidatedJson::<T>::from_request(req, state).await?;
         Ok(AsyncContractJson(inner.0))
     }

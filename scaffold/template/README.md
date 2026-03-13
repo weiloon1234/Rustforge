@@ -38,7 +38,7 @@ Open [http://localhost:5173](http://localhost:5173) for the user portal and [htt
 app/                    Rust application crate (API, websocket, worker, console)
   configs.toml          Languages, auth guards, realtime, CORS
   permissions.toml      Permission catalog
-  schemas/*.toml        Model definitions (code generation source)
+  models/*.rs           Model definitions, enums, helper DTOs, generated View methods
   src/
     internal/api/       Route handlers + state
     internal/workflows/ Business logic
@@ -135,11 +135,11 @@ Pulls latest code, compiles release binaries, builds frontend, runs migrations, 
 
 | Source file | Generates |
 |-------------|-----------|
-| `app/schemas/*.toml` | Model structs, enums, repos, query builders, datatable skeletons |
+| `app/models/*.rs` | Model structs, enums, repos, query builders, datatable skeletons, generated View methods |
 | `app/permissions.toml` | `Permission` enum |
 | `app/configs.toml` | Typed `Settings`, auth guards, localization artifacts |
 
-Never edit generated outputs directly (for example: `generated/src/lib.rs`, `generated/src/models/*`, `generated/src/guards/*`, `generated/src/permissions.rs`, `generated/src/localized.rs`) — they are overwritten by generation/build steps. Put custom code in `generated/src/extensions.rs`.
+Never edit generated outputs directly (for example: `generated/src/lib.rs`, `generated/src/models/*`, `generated/src/guards/*`, `generated/src/permissions.rs`, `generated/src/localized.rs`) — they are overwritten by generation/build steps. Put model-specific helper items and generated `View` / `WithRelations` methods in `app/models/*.rs`.
 
 ### i18n
 

@@ -2,9 +2,7 @@ use crate::contracts::types::username::UsernameString;
 use core_web::contracts::rustforge_contract;
 use core_web::ids::SnowflakeId;
 use core_web::Patch;
-use generated::{
-    extensions::admin::types::AdminViewComputedExt, models::AdminType, permissions::Permission,
-};
+use generated::{models::AdminType, permissions::Permission};
 use schemars::JsonSchema;
 use serde::Serialize;
 use ts_rs::TS;
@@ -72,17 +70,7 @@ pub struct AdminOutput {
 
 impl From<generated::models::AdminView> for AdminOutput {
     fn from(value: generated::models::AdminView) -> Self {
-        let abilities = value
-            .abilities
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| item.as_str())
-                    .filter_map(Permission::from_str)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        let abilities = value.parsed_abilities();
 
         Self {
             id: value.id.into(),
@@ -102,24 +90,4 @@ impl From<generated::models::AdminView> for AdminOutput {
 #[ts(export, export_to = "admin/types/")]
 pub struct AdminDeleteOutput {
     pub deleted: bool,
-}
-
-#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
-pub struct AdminBatchResolveInput {
-    pub ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
-#[ts(export, export_to = "admin/types/")]
-pub struct AdminBatchResolveOutput {
-    #[ts(inline)]
-    pub entries: Vec<AdminBatchResolveEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
-#[ts(export, export_to = "admin/types/")]
-pub struct AdminBatchResolveEntry {
-    pub id: SnowflakeId,
-    pub username: String,
-    pub name: String,
 }

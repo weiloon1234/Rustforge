@@ -1,7 +1,7 @@
 //! Model lifecycle observer using task-local variables.
 //!
 //! Set a global observer per-request (e.g. in admin middleware) via `scope_observer()`.
-//! Generated model code will call observer hooks automatically for models with `audit = true`.
+//! Generated model code will call observer hooks automatically for models with `observe = true`.
 
 use std::sync::Arc;
 use tokio::task_local;
@@ -9,10 +9,12 @@ use tokio::task_local;
 /// Model lifecycle event data passed to observer hooks.
 #[derive(Debug, Clone)]
 pub struct ModelEvent {
+    /// The generated model key (e.g. "user", "admin").
+    pub model: &'static str,
     /// The database table name (e.g. "users", "admin").
     pub table: &'static str,
-    /// The primary key of the affected record.
-    pub record_id: i64,
+    /// The primary key of the affected record as a string when known.
+    pub record_key: Option<String>,
 }
 
 /// Observer trait for model lifecycle hooks.
@@ -22,17 +24,31 @@ pub struct ModelEvent {
 #[async_trait::async_trait]
 pub trait ModelObserver: Send + Sync {
     /// Called before an INSERT is executed.
-    async fn on_creating(&self, _event: &ModelEvent, _new_data: &serde_json::Value) {}
+    async fn on_creating(
+        &self,
+        _event: &ModelEvent,
+        _new_data: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
 
     /// Called after a successful INSERT.
-    async fn on_created(&self, _event: &ModelEvent, _new_data: &serde_json::Value) {}
+    async fn on_created(
+        &self,
+        _event: &ModelEvent,
+        _new_data: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
 
     /// Called before an UPDATE is executed. `old_data` contains current row state.
     async fn on_updating(
         &self,
         _event: &ModelEvent,
         _old_data: &serde_json::Value,
-    ) {
+        _changes: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
 
     /// Called after a successful UPDATE with both old and new state.
@@ -41,7 +57,8 @@ pub trait ModelObserver: Send + Sync {
         _event: &ModelEvent,
         _old_data: &serde_json::Value,
         _new_data: &serde_json::Value,
-    ) {
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
 
     /// Called before a DELETE is executed. `old_data` contains current row state.
@@ -49,7 +66,8 @@ pub trait ModelObserver: Send + Sync {
         &self,
         _event: &ModelEvent,
         _old_data: &serde_json::Value,
-    ) {
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
 
     /// Called after a successful DELETE.
@@ -57,7 +75,8 @@ pub trait ModelObserver: Send + Sync {
         &self,
         _event: &ModelEvent,
         _old_data: &serde_json::Value,
-    ) {
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 

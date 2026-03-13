@@ -1,8 +1,0 @@
-[model.admin]
-table = "admins"
-fields = [
-  "id:i64",
-  "username:string",
-  "email:Option<String>",
-  "password_hash:string"
-]

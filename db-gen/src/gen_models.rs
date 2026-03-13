@@ -1,11 +1,11 @@
 use crate::config::ConfigsFile;
 use crate::schema::{
     parse_attachments, parse_computed, parse_fields, parse_meta, parse_relations, to_snake,
-    to_title_case, AttachmentFieldSpec, EnumOrOther, FieldSpec, MetaFieldSpec, MetaType, ModelSpec,
-    RelationKind, RelationSpec, Schema, SpecialType,
+    to_title_case, AttachmentFieldSpec, EnumOrOther, EnumSpec, FieldSpec, MetaFieldSpec, MetaType,
+    ModelSpec, RelationKind, RelationSpec, Schema, SpecialType,
 };
 use crate::template::{render_template, TemplateContext};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::Write;
 use std::fs;
@@ -80,6 +80,117 @@ fn enum_field_spec(
         explained_name: format!("{field_name}_explained"),
         optional: true,
     })
+}
+
+fn create_input_ident(model_title: &str) -> String {
+    format!("{model_title}CreateInput")
+}
+
+fn update_changes_ident(model_title: &str) -> String {
+    format!("{model_title}UpdateChanges")
+}
+
+fn bind_variant_for_type(ty: &str) -> Option<&'static str> {
+    match ty.trim() {
+        "i16" => Some("I16"),
+        "i32" => Some("I32"),
+        "i64" => Some("I64"),
+        "f64" => Some("F64"),
+        "rust_decimal::Decimal" => Some("Decimal"),
+        "bool" => Some("Bool"),
+        "String" => Some("String"),
+        "Vec<String>" => Some("StringArray"),
+        "time::OffsetDateTime" => Some("Time"),
+        "uuid::Uuid" => Some("Uuid"),
+        "serde_json::Value" => Some("Json"),
+        _ => None,
+    }
+}
+
+fn render_enum_bind_decode_expr(enum_name: &str, bind_expr: &str, optional: bool) -> String {
+    if optional {
+        format!(
+            "match {bind_expr} {{
+                BindValue::StringOpt(value) => match value {{
+                    Some(raw) => {enum_name}::from_storage(raw)
+                        .map(Some)
+                        .ok_or_else(|| anyhow::anyhow!(\"invalid enum storage '{{}}' for type '{enum_name}'\", raw))?,
+                    None => None,
+                }},
+                BindValue::I64Opt(value) => match value {{
+                    Some(raw) => {{
+                        let raw_str = raw.to_string();
+                        {enum_name}::from_storage(&raw_str)
+                            .map(Some)
+                            .ok_or_else(|| anyhow::anyhow!(\"invalid enum storage '{{}}' for type '{enum_name}'\", raw))?
+                    }}
+                    None => None,
+                }},
+                other => anyhow::bail!(\"unexpected bind value '{{:?}}' for type 'Option<{enum_name}>'\", other),
+            }}"
+        )
+    } else {
+        format!(
+            "match {bind_expr} {{
+                BindValue::String(value) => {enum_name}::from_storage(value)
+                    .ok_or_else(|| anyhow::anyhow!(\"invalid enum storage '{{}}' for type '{enum_name}'\", value))?,
+                BindValue::I64(value) => {{
+                    let raw = value.to_string();
+                    {enum_name}::from_storage(&raw)
+                        .ok_or_else(|| anyhow::anyhow!(\"invalid enum storage '{{}}' for type '{enum_name}'\", value))?
+                }}
+                other => anyhow::bail!(\"unexpected bind value '{{:?}}' for type '{enum_name}'\", other),
+            }}"
+        )
+    }
+}
+
+fn render_bind_decode_expr(
+    ty: &str,
+    bind_expr: &str,
+    enum_specs: &BTreeMap<String, EnumSpec>,
+) -> String {
+    let trimmed = ty.trim();
+    if let Some(inner) = parse_option_inner_type(trimmed) {
+        if enum_specs.contains_key(inner.as_str()) {
+            return render_enum_bind_decode_expr(&inner, bind_expr, true);
+        }
+
+        let Some(variant) = bind_variant_for_type(&inner) else {
+            panic!("unsupported lifecycle observer field type '{}'", ty);
+        };
+        return format!(
+            "match {bind_expr} {{
+                BindValue::{variant}Opt(value) => value.clone(),
+                other => anyhow::bail!(\"unexpected bind value '{{:?}}' for type '{trimmed}'\", other),
+            }}"
+        );
+    }
+
+    if enum_specs.contains_key(trimmed) {
+        return render_enum_bind_decode_expr(trimmed, bind_expr, false);
+    }
+
+    let Some(variant) = bind_variant_for_type(trimmed) else {
+        panic!("unsupported lifecycle observer field type '{}'", ty);
+    };
+    format!(
+        "match {bind_expr} {{
+            BindValue::{variant}(value) => value.clone(),
+            other => anyhow::bail!(\"unexpected bind value '{{:?}}' for type '{trimmed}'\", other),
+        }}"
+    )
+}
+
+fn relation_target_field_is_optional(schema: &Schema, rel: &RelationSpec) -> bool {
+    let Some(target_cfg) = schema.models.get(&rel.target_model) else {
+        return false;
+    };
+
+    let target_pk = target_cfg.pk.clone().unwrap_or_else(|| "id".to_string());
+    parse_fields(target_cfg, &target_pk)
+        .iter()
+        .any(|field| field.name == rel.foreign_key && field.ty.starts_with("Option<"))
 }
 
 fn collect_relation_paths(
@@ -1355,7 +1466,16 @@ fn render_into_where_parts_method(col_ident: &str, has_soft_delete: bool) -> Str
     out
 }
 
-fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool, audit: bool, row_ident: &str, pk_snake: &str, skip_profiler: bool) -> String {
+fn render_delete_method(
+    table: &str,
+    model_key: &str,
+    col_ident: &str,
+    has_soft_delete: bool,
+    emit_hooks: bool,
+    row_ident: &str,
+    pk_snake: &str,
+    skip_profiler: bool,
+) -> String {
     let mut out = String::new();
     writeln!(out, "    pub async fn delete(self) -> Result<u64> {{").unwrap();
     writeln!(out, "        if self.limit.is_some() {{").unwrap();
@@ -1384,18 +1504,62 @@ fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool, aud
     )
     .unwrap();
     writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
-    // Fetch old rows before delete for audit hooks
-    if audit {
-        writeln!(out, "        let __observer_active = try_get_observer().is_some();").unwrap();
-        writeln!(out, "        let __old_rows_json: Vec<(i64, serde_json::Value)> = if __observer_active {{").unwrap();
+    if emit_hooks {
+        writeln!(
+            out,
+            "        let __observer_active = try_get_observer().is_some();"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let __old_rows: Vec<{row_ident}> = if __observer_active {{"
+        )
+        .unwrap();
         writeln!(out, "            let select_sql = format!(\"SELECT * FROM {table} WHERE {{}}\", where_sql.join(\" AND \"));").unwrap();
-        writeln!(out, "            let mut fq = sqlx::query_as::<_, {row_ident}>(&select_sql);").unwrap();
-        writeln!(out, "            for b in &binds {{ fq = bind(fq, b.clone()); }}").unwrap();
-        writeln!(out, "            let rows: Vec<{row_ident}> = db.fetch_all(fq).await.unwrap_or_default();").unwrap();
-        writeln!(out, "            rows.into_iter().map(|r| (r.{pk_snake}, serde_json::to_value(&r).unwrap_or_default())).collect()").unwrap();
+        writeln!(
+            out,
+            "            let mut fq = sqlx::query_as::<_, {row_ident}>(&select_sql);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            for b in &binds {{ fq = bind(fq, b.clone()); }}"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            let rows: Vec<{row_ident}> = db.fetch_all(fq).await.unwrap_or_default();"
+        )
+        .unwrap();
+        writeln!(out, "            rows").unwrap();
         writeln!(out, "        }} else {{").unwrap();
         writeln!(out, "            Vec::new()").unwrap();
         writeln!(out, "        }};").unwrap();
+        writeln!(out, "        if !__old_rows.is_empty() {{").unwrap();
+        writeln!(
+            out,
+            "            if let Some(observer) = try_get_observer() {{"
+        )
+        .unwrap();
+        writeln!(out, "                for old_row in &__old_rows {{").unwrap();
+        writeln!(
+            out,
+            "                    let old_data = serde_json::to_value(old_row)?;"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                    let event = ModelEvent {{ model: \"{model_key}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", old_row.{pk_snake})) }};"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                    observer.on_deleting(&event, &old_data).await?;"
+        )
+        .unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "        }}").unwrap();
     }
     if has_soft_delete {
         writeln!(out, "        if HAS_SOFT_DELETE {{").unwrap();
@@ -1428,7 +1592,11 @@ fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool, aud
         .unwrap();
         writeln!(out, "            }}").unwrap();
         if !skip_profiler {
-            writeln!(out, "            let __profiler_start = std::time::Instant::now();").unwrap();
+            writeln!(
+                out,
+                "            let __profiler_start = std::time::Instant::now();"
+            )
+            .unwrap();
         }
         writeln!(out, "            let mut q = sqlx::query(&sql);").unwrap();
         writeln!(
@@ -1445,12 +1613,35 @@ fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool, aud
         if !skip_profiler {
             writeln!(out, "            record_profiled_query(\"{table}\", \"UPDATE\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
         }
-        if audit {
-            writeln!(out, "            if !__old_rows_json.is_empty() && res.rows_affected() > 0 {{").unwrap();
-            writeln!(out, "                if let Some(observer) = try_get_observer() {{").unwrap();
-            writeln!(out, "                    for (record_id, old_data) in &__old_rows_json {{").unwrap();
-            writeln!(out, "                        let event = ModelEvent {{ table: \"{table}\", record_id: *record_id }};").unwrap();
-            writeln!(out, "                        let _ = observer.on_deleted(&event, old_data).await;").unwrap();
+        if emit_hooks {
+            writeln!(
+                out,
+                "            if !__old_rows.is_empty() && res.rows_affected() > 0 {{"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                if let Some(observer) = try_get_observer() {{"
+            )
+            .unwrap();
+            writeln!(out, "                    for old_row in &__old_rows {{").unwrap();
+            writeln!(
+                out,
+                "                        let event = ModelEvent {{ model: \"{model_key}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", old_row.{pk_snake})) }};"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                        match serde_json::to_value(old_row) {{"
+            )
+            .unwrap();
+            writeln!(out, "                            Ok(old_data) => {{").unwrap();
+            writeln!(out, "                                if let Err(err) = observer.on_deleted(&event, &old_data).await {{").unwrap();
+            writeln!(out, "                                    log_observer_error(\"deleted\", \"{model_key}\", &err);").unwrap();
+            writeln!(out, "                                }}").unwrap();
+            writeln!(out, "                            }}").unwrap();
+            writeln!(out, "                            Err(err) => log_observer_error(\"deleted\", \"{model_key}\", &err),").unwrap();
+            writeln!(out, "                        }}").unwrap();
             writeln!(out, "                    }}").unwrap();
             writeln!(out, "                }}").unwrap();
             writeln!(out, "            }}").unwrap();
@@ -1471,13 +1662,42 @@ fn render_delete_method(table: &str, col_ident: &str, has_soft_delete: bool, aud
     writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
     writeln!(out, "        for b in binds {{ q = bind_query(q, b); }}").unwrap();
     writeln!(out, "        let res = db.execute(q).await?;").unwrap();
-    out.push_str(&render_profiler_log(table, "DELETE", "&sql", "&__profiler_binds", skip_profiler));
-    if audit {
-        writeln!(out, "        if !__old_rows_json.is_empty() && res.rows_affected() > 0 {{").unwrap();
-        writeln!(out, "            if let Some(observer) = try_get_observer() {{").unwrap();
-        writeln!(out, "                for (record_id, old_data) in &__old_rows_json {{").unwrap();
-        writeln!(out, "                    let event = ModelEvent {{ table: \"{table}\", record_id: *record_id }};").unwrap();
-        writeln!(out, "                    let _ = observer.on_deleted(&event, old_data).await;").unwrap();
+    out.push_str(&render_profiler_log(
+        table,
+        "DELETE",
+        "&sql",
+        "&__profiler_binds",
+        skip_profiler,
+    ));
+    if emit_hooks {
+        writeln!(
+            out,
+            "        if !__old_rows.is_empty() && res.rows_affected() > 0 {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            if let Some(observer) = try_get_observer() {{"
+        )
+        .unwrap();
+        writeln!(out, "                for old_row in &__old_rows {{").unwrap();
+        writeln!(
+            out,
+            "                    let event = ModelEvent {{ model: \"{model_key}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", old_row.{pk_snake})) }};"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                    match serde_json::to_value(old_row) {{"
+        )
+        .unwrap();
+        writeln!(out, "                        Ok(old_data) => {{").unwrap();
+        writeln!(out, "                            if let Err(err) = observer.on_deleted(&event, &old_data).await {{").unwrap();
+        writeln!(out, "                                log_observer_error(\"deleted\", \"{model_key}\", &err);").unwrap();
+        writeln!(out, "                            }}").unwrap();
+        writeln!(out, "                        }}").unwrap();
+        writeln!(out, "                        Err(err) => log_observer_error(\"deleted\", \"{model_key}\", &err),").unwrap();
+        writeln!(out, "                    }}").unwrap();
         writeln!(out, "                }}").unwrap();
         writeln!(out, "            }}").unwrap();
         writeln!(out, "        }}").unwrap();
@@ -1534,7 +1754,13 @@ fn render_restore_method(table: &str, col_ident: &str, skip_profiler: bool) -> S
     writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
     writeln!(out, "        for b in binds {{ q = bind_query(q, b); }}").unwrap();
     writeln!(out, "        let res = db.execute(q).await?;").unwrap();
-    out.push_str(&render_profiler_log(table, "UPDATE", "&sql", "&__profiler_binds", skip_profiler));
+    out.push_str(&render_profiler_log(
+        table,
+        "UPDATE",
+        "&sql",
+        "&__profiler_binds",
+        skip_profiler,
+    ));
     writeln!(out, "        Ok(res.rows_affected())").unwrap();
     writeln!(out, "    }}").unwrap();
     out
@@ -1656,7 +1882,11 @@ fn render_localized_setters(localized_fields: &[String], cfgs: &ConfigsFile) -> 
             "    pub fn {fn_name_input}(mut self, input: Option<localized::LocalizedInput>) -> Self {{"
         )
         .unwrap();
-        writeln!(out, "        let Some(input) = input else {{ return self; }};").unwrap();
+        writeln!(
+            out,
+            "        let Some(input) = input else {{ return self; }};"
+        )
+        .unwrap();
         writeln!(out, "        if input.is_empty() {{ return self; }}").unwrap();
         writeln!(out, "        let map = input.to_hashmap();").unwrap();
         writeln!(out, "        for (locale, val) in map {{").unwrap();
@@ -1737,7 +1967,11 @@ fn render_meta_setters(meta_fields: &[MetaFieldSpec]) -> String {
                 writeln!(out, "    }}").unwrap();
             }
             MetaType::Decimal => {
-                writeln!(out, "    pub fn {fn_name}(mut self, val: rust_decimal::Decimal) -> Self {{").unwrap();
+                writeln!(
+                    out,
+                    "    pub fn {fn_name}(mut self, val: rust_decimal::Decimal) -> Self {{"
+                )
+                .unwrap();
                 writeln!(
                     out,
                     "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val.to_string()));",
@@ -1853,10 +2087,7 @@ fn render_insert_attachment_setters(
 }
 
 fn is_incrementable_type(ty: &str) -> bool {
-    matches!(
-        ty,
-        "i16" | "i32" | "i64" | "f64" | "rust_decimal::Decimal"
-    )
+    matches!(ty, "i16" | "i32" | "i64" | "f64" | "rust_decimal::Decimal")
 }
 
 fn render_update_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> String {
@@ -2203,7 +2434,13 @@ fn render_profiler_start(skip: bool) -> String {
 /// Generate the profiler log block. `sql_var` is the variable name holding the SQL string,
 /// `binds_expr` is the expression for the bind values to display.
 /// When `skip` is true (model has `profile = false`), returns empty.
-fn render_profiler_log(table: &str, op: &str, sql_var: &str, binds_expr: &str, skip: bool) -> String {
+fn render_profiler_log(
+    table: &str,
+    op: &str,
+    sql_var: &str,
+    binds_expr: &str,
+    skip: bool,
+) -> String {
     if skip {
         return String::new();
     }
@@ -2373,7 +2610,12 @@ fn render_get_as_method(table: &str) -> String {
     out
 }
 
-fn render_count_method(has_soft_delete: bool, col_ident: &str, table: &str, skip_profiler: bool) -> String {
+fn render_count_method(
+    has_soft_delete: bool,
+    col_ident: &str,
+    table: &str,
+    skip_profiler: bool,
+) -> String {
     let mut out = String::new();
     writeln!(out, "    pub async fn count(self) -> Result<i64> {{").unwrap();
     writeln!(
@@ -2408,7 +2650,13 @@ fn render_count_method(has_soft_delete: bool, col_ident: &str, table: &str, skip
     )
     .unwrap();
     writeln!(out, "        let count = db.fetch_scalar(q).await?;").unwrap();
-    out.push_str(&render_profiler_log(table, "COUNT", "&sql", "&__profiler_binds", skip_profiler));
+    out.push_str(&render_profiler_log(
+        table,
+        "COUNT",
+        "&sql",
+        "&__profiler_binds",
+        skip_profiler,
+    ));
     writeln!(out, "        Ok(count)").unwrap();
     writeln!(out, "    }}\n").unwrap();
     out
@@ -2470,7 +2718,13 @@ fn render_pluck_ids_method(
     )
     .unwrap();
     writeln!(out, "        let ids = db.fetch_all_scalar(q).await?;").unwrap();
-    out.push_str(&render_profiler_log(table, "SELECT", "&sql", "&__profiler_binds", skip_profiler));
+    out.push_str(&render_profiler_log(
+        table,
+        "SELECT",
+        "&sql",
+        "&__profiler_binds",
+        skip_profiler,
+    ));
     writeln!(out, "        Ok(ids)").unwrap();
     writeln!(out, "    }}\n").unwrap();
     out
@@ -2519,7 +2773,13 @@ fn render_scalar_aggregate_method(
     .unwrap();
     writeln!(out, "        let result = db.fetch_scalar(q).await?;").unwrap();
     let op = method_name.to_uppercase();
-    out.push_str(&render_profiler_log(table, &op, "&sql", "&__profiler_binds", skip_profiler));
+    out.push_str(&render_profiler_log(
+        table,
+        &op,
+        "&sql",
+        "&__profiler_binds",
+        skip_profiler,
+    ));
     writeln!(out, "        Ok(result)").unwrap();
     writeln!(out, "    }}\n").unwrap();
     out
@@ -2585,7 +2845,13 @@ fn render_paginate_method(
         "        let total: i64 = db.fetch_scalar(count_q).await?;"
     )
     .unwrap();
-    out.push_str(&render_profiler_log(table, "COUNT", "&count_sql", "&__profiler_binds", skip_profiler));
+    out.push_str(&render_profiler_log(
+        table,
+        "COUNT",
+        "&count_sql",
+        "&__profiler_binds",
+        skip_profiler,
+    ));
     writeln!(
         out,
         "        let last_page = ((total + per_page - 1) / per_page).max(1);"
@@ -2634,7 +2900,13 @@ fn render_paginate_method(
     .unwrap();
     writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
     writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-    out.push_str(&render_profiler_log(table, "SELECT", "&sql", "&__profiler_binds", skip_profiler));
+    out.push_str(&render_profiler_log(
+        table,
+        "SELECT",
+        "&sql",
+        "&__profiler_binds",
+        skip_profiler,
+    ));
     if !relations.is_empty() {
         writeln!(
             out,
@@ -2778,7 +3050,13 @@ fn render_get_method(
     writeln!(out, "        for b in join_binds {{ q = bind(q, b); }}").unwrap();
     writeln!(out, "        for b in having_binds {{ q = bind(q, b); }}").unwrap();
     writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-    out.push_str(&render_profiler_log(table, "SELECT", "&sql", "&__profiler_binds", skip_profiler));
+    out.push_str(&render_profiler_log(
+        table,
+        "SELECT",
+        "&sql",
+        "&__profiler_binds",
+        skip_profiler,
+    ));
     if !relations.is_empty() {
         writeln!(
             out,
@@ -2830,7 +3108,7 @@ fn render_get_method(
 
 fn render_with_counts_method(
     model_title: &str,
-    view_ident: &str,
+    with_relations_ident: &str,
     has_many_rels: &[&RelationSpec],
     pk: &str,
 ) -> String {
@@ -2842,7 +3120,7 @@ fn render_with_counts_method(
     let rel_ident = format!("{}Rel", model_title);
     writeln!(
         out,
-        "    pub async fn with_counts(self, rels: &[{rel_ident}]) -> Result<(Vec<{view_ident}>, std::collections::HashMap<String, std::collections::HashMap<i64, i64>>)> {{"
+        "    pub async fn with_counts(self, rels: &[{rel_ident}]) -> Result<(Vec<{with_relations_ident}>, std::collections::HashMap<String, std::collections::HashMap<i64, i64>>)> {{"
     )
     .unwrap();
     writeln!(out, "        let db = self.db.clone();").unwrap();
@@ -2907,7 +3185,12 @@ fn render_with_counts_method(
     out
 }
 
-fn render_first_or_create_method(insert_ident: &str, model_title: &str, model_ident: &str, pk: &str) -> String {
+fn render_first_or_create_method(
+    insert_ident: &str,
+    model_title: &str,
+    model_ident: &str,
+    pk: &str,
+) -> String {
     let wr = format!("{model_title}WithRelations");
     let pk_snake = to_snake(pk);
     let mut out = String::new();
@@ -3008,7 +3291,12 @@ fn render_update_or_create_method(
     out
 }
 
-fn render_increment_method(col_ident: &str, table: &str, has_soft_delete: bool, skip_profiler: bool) -> String {
+fn render_increment_method(
+    col_ident: &str,
+    table: &str,
+    has_soft_delete: bool,
+    skip_profiler: bool,
+) -> String {
     let mut out = String::new();
     writeln!(
         out,
@@ -3042,7 +3330,13 @@ fn render_increment_method(col_ident: &str, table: &str, has_soft_delete: bool, 
     writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
     writeln!(out, "        for b in binds {{ q = bind_query(q, b); }}").unwrap();
     writeln!(out, "        let res = db.execute(q).await?;").unwrap();
-    out.push_str(&render_profiler_log(table, "UPDATE", "&sql", "&__profiler_binds", skip_profiler));
+    out.push_str(&render_profiler_log(
+        table,
+        "UPDATE",
+        "&sql",
+        "&__profiler_binds",
+        skip_profiler,
+    ));
     writeln!(out, "        Ok(res.rows_affected())").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
@@ -3094,6 +3388,9 @@ pub fn generate_models_with_options(
 
         let mut exports = vec![
             model_title.clone(),
+            format!("{model_title}CreateInput"),
+            format!("{model_title}UpdateChanges"),
+            format!("{model_title}Row"),
             format!("{model_title}View"),
             format!("{model_title}WithRelations"),
             format!("{model_title}Query"),
@@ -3146,6 +3443,7 @@ fn render_model(
     let model_title = to_title_case(&model_snake);
     let row_ident = format!("{}Row", model_title);
     let view_ident = format!("{}View", model_title);
+    let with_relations_ident = format!("{}WithRelations", model_title);
     let col_ident = format!("{}Col", model_title);
     let model_ident = model_title.clone();
     let query_ident = format!("{}Query", model_title);
@@ -3196,14 +3494,17 @@ fn render_model(
         .cloned()
         .filter(|f| !localized_set.contains(&f.name))
         .collect();
-    let enum_type_names: BTreeSet<String> = schema
+    let enum_specs: BTreeMap<String, EnumSpec> = schema
         .extra_sections
         .iter()
         .filter_map(|(name, section)| match section {
-            EnumOrOther::Enum(spec) if spec.type_name == "enum" => Some(name.clone()),
+            EnumOrOther::Enum(spec) if spec.type_name == "enum" => {
+                Some((name.clone(), spec.clone()))
+            }
             _ => None,
         })
         .collect();
+    let enum_type_names: BTreeSet<String> = enum_specs.keys().cloned().collect();
     let enum_explained_fields: Vec<EnumExplainedFieldSpec> = db_fields
         .iter()
         .filter_map(|field| enum_field_spec(&field.name, &field.ty, &enum_type_names))
@@ -3235,8 +3536,8 @@ fn render_model(
         );
     }
     let use_snowflake_id = !cfg.disable_id && id_strategy == "snowflake" && parent_pk_ty == "i64";
-    // Emit lifecycle hooks only for audit-enabled models with i64 PKs
-    let emit_hooks = cfg.audit && parent_pk_ty == "i64";
+    // Emit lifecycle hooks for observed models.
+    let emit_hooks = cfg.observe;
     // Skip profiler instrumentation for models with `profile = false`
     let skip_profiler = !cfg.profile;
     let has_created_at = fields.iter().any(|f| f.name == "created_at");
@@ -3332,7 +3633,7 @@ fn render_model(
     .unwrap();
     writeln!(
         imports,
-        "use crate::generated::models::common::{{Page, renumber_placeholders}};"
+        "use crate::generated::models::common::{{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders}};"
     )
     .unwrap();
     writeln!(
@@ -3353,7 +3654,7 @@ fn render_model(
         let mut imported_models = std::collections::BTreeSet::new();
         for rel in &relations {
             let target_mod = to_snake(&rel.target_model);
-            if imported_models.insert(target_mod.clone()) {
+            if target_mod != model_snake && imported_models.insert(target_mod.clone()) {
                 let target_title = to_title_case(&rel.target_model);
                 writeln!(
                     imports,
@@ -3366,7 +3667,7 @@ fn render_model(
         // Import column types for nested relation paths used in datatable filters
         for rel_path in &relation_paths {
             let target_mod = to_snake(&rel_path.target_model);
-            if imported_models.insert(target_mod.clone()) {
+            if target_mod != model_snake && imported_models.insert(target_mod.clone()) {
                 let target_title = to_title_case(&rel_path.target_model);
                 writeln!(
                     imports,
@@ -3376,52 +3677,6 @@ fn render_model(
                 .unwrap();
             }
         }
-    }
-    // Check if any field uses a custom type (not a built-in, no "::" in name)
-    let builtin_types = [
-        "i8",
-        "i16",
-        "i32",
-        "i64",
-        "u8",
-        "u16",
-        "u32",
-        "u64",
-        "f32",
-        "f64",
-        "rust_decimal::Decimal",
-        "bool",
-        "String",
-        "Vec",
-        "Option",
-        "uuid::Uuid",
-        "time::OffsetDateTime",
-    ];
-    let has_custom_types = db_fields.iter().any(|f| {
-        let ty = f.ty.trim();
-        if enum_type_names.contains(ty) {
-            return false;
-        }
-        if let Some(inner) = parse_option_inner_type(ty) {
-            if enum_type_names.contains(inner.as_str()) {
-                return false;
-            }
-        }
-        !ty.contains("::") && !builtin_types.iter().any(|b| ty.starts_with(b))
-    });
-    let has_custom_meta_types = meta_fields
-        .iter()
-        .any(|m| matches!(&m.ty, MetaType::Custom(ty) if !ty.contains("::")));
-    if options.include_extensions_imports && (has_custom_types || has_custom_meta_types) {
-        writeln!(imports, "use crate::extensions::{}::types::*;", model_snake).unwrap();
-    }
-    if options.include_extensions_imports && !computed_fields.is_empty() {
-        writeln!(
-            imports,
-            "use crate::extensions::{}::types::{}Computed;",
-            model_snake, model_title
-        )
-        .unwrap();
     }
     if !localized_fields.is_empty() {
         writeln!(
@@ -3461,7 +3716,38 @@ fn render_model(
     )
     .unwrap();
 
+    let create_input_struct_ident = create_input_ident(&model_title);
+    let update_changes_struct_ident = update_changes_ident(&model_title);
     let mut out = String::new();
+
+    if !cfg.helper_items.is_empty() {
+        writeln!(out, "{}", cfg.helper_items.join("\n")).unwrap();
+        writeln!(out).unwrap();
+    }
+
+    writeln!(
+        out,
+        "#[derive(Debug, Clone, Default, Serialize, Deserialize)]"
+    )
+    .unwrap();
+    writeln!(out, "#[doc(hidden)]").unwrap();
+    writeln!(out, "pub struct {create_input_struct_ident} {{").unwrap();
+    for f in &db_fields {
+        writeln!(out, "    pub {}: FieldInput<{}>,", f.name, f.ty).unwrap();
+    }
+    writeln!(out, "}}\n").unwrap();
+
+    writeln!(
+        out,
+        "#[derive(Debug, Clone, Default, Serialize, Deserialize)]"
+    )
+    .unwrap();
+    writeln!(out, "#[doc(hidden)]").unwrap();
+    writeln!(out, "pub struct {update_changes_struct_ident} {{").unwrap();
+    for f in &db_fields {
+        writeln!(out, "    pub {}: Option<FieldChange<{}>>,", f.name, f.ty).unwrap();
+    }
+    writeln!(out, "}}\n").unwrap();
 
     // Row
     writeln!(
@@ -3701,7 +3987,11 @@ fn render_model(
                 "    pub async fn {fn_upsert}<'a>(&self, db: DbConn<'a>, input: Option<localized::LocalizedInput>) -> Result<()> {{"
             )
             .unwrap();
-            writeln!(out, "        let Some(input) = input else {{ return Ok(()); }};").unwrap();
+            writeln!(
+                out,
+                "        let Some(input) = input else {{ return Ok(()); }};"
+            )
+            .unwrap();
             writeln!(out, "        if input.is_empty() {{ return Ok(()); }}").unwrap();
             writeln!(out, "        let map = input.to_hashmap();").unwrap();
             writeln!(
@@ -3728,6 +4018,10 @@ fn render_model(
         }
     }
     writeln!(out, "}}\n").unwrap();
+
+    if !cfg.view_impl_items.is_empty() {
+        out.push_str(&render_custom_impl_block(&view_ident, &cfg.view_impl_items));
+    }
 
     // Collection extensions for Vec<View>
     let views_ext_ident = format!("{}ViewsExt", model_title);
@@ -3989,17 +4283,40 @@ fn render_model(
     writeln!(out, "}}\n").unwrap();
 
     writeln!(out, "impl {model_title}WithRelations {{").unwrap();
-    writeln!(out, "    pub fn into_row(self) -> {view_ident} {{ self.row }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn into_row(self) -> {view_ident} {{ self.row }}"
+    )
+    .unwrap();
     writeln!(out, "}}\n").unwrap();
 
-    writeln!(out, "impl std::ops::Deref for {model_title}WithRelations {{").unwrap();
+    writeln!(
+        out,
+        "impl std::ops::Deref for {model_title}WithRelations {{"
+    )
+    .unwrap();
     writeln!(out, "    type Target = {view_ident};").unwrap();
     writeln!(out, "    fn deref(&self) -> &Self::Target {{ &self.row }}").unwrap();
     writeln!(out, "}}\n").unwrap();
 
-    writeln!(out, "impl std::ops::DerefMut for {model_title}WithRelations {{").unwrap();
-    writeln!(out, "    fn deref_mut(&mut self) -> &mut Self::Target {{ &mut self.row }}").unwrap();
+    writeln!(
+        out,
+        "impl std::ops::DerefMut for {model_title}WithRelations {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    fn deref_mut(&mut self) -> &mut Self::Target {{ &mut self.row }}"
+    )
+    .unwrap();
     writeln!(out, "}}\n").unwrap();
+
+    if !cfg.with_relations_impl_items.is_empty() {
+        out.push_str(&render_custom_impl_block(
+            &format!("{model_title}WithRelations"),
+            &cfg.with_relations_impl_items,
+        ));
+    }
 
     let row_view_json_section = out;
     let mut out = String::new();
@@ -4109,6 +4426,11 @@ fn render_model(
 
     writeln!(out, "impl<'db> {model_ident}<'db> {{").unwrap();
     writeln!(out, "    pub const TABLE: &'static str = \"{table}\";").unwrap();
+    writeln!(
+        out,
+        "    pub const MODEL_KEY: &'static str = \"{model_snake}\";"
+    )
+    .unwrap();
     writeln!(out, "    pub const PK: &'static str = \"{pk}\";").unwrap();
     writeln!(out, "    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self {{ Self {{ db: db.into(), base_url }} }}").unwrap();
     writeln!(
@@ -4165,11 +4487,9 @@ fn render_model(
         let fn_name = format!("load_{}", to_snake(&rel.name));
         let target_title = to_title_case(&rel.target_model);
         let target_row = format!("{}Row", target_title);
-        let is_fk_optional = fields
-            .iter()
-            .any(|f| f.name == rel.foreign_key && f.ty.starts_with("Option<"));
         match rel.kind {
             RelationKind::HasMany => {
+                let target_fk_optional = relation_target_field_is_optional(schema, rel);
                 writeln!(out, "    pub async fn {fn_name}(&self, parents: &[{row_ident}]) -> Result<HashMap<{parent_pk_ty}, Vec<{target_row}>>> {{").unwrap();
                 writeln!(
                     out,
@@ -4188,17 +4508,29 @@ fn render_model(
                 writeln!(out, "        let rows = self.db.fetch_all(q).await?;").unwrap();
                 writeln!(out, "        let mut map: HashMap<{parent_pk_ty}, Vec<{target_row}>> = HashMap::new();").unwrap();
                 writeln!(out, "        for row in rows {{").unwrap();
-                writeln!(
-                    out,
-                    "            map.entry(row.{fk}.clone()).or_default().push(row);",
-                    fk = rel.foreign_key
-                )
-                .unwrap();
+                if target_fk_optional {
+                    writeln!(
+                        out,
+                        "            if let Some(fk_val) = row.{fk}.clone() {{ map.entry(fk_val).or_default().push(row); }}",
+                        fk = rel.foreign_key
+                    )
+                    .unwrap();
+                } else {
+                    writeln!(
+                        out,
+                        "            map.entry(row.{fk}.clone()).or_default().push(row);",
+                        fk = rel.foreign_key
+                    )
+                    .unwrap();
+                }
                 writeln!(out, "        }}").unwrap();
                 writeln!(out, "        Ok(map)").unwrap();
                 writeln!(out, "    }}").unwrap();
             }
             RelationKind::BelongsTo => {
+                let is_fk_optional = fields
+                    .iter()
+                    .any(|f| f.name == rel.foreign_key && f.ty.starts_with("Option<"));
                 writeln!(out, "    pub async fn {fn_name}(&self, parents: &[{row_ident}]) -> Result<HashMap<{parent_pk_ty}, Option<{target_row}>>> {{").unwrap();
                 writeln!(
                     out,
@@ -4259,7 +4591,11 @@ fn render_model(
                 .unwrap();
                 writeln!(out, "        let mut out = HashMap::new();").unwrap();
                 writeln!(out, "        for (pid, fk) in parent_pairs {{").unwrap();
-                writeln!(out, "            out.insert(pid, fk.and_then(|k| by_pk.get(&k).cloned()));").unwrap();
+                writeln!(
+                    out,
+                    "            out.insert(pid, fk.and_then(|k| by_pk.get(&k).cloned()));"
+                )
+                .unwrap();
                 writeln!(out, "        }}").unwrap();
                 writeln!(out, "        Ok(out)").unwrap();
                 writeln!(out, "    }}").unwrap();
@@ -4434,7 +4770,12 @@ fn render_model(
         &pk,
     ));
 
-    out.push_str(&render_first_or_create_method(&insert_ident, &model_title, &model_ident, &pk));
+    out.push_str(&render_first_or_create_method(
+        &insert_ident,
+        &model_title,
+        &model_ident,
+        &pk,
+    ));
     out.push_str(&render_update_or_create_method(
         &update_ident,
         &insert_ident,
@@ -4450,7 +4791,12 @@ fn render_model(
     ));
     out.push_str(&render_decrement_method(&col_ident));
 
-    out.push_str(&render_count_method(has_soft_delete, &col_ident, &table, skip_profiler));
+    out.push_str(&render_count_method(
+        has_soft_delete,
+        &col_ident,
+        &table,
+        skip_profiler,
+    ));
 
     out.push_str(&render_pluck_ids_method(
         &parent_pk_ty,
@@ -4479,7 +4825,7 @@ fn render_model(
 
     out.push_str(&render_with_counts_method(
         &model_title,
-        &view_ident,
+        &with_relations_ident,
         &has_many_rels,
         &pk,
     ));
@@ -4530,7 +4876,16 @@ fn render_model(
 
     out.push_str(&render_to_sql_method(has_soft_delete, &col_ident, &table));
     out.push_str(&render_into_where_parts_method(&col_ident, has_soft_delete));
-    out.push_str(&render_delete_method(&table, &col_ident, has_soft_delete, emit_hooks, &row_ident, &to_snake(&pk), skip_profiler));
+    out.push_str(&render_delete_method(
+        &table,
+        &model_snake,
+        &col_ident,
+        has_soft_delete,
+        emit_hooks,
+        &row_ident,
+        &to_snake(&pk),
+        skip_profiler,
+    ));
     if has_soft_delete {
         out.push_str(&render_restore_method(&table, &col_ident, skip_profiler));
     }
@@ -4737,6 +5092,44 @@ fn render_model(
     writeln!(out, "        self").unwrap();
     writeln!(out, "    }}").unwrap();
 
+    writeln!(
+        out,
+        "    fn to_create_input(&self) -> Result<{create_input_struct_ident}> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut input = {create_input_struct_ident}::default();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        for (col, bind) in self.cols.iter().zip(self.binds.iter()) {{"
+    )
+    .unwrap();
+    writeln!(out, "            match col {{").unwrap();
+    for f in &db_fields {
+        let decode_expr = render_bind_decode_expr(&f.ty, "bind", &enum_specs);
+        writeln!(
+            out,
+            "                {col_ident}::{} => {{",
+            to_title_case(&f.name)
+        )
+        .unwrap();
+        writeln!(out, "                    let value = {decode_expr};").unwrap();
+        writeln!(
+            out,
+            "                    input.{} = FieldInput::Set(value);",
+            f.name
+        )
+        .unwrap();
+        writeln!(out, "                }}").unwrap();
+    }
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        Ok(input)").unwrap();
+    writeln!(out, "    }}").unwrap();
+
     let insert_builder_methods_section = out;
     let mut out = String::new();
 
@@ -4745,6 +5138,40 @@ fn render_model(
         "    pub async fn save(self) -> Result<{view_ident}> {{"
     )
     .unwrap();
+    if emit_hooks {
+        writeln!(
+            out,
+            "        let __create_input = if try_get_observer().is_some() {{"
+        )
+        .unwrap();
+        writeln!(out, "            Some(self.to_create_input()?)").unwrap();
+        writeln!(out, "        }} else {{").unwrap();
+        writeln!(out, "            None").unwrap();
+        writeln!(out, "        }};").unwrap();
+        writeln!(out, "        if let Some(observer) = try_get_observer() {{").unwrap();
+        writeln!(
+            out,
+            "            if let Some(create_input) = __create_input.as_ref() {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                let event = ModelEvent {{ model: \"{model_snake}\", table: \"{table}\", record_key: None }};"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                let data = serde_json::to_value(create_input)?;"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                observer.on_creating(&event, &data).await?;"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
     writeln!(out, "        let db_conn = self.db.clone();").unwrap();
     writeln!(out, "        match db_conn {{").unwrap();
     writeln!(out, "            DbConn::Pool(pool) => {{").unwrap();
@@ -4754,7 +5181,7 @@ fn render_model(
         "                let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));"
     )
     .unwrap();
-    writeln!(out, "                let view = {{").unwrap();
+    writeln!(out, "                let (view, row) = {{").unwrap();
     writeln!(
         out,
         "                    let db = DbConn::tx(tx_lock.clone());"
@@ -4772,39 +5199,97 @@ fn render_model(
     writeln!(out, "                    .into_inner();").unwrap();
     writeln!(out, "                tx.commit().await?;").unwrap();
     if emit_hooks {
-        writeln!(out, "                if let Some(observer) = try_get_observer() {{").unwrap();
-        writeln!(out, "                    let event = ModelEvent {{ table: \"{table}\", record_id: view.{pk} }};", pk = to_snake(&pk)).unwrap();
-        writeln!(out, "                    if let Ok(data) = serde_json::to_value(&view) {{").unwrap();
-        writeln!(out, "                        let _ = observer.on_created(&event, &data).await;").unwrap();
+        writeln!(
+            out,
+            "                if let Some(observer) = try_get_observer() {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                    let event = ModelEvent {{ model: \"{model_snake}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", row.{pk_snake})) }};",
+            pk_snake = to_snake(&pk)
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                    match serde_json::to_value(&row) {{"
+        )
+        .unwrap();
+        writeln!(out, "                        Ok(data) => {{").unwrap();
+        writeln!(
+            out,
+            "                            if let Err(err) = observer.on_created(&event, &data).await {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                                log_observer_error(\"created\", \"{model_snake}\", &err);"
+        )
+        .unwrap();
+        writeln!(out, "                            }}").unwrap();
+        writeln!(out, "                        }}").unwrap();
+        writeln!(
+            out,
+            "                        Err(err) => log_observer_error(\"created\", \"{model_snake}\", &err),"
+        )
+        .unwrap();
         writeln!(out, "                    }}").unwrap();
         writeln!(out, "                }}").unwrap();
     }
     writeln!(out, "                Ok(view)").unwrap();
     writeln!(out, "            }}").unwrap();
+    writeln!(out, "            DbConn::Tx(_) => {{").unwrap();
+    writeln!(
+        out,
+        "                let (view, row) = self.save_with_db(db_conn).await?;"
+    )
+    .unwrap();
     if emit_hooks {
-        writeln!(out, "            DbConn::Tx(_) => {{").unwrap();
-        writeln!(out, "                let view = self.save_with_db(db_conn).await?;").unwrap();
-        writeln!(out, "                if let Some(observer) = try_get_observer() {{").unwrap();
-        writeln!(out, "                    let event = ModelEvent {{ table: \"{table}\", record_id: view.{pk} }};", pk = to_snake(&pk)).unwrap();
-        writeln!(out, "                    if let Ok(data) = serde_json::to_value(&view) {{").unwrap();
-        writeln!(out, "                        let _ = observer.on_created(&event, &data).await;").unwrap();
-        writeln!(out, "                    }}").unwrap();
-        writeln!(out, "                }}").unwrap();
-        writeln!(out, "                Ok(view)").unwrap();
-        writeln!(out, "            }}").unwrap();
-    } else {
         writeln!(
             out,
-            "            DbConn::Tx(_) => self.save_with_db(db_conn).await,"
+            "                if let Some(observer) = try_get_observer() {{"
         )
         .unwrap();
+        writeln!(
+            out,
+            "                    let event = ModelEvent {{ model: \"{model_snake}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", row.{pk_snake})) }};",
+            pk_snake = to_snake(&pk)
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                    match serde_json::to_value(&row) {{"
+        )
+        .unwrap();
+        writeln!(out, "                        Ok(data) => {{").unwrap();
+        writeln!(
+            out,
+            "                            if let Err(err) = observer.on_created(&event, &data).await {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                                log_observer_error(\"created\", \"{model_snake}\", &err);"
+        )
+        .unwrap();
+        writeln!(out, "                            }}").unwrap();
+        writeln!(out, "                        }}").unwrap();
+        writeln!(
+            out,
+            "                        Err(err) => log_observer_error(\"created\", \"{model_snake}\", &err),"
+        )
+        .unwrap();
+        writeln!(out, "                    }}").unwrap();
+        writeln!(out, "                }}").unwrap();
     }
+    writeln!(out, "                Ok(view)").unwrap();
+    writeln!(out, "            }}").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
     writeln!(
         out,
-        "    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<{view_ident}> {{"
+        "    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<({view_ident}, {row_ident})> {{"
     )
     .unwrap();
     writeln!(out, "        let mut cols = self.cols;").unwrap();
@@ -4910,7 +5395,13 @@ fn render_model(
     writeln!(out, "            q = bind(q, b);").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "        let row = db.fetch_one(q).await?;").unwrap();
-    out.push_str(&render_profiler_log(&table, "INSERT", "&sql", "&__profiler_binds", skip_profiler));
+    out.push_str(&render_profiler_log(
+        &table,
+        "INSERT",
+        "&sql",
+        "&__profiler_binds",
+        skip_profiler,
+    ));
     if !localized_fields.is_empty() {
         writeln!(out, "        if !self.translations.is_empty() {{").unwrap();
         writeln!(
@@ -4996,29 +5487,30 @@ fn render_model(
         )
         .unwrap();
         match has_attachments {
-            true => writeln!(out, "        Ok(hydrate_view(row, &localized, &meta_map, &attachments, self.base_url.as_deref()))").unwrap(),
-            false => writeln!(out, "        Ok(hydrate_view(row, &localized, &meta_map, self.base_url.as_deref()))").unwrap(),
+            true => writeln!(out, "        let view = hydrate_view(row.clone(), &localized, &meta_map, &attachments, self.base_url.as_deref());").unwrap(),
+            false => writeln!(out, "        let view = hydrate_view(row.clone(), &localized, &meta_map, self.base_url.as_deref());").unwrap(),
         }
     } else {
         match has_attachments {
             true => writeln!(
                 out,
-                "        Ok(hydrate_view(row, &localized, &attachments, self.base_url.as_deref()))"
+                "        let view = hydrate_view(row.clone(), &localized, &attachments, self.base_url.as_deref());"
             )
             .unwrap(),
             false => {
                 if localized_fields.is_empty() {
-                    writeln!(out, "        Ok(hydrate_view(row, &LocalizedMap::default(), self.base_url.as_deref()))").unwrap();
+                    writeln!(out, "        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());").unwrap();
                 } else {
                     writeln!(
                         out,
-                        "        Ok(hydrate_view(row, &localized, self.base_url.as_deref()))"
+                        "        let view = hydrate_view(row.clone(), &localized, self.base_url.as_deref());"
                     )
                     .unwrap();
                 }
             }
         }
     }
+    writeln!(out, "        Ok((view, row))").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
 
@@ -5188,6 +5680,56 @@ fn render_model(
     writeln!(out, "        self").unwrap();
     writeln!(out, "    }}").unwrap();
 
+    writeln!(
+        out,
+        "    fn to_update_changes(&self) -> Result<{update_changes_struct_ident}> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let mut changes = {update_changes_struct_ident}::default();"
+    )
+    .unwrap();
+    writeln!(out, "        for (col, bind, mode) in &self.sets {{").unwrap();
+    writeln!(out, "            match col {{").unwrap();
+    for f in &db_fields {
+        let decode_expr = render_bind_decode_expr(&f.ty, "bind", &enum_specs);
+        writeln!(
+            out,
+            "                {col_ident}::{} => {{",
+            to_title_case(&f.name)
+        )
+        .unwrap();
+        writeln!(out, "                    let value = {decode_expr};").unwrap();
+        writeln!(
+            out,
+            "                    changes.{} = Some(match mode {{",
+            f.name
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                        SetMode::Assign => FieldChange::Assign(value),"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                        SetMode::Increment => FieldChange::Increment(value),"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                        SetMode::Decrement => FieldChange::Decrement(value),"
+        )
+        .unwrap();
+        writeln!(out, "                    }});").unwrap();
+        writeln!(out, "                }}").unwrap();
+    }
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        Ok(changes)").unwrap();
+    writeln!(out, "    }}").unwrap();
+
     let update_builder_methods_section = out;
     let mut out = String::new();
 
@@ -5202,6 +5744,17 @@ fn render_model(
         "        if self.where_sql.is_empty() {{ anyhow::bail!(\"update: no conditions set\"); }}"
     )
     .unwrap();
+    if emit_hooks {
+        writeln!(
+            out,
+            "        let observer_changes = if try_get_observer().is_some() {{"
+        )
+        .unwrap();
+        writeln!(out, "            Some(self.to_update_changes()?)").unwrap();
+        writeln!(out, "        }} else {{").unwrap();
+        writeln!(out, "            None").unwrap();
+        writeln!(out, "        }};").unwrap();
+    }
     writeln!(out, "        let db_conn = self.db.clone();").unwrap();
     writeln!(out, "        match db_conn {{").unwrap();
     writeln!(out, "            DbConn::Pool(pool) => {{").unwrap();
@@ -5217,7 +5770,19 @@ fn render_model(
         "                    let db = DbConn::tx(tx_lock.clone());"
     )
     .unwrap();
-    writeln!(out, "                    self.save_with_db(db).await?").unwrap();
+    if emit_hooks {
+        writeln!(
+            out,
+            "                    self.save_with_db(db, observer_changes.clone()).await?"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            out,
+            "                    self.save_with_db(db, None).await?"
+        )
+        .unwrap();
+    }
     writeln!(out, "                }};").unwrap();
     writeln!(
         out,
@@ -5232,7 +5797,12 @@ fn render_model(
     writeln!(out, "            }}").unwrap();
     writeln!(
         out,
-        "            DbConn::Tx(_) => self.save_with_db(db_conn).await,"
+        "            DbConn::Tx(_) => {tx_body},",
+        tx_body = if emit_hooks {
+            "self.save_with_db(db_conn, observer_changes).await"
+        } else {
+            "self.save_with_db(db_conn, None).await"
+        }
     )
     .unwrap();
     writeln!(out, "        }}").unwrap();
@@ -5240,7 +5810,7 @@ fn render_model(
     writeln!(out).unwrap();
     writeln!(
         out,
-        "    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<u64> {{"
+        "    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<{update_changes_struct_ident}>) -> Result<u64> {{"
     )
     .unwrap();
     writeln!(
@@ -5279,30 +5849,78 @@ fn render_model(
     .unwrap();
     if emit_hooks {
         let pk_snake = to_snake(&pk);
-        writeln!(out, "        let __observer_active = try_get_observer().is_some();").unwrap();
-        writeln!(out, "        let __old_rows_json: Vec<({parent_pk_ty}, serde_json::Value)> = if __observer_active && !target_ids.is_empty() {{").unwrap();
+        writeln!(
+            out,
+            "        let __observer_active = try_get_observer().is_some();"
+        )
+        .unwrap();
+        writeln!(out, "        let __old_rows: Vec<{row_ident}> = if __observer_active && !target_ids.is_empty() {{").unwrap();
         writeln!(out, "            let phs: Vec<String> = (1..=target_ids.len()).map(|i| format!(\"${{}}\", i)).collect();").unwrap();
         writeln!(out, "            let fetch_sql = format!(\"SELECT * FROM {table} WHERE {pk} IN ({{}})\", phs.join(\", \"));").unwrap();
-        writeln!(out, "            let mut fq = sqlx::query_as::<_, {row_ident}>(&fetch_sql);").unwrap();
-        writeln!(out, "            for id in &target_ids {{ fq = fq.bind(id); }}").unwrap();
-        writeln!(out, "            let rows: Vec<{row_ident}> = db.fetch_all(fq).await.unwrap_or_default();").unwrap();
-        writeln!(out, "            rows.into_iter().map(|r| (r.{pk_snake}, serde_json::to_value(&r).unwrap_or_default())).collect()").unwrap();
+        writeln!(
+            out,
+            "            let mut fq = sqlx::query_as::<_, {row_ident}>(&fetch_sql);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            for id in &target_ids {{ fq = fq.bind(id); }}"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            let rows: Vec<{row_ident}> = db.fetch_all(fq).await.unwrap_or_default();"
+        )
+        .unwrap();
+        writeln!(out, "            rows").unwrap();
         writeln!(out, "        }} else {{").unwrap();
         writeln!(out, "            Vec::new()").unwrap();
         writeln!(out, "        }};").unwrap();
+        writeln!(out, "        if !__old_rows.is_empty() {{").unwrap();
+        writeln!(
+            out,
+            "            if let Some(observer) = try_get_observer() {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                if let Some(changes) = observer_changes.as_ref() {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                    let changes_data = serde_json::to_value(changes)?;"
+        )
+        .unwrap();
+        writeln!(out, "                    for old_row in &__old_rows {{").unwrap();
+        writeln!(
+            out,
+            "                        let old_data = serde_json::to_value(old_row)?;"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                        let event = ModelEvent {{ model: \"{model_snake}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", old_row.{pk_snake})) }};"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                        observer.on_updating(&event, &old_data, &changes_data).await?;"
+        )
+        .unwrap();
+        writeln!(out, "                    }}").unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "        }}").unwrap();
     }
     writeln!(out, "        let mut parts: Vec<String> = Vec::new();").unwrap();
-    writeln!(out, "        for (i, (c, mode)) in cols.iter().zip(set_modes.iter()).enumerate() {{").unwrap();
     writeln!(
         out,
-        "            let col = c.as_sql();"
+        "        for (i, (c, mode)) in cols.iter().zip(set_modes.iter()).enumerate() {{"
     )
     .unwrap();
-    writeln!(
-        out,
-        "            let part = match mode {{"
-    )
-    .unwrap();
+    writeln!(out, "            let col = c.as_sql();").unwrap();
+    writeln!(out, "            let part = match mode {{").unwrap();
     writeln!(
         out,
         "                SetMode::Assign => format!(\"{{}} = ${{}}\", col, i + 1),"
@@ -5318,16 +5936,8 @@ fn render_model(
         "                SetMode::Decrement => format!(\"{{}} = {{}} - ${{}}\", col, col, i + 1),"
     )
     .unwrap();
-    writeln!(
-        out,
-        "            }};"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            parts.push(part);"
-    )
-    .unwrap();
+    writeln!(out, "            }};").unwrap();
+    writeln!(out, "            parts.push(part);").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "        let offset = parts.len();").unwrap();
     writeln!(out, "        let mut where_sql = self.where_sql;").unwrap();
@@ -5418,7 +6028,13 @@ fn render_model(
     )
     .unwrap();
     writeln!(out, "        let res = db.execute(q).await?;").unwrap();
-    out.push_str(&render_profiler_log(&table, "UPDATE", "&sql", "&__profiler_binds", skip_profiler));
+    out.push_str(&render_profiler_log(
+        &table,
+        "UPDATE",
+        "&sql",
+        "&__profiler_binds",
+        skip_profiler,
+    ));
     if !localized_fields.is_empty() {
         writeln!(out, "        if res.rows_affected() > 0 && !self.translations.is_empty() && !target_ids.is_empty() {{").unwrap();
         writeln!(
@@ -5501,15 +6117,37 @@ fn render_model(
         writeln!(out, "        }}").unwrap();
     }
     if emit_hooks {
-        writeln!(out, "        if !__old_rows_json.is_empty() && res.rows_affected() > 0 {{").unwrap();
-        writeln!(out, "            if let Some(observer) = try_get_observer() {{").unwrap();
-        writeln!(out, "                for (record_id, old_data) in &__old_rows_json {{").unwrap();
+        let pk_snake = to_snake(&pk);
+        writeln!(
+            out,
+            "        if !__old_rows.is_empty() && res.rows_affected() > 0 {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            if let Some(observer) = try_get_observer() {{"
+        )
+        .unwrap();
+        writeln!(out, "                for old_row in &__old_rows {{").unwrap();
         writeln!(out, "                    let fetch_sql = format!(\"SELECT * FROM {table} WHERE {pk} = $1\");").unwrap();
-        writeln!(out, "                    if let Ok(Some(new_row)) = db.fetch_optional(sqlx::query_as::<_, {row_ident}>(&fetch_sql).bind(record_id)).await {{").unwrap();
-        writeln!(out, "                        if let Ok(new_data) = serde_json::to_value(&new_row) {{").unwrap();
-        writeln!(out, "                            let event = ModelEvent {{ table: \"{table}\", record_id: *record_id }};").unwrap();
-        writeln!(out, "                            let _ = observer.on_updated(&event, old_data, &new_data).await;").unwrap();
+        writeln!(out, "                    match db.fetch_optional(sqlx::query_as::<_, {row_ident}>(&fetch_sql).bind(old_row.{pk_snake}.clone())).await {{").unwrap();
+        writeln!(out, "                        Ok(Some(new_row)) => {{").unwrap();
+        writeln!(out, "                            match (serde_json::to_value(old_row), serde_json::to_value(&new_row)) {{").unwrap();
+        writeln!(
+            out,
+            "                                (Ok(old_data), Ok(new_data)) => {{"
+        )
+        .unwrap();
+        writeln!(out, "                                    let event = ModelEvent {{ model: \"{model_snake}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", old_row.{pk_snake})) }};").unwrap();
+        writeln!(out, "                                    if let Err(err) = observer.on_updated(&event, &old_data, &new_data).await {{").unwrap();
+        writeln!(out, "                                        log_observer_error(\"updated\", \"{model_snake}\", &err);").unwrap();
+        writeln!(out, "                                    }}").unwrap();
+        writeln!(out, "                                }}").unwrap();
+        writeln!(out, "                                (Err(err), _) | (_, Err(err)) => log_observer_error(\"updated\", \"{model_snake}\", &err),").unwrap();
+        writeln!(out, "                            }}").unwrap();
         writeln!(out, "                        }}").unwrap();
+        writeln!(out, "                        Ok(None) => {{}}").unwrap();
+        writeln!(out, "                        Err(err) => log_observer_error(\"updated\", \"{model_snake}\", &err),").unwrap();
         writeln!(out, "                    }}").unwrap();
         writeln!(out, "                }}").unwrap();
         writeln!(out, "            }}").unwrap();
@@ -5709,7 +6347,9 @@ fn render_model(
                 "u64" => format!("{raw}.trim().parse::<u64>().ok().map(|v| (v as i64).into())"),
                 "f32" => format!("{raw}.trim().parse::<f32>().ok().map(|v| (v as f64).into())"),
                 "f64" => format!("{raw}.trim().parse::<f64>().ok().map(Into::into)"),
-                "rust_decimal::Decimal" => format!("{raw}.trim().parse::<rust_decimal::Decimal>().ok().map(Into::into)"),
+                "rust_decimal::Decimal" => {
+                    format!("{raw}.trim().parse::<rust_decimal::Decimal>().ok().map(Into::into)")
+                }
                 "uuid::Uuid" => format!("uuid::Uuid::parse_str({raw}.trim()).ok().map(Into::into)"),
                 "time::OffsetDateTime" => {
                     format!("Self::parse_datetime({raw}.trim(), false).map(Into::into)")
@@ -6912,4 +7552,33 @@ fn render_model(
 
 fn generate_common() -> String {
     render_template("models/common.rs.tpl", &TemplateContext::new()).unwrap()
+}
+
+fn render_custom_impl_block(target_ident: &str, items: &[String]) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    writeln!(out, "impl {target_ident} {{").unwrap();
+    for item in items {
+        writeln!(out, "{}", indent_generated_block(item, 4)).unwrap();
+    }
+    writeln!(out, "}}\n").unwrap();
+    out
+}
+
+fn indent_generated_block(block: &str, spaces: usize) -> String {
+    let indent = " ".repeat(spaces);
+    block
+        .lines()
+        .map(|line| {
+            if line.trim().is_empty() {
+                String::new()
+            } else {
+                format!("{indent}{line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

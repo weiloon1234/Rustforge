@@ -5,15 +5,7 @@ use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
-use generated::{
-    models::{
-        CreditTransactionType, CreditType, UserCreditTransactionDataTable,
-        UserCreditTransactionDataTableHooks, UserCreditTransactionQuery, UserCol,
-    },
-    permissions::Permission,
-};
-
-use crate::internal::extensions::user_credit_transaction::UserCreditTransactionViewExt;
+use generated::{models::*, permissions::Permission};
 
 use crate::contracts::datatable::admin::user_credit_transaction::{
     AdminUserCreditTransactionDataTableContract, ROUTE_PREFIX, SCOPED_KEY,

@@ -89,7 +89,7 @@ fn generator_outputs_match_checked_in_fixtures() {
     .expect("failed to load config fixture");
     let parsed_schema = schema::load(
         inputs
-            .join("schemas")
+            .join("models")
             .to_str()
             .expect("schema fixture path should be valid utf-8"),
     )
