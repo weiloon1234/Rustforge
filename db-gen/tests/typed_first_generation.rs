@@ -229,6 +229,44 @@ fn framework_models_load_from_core_db_single_source_of_truth() {
 }
 
 #[test]
+fn framework_models_only_generate_explicit_timestamp_fields() {
+    let root = temp_dir("framework_explicit_timestamps");
+    let out_dir = root.join("out");
+    fs::create_dir_all(&out_dir).expect("failed to create out dir");
+    write_basic_configs(&root, &["en"]);
+
+    let framework_paths = schema::framework_model_source_paths_from_core_db();
+    let parsed_schema = schema::load_framework_from_paths(&framework_paths)
+        .expect("failed to load framework model sources");
+    let (cfgs, _) = config::load(
+        root.join("configs.toml")
+            .to_str()
+            .expect("configs path should be valid utf-8"),
+    )
+    .expect("failed to load config");
+
+    generate_enums(&parsed_schema, &out_dir).expect("enum generation should succeed");
+    generate_models(&parsed_schema, &cfgs, &out_dir).expect("model generation should succeed");
+
+    let outbox_rs =
+        fs::read_to_string(out_dir.join("outbox_job.rs")).expect("outbox_job.rs should exist");
+    let failed_rs =
+        fs::read_to_string(out_dir.join("failed_job.rs")).expect("failed_job.rs should exist");
+    let request_rs = fs::read_to_string(out_dir.join("sql_profiler_request.rs"))
+        .expect("sql_profiler_request.rs should exist");
+
+    assert!(outbox_rs.contains("pub created_at: time::OffsetDateTime,"));
+    assert!(!outbox_rs.contains("updated_at"));
+    assert!(failed_rs.contains("pub failed_at: time::OffsetDateTime,"));
+    assert!(!failed_rs.contains("created_at"));
+    assert!(!failed_rs.contains("updated_at"));
+    assert!(request_rs.contains("pub created_at: time::OffsetDateTime,"));
+    assert!(!request_rs.contains("updated_at"));
+
+    fs::remove_dir_all(root).expect("failed to remove temp dir");
+}
+
+#[test]
 fn generated_models_support_nested_relation_filter_paths() {
     let root = temp_dir("nested_rel_filters");
     let models_dir = root.join("models");

@@ -1351,26 +1351,6 @@ pub fn parse_fields(cfg: &ModelSpec, pk: &str) -> Vec<FieldSpec> {
         seen.insert(pk.to_string());
     }
 
-    if !cfg.disable_timestamps {
-        if !seen.contains("created_at") {
-            out.push(FieldSpec {
-                name: "created_at".into(),
-                ty: "time::OffsetDateTime".into(),
-                serde_attr: Some("#[serde(with = \"time::serde::rfc3339\")]"),
-                special_type: None,
-            });
-            seen.insert("created_at".into());
-        }
-        if !seen.contains("updated_at") {
-            out.push(FieldSpec {
-                name: "updated_at".into(),
-                ty: "time::OffsetDateTime".into(),
-                serde_attr: Some("#[serde(with = \"time::serde::rfc3339\")]"),
-                special_type: None,
-            });
-        }
-    }
-
     if cfg.soft_delete && !seen.contains("deleted_at") {
         out.push(FieldSpec {
             name: "deleted_at".into(),

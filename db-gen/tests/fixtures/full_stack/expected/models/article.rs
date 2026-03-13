@@ -23,8 +23,8 @@ use crate::generated::models::profile::{ProfileCol, ProfileQuery, ProfileRow};
 use crate::generated::localized::LocalizedMapHelper;
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
-const HAS_CREATED_AT: bool = true;
-const HAS_UPDATED_AT: bool = true;
+const HAS_CREATED_AT: bool = false;
+const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
@@ -33,8 +33,6 @@ pub struct ArticleCreateInput {
     pub author_id: FieldInput<i64>,
     pub status: FieldInput<ArticleStatus>,
     pub is_system: FieldInput<ArticleSystemFlag>,
-    pub created_at: FieldInput<time::OffsetDateTime>,
-    pub updated_at: FieldInput<time::OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -44,8 +42,6 @@ pub struct ArticleUpdateChanges {
     pub author_id: Option<FieldChange<i64>>,
     pub status: Option<FieldChange<ArticleStatus>>,
     pub is_system: Option<FieldChange<ArticleSystemFlag>>,
-    pub created_at: Option<FieldChange<time::OffsetDateTime>>,
-    pub updated_at: Option<FieldChange<time::OffsetDateTime>>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, JsonSchema)]
@@ -55,12 +51,6 @@ pub struct ArticleRow {
     pub author_id: i64,
     pub status: ArticleStatus,
     pub is_system: ArticleSystemFlag,
-    #[serde(with = "time::serde::rfc3339")]
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339")]
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -69,10 +59,6 @@ pub struct ArticleView {
     pub author_id: i64,
     pub status: ArticleStatus,
     pub is_system: ArticleSystemFlag,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
     pub status_explained: String,
     pub is_system_explained: String,
     pub title: Option<String>,
@@ -95,8 +81,6 @@ impl ArticleView {
             author_id: self.author_id.clone(),
             status: self.status.clone(),
             is_system: self.is_system.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
             status_explained: self.status_explained.clone(),
             is_system_explained: self.is_system_explained.clone(),
             title: self.title.clone(),
@@ -140,10 +124,6 @@ pub struct ArticleJson {
     pub author_id: i64,
     pub status: ArticleStatus,
     pub is_system: ArticleSystemFlag,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
     pub status_explained: String,
     pub is_system_explained: String,
     pub title: Option<String>,
@@ -160,8 +140,6 @@ fn hydrate_view(row: ArticleRow, loc: &LocalizedMap, meta: &MetaMap, attachments
         author_id: row.author_id,
         status: row.status,
         is_system: row.is_system,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
         status_explained: row.status.explained_label(),
         is_system_explained: row.is_system.explained_label(),
         title: None,
@@ -208,13 +186,11 @@ pub enum ArticleCol {
     AuthorId,
     Status,
     IsSystem,
-    CreatedAt,
-    UpdatedAt,
 }
 
 impl ArticleCol {
     pub const fn all() -> &'static [ArticleCol] {
-        &[ArticleCol::Id, ArticleCol::AuthorId, ArticleCol::Status, ArticleCol::IsSystem, ArticleCol::CreatedAt, ArticleCol::UpdatedAt]
+        &[ArticleCol::Id, ArticleCol::AuthorId, ArticleCol::Status, ArticleCol::IsSystem]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
@@ -222,8 +198,6 @@ impl ArticleCol {
             ArticleCol::AuthorId => "author_id",
             ArticleCol::Status => "status",
             ArticleCol::IsSystem => "is_system",
-            ArticleCol::CreatedAt => "created_at",
-            ArticleCol::UpdatedAt => "updated_at",
         }
     }
 }
@@ -297,7 +271,7 @@ pub struct ArticleQuery<'db> {
 
 impl<'db> ArticleQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, author_id, status, is_system, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
+        Self { db, base_url, select_sql: Some("id, author_id, status, is_system".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
     pub fn unsafe_sql(self) -> ArticleUnsafeQuery<'db> { ArticleUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
@@ -345,30 +319,6 @@ impl<'db> ArticleQuery<'db> {
     pub fn where_is_system_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", ArticleCol::IsSystem.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -492,10 +442,10 @@ impl<'db> ArticleQuery<'db> {
     }
     pub fn select_cols(mut self, cols: &[ArticleCol]) -> Self {
         if cols.is_empty() {
-            self.select_sql = Some("id, author_id, status, is_system, created_at, updated_at".to_string());
+            self.select_sql = Some("id, author_id, status, is_system".to_string());
         } else {
             let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, author_id, status, is_system, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect();
+            let mut list: Vec<String> = "id, author_id, status, is_system".split(',').map(|s| s.trim().to_string()).collect();
             for s in &list { seen.insert(s.clone()); }
             for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
             self.select_sql = Some(list.join(", "));
@@ -506,7 +456,7 @@ impl<'db> ArticleQuery<'db> {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, author_id, status, is_system, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect(),
+            _ => "id, author_id, status, is_system".split(',').map(|s| s.trim().to_string()).collect(),
         };
         for s in &list { seen.insert(s.clone()); }
         for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
@@ -516,16 +466,16 @@ impl<'db> ArticleQuery<'db> {
     fn select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() {
-            self.select_sql = Some("id, author_id, status, is_system, created_at, updated_at".to_string());
+            self.select_sql = Some("id, author_id, status, is_system".to_string());
         } else {
-            self.select_sql = Some(format!("id, author_id, status, is_system, created_at, updated_at, {}", s));
+            self.select_sql = Some(format!("id, author_id, status, is_system, {}", s));
         }
         self
     }
     fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, author_id, status, is_system, created_at, updated_at".to_string());
+        let mut base = self.select_sql.take().unwrap_or_else(|| "id, author_id, status, is_system".to_string());
         if !base.is_empty() { base.push_str(", "); }
         base.push_str(&s);
         self.select_sql = Some(base);
@@ -971,11 +921,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(ArticleCol::CreatedAt, OrderDir::Desc)
+        self.order_by(ArticleCol::Id, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(ArticleCol::CreatedAt, OrderDir::Asc)
+        self.order_by(ArticleCol::Id, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -1350,16 +1300,6 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.push(val.into());
         self
     }
-    pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(ArticleCol::CreatedAt);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(ArticleCol::UpdatedAt);
-        self.binds.push(val.into());
-        self
-    }
     pub fn set_title_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
         self.translations.entry("title").or_default().insert(locale.into(), val.into());
         self
@@ -1448,20 +1388,6 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.is_system = FieldInput::Set(value);
                 }
-                ArticleCol::CreatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    input.created_at = FieldInput::Set(value);
-                }
-                ArticleCol::UpdatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    input.updated_at = FieldInput::Set(value);
-                }
             }
         }
         Ok(input)
@@ -1531,16 +1457,6 @@ pub async fn save(self) -> Result<ArticleView> {
         if !cols.iter().any(|c| matches!(c, ArticleCol::Id)) {
             cols.push(ArticleCol::Id);
             binds.push(generate_snowflake_i64().into());
-        }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, ArticleCol::CreatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(ArticleCol::CreatedAt);
-            binds.push(now.into());
-        }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, ArticleCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(ArticleCol::UpdatedAt);
-            binds.push(now.into());
         }
         if cols.is_empty() {
             anyhow::bail!("insert: no columns set");
@@ -1668,14 +1584,6 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.sets.push((ArticleCol::IsSystem, val.into(), SetMode::Assign));
         self
     }
-    pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((ArticleCol::CreatedAt, val.into(), SetMode::Assign));
-        self
-    }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((ArticleCol::UpdatedAt, val.into(), SetMode::Assign));
-        self
-    }
     pub fn set_title_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
         self.translations.entry("title").or_default().insert(locale.into(), val.into());
         self
@@ -1735,18 +1643,6 @@ pub fn set_id(mut self, val: i64) -> Self {
     pub fn where_is_system(mut self, op: Op, val: ArticleSystemFlag) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", ArticleCol::IsSystem.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -1829,28 +1725,6 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                ArticleCol::CreatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    changes.created_at = Some(match mode {
-                        SetMode::Assign => FieldChange::Assign(value),
-                        SetMode::Increment => FieldChange::Increment(value),
-                        SetMode::Decrement => FieldChange::Decrement(value),
-                    });
-                }
-                ArticleCol::UpdatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    changes.updated_at = Some(match mode {
-                        SetMode::Assign => FieldChange::Assign(value),
-                        SetMode::Increment => FieldChange::Increment(value),
-                        SetMode::Decrement => FieldChange::Decrement(value),
-                    });
-                }
             }
         }
         Ok(changes)
@@ -1889,12 +1763,6 @@ pub async fn save(self) -> Result<u64> {
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, ArticleCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(ArticleCol::UpdatedAt);
-            set_binds.push(now.into());
-            set_modes.push(SetMode::Assign);
-        }
         // find target ids for localized updates
         let select_sql = format!("SELECT id FROM articles WHERE {}", self.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
@@ -2035,8 +1903,6 @@ impl ArticleTableAdapter {
             "author_id" => Some(ArticleCol::AuthorId),
             "status" => Some(ArticleCol::Status),
             "is_system" => Some(ArticleCol::IsSystem),
-            "created_at" => Some(ArticleCol::CreatedAt),
-            "updated_at" => Some(ArticleCol::UpdatedAt),
             _ => None,
         }
     }
@@ -2063,8 +1929,6 @@ impl ArticleTableAdapter {
             "author_id" => raw.trim().parse::<i64>().ok().map(Into::into),
             "status" => Some(Self::parse_bind(raw.trim())),
             "is_system" => Some(Self::parse_bind(raw.trim())),
-            "created_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            "updated_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             _ => None,
         }
     }
@@ -2073,11 +1937,7 @@ impl ArticleTableAdapter {
             ("author", "id") => raw.trim().parse::<i64>().ok().map(Into::into),
             ("author", "name") => Some(raw.trim().to_string().into()),
             ("author", "profile_id") => raw.trim().parse::<i64>().ok().map(Into::into),
-            ("author", "created_at") => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            ("author", "updated_at") => Self::parse_datetime(raw.trim(), false).map(Into::into),
             ("author__profile", "id") => raw.trim().parse::<i64>().ok().map(Into::into),
-            ("author__profile", "created_at") => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            ("author__profile", "updated_at") => Self::parse_datetime(raw.trim(), false).map(Into::into),
             _ => None,
         }
     }
@@ -2106,16 +1966,14 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
     type Query<'db> = ArticleQuery<'db>;
     type Row = ArticleWithRelations;
     fn model_key(&self) -> &'static str { "Article" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "author_id", "status", "is_system", "created_at", "updated_at"] }
-    fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at"] }
+    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "author_id", "status", "is_system"] }
+    fn timestamp_columns(&self) -> &'static [&'static str] { &[] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
         &[
             DataTableColumnDescriptor { name: "id", label: "ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "author_id", label: "Author ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "status", label: "Status", data_type: "ArticleStatus", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "is_system", label: "Is System", data_type: "ArticleSystemFlag", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "created_at", label: "Created At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
-            DataTableColumnDescriptor { name: "updated_at", label: "Updated At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
             DataTableColumnDescriptor { name: "title", label: "Title", data_type: "String", sortable: false, localized: true, filter_ops: &["locale_eq", "locale_like"] },
         ]
     }
@@ -2124,11 +1982,7 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
             DataTableRelationColumnDescriptor { relation: "author", column: "id", data_type: "i64", filter_ops: &["has_eq"] },
             DataTableRelationColumnDescriptor { relation: "author", column: "name", data_type: "String", filter_ops: &["has_eq", "has_like"] },
             DataTableRelationColumnDescriptor { relation: "author", column: "profile_id", data_type: "i64", filter_ops: &["has_eq"] },
-            DataTableRelationColumnDescriptor { relation: "author", column: "created_at", data_type: "time::OffsetDateTime", filter_ops: &["has_eq"] },
-            DataTableRelationColumnDescriptor { relation: "author", column: "updated_at", data_type: "time::OffsetDateTime", filter_ops: &["has_eq"] },
             DataTableRelationColumnDescriptor { relation: "author__profile", column: "id", data_type: "i64", filter_ops: &["has_eq"] },
-            DataTableRelationColumnDescriptor { relation: "author__profile", column: "created_at", data_type: "time::OffsetDateTime", filter_ops: &["has_eq"] },
-            DataTableRelationColumnDescriptor { relation: "author__profile", column: "updated_at", data_type: "time::OffsetDateTime", filter_ops: &["has_eq"] },
             DataTableRelationColumnDescriptor { relation: "author__profile", column: "display_name", data_type: "String", filter_ops: &["locale_has_eq", "locale_has_like"] },
         ]
     }
@@ -2228,11 +2082,7 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
                     ("author", "id") => { let Some(bind) = Self::parse_bind_for_relation("author", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_author(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))) },
                     ("author", "name") => { let Some(bind) = Self::parse_bind_for_relation("author", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_author(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))) },
                     ("author", "profile_id") => { let Some(bind) = Self::parse_bind_for_relation("author", "profile_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_author(|rq| rq.where_col(UserCol::ProfileId, Op::Eq, bind)))) },
-                    ("author", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("author", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_author(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))) },
-                    ("author", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("author", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_author(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))) },
                     ("author__profile", "id") => { let Some(bind) = Self::parse_bind_for_relation("author__profile", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_author(|rq| rq.where_has_profile(|rq| rq.where_col(ProfileCol::Id, Op::Eq, bind))))) },
-                    ("author__profile", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("author__profile", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_author(|rq| rq.where_has_profile(|rq| rq.where_col(ProfileCol::CreatedAt, Op::Eq, bind))))) },
-                    ("author__profile", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("author__profile", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_author(|rq| rq.where_has_profile(|rq| rq.where_col(ProfileCol::UpdatedAt, Op::Eq, bind))))) },
                     _ => Ok(None),
                 }
             }
@@ -2269,8 +2119,6 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
             "author_id" => query.order_by(ArticleCol::AuthorId, dir),
             "status" => query.order_by(ArticleCol::Status, dir),
             "is_system" => query.order_by(ArticleCol::IsSystem, dir),
-            "created_at" => query.order_by(ArticleCol::CreatedAt, dir),
-            "updated_at" => query.order_by(ArticleCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
@@ -2285,8 +2133,6 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
         match column {
             "id" => Some(row.id.to_string()),
             "author_id" => Some(row.author_id.to_string()),
-            "created_at" => row.created_at.format(&time::format_description::well_known::Rfc3339).ok(),
-            "updated_at" => row.updated_at.format(&time::format_description::well_known::Rfc3339).ok(),
             _ => None,
         }
     }
@@ -2312,7 +2158,7 @@ impl Default for ArticleDataTableConfig {
             default_sorting_column: "id",
             default_sorted: SortDirection::Desc,
             default_export_ignore_columns: &["actions", "action"],
-            default_timestamp_columns: &["created_at", "updated_at"],
+            default_timestamp_columns: &[],
             default_unsortable: &[],
             default_row_per_page: None,
         }

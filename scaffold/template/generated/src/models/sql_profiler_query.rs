@@ -12,7 +12,7 @@ use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
 use core_db::common::collection::TypedCollectionExt;
 const HAS_CREATED_AT: bool = true;
-const HAS_UPDATED_AT: bool = true;
+const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
@@ -25,7 +25,6 @@ pub struct SqlProfilerQueryCreateInput {
     pub binds: FieldInput<String>,
     pub duration_us: FieldInput<i64>,
     pub created_at: FieldInput<time::OffsetDateTime>,
-    pub updated_at: FieldInput<time::OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -39,7 +38,6 @@ pub struct SqlProfilerQueryUpdateChanges {
     pub binds: Option<FieldChange<String>>,
     pub duration_us: Option<FieldChange<i64>>,
     pub created_at: Option<FieldChange<time::OffsetDateTime>>,
-    pub updated_at: Option<FieldChange<time::OffsetDateTime>>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, JsonSchema)]
@@ -55,9 +53,6 @@ pub struct SqlProfilerQueryRow {
     #[serde(with = "time::serde::rfc3339")]
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339")]
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -71,8 +66,6 @@ pub struct SqlProfilerQueryView {
     pub duration_us: i64,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 impl SqlProfilerQueryView {
@@ -92,7 +85,6 @@ impl SqlProfilerQueryView {
             binds: self.binds.clone(),
             duration_us: self.duration_us.clone(),
             created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
         }
     }
 }
@@ -123,8 +115,6 @@ pub struct SqlProfilerQueryJson {
     pub duration_us: i64,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 fn hydrate_view(row: SqlProfilerQueryRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> SqlProfilerQueryView {
@@ -137,7 +127,6 @@ fn hydrate_view(row: SqlProfilerQueryRow, _loc: &LocalizedMap, _base_url: Option
         binds: row.binds,
         duration_us: row.duration_us,
         created_at: row.created_at,
-        updated_at: row.updated_at,
     };
     view
 }
@@ -172,12 +161,11 @@ pub enum SqlProfilerQueryCol {
     Binds,
     DurationUs,
     CreatedAt,
-    UpdatedAt,
 }
 
 impl SqlProfilerQueryCol {
     pub const fn all() -> &'static [SqlProfilerQueryCol] {
-        &[SqlProfilerQueryCol::Id, SqlProfilerQueryCol::RequestId, SqlProfilerQueryCol::TableName, SqlProfilerQueryCol::Operation, SqlProfilerQueryCol::Sql, SqlProfilerQueryCol::Binds, SqlProfilerQueryCol::DurationUs, SqlProfilerQueryCol::CreatedAt, SqlProfilerQueryCol::UpdatedAt]
+        &[SqlProfilerQueryCol::Id, SqlProfilerQueryCol::RequestId, SqlProfilerQueryCol::TableName, SqlProfilerQueryCol::Operation, SqlProfilerQueryCol::Sql, SqlProfilerQueryCol::Binds, SqlProfilerQueryCol::DurationUs, SqlProfilerQueryCol::CreatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
@@ -189,7 +177,6 @@ impl SqlProfilerQueryCol {
             SqlProfilerQueryCol::Binds => "binds",
             SqlProfilerQueryCol::DurationUs => "duration_us",
             SqlProfilerQueryCol::CreatedAt => "created_at",
-            SqlProfilerQueryCol::UpdatedAt => "updated_at",
         }
     }
 }
@@ -241,7 +228,7 @@ pub struct SqlProfilerQueryQuery<'db> {
 
 impl<'db> SqlProfilerQueryQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, request_id, table_name, operation, sql, binds, duration_us, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
+        Self { db, base_url, select_sql: Some("id, request_id, table_name, operation, sql, binds, duration_us, created_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
     pub fn unsafe_sql(self) -> SqlProfilerQueryUnsafeQuery<'db> { SqlProfilerQueryUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
@@ -337,18 +324,6 @@ impl<'db> SqlProfilerQueryQuery<'db> {
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -472,10 +447,10 @@ impl<'db> SqlProfilerQueryQuery<'db> {
     }
     pub fn select_cols(mut self, cols: &[SqlProfilerQueryCol]) -> Self {
         if cols.is_empty() {
-            self.select_sql = Some("id, request_id, table_name, operation, sql, binds, duration_us, created_at, updated_at".to_string());
+            self.select_sql = Some("id, request_id, table_name, operation, sql, binds, duration_us, created_at".to_string());
         } else {
             let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, request_id, table_name, operation, sql, binds, duration_us, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect();
+            let mut list: Vec<String> = "id, request_id, table_name, operation, sql, binds, duration_us, created_at".split(',').map(|s| s.trim().to_string()).collect();
             for s in &list { seen.insert(s.clone()); }
             for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
             self.select_sql = Some(list.join(", "));
@@ -486,7 +461,7 @@ impl<'db> SqlProfilerQueryQuery<'db> {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, request_id, table_name, operation, sql, binds, duration_us, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect(),
+            _ => "id, request_id, table_name, operation, sql, binds, duration_us, created_at".split(',').map(|s| s.trim().to_string()).collect(),
         };
         for s in &list { seen.insert(s.clone()); }
         for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
@@ -496,16 +471,16 @@ impl<'db> SqlProfilerQueryQuery<'db> {
     fn select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() {
-            self.select_sql = Some("id, request_id, table_name, operation, sql, binds, duration_us, created_at, updated_at".to_string());
+            self.select_sql = Some("id, request_id, table_name, operation, sql, binds, duration_us, created_at".to_string());
         } else {
-            self.select_sql = Some(format!("id, request_id, table_name, operation, sql, binds, duration_us, created_at, updated_at, {}", s));
+            self.select_sql = Some(format!("id, request_id, table_name, operation, sql, binds, duration_us, created_at, {}", s));
         }
         self
     }
     fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, request_id, table_name, operation, sql, binds, duration_us, created_at, updated_at".to_string());
+        let mut base = self.select_sql.take().unwrap_or_else(|| "id, request_id, table_name, operation, sql, binds, duration_us, created_at".to_string());
         if !base.is_empty() { base.push_str(", "); }
         base.push_str(&s);
         self.select_sql = Some(base);
@@ -1227,11 +1202,6 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.push(val.into());
         self
     }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(SqlProfilerQueryCol::UpdatedAt);
-        self.binds.push(val.into());
-        self
-    }
     pub fn on_conflict_do_nothing(mut self, conflict_cols: &[SqlProfilerQueryCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
@@ -1302,13 +1272,6 @@ pub fn set_id(mut self, val: i64) -> Self {
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                SqlProfilerQueryCol::UpdatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    input.updated_at = FieldInput::Set(value);
-                }
             }
         }
         Ok(input)
@@ -1348,11 +1311,6 @@ pub async fn save(self) -> Result<SqlProfilerQueryView> {
         if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, SqlProfilerQueryCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
             cols.push(SqlProfilerQueryCol::CreatedAt);
-            binds.push(now.into());
-        }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, SqlProfilerQueryCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(SqlProfilerQueryCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1458,10 +1416,6 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.sets.push((SqlProfilerQueryCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((SqlProfilerQueryCol::UpdatedAt, val.into(), SetMode::Assign));
-        self
-    }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Id.as_sql(), op.as_sql(), idx));
@@ -1507,12 +1461,6 @@ pub fn set_id(mut self, val: i64) -> Self {
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -1627,17 +1575,6 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                SqlProfilerQueryCol::UpdatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    changes.updated_at = Some(match mode {
-                        SetMode::Assign => FieldChange::Assign(value),
-                        SetMode::Increment => FieldChange::Increment(value),
-                        SetMode::Decrement => FieldChange::Decrement(value),
-                    });
-                }
             }
         }
         Ok(changes)
@@ -1671,12 +1608,6 @@ pub async fn save(self) -> Result<u64> {
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, SqlProfilerQueryCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(SqlProfilerQueryCol::UpdatedAt);
-            set_binds.push(now.into());
-            set_modes.push(SetMode::Assign);
-        }
         // find target ids for localized updates
         let select_sql = format!("SELECT id FROM sql_profiler_queries WHERE {}", self.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
@@ -1739,7 +1670,6 @@ impl SqlProfilerQueryTableAdapter {
             "binds" => Some(SqlProfilerQueryCol::Binds),
             "duration_us" => Some(SqlProfilerQueryCol::DurationUs),
             "created_at" => Some(SqlProfilerQueryCol::CreatedAt),
-            "updated_at" => Some(SqlProfilerQueryCol::UpdatedAt),
             _ => None,
         }
     }
@@ -1772,7 +1702,6 @@ impl SqlProfilerQueryTableAdapter {
             "binds" => Some(raw.trim().to_string().into()),
             "duration_us" => raw.trim().parse::<i64>().ok().map(Into::into),
             "created_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            "updated_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             _ => None,
         }
     }
@@ -1806,8 +1735,8 @@ impl GeneratedTableAdapter for SqlProfilerQueryTableAdapter {
     type Query<'db> = SqlProfilerQueryQuery<'db>;
     type Row = SqlProfilerQueryWithRelations;
     fn model_key(&self) -> &'static str { "SqlProfilerQuery" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "request_id", "table_name", "operation", "sql", "binds", "duration_us", "created_at", "updated_at"] }
-    fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at"] }
+    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "request_id", "table_name", "operation", "sql", "binds", "duration_us", "created_at"] }
+    fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at"] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
         &[
             DataTableColumnDescriptor { name: "id", label: "ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
@@ -1818,7 +1747,6 @@ impl GeneratedTableAdapter for SqlProfilerQueryTableAdapter {
             DataTableColumnDescriptor { name: "binds", label: "Binds", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
             DataTableColumnDescriptor { name: "duration_us", label: "Duration Us", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "created_at", label: "Created At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
-            DataTableColumnDescriptor { name: "updated_at", label: "Updated At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
         ]
     }
     fn relation_column_descriptors(&self) -> &'static [DataTableRelationColumnDescriptor] {
@@ -1944,7 +1872,6 @@ impl GeneratedTableAdapter for SqlProfilerQueryTableAdapter {
             "binds" => query.order_by(SqlProfilerQueryCol::Binds, dir),
             "duration_us" => query.order_by(SqlProfilerQueryCol::DurationUs, dir),
             "created_at" => query.order_by(SqlProfilerQueryCol::CreatedAt, dir),
-            "updated_at" => query.order_by(SqlProfilerQueryCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
@@ -1965,7 +1892,6 @@ impl GeneratedTableAdapter for SqlProfilerQueryTableAdapter {
             "binds" => Some(row.binds.clone()),
             "duration_us" => Some(row.duration_us.to_string()),
             "created_at" => row.created_at.format(&time::format_description::well_known::Rfc3339).ok(),
-            "updated_at" => row.updated_at.format(&time::format_description::well_known::Rfc3339).ok(),
             _ => None,
         }
     }
@@ -1991,7 +1917,7 @@ impl Default for SqlProfilerQueryDataTableConfig {
             default_sorting_column: "id",
             default_sorted: SortDirection::Desc,
             default_export_ignore_columns: &["actions", "action"],
-            default_timestamp_columns: &["created_at", "updated_at"],
+            default_timestamp_columns: &["created_at"],
             default_unsortable: &[],
             default_row_per_page: None,
         }

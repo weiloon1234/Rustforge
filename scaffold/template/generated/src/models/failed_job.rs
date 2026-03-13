@@ -12,8 +12,8 @@ use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
 use core_db::common::collection::TypedCollectionExt;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
-const HAS_CREATED_AT: bool = true;
-const HAS_UPDATED_AT: bool = true;
+const HAS_CREATED_AT: bool = false;
+const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
@@ -26,8 +26,6 @@ pub struct FailedJobCreateInput {
     pub attempts: FieldInput<i32>,
     pub group_id: FieldInput<Option<String>>,
     pub failed_at: FieldInput<time::OffsetDateTime>,
-    pub created_at: FieldInput<time::OffsetDateTime>,
-    pub updated_at: FieldInput<time::OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -41,8 +39,6 @@ pub struct FailedJobUpdateChanges {
     pub attempts: Option<FieldChange<i32>>,
     pub group_id: Option<FieldChange<Option<String>>>,
     pub failed_at: Option<FieldChange<time::OffsetDateTime>>,
-    pub created_at: Option<FieldChange<time::OffsetDateTime>>,
-    pub updated_at: Option<FieldChange<time::OffsetDateTime>>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, JsonSchema)]
@@ -58,12 +54,6 @@ pub struct FailedJobRow {
     #[serde(with = "time::serde::rfc3339")]
     #[schemars(with = "String")]
     pub failed_at: time::OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339")]
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339")]
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -77,10 +67,6 @@ pub struct FailedJobView {
     pub group_id: Option<String>,
     #[schemars(with = "String")]
     pub failed_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 impl FailedJobView {
@@ -100,8 +86,6 @@ impl FailedJobView {
             attempts: self.attempts.clone(),
             group_id: self.group_id.clone(),
             failed_at: self.failed_at.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
         }
     }
 }
@@ -132,10 +116,6 @@ pub struct FailedJobJson {
     pub group_id: Option<String>,
     #[schemars(with = "String")]
     pub failed_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 fn hydrate_view(row: FailedJobRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> FailedJobView {
@@ -148,8 +128,6 @@ fn hydrate_view(row: FailedJobRow, _loc: &LocalizedMap, _base_url: Option<&str>)
         attempts: row.attempts,
         group_id: row.group_id,
         failed_at: row.failed_at,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
     };
     view
 }
@@ -184,13 +162,11 @@ pub enum FailedJobCol {
     Attempts,
     GroupId,
     FailedAt,
-    CreatedAt,
-    UpdatedAt,
 }
 
 impl FailedJobCol {
     pub const fn all() -> &'static [FailedJobCol] {
-        &[FailedJobCol::Id, FailedJobCol::JobName, FailedJobCol::Queue, FailedJobCol::Payload, FailedJobCol::Error, FailedJobCol::Attempts, FailedJobCol::GroupId, FailedJobCol::FailedAt, FailedJobCol::CreatedAt, FailedJobCol::UpdatedAt]
+        &[FailedJobCol::Id, FailedJobCol::JobName, FailedJobCol::Queue, FailedJobCol::Payload, FailedJobCol::Error, FailedJobCol::Attempts, FailedJobCol::GroupId, FailedJobCol::FailedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
@@ -202,8 +178,6 @@ impl FailedJobCol {
             FailedJobCol::Attempts => "attempts",
             FailedJobCol::GroupId => "group_id",
             FailedJobCol::FailedAt => "failed_at",
-            FailedJobCol::CreatedAt => "created_at",
-            FailedJobCol::UpdatedAt => "updated_at",
         }
     }
 }
@@ -255,7 +229,7 @@ pub struct FailedJobQuery<'db> {
 
 impl<'db> FailedJobQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, job_name, queue, payload, error, attempts, group_id, failed_at, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
+        Self { db, base_url, select_sql: Some("id, job_name, queue, payload, error, attempts, group_id, failed_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
     pub fn unsafe_sql(self) -> FailedJobUnsafeQuery<'db> { FailedJobUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
@@ -351,30 +325,6 @@ impl<'db> FailedJobQuery<'db> {
     pub fn where_failed_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", FailedJobCol::FailedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -498,10 +448,10 @@ impl<'db> FailedJobQuery<'db> {
     }
     pub fn select_cols(mut self, cols: &[FailedJobCol]) -> Self {
         if cols.is_empty() {
-            self.select_sql = Some("id, job_name, queue, payload, error, attempts, group_id, failed_at, created_at, updated_at".to_string());
+            self.select_sql = Some("id, job_name, queue, payload, error, attempts, group_id, failed_at".to_string());
         } else {
             let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, job_name, queue, payload, error, attempts, group_id, failed_at, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect();
+            let mut list: Vec<String> = "id, job_name, queue, payload, error, attempts, group_id, failed_at".split(',').map(|s| s.trim().to_string()).collect();
             for s in &list { seen.insert(s.clone()); }
             for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
             self.select_sql = Some(list.join(", "));
@@ -512,7 +462,7 @@ impl<'db> FailedJobQuery<'db> {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, job_name, queue, payload, error, attempts, group_id, failed_at, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect(),
+            _ => "id, job_name, queue, payload, error, attempts, group_id, failed_at".split(',').map(|s| s.trim().to_string()).collect(),
         };
         for s in &list { seen.insert(s.clone()); }
         for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
@@ -522,16 +472,16 @@ impl<'db> FailedJobQuery<'db> {
     fn select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() {
-            self.select_sql = Some("id, job_name, queue, payload, error, attempts, group_id, failed_at, created_at, updated_at".to_string());
+            self.select_sql = Some("id, job_name, queue, payload, error, attempts, group_id, failed_at".to_string());
         } else {
-            self.select_sql = Some(format!("id, job_name, queue, payload, error, attempts, group_id, failed_at, created_at, updated_at, {}", s));
+            self.select_sql = Some(format!("id, job_name, queue, payload, error, attempts, group_id, failed_at, {}", s));
         }
         self
     }
     fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, job_name, queue, payload, error, attempts, group_id, failed_at, created_at, updated_at".to_string());
+        let mut base = self.select_sql.take().unwrap_or_else(|| "id, job_name, queue, payload, error, attempts, group_id, failed_at".to_string());
         if !base.is_empty() { base.push_str(", "); }
         base.push_str(&s);
         self.select_sql = Some(base);
@@ -926,11 +876,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(FailedJobCol::CreatedAt, OrderDir::Desc)
+        self.order_by(FailedJobCol::Id, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(FailedJobCol::CreatedAt, OrderDir::Asc)
+        self.order_by(FailedJobCol::Id, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -1309,16 +1259,6 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
         self.binds.push(val.into());
         self
     }
-    pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(FailedJobCol::CreatedAt);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(FailedJobCol::UpdatedAt);
-        self.binds.push(val.into());
-        self
-    }
     pub fn on_conflict_do_nothing(mut self, conflict_cols: &[FailedJobCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
@@ -1389,20 +1329,6 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
         };
                     input.failed_at = FieldInput::Set(value);
                 }
-                FailedJobCol::CreatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    input.created_at = FieldInput::Set(value);
-                }
-                FailedJobCol::UpdatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    input.updated_at = FieldInput::Set(value);
-                }
             }
         }
         Ok(input)
@@ -1469,16 +1395,6 @@ pub async fn save(self) -> Result<FailedJobView> {
     async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(FailedJobView, FailedJobRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, FailedJobCol::CreatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(FailedJobCol::CreatedAt);
-            binds.push(now.into());
-        }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, FailedJobCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(FailedJobCol::UpdatedAt);
-            binds.push(now.into());
-        }
         if cols.is_empty() {
             anyhow::bail!("insert: no columns set");
         }
@@ -1576,14 +1492,6 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
         self.sets.push((FailedJobCol::FailedAt, val.into(), SetMode::Assign));
         self
     }
-    pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((FailedJobCol::CreatedAt, val.into(), SetMode::Assign));
-        self
-    }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((FailedJobCol::UpdatedAt, val.into(), SetMode::Assign));
-        self
-    }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", FailedJobCol::Id.as_sql(), op.as_sql(), idx));
@@ -1629,18 +1537,6 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
     pub fn where_failed_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", FailedJobCol::FailedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -1755,28 +1651,6 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                FailedJobCol::CreatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    changes.created_at = Some(match mode {
-                        SetMode::Assign => FieldChange::Assign(value),
-                        SetMode::Increment => FieldChange::Increment(value),
-                        SetMode::Decrement => FieldChange::Decrement(value),
-                    });
-                }
-                FailedJobCol::UpdatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    changes.updated_at = Some(match mode {
-                        SetMode::Assign => FieldChange::Assign(value),
-                        SetMode::Increment => FieldChange::Increment(value),
-                        SetMode::Decrement => FieldChange::Decrement(value),
-                    });
-                }
             }
         }
         Ok(changes)
@@ -1815,12 +1689,6 @@ pub async fn save(self) -> Result<u64> {
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, FailedJobCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(FailedJobCol::UpdatedAt);
-            set_binds.push(now.into());
-            set_modes.push(SetMode::Assign);
-        }
         // find target ids for localized updates
         let select_sql = format!("SELECT id FROM failed_jobs WHERE {}", self.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, uuid::Uuid>(&select_sql);
@@ -1930,8 +1798,6 @@ impl FailedJobTableAdapter {
             "attempts" => Some(FailedJobCol::Attempts),
             "group_id" => Some(FailedJobCol::GroupId),
             "failed_at" => Some(FailedJobCol::FailedAt),
-            "created_at" => Some(FailedJobCol::CreatedAt),
-            "updated_at" => Some(FailedJobCol::UpdatedAt),
             _ => None,
         }
     }
@@ -1964,8 +1830,6 @@ impl FailedJobTableAdapter {
             "attempts" => raw.trim().parse::<i32>().ok().map(Into::into),
             "group_id" => Some(Self::parse_bind(raw.trim())),
             "failed_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            "created_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            "updated_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             _ => None,
         }
     }
@@ -1999,8 +1863,8 @@ impl GeneratedTableAdapter for FailedJobTableAdapter {
     type Query<'db> = FailedJobQuery<'db>;
     type Row = FailedJobWithRelations;
     fn model_key(&self) -> &'static str { "FailedJob" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "job_name", "queue", "error", "attempts", "group_id", "failed_at", "created_at", "updated_at"] }
-    fn timestamp_columns(&self) -> &'static [&'static str] { &["failed_at", "created_at", "updated_at"] }
+    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "job_name", "queue", "error", "attempts", "group_id", "failed_at"] }
+    fn timestamp_columns(&self) -> &'static [&'static str] { &["failed_at"] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
         &[
             DataTableColumnDescriptor { name: "id", label: "ID", data_type: "uuid::Uuid", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
@@ -2011,8 +1875,6 @@ impl GeneratedTableAdapter for FailedJobTableAdapter {
             DataTableColumnDescriptor { name: "attempts", label: "Attempts", data_type: "i32", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "group_id", label: "Group ID", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
             DataTableColumnDescriptor { name: "failed_at", label: "Failed At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
-            DataTableColumnDescriptor { name: "created_at", label: "Created At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
-            DataTableColumnDescriptor { name: "updated_at", label: "Updated At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
         ]
     }
     fn relation_column_descriptors(&self) -> &'static [DataTableRelationColumnDescriptor] {
@@ -2138,8 +2000,6 @@ impl GeneratedTableAdapter for FailedJobTableAdapter {
             "attempts" => query.order_by(FailedJobCol::Attempts, dir),
             "group_id" => query.order_by(FailedJobCol::GroupId, dir),
             "failed_at" => query.order_by(FailedJobCol::FailedAt, dir),
-            "created_at" => query.order_by(FailedJobCol::CreatedAt, dir),
-            "updated_at" => query.order_by(FailedJobCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
@@ -2159,8 +2019,6 @@ impl GeneratedTableAdapter for FailedJobTableAdapter {
             "attempts" => Some(row.attempts.to_string()),
             "group_id" => row.group_id.as_ref().map(|v| v.to_string()),
             "failed_at" => row.failed_at.format(&time::format_description::well_known::Rfc3339).ok(),
-            "created_at" => row.created_at.format(&time::format_description::well_known::Rfc3339).ok(),
-            "updated_at" => row.updated_at.format(&time::format_description::well_known::Rfc3339).ok(),
             _ => None,
         }
     }
@@ -2186,7 +2044,7 @@ impl Default for FailedJobDataTableConfig {
             default_sorting_column: "id",
             default_sorted: SortDirection::Desc,
             default_export_ignore_columns: &["actions", "action"],
-            default_timestamp_columns: &["failed_at", "created_at", "updated_at"],
+            default_timestamp_columns: &["failed_at"],
             default_unsortable: &[],
             default_row_per_page: None,
         }

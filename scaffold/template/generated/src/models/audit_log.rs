@@ -15,7 +15,7 @@ use core_db::common::collection::TypedCollectionExt;
 use crate::generated::models::admin::{AdminCol, AdminQuery, AdminRow};
 use super::enums::*;
 const HAS_CREATED_AT: bool = true;
-const HAS_UPDATED_AT: bool = true;
+const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
@@ -28,7 +28,6 @@ pub struct AuditLogCreateInput {
     pub old_data: FieldInput<Option<serde_json::Value>>,
     pub new_data: FieldInput<Option<serde_json::Value>>,
     pub created_at: FieldInput<time::OffsetDateTime>,
-    pub updated_at: FieldInput<time::OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -42,7 +41,6 @@ pub struct AuditLogUpdateChanges {
     pub old_data: Option<FieldChange<Option<serde_json::Value>>>,
     pub new_data: Option<FieldChange<Option<serde_json::Value>>>,
     pub created_at: Option<FieldChange<time::OffsetDateTime>>,
-    pub updated_at: Option<FieldChange<time::OffsetDateTime>>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, JsonSchema)]
@@ -58,9 +56,6 @@ pub struct AuditLogRow {
     #[serde(with = "time::serde::rfc3339")]
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339")]
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -74,8 +69,6 @@ pub struct AuditLogView {
     pub new_data: Option<serde_json::Value>,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
     pub action_explained: String,
 }
 
@@ -96,7 +89,6 @@ impl AuditLogView {
             old_data: self.old_data.clone(),
             new_data: self.new_data.clone(),
             created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
             action_explained: self.action_explained.clone(),
         }
     }
@@ -128,8 +120,6 @@ pub struct AuditLogJson {
     pub new_data: Option<serde_json::Value>,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
     pub action_explained: String,
 }
 
@@ -143,7 +133,6 @@ fn hydrate_view(row: AuditLogRow, _loc: &LocalizedMap, _base_url: Option<&str>) 
         old_data: row.old_data,
         new_data: row.new_data,
         created_at: row.created_at,
-        updated_at: row.updated_at,
         action_explained: row.action.explained_label(),
     };
     view
@@ -180,12 +169,11 @@ pub enum AuditLogCol {
     OldData,
     NewData,
     CreatedAt,
-    UpdatedAt,
 }
 
 impl AuditLogCol {
     pub const fn all() -> &'static [AuditLogCol] {
-        &[AuditLogCol::Id, AuditLogCol::AdminId, AuditLogCol::Action, AuditLogCol::TableName, AuditLogCol::RecordKey, AuditLogCol::OldData, AuditLogCol::NewData, AuditLogCol::CreatedAt, AuditLogCol::UpdatedAt]
+        &[AuditLogCol::Id, AuditLogCol::AdminId, AuditLogCol::Action, AuditLogCol::TableName, AuditLogCol::RecordKey, AuditLogCol::OldData, AuditLogCol::NewData, AuditLogCol::CreatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
@@ -197,7 +185,6 @@ impl AuditLogCol {
             AuditLogCol::OldData => "old_data",
             AuditLogCol::NewData => "new_data",
             AuditLogCol::CreatedAt => "created_at",
-            AuditLogCol::UpdatedAt => "updated_at",
         }
     }
 }
@@ -271,7 +258,7 @@ pub struct AuditLogQuery<'db> {
 
 impl<'db> AuditLogQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, admin_id, action, table_name, record_key, old_data, new_data, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
+        Self { db, base_url, select_sql: Some("id, admin_id, action, table_name, record_key, old_data, new_data, created_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
     pub fn unsafe_sql(self) -> AuditLogUnsafeQuery<'db> { AuditLogUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
@@ -367,18 +354,6 @@ impl<'db> AuditLogQuery<'db> {
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", AuditLogCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -502,10 +477,10 @@ impl<'db> AuditLogQuery<'db> {
     }
     pub fn select_cols(mut self, cols: &[AuditLogCol]) -> Self {
         if cols.is_empty() {
-            self.select_sql = Some("id, admin_id, action, table_name, record_key, old_data, new_data, created_at, updated_at".to_string());
+            self.select_sql = Some("id, admin_id, action, table_name, record_key, old_data, new_data, created_at".to_string());
         } else {
             let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, admin_id, action, table_name, record_key, old_data, new_data, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect();
+            let mut list: Vec<String> = "id, admin_id, action, table_name, record_key, old_data, new_data, created_at".split(',').map(|s| s.trim().to_string()).collect();
             for s in &list { seen.insert(s.clone()); }
             for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
             self.select_sql = Some(list.join(", "));
@@ -516,7 +491,7 @@ impl<'db> AuditLogQuery<'db> {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, admin_id, action, table_name, record_key, old_data, new_data, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect(),
+            _ => "id, admin_id, action, table_name, record_key, old_data, new_data, created_at".split(',').map(|s| s.trim().to_string()).collect(),
         };
         for s in &list { seen.insert(s.clone()); }
         for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
@@ -526,16 +501,16 @@ impl<'db> AuditLogQuery<'db> {
     fn select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() {
-            self.select_sql = Some("id, admin_id, action, table_name, record_key, old_data, new_data, created_at, updated_at".to_string());
+            self.select_sql = Some("id, admin_id, action, table_name, record_key, old_data, new_data, created_at".to_string());
         } else {
-            self.select_sql = Some(format!("id, admin_id, action, table_name, record_key, old_data, new_data, created_at, updated_at, {}", s));
+            self.select_sql = Some(format!("id, admin_id, action, table_name, record_key, old_data, new_data, created_at, {}", s));
         }
         self
     }
     fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, admin_id, action, table_name, record_key, old_data, new_data, created_at, updated_at".to_string());
+        let mut base = self.select_sql.take().unwrap_or_else(|| "id, admin_id, action, table_name, record_key, old_data, new_data, created_at".to_string());
         if !base.is_empty() { base.push_str(", "); }
         base.push_str(&s);
         self.select_sql = Some(base);
@@ -1334,11 +1309,6 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.push(val.into());
         self
     }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AuditLogCol::UpdatedAt);
-        self.binds.push(val.into());
-        self
-    }
     pub fn on_conflict_do_nothing(mut self, conflict_cols: &[AuditLogCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
@@ -1415,13 +1385,6 @@ pub fn set_id(mut self, val: i64) -> Self {
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                AuditLogCol::UpdatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    input.updated_at = FieldInput::Set(value);
-                }
             }
         }
         Ok(input)
@@ -1461,11 +1424,6 @@ pub async fn save(self) -> Result<AuditLogView> {
         if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, AuditLogCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
             cols.push(AuditLogCol::CreatedAt);
-            binds.push(now.into());
-        }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AuditLogCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(AuditLogCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1573,10 +1531,6 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.sets.push((AuditLogCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AuditLogCol::UpdatedAt, val.into(), SetMode::Assign));
-        self
-    }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", AuditLogCol::Id.as_sql(), op.as_sql(), idx));
@@ -1622,12 +1576,6 @@ pub fn set_id(mut self, val: i64) -> Self {
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", AuditLogCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -1748,17 +1696,6 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AuditLogCol::UpdatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    changes.updated_at = Some(match mode {
-                        SetMode::Assign => FieldChange::Assign(value),
-                        SetMode::Increment => FieldChange::Increment(value),
-                        SetMode::Decrement => FieldChange::Decrement(value),
-                    });
-                }
             }
         }
         Ok(changes)
@@ -1792,12 +1729,6 @@ pub async fn save(self) -> Result<u64> {
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AuditLogCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(AuditLogCol::UpdatedAt);
-            set_binds.push(now.into());
-            set_modes.push(SetMode::Assign);
-        }
         // find target ids for localized updates
         let select_sql = format!("SELECT id FROM audit_logs WHERE {}", self.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
@@ -1862,7 +1793,6 @@ impl AuditLogTableAdapter {
             "old_data" => Some(AuditLogCol::OldData),
             "new_data" => Some(AuditLogCol::NewData),
             "created_at" => Some(AuditLogCol::CreatedAt),
-            "updated_at" => Some(AuditLogCol::UpdatedAt),
             _ => None,
         }
     }
@@ -1893,7 +1823,6 @@ impl AuditLogTableAdapter {
             "old_data" => Some(Self::parse_bind(raw.trim())),
             "new_data" => Some(Self::parse_bind(raw.trim())),
             "created_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            "updated_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             _ => None,
         }
     }
@@ -1938,8 +1867,8 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
     type Query<'db> = AuditLogQuery<'db>;
     type Row = AuditLogWithRelations;
     fn model_key(&self) -> &'static str { "AuditLog" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "admin_id", "action", "table_name", "record_key", "created_at", "updated_at"] }
-    fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at"] }
+    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "admin_id", "action", "table_name", "record_key", "created_at"] }
+    fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at"] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
         &[
             DataTableColumnDescriptor { name: "id", label: "ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
@@ -1950,7 +1879,6 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
             DataTableColumnDescriptor { name: "old_data", label: "Old Data", data_type: "Option<serde_json::Value>", sortable: false, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "new_data", label: "New Data", data_type: "Option<serde_json::Value>", sortable: false, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "created_at", label: "Created At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
-            DataTableColumnDescriptor { name: "updated_at", label: "Updated At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
         ]
     }
     fn relation_column_descriptors(&self) -> &'static [DataTableRelationColumnDescriptor] {
@@ -2103,7 +2031,6 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
             "old_data" => query.order_by(AuditLogCol::OldData, dir),
             "new_data" => query.order_by(AuditLogCol::NewData, dir),
             "created_at" => query.order_by(AuditLogCol::CreatedAt, dir),
-            "updated_at" => query.order_by(AuditLogCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
@@ -2121,7 +2048,6 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
             "table_name" => Some(row.table_name.clone()),
             "record_key" => Some(row.record_key.clone()),
             "created_at" => row.created_at.format(&time::format_description::well_known::Rfc3339).ok(),
-            "updated_at" => row.updated_at.format(&time::format_description::well_known::Rfc3339).ok(),
             _ => None,
         }
     }
@@ -2147,7 +2073,7 @@ impl Default for AuditLogDataTableConfig {
             default_sorting_column: "id",
             default_sorted: SortDirection::Desc,
             default_export_ignore_columns: &["actions", "action"],
-            default_timestamp_columns: &["created_at", "updated_at"],
+            default_timestamp_columns: &["created_at"],
             default_unsortable: &[],
             default_row_per_page: None,
         }

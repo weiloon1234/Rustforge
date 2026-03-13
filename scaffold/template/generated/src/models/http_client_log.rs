@@ -13,7 +13,7 @@ use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observ
 use core_db::common::collection::TypedCollectionExt;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
-const HAS_UPDATED_AT: bool = true;
+const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
@@ -28,7 +28,6 @@ pub struct HttpClientLogCreateInput {
     pub response_body: FieldInput<Option<String>>,
     pub duration_ms: FieldInput<Option<i32>>,
     pub created_at: FieldInput<time::OffsetDateTime>,
-    pub updated_at: FieldInput<time::OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -44,7 +43,6 @@ pub struct HttpClientLogUpdateChanges {
     pub response_body: Option<FieldChange<Option<String>>>,
     pub duration_ms: Option<FieldChange<Option<i32>>>,
     pub created_at: Option<FieldChange<time::OffsetDateTime>>,
-    pub updated_at: Option<FieldChange<time::OffsetDateTime>>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, JsonSchema)]
@@ -62,9 +60,6 @@ pub struct HttpClientLogRow {
     #[serde(with = "time::serde::rfc3339")]
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339")]
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -80,8 +75,6 @@ pub struct HttpClientLogView {
     pub duration_ms: Option<i32>,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 impl HttpClientLogView {
@@ -103,7 +96,6 @@ impl HttpClientLogView {
             response_body: self.response_body.clone(),
             duration_ms: self.duration_ms.clone(),
             created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
         }
     }
 }
@@ -136,8 +128,6 @@ pub struct HttpClientLogJson {
     pub duration_ms: Option<i32>,
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 fn hydrate_view(row: HttpClientLogRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> HttpClientLogView {
@@ -152,7 +142,6 @@ fn hydrate_view(row: HttpClientLogRow, _loc: &LocalizedMap, _base_url: Option<&s
         response_body: row.response_body,
         duration_ms: row.duration_ms,
         created_at: row.created_at,
-        updated_at: row.updated_at,
     };
     view
 }
@@ -189,12 +178,11 @@ pub enum HttpClientLogCol {
     ResponseBody,
     DurationMs,
     CreatedAt,
-    UpdatedAt,
 }
 
 impl HttpClientLogCol {
     pub const fn all() -> &'static [HttpClientLogCol] {
-        &[HttpClientLogCol::Id, HttpClientLogCol::RequestUrl, HttpClientLogCol::RequestMethod, HttpClientLogCol::RequestHeaders, HttpClientLogCol::RequestBody, HttpClientLogCol::ResponseStatus, HttpClientLogCol::ResponseHeaders, HttpClientLogCol::ResponseBody, HttpClientLogCol::DurationMs, HttpClientLogCol::CreatedAt, HttpClientLogCol::UpdatedAt]
+        &[HttpClientLogCol::Id, HttpClientLogCol::RequestUrl, HttpClientLogCol::RequestMethod, HttpClientLogCol::RequestHeaders, HttpClientLogCol::RequestBody, HttpClientLogCol::ResponseStatus, HttpClientLogCol::ResponseHeaders, HttpClientLogCol::ResponseBody, HttpClientLogCol::DurationMs, HttpClientLogCol::CreatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
@@ -208,7 +196,6 @@ impl HttpClientLogCol {
             HttpClientLogCol::ResponseBody => "response_body",
             HttpClientLogCol::DurationMs => "duration_ms",
             HttpClientLogCol::CreatedAt => "created_at",
-            HttpClientLogCol::UpdatedAt => "updated_at",
         }
     }
 }
@@ -260,7 +247,7 @@ pub struct HttpClientLogQuery<'db> {
 
 impl<'db> HttpClientLogQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
+        Self { db, base_url, select_sql: Some("id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
     pub fn unsafe_sql(self) -> HttpClientLogUnsafeQuery<'db> { HttpClientLogUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
@@ -380,18 +367,6 @@ impl<'db> HttpClientLogQuery<'db> {
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -515,10 +490,10 @@ impl<'db> HttpClientLogQuery<'db> {
     }
     pub fn select_cols(mut self, cols: &[HttpClientLogCol]) -> Self {
         if cols.is_empty() {
-            self.select_sql = Some("id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at, updated_at".to_string());
+            self.select_sql = Some("id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at".to_string());
         } else {
             let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect();
+            let mut list: Vec<String> = "id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at".split(',').map(|s| s.trim().to_string()).collect();
             for s in &list { seen.insert(s.clone()); }
             for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
             self.select_sql = Some(list.join(", "));
@@ -529,7 +504,7 @@ impl<'db> HttpClientLogQuery<'db> {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect(),
+            _ => "id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at".split(',').map(|s| s.trim().to_string()).collect(),
         };
         for s in &list { seen.insert(s.clone()); }
         for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
@@ -539,16 +514,16 @@ impl<'db> HttpClientLogQuery<'db> {
     fn select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() {
-            self.select_sql = Some("id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at, updated_at".to_string());
+            self.select_sql = Some("id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at".to_string());
         } else {
-            self.select_sql = Some(format!("id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at, updated_at, {}", s));
+            self.select_sql = Some(format!("id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at, {}", s));
         }
         self
     }
     fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at, updated_at".to_string());
+        let mut base = self.select_sql.take().unwrap_or_else(|| "id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at".to_string());
         if !base.is_empty() { base.push_str(", "); }
         base.push_str(&s);
         self.select_sql = Some(base);
@@ -1336,11 +1311,6 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
         self.binds.push(val.into());
         self
     }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(HttpClientLogCol::UpdatedAt);
-        self.binds.push(val.into());
-        self
-    }
     pub fn on_conflict_do_nothing(mut self, conflict_cols: &[HttpClientLogCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
@@ -1425,13 +1395,6 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                HttpClientLogCol::UpdatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    input.updated_at = FieldInput::Set(value);
-                }
             }
         }
         Ok(input)
@@ -1501,11 +1464,6 @@ pub async fn save(self) -> Result<HttpClientLogView> {
         if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, HttpClientLogCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
             cols.push(HttpClientLogCol::CreatedAt);
-            binds.push(now.into());
-        }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, HttpClientLogCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(HttpClientLogCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1605,10 +1563,6 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
         self.sets.push((HttpClientLogCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((HttpClientLogCol::UpdatedAt, val.into(), SetMode::Assign));
-        self
-    }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::Id.as_sql(), op.as_sql(), idx));
@@ -1666,12 +1620,6 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -1808,17 +1756,6 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                HttpClientLogCol::UpdatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    changes.updated_at = Some(match mode {
-                        SetMode::Assign => FieldChange::Assign(value),
-                        SetMode::Increment => FieldChange::Increment(value),
-                        SetMode::Decrement => FieldChange::Decrement(value),
-                    });
-                }
             }
         }
         Ok(changes)
@@ -1857,12 +1794,6 @@ pub async fn save(self) -> Result<u64> {
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, HttpClientLogCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(HttpClientLogCol::UpdatedAt);
-            set_binds.push(now.into());
-            set_modes.push(SetMode::Assign);
-        }
         // find target ids for localized updates
         let select_sql = format!("SELECT id FROM http_client_logs WHERE {}", self.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, uuid::Uuid>(&select_sql);
@@ -1974,7 +1905,6 @@ impl HttpClientLogTableAdapter {
             "response_body" => Some(HttpClientLogCol::ResponseBody),
             "duration_ms" => Some(HttpClientLogCol::DurationMs),
             "created_at" => Some(HttpClientLogCol::CreatedAt),
-            "updated_at" => Some(HttpClientLogCol::UpdatedAt),
             _ => None,
         }
     }
@@ -2009,7 +1939,6 @@ impl HttpClientLogTableAdapter {
             "response_body" => Some(Self::parse_bind(raw.trim())),
             "duration_ms" => Some(Self::parse_bind(raw.trim())),
             "created_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            "updated_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             _ => None,
         }
     }
@@ -2043,8 +1972,8 @@ impl GeneratedTableAdapter for HttpClientLogTableAdapter {
     type Query<'db> = HttpClientLogQuery<'db>;
     type Row = HttpClientLogWithRelations;
     fn model_key(&self) -> &'static str { "HttpClientLog" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "request_url", "request_method", "request_body", "response_status", "response_body", "duration_ms", "created_at", "updated_at"] }
-    fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at"] }
+    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "request_url", "request_method", "request_body", "response_status", "response_body", "duration_ms", "created_at"] }
+    fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at"] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
         &[
             DataTableColumnDescriptor { name: "id", label: "ID", data_type: "uuid::Uuid", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
@@ -2057,7 +1986,6 @@ impl GeneratedTableAdapter for HttpClientLogTableAdapter {
             DataTableColumnDescriptor { name: "response_body", label: "Response Body", data_type: "Option<String>", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
             DataTableColumnDescriptor { name: "duration_ms", label: "Duration Ms", data_type: "Option<i32>", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "created_at", label: "Created At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
-            DataTableColumnDescriptor { name: "updated_at", label: "Updated At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
         ]
     }
     fn relation_column_descriptors(&self) -> &'static [DataTableRelationColumnDescriptor] {
@@ -2185,7 +2113,6 @@ impl GeneratedTableAdapter for HttpClientLogTableAdapter {
             "response_body" => query.order_by(HttpClientLogCol::ResponseBody, dir),
             "duration_ms" => query.order_by(HttpClientLogCol::DurationMs, dir),
             "created_at" => query.order_by(HttpClientLogCol::CreatedAt, dir),
-            "updated_at" => query.order_by(HttpClientLogCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
@@ -2206,7 +2133,6 @@ impl GeneratedTableAdapter for HttpClientLogTableAdapter {
             "response_body" => row.response_body.as_ref().map(|v| v.to_string()),
             "duration_ms" => row.duration_ms.as_ref().map(|v| v.to_string()),
             "created_at" => row.created_at.format(&time::format_description::well_known::Rfc3339).ok(),
-            "updated_at" => row.updated_at.format(&time::format_description::well_known::Rfc3339).ok(),
             _ => None,
         }
     }
@@ -2232,7 +2158,7 @@ impl Default for HttpClientLogDataTableConfig {
             default_sorting_column: "id",
             default_sorted: SortDirection::Desc,
             default_export_ignore_columns: &["actions", "action"],
-            default_timestamp_columns: &["created_at", "updated_at"],
+            default_timestamp_columns: &["created_at"],
             default_unsortable: &[],
             default_row_per_page: None,
         }

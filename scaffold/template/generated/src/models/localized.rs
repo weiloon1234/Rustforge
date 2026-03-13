@@ -12,8 +12,8 @@ use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
 use core_db::common::collection::TypedCollectionExt;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
-const HAS_CREATED_AT: bool = true;
-const HAS_UPDATED_AT: bool = true;
+const HAS_CREATED_AT: bool = false;
+const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
@@ -24,8 +24,6 @@ pub struct LocalizedCreateInput {
     pub field: FieldInput<String>,
     pub locale: FieldInput<String>,
     pub value: FieldInput<String>,
-    pub created_at: FieldInput<time::OffsetDateTime>,
-    pub updated_at: FieldInput<time::OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -37,8 +35,6 @@ pub struct LocalizedUpdateChanges {
     pub field: Option<FieldChange<String>>,
     pub locale: Option<FieldChange<String>>,
     pub value: Option<FieldChange<String>>,
-    pub created_at: Option<FieldChange<time::OffsetDateTime>>,
-    pub updated_at: Option<FieldChange<time::OffsetDateTime>>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, JsonSchema)]
@@ -50,12 +46,6 @@ pub struct LocalizedRow {
     pub field: String,
     pub locale: String,
     pub value: String,
-    #[serde(with = "time::serde::rfc3339")]
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339")]
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -66,10 +56,6 @@ pub struct LocalizedView {
     pub field: String,
     pub locale: String,
     pub value: String,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 impl LocalizedView {
@@ -87,8 +73,6 @@ impl LocalizedView {
             field: self.field.clone(),
             locale: self.locale.clone(),
             value: self.value.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
         }
     }
 }
@@ -116,10 +100,6 @@ pub struct LocalizedJson {
     pub field: String,
     pub locale: String,
     pub value: String,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
 }
 
 fn hydrate_view(row: LocalizedRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> LocalizedView {
@@ -130,8 +110,6 @@ fn hydrate_view(row: LocalizedRow, _loc: &LocalizedMap, _base_url: Option<&str>)
         field: row.field,
         locale: row.locale,
         value: row.value,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
     };
     view
 }
@@ -164,13 +142,11 @@ pub enum LocalizedCol {
     Field,
     Locale,
     Value,
-    CreatedAt,
-    UpdatedAt,
 }
 
 impl LocalizedCol {
     pub const fn all() -> &'static [LocalizedCol] {
-        &[LocalizedCol::Id, LocalizedCol::OwnerType, LocalizedCol::OwnerId, LocalizedCol::Field, LocalizedCol::Locale, LocalizedCol::Value, LocalizedCol::CreatedAt, LocalizedCol::UpdatedAt]
+        &[LocalizedCol::Id, LocalizedCol::OwnerType, LocalizedCol::OwnerId, LocalizedCol::Field, LocalizedCol::Locale, LocalizedCol::Value]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
@@ -180,8 +156,6 @@ impl LocalizedCol {
             LocalizedCol::Field => "field",
             LocalizedCol::Locale => "locale",
             LocalizedCol::Value => "value",
-            LocalizedCol::CreatedAt => "created_at",
-            LocalizedCol::UpdatedAt => "updated_at",
         }
     }
 }
@@ -233,7 +207,7 @@ pub struct LocalizedQuery<'db> {
 
 impl<'db> LocalizedQuery<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, owner_type, owner_id, field, locale, value, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
+        Self { db, base_url, select_sql: Some("id, owner_type, owner_id, field, locale, value".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
     pub fn unsafe_sql(self) -> LocalizedUnsafeQuery<'db> { LocalizedUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
@@ -305,30 +279,6 @@ impl<'db> LocalizedQuery<'db> {
     pub fn where_value_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", LocalizedCol::Value.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", LocalizedCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", LocalizedCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", LocalizedCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", LocalizedCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -452,10 +402,10 @@ impl<'db> LocalizedQuery<'db> {
     }
     pub fn select_cols(mut self, cols: &[LocalizedCol]) -> Self {
         if cols.is_empty() {
-            self.select_sql = Some("id, owner_type, owner_id, field, locale, value, created_at, updated_at".to_string());
+            self.select_sql = Some("id, owner_type, owner_id, field, locale, value".to_string());
         } else {
             let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, owner_type, owner_id, field, locale, value, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect();
+            let mut list: Vec<String> = "id, owner_type, owner_id, field, locale, value".split(',').map(|s| s.trim().to_string()).collect();
             for s in &list { seen.insert(s.clone()); }
             for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
             self.select_sql = Some(list.join(", "));
@@ -466,7 +416,7 @@ impl<'db> LocalizedQuery<'db> {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, owner_type, owner_id, field, locale, value, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect(),
+            _ => "id, owner_type, owner_id, field, locale, value".split(',').map(|s| s.trim().to_string()).collect(),
         };
         for s in &list { seen.insert(s.clone()); }
         for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
@@ -476,16 +426,16 @@ impl<'db> LocalizedQuery<'db> {
     fn select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() {
-            self.select_sql = Some("id, owner_type, owner_id, field, locale, value, created_at, updated_at".to_string());
+            self.select_sql = Some("id, owner_type, owner_id, field, locale, value".to_string());
         } else {
-            self.select_sql = Some(format!("id, owner_type, owner_id, field, locale, value, created_at, updated_at, {}", s));
+            self.select_sql = Some(format!("id, owner_type, owner_id, field, locale, value, {}", s));
         }
         self
     }
     fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
         let s = sql.into();
         if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, owner_type, owner_id, field, locale, value, created_at, updated_at".to_string());
+        let mut base = self.select_sql.take().unwrap_or_else(|| "id, owner_type, owner_id, field, locale, value".to_string());
         if !base.is_empty() { base.push_str(", "); }
         base.push_str(&s);
         self.select_sql = Some(base);
@@ -880,11 +830,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(LocalizedCol::CreatedAt, OrderDir::Desc)
+        self.order_by(LocalizedCol::Id, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(LocalizedCol::CreatedAt, OrderDir::Asc)
+        self.order_by(LocalizedCol::Id, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -1253,16 +1203,6 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.push(val.into());
         self
     }
-    pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(LocalizedCol::CreatedAt);
-        self.binds.push(val.into());
-        self
-    }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(LocalizedCol::UpdatedAt);
-        self.binds.push(val.into());
-        self
-    }
     pub fn on_conflict_do_nothing(mut self, conflict_cols: &[LocalizedCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
@@ -1318,20 +1258,6 @@ pub fn set_id(mut self, val: i64) -> Self {
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.value = FieldInput::Set(value);
-                }
-                LocalizedCol::CreatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    input.created_at = FieldInput::Set(value);
-                }
-                LocalizedCol::UpdatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    input.updated_at = FieldInput::Set(value);
                 }
             }
         }
@@ -1399,16 +1325,6 @@ pub async fn save(self) -> Result<LocalizedView> {
     async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(LocalizedView, LocalizedRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, LocalizedCol::CreatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(LocalizedCol::CreatedAt);
-            binds.push(now.into());
-        }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, LocalizedCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(LocalizedCol::UpdatedAt);
-            binds.push(now.into());
-        }
         if cols.is_empty() {
             anyhow::bail!("insert: no columns set");
         }
@@ -1506,14 +1422,6 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.sets.push((LocalizedCol::Value, val.into(), SetMode::Assign));
         self
     }
-    pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((LocalizedCol::CreatedAt, val.into(), SetMode::Assign));
-        self
-    }
-    pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((LocalizedCol::UpdatedAt, val.into(), SetMode::Assign));
-        self
-    }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", LocalizedCol::Id.as_sql(), op.as_sql(), idx));
@@ -1547,18 +1455,6 @@ pub fn set_id(mut self, val: i64) -> Self {
     pub fn where_value(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", LocalizedCol::Value.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", LocalizedCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", LocalizedCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
@@ -1651,28 +1547,6 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                LocalizedCol::CreatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    changes.created_at = Some(match mode {
-                        SetMode::Assign => FieldChange::Assign(value),
-                        SetMode::Increment => FieldChange::Increment(value),
-                        SetMode::Decrement => FieldChange::Decrement(value),
-                    });
-                }
-                LocalizedCol::UpdatedAt => {
-                    let value = match bind {
-            BindValue::Time(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
-        };
-                    changes.updated_at = Some(match mode {
-                        SetMode::Assign => FieldChange::Assign(value),
-                        SetMode::Increment => FieldChange::Increment(value),
-                        SetMode::Decrement => FieldChange::Decrement(value),
-                    });
-                }
             }
         }
         Ok(changes)
@@ -1711,12 +1585,6 @@ pub async fn save(self) -> Result<u64> {
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, LocalizedCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(LocalizedCol::UpdatedAt);
-            set_binds.push(now.into());
-            set_modes.push(SetMode::Assign);
-        }
         // find target ids for localized updates
         let select_sql = format!("SELECT id FROM localized WHERE {}", self.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
@@ -1824,8 +1692,6 @@ impl LocalizedTableAdapter {
             "field" => Some(LocalizedCol::Field),
             "locale" => Some(LocalizedCol::Locale),
             "value" => Some(LocalizedCol::Value),
-            "created_at" => Some(LocalizedCol::CreatedAt),
-            "updated_at" => Some(LocalizedCol::UpdatedAt),
             _ => None,
         }
     }
@@ -1856,8 +1722,6 @@ impl LocalizedTableAdapter {
             "field" => Some(raw.trim().to_string().into()),
             "locale" => Some(raw.trim().to_string().into()),
             "value" => Some(raw.trim().to_string().into()),
-            "created_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
-            "updated_at" => Self::parse_datetime(raw.trim(), false).map(Into::into),
             _ => None,
         }
     }
@@ -1891,8 +1755,8 @@ impl GeneratedTableAdapter for LocalizedTableAdapter {
     type Query<'db> = LocalizedQuery<'db>;
     type Row = LocalizedWithRelations;
     fn model_key(&self) -> &'static str { "Localized" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "owner_type", "owner_id", "field", "locale", "value", "created_at", "updated_at"] }
-    fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at"] }
+    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "owner_type", "owner_id", "field", "locale", "value"] }
+    fn timestamp_columns(&self) -> &'static [&'static str] { &[] }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
         &[
             DataTableColumnDescriptor { name: "id", label: "ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
@@ -1901,8 +1765,6 @@ impl GeneratedTableAdapter for LocalizedTableAdapter {
             DataTableColumnDescriptor { name: "field", label: "Field", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
             DataTableColumnDescriptor { name: "locale", label: "Locale", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
             DataTableColumnDescriptor { name: "value", label: "Value", data_type: "String", sortable: true, localized: false, filter_ops: &["eq", "like", "gte", "lte"] },
-            DataTableColumnDescriptor { name: "created_at", label: "Created At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
-            DataTableColumnDescriptor { name: "updated_at", label: "Updated At", data_type: "time::OffsetDateTime", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte", "date_from", "date_to"] },
         ]
     }
     fn relation_column_descriptors(&self) -> &'static [DataTableRelationColumnDescriptor] {
@@ -2026,8 +1888,6 @@ impl GeneratedTableAdapter for LocalizedTableAdapter {
             "field" => query.order_by(LocalizedCol::Field, dir),
             "locale" => query.order_by(LocalizedCol::Locale, dir),
             "value" => query.order_by(LocalizedCol::Value, dir),
-            "created_at" => query.order_by(LocalizedCol::CreatedAt, dir),
-            "updated_at" => query.order_by(LocalizedCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
@@ -2046,8 +1906,6 @@ impl GeneratedTableAdapter for LocalizedTableAdapter {
             "field" => Some(row.field.clone()),
             "locale" => Some(row.locale.clone()),
             "value" => Some(row.value.clone()),
-            "created_at" => row.created_at.format(&time::format_description::well_known::Rfc3339).ok(),
-            "updated_at" => row.updated_at.format(&time::format_description::well_known::Rfc3339).ok(),
             _ => None,
         }
     }
@@ -2073,7 +1931,7 @@ impl Default for LocalizedDataTableConfig {
             default_sorting_column: "id",
             default_sorted: SortDirection::Desc,
             default_export_ignore_columns: &["actions", "action"],
-            default_timestamp_columns: &["created_at", "updated_at"],
+            default_timestamp_columns: &[],
             default_unsortable: &[],
             default_row_per_page: None,
         }
