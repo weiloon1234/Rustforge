@@ -2,14 +2,17 @@ use core_datatable::{
     AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput,
     DataTableRegistry, GeneratedTableAdapter, SortDirection,
 };
-use core_db::common::sql::{DbConn, Op, OrderDir};
+use core_db::common::{
+    model_api::Query,
+    sql::{DbConn, Op, OrderDir, RawClause},
+};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
 use generated::models::{
-    AuditAction, AuditLog, AuditLogCol, AuditLogQuery,
+    AuditAction, AuditLogCol, AuditLogModel, AuditLogRecord,
 };
 use generated::permissions::Permission;
 
@@ -111,7 +114,7 @@ pub struct AuditLogQueryState {
     record_key: Option<String>,
     date_from: Option<time::OffsetDateTime>,
     date_to: Option<time::OffsetDateTime>,
-    sorting_column: AuditLogCol,
+    sorting_column: &'static str,
     sorting: SortDirection,
 }
 
@@ -124,7 +127,7 @@ impl Default for AuditLogQueryState {
             record_key: None,
             date_from: None,
             date_to: None,
-            sorting_column: AuditLogCol::Id,
+            sorting_column: "id",
             sorting: SortDirection::Desc,
         }
     }
@@ -172,8 +175,8 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
     where
         Self: 'db,
     {
-        if let Some(col) = normalize_sort_column(column) {
-            query.sorting_column = col;
+        if let Some(key) = normalize_sort_column(column) {
+            query.sorting_column = key;
         }
         query.sorting = dir;
         Ok(query)
@@ -185,7 +188,7 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
     {
         let db = self.db.clone();
         Box::pin(async move {
-            let base = AuditLog::new(DbConn::pool(&db), None).query();
+            let base = AuditLogModel::query(DbConn::pool(&db));
             let filtered = apply_audit_log_filters(base, &query);
             Ok(filtered.count().await?)
         })
@@ -206,32 +209,34 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
             let safe_per_page = per_page.max(1);
             let offset = (safe_page - 1) * safe_per_page;
 
-            let base = AuditLog::new(DbConn::pool(&db), None).query();
-            let filtered = apply_audit_log_filters(base, &query)
-                .order_by(query.sorting_column, to_order_direction(query.sorting))
-                .order_by(AuditLogCol::Id, OrderDir::Desc)
-                .offset(offset)
-                .limit(safe_per_page);
+            let base = AuditLogModel::query(DbConn::pool(&db));
+            let filtered = apply_default_audit_log_sort(apply_audit_log_sort(
+                apply_audit_log_filters(base, &query),
+                query.sorting_column,
+                to_order_direction(query.sorting),
+            ))
+            .offset(offset)
+            .limit(safe_per_page);
 
-            let rows = filtered.get().await?;
+            let rows = filtered.all().await?;
 
             let out = rows
                 .into_iter()
-                .map(|r| {
+                .map(|r: AuditLogRecord| {
                     let admin_username = r.admin.as_ref()
                         .map(|a| a.username.clone())
-                        .unwrap_or_else(|| r.row.admin_id.to_string());
+                        .unwrap_or_else(|| r.admin_id.to_string());
                     AuditLogDatatableRow {
-                        id: r.row.id.into(),
-                        admin_id: r.row.admin_id,
+                        id: r.id.into(),
+                        admin_id: r.admin_id,
                         admin_username,
-                        action: r.row.action,
-                        action_explained: r.row.action_explained,
-                        table_name: r.row.table_name,
-                        record_key: r.row.record_key,
-                        old_data: r.row.old_data,
-                        new_data: r.row.new_data,
-                        created_at: format_rfc3339(r.row.created_at),
+                        action: r.action,
+                        action_explained: r.action_explained,
+                        table_name: r.table_name,
+                        record_key: r.record_key,
+                        old_data: r.old_data,
+                        new_data: r.new_data,
+                        created_at: format_rfc3339(r.created_at),
                     }
                 })
                 .collect();
@@ -379,39 +384,41 @@ where
 }
 
 fn apply_audit_log_filters<'db>(
-    mut query: AuditLogQuery<'db>,
+    mut query: Query<'db, AuditLogModel>,
     filters: &AuditLogQueryState,
-) -> AuditLogQuery<'db> {
+) -> Query<'db, AuditLogModel> {
     if let Some(keyword) = filters.keyword.as_deref() {
         let trimmed = keyword.trim();
         if !trimmed.is_empty() {
             let pattern = format!("%{trimmed}%");
-            query = query.where_group(|q| {
-                q.where_col(AuditLogCol::OldData, Op::Like, pattern.clone())
-                    .or_where_col(AuditLogCol::NewData, Op::Like, pattern.clone())
-                    .or_where_col(AuditLogCol::TableName, Op::Like, pattern)
-            });
+            if let Ok(clause) = RawClause::new(
+                "(old_data::text ILIKE ? OR new_data::text ILIKE ? OR table_name ILIKE ?)",
+                [pattern.clone(), pattern.clone(), pattern],
+            ) {
+                let (sql, binds) = clause.into_parts();
+                query = query.unsafe_sql().where_raw(sql, binds).done();
+            }
         }
     }
 
     if let Some(table_name) = &filters.table_name {
-        query = query.where_col(AuditLogCol::TableName, Op::Eq, table_name.clone());
+        query = query.where_col(AuditLogCol::TABLE_NAME, Op::Eq, table_name.clone());
     }
 
     if let Some(action) = filters.action {
-        query = query.where_action(Op::Eq, action);
+        query = query.where_col(AuditLogCol::ACTION, Op::Eq, action);
     }
 
     if let Some(record_key) = &filters.record_key {
-        query = query.where_record_key(Op::Eq, record_key.clone());
+        query = query.where_col(AuditLogCol::RECORD_KEY, Op::Eq, record_key.clone());
     }
 
     if let Some(ts) = filters.date_from {
-        query = query.where_col(AuditLogCol::CreatedAt, Op::Ge, ts);
+        query = query.where_col(AuditLogCol::CREATED_AT, Op::Ge, ts);
     }
 
     if let Some(ts) = filters.date_to {
-        query = query.where_col(AuditLogCol::CreatedAt, Op::Le, ts);
+        query = query.where_col(AuditLogCol::CREATED_AT, Op::Le, ts);
     }
 
     query
@@ -424,16 +431,37 @@ fn to_order_direction(direction: SortDirection) -> OrderDir {
     }
 }
 
-fn normalize_sort_column(value: &str) -> Option<AuditLogCol> {
+fn normalize_sort_column(value: &str) -> Option<&'static str> {
     match value.trim().to_ascii_lowercase().as_str() {
-        "id" => Some(AuditLogCol::Id),
-        "admin_id" => Some(AuditLogCol::AdminId),
-        "action" => Some(AuditLogCol::Action),
-        "table_name" => Some(AuditLogCol::TableName),
-        "record_key" => Some(AuditLogCol::RecordKey),
-        "created_at" => Some(AuditLogCol::CreatedAt),
+        "id" => Some("id"),
+        "admin_id" => Some("admin_id"),
+        "action" => Some("action"),
+        "table_name" => Some("table_name"),
+        "record_key" => Some("record_key"),
+        "created_at" => Some("created_at"),
         _ => None,
     }
+}
+
+fn apply_audit_log_sort<'db>(
+    query: Query<'db, AuditLogModel>,
+    sorting_column: &str,
+    direction: OrderDir,
+) -> Query<'db, AuditLogModel> {
+    match sorting_column {
+        "admin_id" => query.order_by(AuditLogCol::ADMIN_ID, direction),
+        "action" => query.order_by(AuditLogCol::ACTION, direction),
+        "table_name" => query.order_by(AuditLogCol::TABLE_NAME, direction),
+        "record_key" => query.order_by(AuditLogCol::RECORD_KEY, direction),
+        "created_at" => query.order_by(AuditLogCol::CREATED_AT, direction),
+        _ => query.order_by(AuditLogCol::ID, direction),
+    }
+}
+
+fn apply_default_audit_log_sort<'db>(
+    query: Query<'db, AuditLogModel>,
+) -> Query<'db, AuditLogModel> {
+    query.order_by(AuditLogCol::ID, OrderDir::Desc)
 }
 
 fn format_rfc3339(value: time::OffsetDateTime) -> String {

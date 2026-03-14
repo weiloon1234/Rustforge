@@ -52,8 +52,8 @@ pub struct Deposit {
     pub company_crypto_account: BelongsTo<CompanyCryptoAccount>,
 }
 
-#[rf_with_relations_impl]
-impl DepositWithRelations {
+#[rf_record_impl]
+impl DepositRecord {
     pub fn status_label(&self) -> String {
         self.status.explained_label().to_string()
     }

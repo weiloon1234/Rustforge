@@ -121,10 +121,11 @@ async fn upload_receipt(
     let receipt_url = build_attachment_url(&object_key, base_url.as_deref());
 
     let params = serde_json::json!({ "receipt_url": receipt_url, "receipt_path": object_key });
-    generated::models::Deposit::new(core_db::common::sql::DbConn::pool(&state.db), None)
-        .update()
-        .where_id(core_db::common::sql::Op::Eq, id)
-        .set_params(Some(params.clone()))
+    generated::models::DepositModel::query(core_db::common::sql::DbConn::pool(&state.db))
+        .where_col(generated::models::DepositCol::ID, core_db::common::sql::Op::Eq, id)
+        .patch()
+        .assign(generated::models::DepositCol::PARAMS, Some(params.clone()))
+        .map_err(AppError::from)?
         .save()
         .await
         .map_err(AppError::from)?;

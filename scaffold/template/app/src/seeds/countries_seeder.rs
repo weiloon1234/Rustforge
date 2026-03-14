@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use core_db::{
     common::sql::DbConn,
-    generated::models::{Country, CountryCol, CountryIsDefault, CountryStatus},
+    generated::models::{CountryCol, CountryIsDefault, CountryModel, CountryStatus},
     platform::countries::{
         default_country_status_for_iso2, load_builtin_country_seed, normalize_country_seed,
     },
@@ -15,7 +15,6 @@ pub struct CountriesSeeder;
 impl Seeder for CountriesSeeder {
     async fn run(&self, db: &sqlx::PgPool) -> anyhow::Result<()> {
         let countries = load_builtin_country_seed()?;
-        let model = Country::new(DbConn::pool(db), None);
 
         for seed in countries {
             let seed = normalize_country_seed(seed);
@@ -29,33 +28,32 @@ impl Seeder for CountriesSeeder {
                 CountryIsDefault::No
             };
 
-            model
-                .insert()
-                .set_iso2(seed.iso2)
-                .set_iso3(seed.iso3)
-                .set_iso_numeric(seed.iso_numeric)
-                .set_name(seed.name)
-                .set_official_name(seed.official_name)
-                .set_capital(seed.capital)
-                .set_capitals(seed.capitals)
-                .set_region(seed.region)
-                .set_subregion(seed.subregion)
-                .set_currencies(currencies)
-                .set_primary_currency_code(seed.primary_currency_code)
-                .set_calling_code(seed.calling_code)
-                .set_calling_root(seed.calling_root)
-                .set_calling_suffixes(seed.calling_suffixes)
-                .set_tlds(seed.tlds)
-                .set_timezones(seed.timezones)
-                .set_latitude(seed.latitude)
-                .set_longitude(seed.longitude)
-                .set_independent(seed.independent)
-                .set_status(status)
-                .set_is_default(is_default)
-                .set_assignment_status(seed.assignment_status)
-                .set_un_member(seed.un_member)
-                .set_flag_emoji(seed.flag_emoji)
-                .on_conflict_update(&[CountryCol::Iso2])
+            CountryModel::create(DbConn::pool(db))
+                .set(CountryCol::ISO2, seed.iso2)?
+                .set(CountryCol::ISO3, seed.iso3)?
+                .set(CountryCol::ISO_NUMERIC, seed.iso_numeric)?
+                .set(CountryCol::NAME, seed.name)?
+                .set(CountryCol::OFFICIAL_NAME, seed.official_name)?
+                .set(CountryCol::CAPITAL, seed.capital)?
+                .set(CountryCol::CAPITALS, seed.capitals)?
+                .set(CountryCol::REGION, seed.region)?
+                .set(CountryCol::SUBREGION, seed.subregion)?
+                .set(CountryCol::CURRENCIES, currencies)?
+                .set(CountryCol::PRIMARY_CURRENCY_CODE, seed.primary_currency_code)?
+                .set(CountryCol::CALLING_CODE, seed.calling_code)?
+                .set(CountryCol::CALLING_ROOT, seed.calling_root)?
+                .set(CountryCol::CALLING_SUFFIXES, seed.calling_suffixes)?
+                .set(CountryCol::TLDS, seed.tlds)?
+                .set(CountryCol::TIMEZONES, seed.timezones)?
+                .set(CountryCol::LATITUDE, seed.latitude)?
+                .set(CountryCol::LONGITUDE, seed.longitude)?
+                .set(CountryCol::INDEPENDENT, seed.independent)?
+                .set(CountryCol::STATUS, status)?
+                .set(CountryCol::IS_DEFAULT, is_default)?
+                .set(CountryCol::ASSIGNMENT_STATUS, seed.assignment_status)?
+                .set(CountryCol::UN_MEMBER, seed.un_member)?
+                .set(CountryCol::FLAG_EMOJI, seed.flag_emoji)?
+                .on_conflict_update(&[CountryCol::ISO2])
                 .save()
                 .await?;
         }

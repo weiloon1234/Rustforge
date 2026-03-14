@@ -1,14 +1,11 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
-use core_db::common::sql::Op;
+use core_db::common::{model_api::Query, sql::Op};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
-use generated::{
-    models::{BankDataTable, BankDataTableHooks, BankQuery, BankStatus},
-    permissions::Permission,
-};
+use generated::{models::*, permissions::Permission};
 
 use crate::contracts::datatable::admin::bank::{
     AdminBankDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
@@ -21,10 +18,10 @@ pub struct BankDataTableAppHooks;
 impl BankDataTableHooks for BankDataTableAppHooks {
     fn scope<'db>(
         &'db self,
-        query: BankQuery<'db>,
+        query: Query<'db, BankModel>,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> BankQuery<'db> {
+    ) -> Query<'db, BankModel> {
         query
     }
 
@@ -42,12 +39,12 @@ impl BankDataTableHooks for BankDataTableAppHooks {
 
     fn filter_query<'db>(
         &'db self,
-        query: BankQuery<'db>,
+        query: Query<'db, BankModel>,
         filter_key: &str,
         value: &str,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<Option<BankQuery<'db>>> {
+    ) -> anyhow::Result<Option<Query<'db, BankModel>>> {
         match filter_key {
             "q" => Ok(Some(apply_keyword_filter(query, value))),
             "f-country_iso2" => {
@@ -55,12 +52,12 @@ impl BankDataTableHooks for BankDataTableAppHooks {
                 if trimmed.is_empty() {
                     Ok(Some(query))
                 } else {
-                    Ok(Some(query.where_country_iso2(Op::Eq, trimmed.to_string())))
+                    Ok(Some(query.where_col(BankCol::COUNTRY_ISO2, Op::Eq, trimmed.to_string())))
                 }
             }
             "f-status" => {
                 if let Some(s) = BankStatus::from_storage(value) {
-                    Ok(Some(query.where_status(Op::Eq, s)))
+                    Ok(Some(query.where_col(BankCol::STATUS, Op::Eq, s)))
                 } else {
                     Ok(Some(query))
                 }
@@ -71,7 +68,7 @@ impl BankDataTableHooks for BankDataTableAppHooks {
 
     fn map_row(
         &self,
-        _row: &mut generated::models::BankWithRelations,
+        _row: &mut BankRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<()> {
@@ -80,7 +77,7 @@ impl BankDataTableHooks for BankDataTableAppHooks {
 
     fn row_to_record(
         &self,
-        row: generated::models::BankWithRelations,
+        row: BankRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
@@ -93,16 +90,16 @@ impl BankDataTableHooks for BankDataTableAppHooks {
     }
 }
 
-fn apply_keyword_filter<'db>(query: BankQuery<'db>, value: &str) -> BankQuery<'db> {
+fn apply_keyword_filter<'db>(query: Query<'db, BankModel>, value: &str) -> Query<'db, BankModel> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return query;
     }
     if let Ok(id) = trimmed.parse::<i64>() {
-        return query.where_id(Op::Eq, id);
+        return query.where_col(BankCol::ID, Op::Eq, id);
     }
     let pattern = format!("%{trimmed}%");
-    query.where_name(Op::Like, pattern)
+    query.where_col(BankCol::NAME, Op::Like, pattern)
 }
 
 pub type AppBankDataTable = BankDataTable<BankDataTableAppHooks>;

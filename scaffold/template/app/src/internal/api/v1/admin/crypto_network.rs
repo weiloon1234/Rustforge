@@ -156,7 +156,7 @@ async fn parse_crypto_network_multipart(
     Ok(ParsedCryptoNetworkMultipart { input, logo })
 }
 
-fn network_output(network: &generated::models::CryptoNetworkWithRelations) -> CryptoNetworkOutput {
+fn network_output(network: &generated::models::CryptoNetworkRecord) -> CryptoNetworkOutput {
     CryptoNetworkOutput {
         id: network.id.into(),
         name: network.name.clone(),

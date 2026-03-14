@@ -1,6 +1,9 @@
 use crate::{Job, JobContext};
 use async_trait::async_trait;
-use core_db::{common::sql::DbConn, generated::models::FailedJob};
+use core_db::{
+    common::sql::DbConn,
+    generated::models::{FailedJobCol, FailedJobModel},
+};
 use redis::AsyncCommands;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -378,17 +381,18 @@ impl Worker {
     async fn persist_failure(&self, wrapper: &JobPayload, group_id: Option<&str>, err: &str) {
         let payload_json = serde_json::to_value(wrapper).unwrap_or(serde_json::json!({}));
 
-        if let Err(e) = FailedJob::new(DbConn::pool(&self.context.db), None)
-            .insert()
-            .set_job_name(wrapper.job.clone())
-            .set_queue(wrapper.queue.clone())
-            .set_payload(payload_json)
-            .set_error(err.to_string())
-            .set_attempts(wrapper.attempts as i32)
-            .set_group_id(group_id.map(str::to_string))
-            .save()
-            .await
-        {
+        let insert = FailedJobModel::create(DbConn::pool(&self.context.db))
+            .set(FailedJobCol::JOB_NAME, wrapper.job.clone())
+            .and_then(|create| create.set(FailedJobCol::QUEUE, wrapper.queue.clone()))
+            .and_then(|create| create.set(FailedJobCol::PAYLOAD, payload_json))
+            .and_then(|create| create.set(FailedJobCol::ERROR, err.to_string()))
+            .and_then(|create| create.set(FailedJobCol::ATTEMPTS, wrapper.attempts as i32))
+            .and_then(|create| create.set(FailedJobCol::GROUP_ID, group_id.map(str::to_string)));
+
+        if let Err(e) = match insert {
+            Ok(insert) => insert.save().await,
+            Err(err) => Err(err),
+        } {
             tracing::error!("Failed to persist job failure log: {}", e);
         }
     }

@@ -48,8 +48,8 @@ pub struct ModelSpec {
     /// Default: true — set `profile = false` to exclude (e.g. profiler tables).
     pub profile: bool,
     pub helper_items: Vec<String>,
-    pub view_impl_items: Vec<String>,
-    pub with_relations_impl_items: Vec<String>,
+    pub record_impl_items: Vec<String>,
+    pub model_impl_items: Vec<String>,
 }
 
 impl Default for ModelSpec {
@@ -74,8 +74,8 @@ impl Default for ModelSpec {
             observe: true,
             profile: true,
             helper_items: Vec::new(),
-            view_impl_items: Vec::new(),
-            with_relations_impl_items: Vec::new(),
+            record_impl_items: Vec::new(),
+            model_impl_items: Vec::new(),
         }
     }
 }
@@ -208,8 +208,8 @@ struct ParsedField {
 
 #[derive(Debug, Clone)]
 enum CustomImplTarget {
-    View { model_key: String },
-    WithRelations { model_key: String },
+    Record { model_key: String },
+    Model { model_key: String },
 }
 
 #[derive(Debug, Clone)]
@@ -394,15 +394,47 @@ fn parse_model_source(raw: &str, source: &Path) -> anyhow::Result<Schema> {
                     );
                 }
             }
-            Item::Impl(item_impl) if has_attr(&item_impl.attrs, "rf_view_impl") => {
-                custom_impls.push(parse_custom_impl(item_impl, source, CustomImplKind::View)?);
-            }
-            Item::Impl(item_impl) if has_attr(&item_impl.attrs, "rf_with_relations_impl") => {
+            Item::Impl(item_impl) if has_attr(&item_impl.attrs, "rf_record_impl") => {
                 custom_impls.push(parse_custom_impl(
                     item_impl,
                     source,
-                    CustomImplKind::WithRelations,
+                    CustomImplKind::Record,
                 )?);
+            }
+            Item::Impl(item_impl) if has_attr(&item_impl.attrs, "rf_model_impl") => {
+                custom_impls.push(parse_custom_impl(item_impl, source, CustomImplKind::Model)?);
+            }
+            Item::Impl(item_impl)
+                if has_attr(&item_impl.attrs, "rf_view_impl")
+                    || has_attr(&item_impl.attrs, "rf_with_relations_impl") =>
+            {
+                bail_legacy_custom_impl_attr(&item_impl, source)?;
+            }
+            Item::Verbatim(tokens) => {
+                if let Ok(item_impl) = syn::parse2::<ItemImpl>(tokens.clone()) {
+                    if has_attr(&item_impl.attrs, "rf_record_impl") {
+                        custom_impls.push(parse_custom_impl(
+                            item_impl,
+                            source,
+                            CustomImplKind::Record,
+                        )?);
+                        continue;
+                    }
+                    if has_attr(&item_impl.attrs, "rf_model_impl") {
+                        custom_impls.push(parse_custom_impl(
+                            item_impl,
+                            source,
+                            CustomImplKind::Model,
+                        )?);
+                        continue;
+                    }
+                    if has_attr(&item_impl.attrs, "rf_view_impl")
+                        || has_attr(&item_impl.attrs, "rf_with_relations_impl")
+                    {
+                        bail_legacy_custom_impl_attr(&item_impl, source)?;
+                    }
+                }
+                helper_items.push(tokens.to_string());
             }
             other => {
                 helper_items.push(other.into_token_stream().to_string());
@@ -420,31 +452,31 @@ fn parse_model_source(raw: &str, source: &Path) -> anyhow::Result<Schema> {
     let mut computed = Vec::new();
     for parsed in custom_impls {
         match parsed.target {
-            CustomImplTarget::View { model_key: target } => {
+            CustomImplTarget::Record { model_key: target } => {
                 if target != model_key {
                     bail!(
-                        "file '{}' contains #[rf_view_impl] for model '{}' but the file model is '{}'",
+                        "file '{}' contains #[rf_record_impl] for model '{}' but the file model is '{}'",
                         source.display(),
                         target,
                         model_key
                     );
                 }
-                model.view_impl_items.extend(parsed.items);
+                model.record_impl_items.extend(parsed.items);
                 computed.extend(parsed.computed);
             }
-            CustomImplTarget::WithRelations { model_key: target } => {
+            CustomImplTarget::Model { model_key: target } => {
                 if target != model_key {
                     bail!(
-                        "file '{}' contains #[rf_with_relations_impl] for model '{}' but the file model is '{}'",
+                        "file '{}' contains #[rf_model_impl] for model '{}' but the file model is '{}'",
                         source.display(),
                         target,
                         model_key
                     );
                 }
-                model.with_relations_impl_items.extend(parsed.items);
+                model.model_impl_items.extend(parsed.items);
                 if !parsed.computed.is_empty() {
                     bail!(
-                        "#[rf_computed] methods are only supported inside #[rf_view_impl] blocks (file: {})",
+                        "#[rf_computed] methods are only supported inside #[rf_record_impl] blocks (file: {})",
                         source.display()
                     );
                 }
@@ -470,8 +502,21 @@ fn parse_model_source(raw: &str, source: &Path) -> anyhow::Result<Schema> {
 
 #[derive(Debug, Clone, Copy)]
 enum CustomImplKind {
-    View,
-    WithRelations,
+    Record,
+    Model,
+}
+
+fn bail_legacy_custom_impl_attr(item_impl: &ItemImpl, source: &Path) -> anyhow::Result<()> {
+    let attr = if has_attr(&item_impl.attrs, "rf_view_impl") {
+        "#[rf_view_impl]"
+    } else {
+        "#[rf_with_relations_impl]"
+    };
+    bail!(
+        "{} is no longer supported in '{}'; use #[rf_record_impl] on XxxRecord instead",
+        attr,
+        source.display()
+    );
 }
 
 fn parse_model_struct(item: &ItemStruct, source: &Path) -> anyhow::Result<(String, ModelSpec)> {
@@ -976,8 +1021,8 @@ fn parse_custom_impl(
     item_impl.attrs = strip_named_attrs(
         &item_impl.attrs,
         &[match kind {
-            CustomImplKind::View => "rf_view_impl",
-            CustomImplKind::WithRelations => "rf_with_relations_impl",
+            CustomImplKind::Record => "rf_record_impl",
+            CustomImplKind::Model => "rf_model_impl",
         }],
     );
 
@@ -989,27 +1034,27 @@ fn parse_custom_impl(
     })?;
 
     let target = match kind {
-        CustomImplKind::View => {
-            let Some(base) = target_ident.strip_suffix("View") else {
+        CustomImplKind::Record => {
+            let Some(base) = target_ident.strip_suffix("Record") else {
                 bail!(
-                    "#[rf_view_impl] in '{}' must target XxxView, found '{}'",
+                    "#[rf_record_impl] in '{}' must target XxxRecord, found '{}'",
                     source.display(),
                     target_ident
                 );
             };
-            CustomImplTarget::View {
+            CustomImplTarget::Record {
                 model_key: to_snake(base),
             }
         }
-        CustomImplKind::WithRelations => {
-            let Some(base) = target_ident.strip_suffix("WithRelations") else {
+        CustomImplKind::Model => {
+            let Some(base) = target_ident.strip_suffix("Model") else {
                 bail!(
-                    "#[rf_with_relations_impl] in '{}' must target XxxWithRelations, found '{}'",
+                    "#[rf_model_impl] in '{}' must target XxxModel, found '{}'",
                     source.display(),
                     target_ident
                 );
             };
-            CustomImplTarget::WithRelations {
+            CustomImplTarget::Model {
                 model_key: to_snake(base),
             }
         }

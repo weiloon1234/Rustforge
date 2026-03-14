@@ -5,19 +5,19 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
 const HAS_UPDATED_AT: bool = true;
 const HAS_SOFT_DELETE: bool = true;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct AttachmentCreateInput {
+pub struct AttachmentCreate {
     pub id: FieldInput<uuid::Uuid>,
     pub owner_type: FieldInput<String>,
     pub owner_id: FieldInput<i64>,
@@ -34,7 +34,7 @@ pub struct AttachmentCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct AttachmentUpdateChanges {
+pub struct AttachmentChanges {
     pub id: Option<FieldChange<uuid::Uuid>>,
     pub owner_type: Option<FieldChange<String>>,
     pub owner_id: Option<FieldChange<i64>>,
@@ -73,7 +73,7 @@ pub struct AttachmentRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AttachmentView {
+pub struct AttachmentRecord {
     pub id: uuid::Uuid,
     pub owner_type: String,
     pub owner_id: i64,
@@ -91,67 +91,14 @@ pub struct AttachmentView {
     pub deleted_at: Option<time::OffsetDateTime>,
 }
 
-impl AttachmentView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> AttachmentUpdate<'db> {
-        Attachment::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &Attachment<'db>) -> AttachmentUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> AttachmentJson {
-        AttachmentJson {
-            id: self.id.clone(),
-            owner_type: self.owner_type.clone(),
-            owner_id: self.owner_id.clone(),
-            field: self.field.clone(),
-            path: self.path.clone(),
-            content_type: self.content_type.clone(),
-            size: self.size.clone(),
-            width: self.width.clone(),
-            height: self.height.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            deleted_at: self.deleted_at.clone(),
-        }
+impl AttachmentRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, AttachmentModel> {
+        AttachmentModel::query(db.into()).where_col(AttachmentDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-pub trait AttachmentViewsExt {
-    fn ids(&self) -> Vec<uuid::Uuid>;
-    fn pluck<R>(&self, f: impl Fn(&AttachmentView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&AttachmentView) -> K) -> std::collections::HashMap<K, AttachmentView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&AttachmentView) -> K) -> std::collections::HashMap<K, Vec<AttachmentView>> where K: Eq + std::hash::Hash;
-}
-
-impl AttachmentViewsExt for Vec<AttachmentView> {
-    fn ids(&self) -> Vec<uuid::Uuid> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&AttachmentView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&AttachmentView) -> K) -> std::collections::HashMap<K, AttachmentView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&AttachmentView) -> K) -> std::collections::HashMap<K, Vec<AttachmentView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct AttachmentJson {
-    pub id: uuid::Uuid,
-    pub owner_type: String,
-    pub owner_id: i64,
-    pub field: String,
-    pub path: String,
-    pub content_type: String,
-    pub size: i64,
-    pub width: Option<i32>,
-    pub height: Option<i32>,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub deleted_at: Option<time::OffsetDateTime>,
-}
-
-fn hydrate_view(row: AttachmentRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> AttachmentView {
-    let view = AttachmentView {
+fn hydrate_record(row: AttachmentRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> AttachmentRecord {
+    let mut record = AttachmentRecord {
         id: row.id,
         owner_type: row.owner_type,
         owner_id: row.owner_id,
@@ -165,31 +112,46 @@ fn hydrate_view(row: AttachmentRow, _loc: &LocalizedMap, _base_url: Option<&str>
         updated_at: row.updated_at,
         deleted_at: row.deleted_at,
     };
-    view
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct AttachmentWithRelations {
-    #[serde(flatten)]
-    pub row: AttachmentView,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AttachmentCol;
+impl AttachmentCol {
+    pub const ID: Column<AttachmentModel, uuid::Uuid> = Column::new("id");
+    pub const OWNER_TYPE: Column<AttachmentModel, String> = Column::new("owner_type");
+    pub const OWNER_ID: Column<AttachmentModel, i64> = Column::new("owner_id");
+    pub const FIELD: Column<AttachmentModel, String> = Column::new("field");
+    pub const PATH: Column<AttachmentModel, String> = Column::new("path");
+    pub const CONTENT_TYPE: Column<AttachmentModel, String> = Column::new("content_type");
+    pub const SIZE: Column<AttachmentModel, i64> = Column::new("size");
+    pub const WIDTH: Column<AttachmentModel, Option<i32>> = Column::new("width");
+    pub const HEIGHT: Column<AttachmentModel, Option<i32>> = Column::new("height");
+    pub const CREATED_AT: Column<AttachmentModel, time::OffsetDateTime> = Column::new("created_at");
+    pub const UPDATED_AT: Column<AttachmentModel, time::OffsetDateTime> = Column::new("updated_at");
+    pub const DELETED_AT: Column<AttachmentModel, Option<time::OffsetDateTime>> = Column::new("deleted_at");
 }
 
-impl AttachmentWithRelations {
-    pub fn into_row(self) -> AttachmentView { self.row }
-}
-
-impl std::ops::Deref for AttachmentWithRelations {
-    type Target = AttachmentView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for AttachmentWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_attachment_db_col(sql: &str) -> Option<AttachmentDbCol> {
+    match sql {
+        "id" => Some(AttachmentDbCol::Id),
+        "owner_type" => Some(AttachmentDbCol::OwnerType),
+        "owner_id" => Some(AttachmentDbCol::OwnerId),
+        "field" => Some(AttachmentDbCol::Field),
+        "path" => Some(AttachmentDbCol::Path),
+        "content_type" => Some(AttachmentDbCol::ContentType),
+        "size" => Some(AttachmentDbCol::Size),
+        "width" => Some(AttachmentDbCol::Width),
+        "height" => Some(AttachmentDbCol::Height),
+        "created_at" => Some(AttachmentDbCol::CreatedAt),
+        "updated_at" => Some(AttachmentDbCol::UpdatedAt),
+        "deleted_at" => Some(AttachmentDbCol::DeletedAt),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum AttachmentCol {
+pub enum AttachmentDbCol {
     Id,
     OwnerType,
     OwnerId,
@@ -204,54 +166,31 @@ pub enum AttachmentCol {
     DeletedAt,
 }
 
-impl AttachmentCol {
-    pub const fn all() -> &'static [AttachmentCol] {
-        &[AttachmentCol::Id, AttachmentCol::OwnerType, AttachmentCol::OwnerId, AttachmentCol::Field, AttachmentCol::Path, AttachmentCol::ContentType, AttachmentCol::Size, AttachmentCol::Width, AttachmentCol::Height, AttachmentCol::CreatedAt, AttachmentCol::UpdatedAt, AttachmentCol::DeletedAt]
+impl AttachmentDbCol {
+    pub const fn all() -> &'static [AttachmentDbCol] {
+        &[AttachmentDbCol::Id, AttachmentDbCol::OwnerType, AttachmentDbCol::OwnerId, AttachmentDbCol::Field, AttachmentDbCol::Path, AttachmentDbCol::ContentType, AttachmentDbCol::Size, AttachmentDbCol::Width, AttachmentDbCol::Height, AttachmentDbCol::CreatedAt, AttachmentDbCol::UpdatedAt, AttachmentDbCol::DeletedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            AttachmentCol::Id => "id",
-            AttachmentCol::OwnerType => "owner_type",
-            AttachmentCol::OwnerId => "owner_id",
-            AttachmentCol::Field => "field",
-            AttachmentCol::Path => "path",
-            AttachmentCol::ContentType => "content_type",
-            AttachmentCol::Size => "size",
-            AttachmentCol::Width => "width",
-            AttachmentCol::Height => "height",
-            AttachmentCol::CreatedAt => "created_at",
-            AttachmentCol::UpdatedAt => "updated_at",
-            AttachmentCol::DeletedAt => "deleted_at",
+            AttachmentDbCol::Id => "id",
+            AttachmentDbCol::OwnerType => "owner_type",
+            AttachmentDbCol::OwnerId => "owner_id",
+            AttachmentDbCol::Field => "field",
+            AttachmentDbCol::Path => "path",
+            AttachmentDbCol::ContentType => "content_type",
+            AttachmentDbCol::Size => "size",
+            AttachmentDbCol::Width => "width",
+            AttachmentDbCol::Height => "height",
+            AttachmentDbCol::CreatedAt => "created_at",
+            AttachmentDbCol::UpdatedAt => "updated_at",
+            AttachmentDbCol::DeletedAt => "deleted_at",
         }
     }
 }
 
-pub struct Attachment<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-}
-
-impl<'db> Attachment<'db> {
-    pub const TABLE: &'static str = "attachments";
-    pub const MODEL_KEY: &'static str = "attachment";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> AttachmentQuery<'db> { AttachmentQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> AttachmentInsert<'db> { AttachmentInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> AttachmentUpdate<'db> { AttachmentUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: uuid::Uuid) -> Result<Option<AttachmentWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: uuid::Uuid) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-    pub async fn restore(&self, id: uuid::Uuid) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).restore().await
-    }
-}
 
 #[derive(Clone)]
-pub struct AttachmentQuery<'db> {
+pub struct AttachmentQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -276,158 +215,157 @@ pub struct AttachmentQuery<'db> {
 
 
 
-impl<'db> AttachmentQuery<'db> {
+impl<'db> AttachmentQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![], with_deleted: false, only_deleted: false }
     }
-    pub fn unsafe_sql(self) -> AttachmentUnsafeQuery<'db> { AttachmentUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_field(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Field.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Field.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_field_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Field.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Field.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_path(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Path.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Path.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_path_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Path.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Path.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_content_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::ContentType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::ContentType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_content_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::ContentType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::ContentType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_size(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Size.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Size.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_size_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Size.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Size.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_width(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Width.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Width.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_width_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Width.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Width.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_height(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Height.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Height.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_height_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Height.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Height.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: uuid::Uuid) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(AttachmentCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AttachmentCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(AttachmentDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: AttachmentDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -446,7 +384,7 @@ impl<'db> AttachmentQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: AttachmentCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: AttachmentDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -461,7 +399,7 @@ impl<'db> AttachmentQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: AttachmentCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: AttachmentDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -473,7 +411,7 @@ impl<'db> AttachmentQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: AttachmentCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: AttachmentDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -481,15 +419,15 @@ impl<'db> AttachmentQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: AttachmentCol) -> Self {
+    pub fn where_null(mut self, col: AttachmentDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: AttachmentCol) -> Self {
+    pub fn where_not_null(mut self, col: AttachmentDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: AttachmentCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: AttachmentDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -543,7 +481,7 @@ impl<'db> AttachmentQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[AttachmentCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[AttachmentDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, owner_type, owner_id, field, path, content_type, size, width, height, created_at, updated_at, deleted_at".to_string());
         } else {
@@ -555,7 +493,7 @@ impl<'db> AttachmentQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[AttachmentCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[AttachmentDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -636,26 +574,26 @@ impl<'db> AttachmentQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: AttachmentCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: AttachmentDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: AttachmentCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: AttachmentDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: AttachmentCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: AttachmentDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[AttachmentCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[AttachmentDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[AttachmentCol]) -> Self {
+    pub fn select(mut self, cols: &[AttachmentDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -703,7 +641,7 @@ impl<'db> AttachmentQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[AttachmentCol]) -> Self {
+    pub fn group_by(mut self, cols: &[AttachmentDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -780,14 +718,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<AttachmentWithRelations>> {
+    pub async fn get(self) -> Result<Vec<AttachmentRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , with_deleted, only_deleted, .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentDbCol::DeletedAt.as_sql()));
             }
         }
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -837,66 +775,66 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
-            out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            out_vec.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let out_vec: Vec<AttachmentWithRelations> = out_vec.into_iter().map(|v| AttachmentWithRelations { row: v }).collect();
+        let out_vec: Vec<AttachmentRecord> = out_vec;
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<AttachmentWithRelations>> {
+    pub async fn first(self) -> Result<Option<AttachmentRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<AttachmentWithRelations> {
+    pub async fn first_or_fail(self) -> Result<AttachmentRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("attachments: record not found"))
     }
 
-    pub async fn find(self, id: uuid::Uuid) -> Result<Option<AttachmentWithRelations>> {
+    pub async fn find(self, id: uuid::Uuid) -> Result<Option<AttachmentRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<AttachmentWithRelations> {
+    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<AttachmentRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("attachments: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(AttachmentInsert<'db>) -> AttachmentInsert<'db>) -> Result<AttachmentWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(AttachmentCreateInner<'db>) -> AttachmentCreateInner<'db>) -> Result<AttachmentRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(AttachmentInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(AttachmentCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Attachment::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        AttachmentQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(AttachmentUpdate<'db>) -> AttachmentUpdate<'db>,
-        on_create: impl FnOnce(AttachmentInsert<'db>) -> AttachmentInsert<'db>,
-    ) -> Result<AttachmentWithRelations> {
+        on_update: impl FnOnce(AttachmentPatchInner<'db>) -> AttachmentPatchInner<'db>,
+        on_create: impl FnOnce(AttachmentCreateInner<'db>) -> AttachmentCreateInner<'db>,
+    ) -> Result<AttachmentRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = AttachmentUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = AttachmentPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Attachment::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return AttachmentQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(AttachmentInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(AttachmentCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Attachment::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        AttachmentQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: AttachmentCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: AttachmentDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
         if HAS_SOFT_DELETE && !self.with_deleted {
-            where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
+            where_sql.push(format!("{} IS NULL", AttachmentDbCol::DeletedAt.as_sql()));
         }
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let sql = format!("UPDATE attachments SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
@@ -909,7 +847,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: AttachmentCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: AttachmentDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -918,9 +856,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
@@ -947,9 +885,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
@@ -979,13 +917,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<AttachmentWithRelations>) -> Fut,
+        F: FnMut(Vec<AttachmentRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = AttachmentQuery::new(db.clone(), self.base_url.clone());
+            let mut query = AttachmentQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -999,11 +937,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(AttachmentCol::CreatedAt, OrderDir::Desc)
+        self.order_by(AttachmentDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(AttachmentCol::CreatedAt, OrderDir::Asc)
+        self.order_by(AttachmentDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -1014,7 +952,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<AttachmentWithRelations> {
+    pub async fn sole(self) -> Result<AttachmentRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -1033,7 +971,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&AttachmentWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&AttachmentRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -1041,14 +979,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: AttachmentCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: AttachmentDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
@@ -1069,14 +1007,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: AttachmentCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: AttachmentDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
@@ -1097,14 +1035,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: AttachmentCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: AttachmentDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
@@ -1125,14 +1063,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: AttachmentCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: AttachmentDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "attachments".to_string());
@@ -1153,16 +1091,16 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<AttachmentWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<AttachmentRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , with_deleted, only_deleted, .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentDbCol::DeletedAt.as_sql()));
             }
         }
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -1211,9 +1149,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
-            data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            data.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let data: Vec<AttachmentWithRelations> = data.into_iter().map(|v| AttachmentWithRelations { row: v }).collect();
+        let data: Vec<AttachmentRecord> = data;
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn to_sql(&self) -> (String, Vec<BindValue>) {
@@ -1236,9 +1174,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let only_deleted = self.only_deleted;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentDbCol::DeletedAt.as_sql()));
             }
         }
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -1285,9 +1223,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentDbCol::DeletedAt.as_sql()));
             }
         }
         (where_sql, binds)
@@ -1321,12 +1259,12 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         if HAS_SOFT_DELETE {
             let mut where_sql = where_sql;
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AttachmentDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AttachmentCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AttachmentDbCol::DeletedAt.as_sql()));
             }
             let idx = binds.len() + 1;
-            let mut sql = format!("UPDATE attachments SET {} = ${}", AttachmentCol::DeletedAt.as_sql(), idx);
+            let mut sql = format!("UPDATE attachments SET {} = ${}", AttachmentDbCol::DeletedAt.as_sql(), idx);
             if !where_sql.is_empty() {
                 sql.push_str(" WHERE ");
                 sql.push_str(&where_sql.join(" AND "));
@@ -1390,9 +1328,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         if where_sql.is_empty() { anyhow::bail!("restore(): no conditions set"); }
         let mut where_sql = where_sql;
         if !with_deleted && !only_deleted {
-            where_sql.push(format!("{} IS NOT NULL", AttachmentCol::DeletedAt.as_sql()));
+            where_sql.push(format!("{} IS NOT NULL", AttachmentDbCol::DeletedAt.as_sql()));
         }
-        let mut sql = format!("UPDATE attachments SET {} = NULL", AttachmentCol::DeletedAt.as_sql());
+        let mut sql = format!("UPDATE attachments SET {} = NULL", AttachmentDbCol::DeletedAt.as_sql());
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&where_sql.join(" AND "));
@@ -1409,38 +1347,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct AttachmentUnsafeQuery<'db> {
-    inner: AttachmentQuery<'db>,
-}
 
-impl<'db> AttachmentUnsafeQuery<'db> {
-    fn new(inner: AttachmentQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> AttachmentQuery<'db> { self.inner }
-}
-
-
-pub struct AttachmentInsert<'db> {
+pub struct AttachmentCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<AttachmentCol>,
+    cols: Vec<AttachmentDbCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<AttachmentCol>,
+    conflict_cols: Vec<AttachmentDbCol>,
 }
 
-impl<'db> AttachmentInsert<'db> {
+impl<'db> AttachmentCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1454,157 +1371,157 @@ impl<'db> AttachmentInsert<'db> {
 
 
 pub fn set_id(mut self, val: uuid::Uuid) -> Self {
-        self.cols.push(AttachmentCol::Id);
+        self.cols.push(AttachmentDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_owner_type(mut self, val: String) -> Self {
-        self.cols.push(AttachmentCol::OwnerType);
+        self.cols.push(AttachmentDbCol::OwnerType);
         self.binds.push(val.into());
         self
     }
     pub fn set_owner_id(mut self, val: i64) -> Self {
-        self.cols.push(AttachmentCol::OwnerId);
+        self.cols.push(AttachmentDbCol::OwnerId);
         self.binds.push(val.into());
         self
     }
     pub fn set_field(mut self, val: String) -> Self {
-        self.cols.push(AttachmentCol::Field);
+        self.cols.push(AttachmentDbCol::Field);
         self.binds.push(val.into());
         self
     }
     pub fn set_path(mut self, val: String) -> Self {
-        self.cols.push(AttachmentCol::Path);
+        self.cols.push(AttachmentDbCol::Path);
         self.binds.push(val.into());
         self
     }
     pub fn set_content_type(mut self, val: String) -> Self {
-        self.cols.push(AttachmentCol::ContentType);
+        self.cols.push(AttachmentDbCol::ContentType);
         self.binds.push(val.into());
         self
     }
     pub fn set_size(mut self, val: i64) -> Self {
-        self.cols.push(AttachmentCol::Size);
+        self.cols.push(AttachmentDbCol::Size);
         self.binds.push(val.into());
         self
     }
     pub fn set_width(mut self, val: Option<i32>) -> Self {
-        self.cols.push(AttachmentCol::Width);
+        self.cols.push(AttachmentDbCol::Width);
         self.binds.push(val.into());
         self
     }
     pub fn set_height(mut self, val: Option<i32>) -> Self {
-        self.cols.push(AttachmentCol::Height);
+        self.cols.push(AttachmentDbCol::Height);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AttachmentCol::CreatedAt);
+        self.cols.push(AttachmentDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AttachmentCol::UpdatedAt);
+        self.cols.push(AttachmentDbCol::UpdatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.cols.push(AttachmentCol::DeletedAt);
+        self.cols.push(AttachmentDbCol::DeletedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[AttachmentCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[AttachmentDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[AttachmentCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[AttachmentDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<AttachmentCreateInput> {
-        let mut input = AttachmentCreateInput::default();
+    fn to_create_input(&self) -> Result<AttachmentCreate> {
+        let mut input = AttachmentCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                AttachmentCol::Id => {
+                AttachmentDbCol::Id => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                AttachmentCol::OwnerType => {
+                AttachmentDbCol::OwnerType => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.owner_type = FieldInput::Set(value);
                 }
-                AttachmentCol::OwnerId => {
+                AttachmentDbCol::OwnerId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.owner_id = FieldInput::Set(value);
                 }
-                AttachmentCol::Field => {
+                AttachmentDbCol::Field => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.field = FieldInput::Set(value);
                 }
-                AttachmentCol::Path => {
+                AttachmentDbCol::Path => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.path = FieldInput::Set(value);
                 }
-                AttachmentCol::ContentType => {
+                AttachmentDbCol::ContentType => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.content_type = FieldInput::Set(value);
                 }
-                AttachmentCol::Size => {
+                AttachmentDbCol::Size => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.size = FieldInput::Set(value);
                 }
-                AttachmentCol::Width => {
+                AttachmentDbCol::Width => {
                     let value = match bind {
                 BindValue::I32Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i32>'", other),
             };
                     input.width = FieldInput::Set(value);
                 }
-                AttachmentCol::Height => {
+                AttachmentDbCol::Height => {
                     let value = match bind {
                 BindValue::I32Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i32>'", other),
             };
                     input.height = FieldInput::Set(value);
                 }
-                AttachmentCol::CreatedAt => {
+                AttachmentDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                AttachmentCol::UpdatedAt => {
+                AttachmentDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.updated_at = FieldInput::Set(value);
                 }
-                AttachmentCol::DeletedAt => {
+                AttachmentDbCol::DeletedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
@@ -1617,7 +1534,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
     }
 
 
-pub async fn save(self) -> Result<AttachmentView> {
+pub async fn save(self) -> Result<AttachmentRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -1635,7 +1552,7 @@ pub async fn save(self) -> Result<AttachmentView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1654,10 +1571,10 @@ pub async fn save(self) -> Result<AttachmentView> {
                         Err(err) => log_observer_error("created", "attachment", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "attachment", table: "attachments", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -1669,22 +1586,22 @@ pub async fn save(self) -> Result<AttachmentView> {
                         Err(err) => log_observer_error("created", "attachment", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(AttachmentView, AttachmentRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(AttachmentRecord, AttachmentRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, AttachmentCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, AttachmentDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AttachmentCol::CreatedAt);
+            cols.push(AttachmentDbCol::CreatedAt);
             binds.push(now.into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AttachmentCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AttachmentDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AttachmentCol::UpdatedAt);
+            cols.push(AttachmentDbCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1718,20 +1635,20 @@ pub async fn save(self) -> Result<AttachmentView> {
         let row = db.fetch_one(q).await?;
         record_profiled_query("attachments", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
-        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct AttachmentUpdate<'db> {
+pub struct AttachmentPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(AttachmentCol, BindValue, SetMode)>,
+    sets: Vec<(AttachmentDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> AttachmentUpdate<'db> {
+impl<'db> AttachmentPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1741,146 +1658,145 @@ impl<'db> AttachmentUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> AttachmentUnsafeUpdate<'db> { AttachmentUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: uuid::Uuid) -> Self {
-        self.sets.push((AttachmentCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((AttachmentDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn set_owner_type(mut self, val: String) -> Self {
-        self.sets.push((AttachmentCol::OwnerType, val.into(), SetMode::Assign));
+        self.sets.push((AttachmentDbCol::OwnerType, val.into(), SetMode::Assign));
         self
     }
     pub fn set_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((AttachmentCol::OwnerId, val.into(), SetMode::Assign));
+        self.sets.push((AttachmentDbCol::OwnerId, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((AttachmentCol::OwnerId, val.into(), SetMode::Increment));
+        self.sets.push((AttachmentDbCol::OwnerId, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((AttachmentCol::OwnerId, val.into(), SetMode::Decrement));
+        self.sets.push((AttachmentDbCol::OwnerId, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_field(mut self, val: String) -> Self {
-        self.sets.push((AttachmentCol::Field, val.into(), SetMode::Assign));
+        self.sets.push((AttachmentDbCol::Field, val.into(), SetMode::Assign));
         self
     }
     pub fn set_path(mut self, val: String) -> Self {
-        self.sets.push((AttachmentCol::Path, val.into(), SetMode::Assign));
+        self.sets.push((AttachmentDbCol::Path, val.into(), SetMode::Assign));
         self
     }
     pub fn set_content_type(mut self, val: String) -> Self {
-        self.sets.push((AttachmentCol::ContentType, val.into(), SetMode::Assign));
+        self.sets.push((AttachmentDbCol::ContentType, val.into(), SetMode::Assign));
         self
     }
     pub fn set_size(mut self, val: i64) -> Self {
-        self.sets.push((AttachmentCol::Size, val.into(), SetMode::Assign));
+        self.sets.push((AttachmentDbCol::Size, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_size(mut self, val: i64) -> Self {
-        self.sets.push((AttachmentCol::Size, val.into(), SetMode::Increment));
+        self.sets.push((AttachmentDbCol::Size, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_size(mut self, val: i64) -> Self {
-        self.sets.push((AttachmentCol::Size, val.into(), SetMode::Decrement));
+        self.sets.push((AttachmentDbCol::Size, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_width(mut self, val: Option<i32>) -> Self {
-        self.sets.push((AttachmentCol::Width, val.into(), SetMode::Assign));
+        self.sets.push((AttachmentDbCol::Width, val.into(), SetMode::Assign));
         self
     }
     pub fn set_height(mut self, val: Option<i32>) -> Self {
-        self.sets.push((AttachmentCol::Height, val.into(), SetMode::Assign));
+        self.sets.push((AttachmentDbCol::Height, val.into(), SetMode::Assign));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AttachmentCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((AttachmentDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AttachmentCol::UpdatedAt, val.into(), SetMode::Assign));
+        self.sets.push((AttachmentDbCol::UpdatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((AttachmentCol::DeletedAt, val.into(), SetMode::Assign));
+        self.sets.push((AttachmentDbCol::DeletedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_field(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Field.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Field.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_path(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Path.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Path.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_content_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::ContentType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::ContentType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_size(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Size.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Size.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_width(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Width.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Width.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_height(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::Height.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::Height.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AttachmentCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AttachmentDbCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AttachmentCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: AttachmentDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1899,11 +1815,11 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<AttachmentUpdateChanges> {
-        let mut changes = AttachmentUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<AttachmentChanges> {
+        let mut changes = AttachmentChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                AttachmentCol::Id => {
+                AttachmentDbCol::Id => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
@@ -1914,7 +1830,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AttachmentCol::OwnerType => {
+                AttachmentDbCol::OwnerType => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1925,7 +1841,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AttachmentCol::OwnerId => {
+                AttachmentDbCol::OwnerId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1936,7 +1852,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AttachmentCol::Field => {
+                AttachmentDbCol::Field => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1947,7 +1863,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AttachmentCol::Path => {
+                AttachmentDbCol::Path => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1958,7 +1874,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AttachmentCol::ContentType => {
+                AttachmentDbCol::ContentType => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1969,7 +1885,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AttachmentCol::Size => {
+                AttachmentDbCol::Size => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1980,7 +1896,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AttachmentCol::Width => {
+                AttachmentDbCol::Width => {
                     let value = match bind {
                 BindValue::I32Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i32>'", other),
@@ -1991,7 +1907,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AttachmentCol::Height => {
+                AttachmentDbCol::Height => {
                     let value = match bind {
                 BindValue::I32Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i32>'", other),
@@ -2002,7 +1918,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AttachmentCol::CreatedAt => {
+                AttachmentDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2013,7 +1929,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AttachmentCol::UpdatedAt => {
+                AttachmentDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2024,7 +1940,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AttachmentCol::DeletedAt => {
+                AttachmentDbCol::DeletedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
@@ -2068,14 +1984,14 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<AttachmentUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<AttachmentChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AttachmentCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AttachmentDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AttachmentCol::UpdatedAt);
+            cols.push(AttachmentDbCol::UpdatedAt);
             set_binds.push(now.into());
             set_modes.push(SetMode::Assign);
         }
@@ -2165,33 +2081,23 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct AttachmentUnsafeUpdate<'db> {
-    inner: AttachmentUpdate<'db>,
-}
-
-impl<'db> AttachmentUnsafeUpdate<'db> {
-    fn new(inner: AttachmentUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> AttachmentUpdate<'db> { self.inner }
-}
 
 pub struct AttachmentTableAdapter;
 impl AttachmentTableAdapter {
-    fn parse_col(name: &str) -> Option<AttachmentCol> {
+    fn parse_col(name: &str) -> Option<AttachmentDbCol> {
         match name {
-            "id" => Some(AttachmentCol::Id),
-            "owner_type" => Some(AttachmentCol::OwnerType),
-            "owner_id" => Some(AttachmentCol::OwnerId),
-            "field" => Some(AttachmentCol::Field),
-            "path" => Some(AttachmentCol::Path),
-            "content_type" => Some(AttachmentCol::ContentType),
-            "size" => Some(AttachmentCol::Size),
-            "width" => Some(AttachmentCol::Width),
-            "height" => Some(AttachmentCol::Height),
-            "created_at" => Some(AttachmentCol::CreatedAt),
-            "updated_at" => Some(AttachmentCol::UpdatedAt),
-            "deleted_at" => Some(AttachmentCol::DeletedAt),
+            "id" => Some(AttachmentDbCol::Id),
+            "owner_type" => Some(AttachmentDbCol::OwnerType),
+            "owner_id" => Some(AttachmentDbCol::OwnerId),
+            "field" => Some(AttachmentDbCol::Field),
+            "path" => Some(AttachmentDbCol::Path),
+            "content_type" => Some(AttachmentDbCol::ContentType),
+            "size" => Some(AttachmentDbCol::Size),
+            "width" => Some(AttachmentDbCol::Width),
+            "height" => Some(AttachmentDbCol::Height),
+            "created_at" => Some(AttachmentDbCol::CreatedAt),
+            "updated_at" => Some(AttachmentDbCol::UpdatedAt),
+            "deleted_at" => Some(AttachmentDbCol::DeletedAt),
             _ => None,
         }
     }
@@ -2205,12 +2111,12 @@ impl AttachmentTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<AttachmentCol> {
+    fn parse_like_col(name: &str) -> Option<AttachmentDbCol> {
         match name {
-            "owner_type" => Some(AttachmentCol::OwnerType),
-            "field" => Some(AttachmentCol::Field),
-            "path" => Some(AttachmentCol::Path),
-            "content_type" => Some(AttachmentCol::ContentType),
+            "owner_type" => Some(AttachmentDbCol::OwnerType),
+            "field" => Some(AttachmentDbCol::Field),
+            "path" => Some(AttachmentDbCol::Path),
+            "content_type" => Some(AttachmentDbCol::ContentType),
             _ => None,
         }
     }
@@ -2258,8 +2164,8 @@ impl AttachmentTableAdapter {
     }
 }
 impl GeneratedTableAdapter for AttachmentTableAdapter {
-    type Query<'db> = AttachmentQuery<'db>;
-    type Row = AttachmentWithRelations;
+    type Query<'db> = Query<'db, AttachmentModel>;
+    type Row = AttachmentRecord;
     fn model_key(&self) -> &'static str { "Attachment" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "owner_type", "owner_id", "field", "path", "content_type", "size", "width", "height", "created_at", "updated_at", "deleted_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at", "deleted_at"] }
@@ -2297,7 +2203,7 @@ impl GeneratedTableAdapter for AttachmentTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: AttachmentQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<AttachmentQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, AttachmentModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, AttachmentModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -2391,32 +2297,32 @@ impl GeneratedTableAdapter for AttachmentTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: AttachmentQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<AttachmentQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, AttachmentModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, AttachmentModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(AttachmentCol::Id, dir),
-            "owner_type" => query.order_by(AttachmentCol::OwnerType, dir),
-            "owner_id" => query.order_by(AttachmentCol::OwnerId, dir),
-            "field" => query.order_by(AttachmentCol::Field, dir),
-            "path" => query.order_by(AttachmentCol::Path, dir),
-            "content_type" => query.order_by(AttachmentCol::ContentType, dir),
-            "size" => query.order_by(AttachmentCol::Size, dir),
-            "width" => query.order_by(AttachmentCol::Width, dir),
-            "height" => query.order_by(AttachmentCol::Height, dir),
-            "created_at" => query.order_by(AttachmentCol::CreatedAt, dir),
-            "updated_at" => query.order_by(AttachmentCol::UpdatedAt, dir),
-            "deleted_at" => query.order_by(AttachmentCol::DeletedAt, dir),
+            "id" => query.order_by(AttachmentDbCol::Id, dir),
+            "owner_type" => query.order_by(AttachmentDbCol::OwnerType, dir),
+            "owner_id" => query.order_by(AttachmentDbCol::OwnerId, dir),
+            "field" => query.order_by(AttachmentDbCol::Field, dir),
+            "path" => query.order_by(AttachmentDbCol::Path, dir),
+            "content_type" => query.order_by(AttachmentDbCol::ContentType, dir),
+            "size" => query.order_by(AttachmentDbCol::Size, dir),
+            "width" => query.order_by(AttachmentDbCol::Width, dir),
+            "height" => query.order_by(AttachmentDbCol::Height, dir),
+            "created_at" => query.order_by(AttachmentDbCol::CreatedAt, dir),
+            "updated_at" => query.order_by(AttachmentDbCol::UpdatedAt, dir),
+            "deleted_at" => query.order_by(AttachmentDbCol::DeletedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: AttachmentQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<AttachmentQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, AttachmentModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, AttachmentModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &AttachmentWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &AttachmentRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "owner_type" => Some(row.owner_type.clone()),
@@ -2433,10 +2339,10 @@ impl GeneratedTableAdapter for AttachmentTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: AttachmentQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, AttachmentModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: AttachmentQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<AttachmentWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, AttachmentModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<AttachmentRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -2462,20 +2368,20 @@ impl Default for AttachmentDataTableConfig {
     }
 }
 pub trait AttachmentDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: AttachmentQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> AttachmentQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, AttachmentModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, AttachmentModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: AttachmentQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<AttachmentQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: AttachmentQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<AttachmentQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut AttachmentWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: AttachmentWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, AttachmentModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, AttachmentModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, AttachmentModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, AttachmentModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut AttachmentRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: AttachmentRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         Ok(record)
     }
-    fn row_to_record(&self, row: AttachmentWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: AttachmentRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: AttachmentQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, AttachmentModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct AttachmentDefaultDataTableHooks;
@@ -2513,15 +2419,15 @@ impl<H: AttachmentDataTableHooks> AttachmentDataTable<H> {
 impl<H: AttachmentDataTableHooks> AutoDataTable for AttachmentDataTable<H> {
     type Adapter = AttachmentTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> AttachmentQuery<'db> {
-        self.hooks.scope(Attachment::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, AttachmentModel> {
+        self.hooks.scope(AttachmentModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: AttachmentQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<AttachmentQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: AttachmentQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<AttachmentQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut AttachmentWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: AttachmentWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: AttachmentQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, AttachmentModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, AttachmentModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, AttachmentModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, AttachmentModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut AttachmentRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: AttachmentRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, AttachmentModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -2531,10 +2437,544 @@ impl<H: AttachmentDataTableHooks> AutoDataTable for AttachmentDataTable<H> {
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for AttachmentView {
+impl ActiveRecord for AttachmentRecord {
     type Id = uuid::Uuid;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Attachment::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        AttachmentModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct AttachmentModel;
+impl AttachmentModel {
+    pub const TABLE: &'static str = "attachments";
+    pub const MODEL_KEY: &'static str = "attachment";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, AttachmentModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, AttachmentModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, AttachmentModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, AttachmentModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, AttachmentModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, AttachmentModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: uuid::Uuid) -> Result<Option<AttachmentRecord>> {
+        AttachmentQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for AttachmentModel {
+    type Pk = uuid::Uuid;
+    type Record = AttachmentRecord;
+    type Create = AttachmentCreate;
+    type Changes = AttachmentChanges;
+    const TABLE: &'static str = AttachmentModel::TABLE;
+    const MODEL_KEY: &'static str = AttachmentModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for AttachmentModel {
+    type InnerQuery<'db> = AttachmentQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        AttachmentQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for AttachmentModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for AttachmentModel {
+    type InnerCreate<'db> = AttachmentCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        AttachmentCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            AttachmentQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("attachments: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<AttachmentModel> for AttachmentDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <AttachmentModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<AttachmentModel>>::Value) -> anyhow::Result<<AttachmentModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            AttachmentDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::OwnerType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::OwnerId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::Field => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::Path => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::ContentType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::Size => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::Width => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::Height => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::DeletedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<AttachmentModel> for Column<AttachmentModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <AttachmentModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<AttachmentModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_attachment_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            AttachmentDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::OwnerType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::OwnerId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::Field => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::Path => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::ContentType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::Size => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::Width => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::Height => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AttachmentDbCol::DeletedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<AttachmentModel> for AttachmentDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <AttachmentModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <AttachmentModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <AttachmentModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <AttachmentModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<AttachmentModel> for Column<AttachmentModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <AttachmentModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <AttachmentModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<AttachmentDbCol> = fields.iter().map(|field| resolve_attachment_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <AttachmentModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <AttachmentModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<AttachmentDbCol> = fields.iter().map(|field| resolve_attachment_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for AttachmentModel {
+    type InnerQuery<'db> = AttachmentQueryInner<'db>;
+    type InnerPatch<'db> = AttachmentPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        AttachmentPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(AttachmentDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = AttachmentPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", AttachmentDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM attachments", AttachmentDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, uuid::Uuid>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = AttachmentQueryInner::new(db, base_url);
+            query = query.with_deleted();
+            query.where_in(AttachmentDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<AttachmentModel> for AttachmentDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <AttachmentModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AttachmentModel>>::Value) -> anyhow::Result<<AttachmentModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            AttachmentDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::OwnerType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::OwnerId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::Field => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::Path => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::ContentType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::Size => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::Width => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::Height => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::DeletedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<AttachmentModel> for Column<AttachmentModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <AttachmentModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<AttachmentModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_attachment_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            AttachmentDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::OwnerType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::OwnerId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::Field => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::Path => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::ContentType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::Size => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::Width => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::Height => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AttachmentDbCol::DeletedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<AttachmentModel> for AttachmentDbCol {
+    fn increment<'db>(field: Self, mut builder: <AttachmentModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AttachmentModel>>::Value) -> anyhow::Result<<AttachmentModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            AttachmentDbCol::OwnerId => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            AttachmentDbCol::Size => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <AttachmentModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AttachmentModel>>::Value) -> anyhow::Result<<AttachmentModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            AttachmentDbCol::OwnerId => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            AttachmentDbCol::Size => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<AttachmentModel> for Column<AttachmentModel, i64> {
+    fn increment<'db>(field: Self, mut builder: <AttachmentModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AttachmentModel>>::Value) -> anyhow::Result<<AttachmentModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_attachment_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            AttachmentDbCol::OwnerId => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            AttachmentDbCol::Size => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <AttachmentModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AttachmentModel>>::Value) -> anyhow::Result<<AttachmentModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_attachment_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            AttachmentDbCol::OwnerId => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            AttachmentDbCol::Size => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<AttachmentModel> for AttachmentDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<AttachmentModel>>::Value) -> <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<AttachmentModel>>::Value) -> <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<AttachmentModel>>::Value]) -> <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<AttachmentModel> for Column<AttachmentModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_attachment_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_attachment_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_attachment_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_attachment_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_attachment_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <AttachmentModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_attachment_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
 

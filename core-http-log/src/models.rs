@@ -2,7 +2,9 @@
 
 use core_db::{
     common::sql::DbConn,
-    generated::models::{HttpClientLog as HttpClientLogModel, WebhookLog as WebhookLogModel},
+    generated::models::{
+        HttpClientLogCol, HttpClientLogModel, WebhookLogCol, WebhookLogModel,
+    },
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -22,15 +24,14 @@ impl WebhookLog {
         response_body: Option<&str>,
         duration_ms: Option<i32>,
     ) -> anyhow::Result<Uuid> {
-        let row = WebhookLogModel::new(DbConn::pool(pool), None)
-            .insert()
-            .set_request_url(request_url.to_string())
-            .set_request_method(request_method.to_string())
-            .set_request_headers(request_headers)
-            .set_request_body(request_body.map(str::to_string))
-            .set_response_status(response_status)
-            .set_response_body(response_body.map(str::to_string))
-            .set_duration_ms(duration_ms)
+        let row = WebhookLogModel::create(DbConn::pool(pool))
+            .set(WebhookLogCol::REQUEST_URL, request_url.to_string())?
+            .set(WebhookLogCol::REQUEST_METHOD, request_method.to_string())?
+            .set(WebhookLogCol::REQUEST_HEADERS, request_headers)?
+            .set(WebhookLogCol::REQUEST_BODY, request_body.map(str::to_string))?
+            .set(WebhookLogCol::RESPONSE_STATUS, response_status)?
+            .set(WebhookLogCol::RESPONSE_BODY, response_body.map(str::to_string))?
+            .set(WebhookLogCol::DURATION_MS, duration_ms)?
             .save()
             .await?;
 
@@ -54,16 +55,15 @@ impl HttpClientLog {
         response_body: Option<&str>,
         duration_ms: Option<i32>,
     ) -> anyhow::Result<Uuid> {
-        let row = HttpClientLogModel::new(DbConn::pool(pool), None)
-            .insert()
-            .set_request_url(request_url.to_string())
-            .set_request_method(request_method.to_string())
-            .set_request_headers(request_headers)
-            .set_request_body(request_body.map(str::to_string))
-            .set_response_status(response_status)
-            .set_response_headers(response_headers)
-            .set_response_body(response_body.map(str::to_string))
-            .set_duration_ms(duration_ms)
+        let row = HttpClientLogModel::create(DbConn::pool(pool))
+            .set(HttpClientLogCol::REQUEST_URL, request_url.to_string())?
+            .set(HttpClientLogCol::REQUEST_METHOD, request_method.to_string())?
+            .set(HttpClientLogCol::REQUEST_HEADERS, request_headers)?
+            .set(HttpClientLogCol::REQUEST_BODY, request_body.map(str::to_string))?
+            .set(HttpClientLogCol::RESPONSE_STATUS, response_status)?
+            .set(HttpClientLogCol::RESPONSE_HEADERS, response_headers)?
+            .set(HttpClientLogCol::RESPONSE_BODY, response_body.map(str::to_string))?
+            .set(HttpClientLogCol::DURATION_MS, duration_ms)?
             .save()
             .await?;
 

@@ -1,18 +1,18 @@
 use anyhow::Context;
 use core_db::common::model_observer::{ModelEvent, ModelObserver};
 use generated::models::{
-    Admin, AdminCreateInput, AdminRow, AdminUpdateChanges, Bank, BankCreateInput, BankRow,
-    BankUpdateChanges, CompanyBankAccount, CompanyBankAccountCreateInput, CompanyBankAccountRow,
-    CompanyBankAccountUpdateChanges, CompanyCryptoAccount, CompanyCryptoAccountCreateInput,
-    CompanyCryptoAccountRow, CompanyCryptoAccountUpdateChanges, ContentPage,
-    ContentPageCreateInput, ContentPageRow, ContentPageUpdateChanges, Country,
-    CountryCreateInput, CountryRow, CountryUpdateChanges, CryptoNetwork,
-    CryptoNetworkCreateInput, CryptoNetworkRow, CryptoNetworkUpdateChanges, Deposit,
-    DepositCreateInput, DepositRow, DepositUpdateChanges, IntroducerChange,
-    IntroducerChangeCreateInput, IntroducerChangeRow, IntroducerChangeUpdateChanges, User,
-    UserCreateInput, UserCreditTransaction, UserCreditTransactionCreateInput,
-    UserCreditTransactionRow, UserCreditTransactionUpdateChanges, UserRow, UserUpdateChanges,
-    Withdrawal, WithdrawalCreateInput, WithdrawalRow, WithdrawalUpdateChanges,
+    AdminModel, AdminCreate, AdminRecord, AdminChanges, BankModel, BankCreate, BankRecord,
+    BankChanges, CompanyBankAccountModel, CompanyBankAccountCreate, CompanyBankAccountRecord,
+    CompanyBankAccountChanges, CompanyCryptoAccountModel, CompanyCryptoAccountCreate,
+    CompanyCryptoAccountRecord, CompanyCryptoAccountChanges, ContentPageModel,
+    ContentPageCreate, ContentPageRecord, ContentPageChanges, CountryModel,
+    CountryCreate, CountryRecord, CountryChanges, CryptoNetworkModel,
+    CryptoNetworkCreate, CryptoNetworkRecord, CryptoNetworkChanges, DepositModel,
+    DepositCreate, DepositRecord, DepositChanges, IntroducerChangeModel,
+    IntroducerChangeCreate, IntroducerChangeRecord, IntroducerChangeChanges, UserModel,
+    UserCreate, UserCreditTransactionModel, UserCreditTransactionCreate,
+    UserCreditTransactionRecord, UserCreditTransactionChanges, UserRecord, UserChanges,
+    WithdrawalModel, WithdrawalCreate, WithdrawalRecord, WithdrawalChanges,
 };
 use serde::de::DeserializeOwned;
 
@@ -102,44 +102,44 @@ impl ModelObserver for AppModelObserver {
         dispatch_creating!(
             event,
             new_data,
-            (Admin, AdminCreateInput, models::admin::creating),
-            (Bank, BankCreateInput, models::bank::creating),
+            (AdminModel, AdminCreate, models::admin::creating),
+            (BankModel, BankCreate, models::bank::creating),
             (
-                CompanyBankAccount,
-                CompanyBankAccountCreateInput,
+                CompanyBankAccountModel,
+                CompanyBankAccountCreate,
                 models::company_bank_account::creating
             ),
             (
-                CompanyCryptoAccount,
-                CompanyCryptoAccountCreateInput,
+                CompanyCryptoAccountModel,
+                CompanyCryptoAccountCreate,
                 models::company_crypto_account::creating
             ),
             (
-                ContentPage,
-                ContentPageCreateInput,
+                ContentPageModel,
+                ContentPageCreate,
                 models::content_page::creating
             ),
-            (Country, CountryCreateInput, models::country::creating),
+            (CountryModel, CountryCreate, models::country::creating),
             (
-                CryptoNetwork,
-                CryptoNetworkCreateInput,
+                CryptoNetworkModel,
+                CryptoNetworkCreate,
                 models::crypto_network::creating
             ),
-            (Deposit, DepositCreateInput, models::deposit::creating),
+            (DepositModel, DepositCreate, models::deposit::creating),
             (
-                IntroducerChange,
-                IntroducerChangeCreateInput,
+                IntroducerChangeModel,
+                IntroducerChangeCreate,
                 models::introducer_change::creating
             ),
-            (User, UserCreateInput, models::user::creating),
+            (UserModel, UserCreate, models::user::creating),
             (
-                UserCreditTransaction,
-                UserCreditTransactionCreateInput,
+                UserCreditTransactionModel,
+                UserCreditTransactionCreate,
                 models::user_credit_transaction::creating
             ),
             (
-                Withdrawal,
-                WithdrawalCreateInput,
+                WithdrawalModel,
+                WithdrawalCreate,
                 models::withdrawal::creating
             ),
         )
@@ -153,38 +153,38 @@ impl ModelObserver for AppModelObserver {
         let model_result = dispatch_row_hook!(
             event,
             new_data,
-            (Admin, AdminRow, models::admin::created),
-            (Bank, BankRow, models::bank::created),
+            (AdminModel, AdminRecord, models::admin::created),
+            (BankModel, BankRecord, models::bank::created),
             (
-                CompanyBankAccount,
-                CompanyBankAccountRow,
+                CompanyBankAccountModel,
+                CompanyBankAccountRecord,
                 models::company_bank_account::created
             ),
             (
-                CompanyCryptoAccount,
-                CompanyCryptoAccountRow,
+                CompanyCryptoAccountModel,
+                CompanyCryptoAccountRecord,
                 models::company_crypto_account::created
             ),
-            (ContentPage, ContentPageRow, models::content_page::created),
-            (Country, CountryRow, models::country::created),
+            (ContentPageModel, ContentPageRecord, models::content_page::created),
+            (CountryModel, CountryRecord, models::country::created),
             (
-                CryptoNetwork,
-                CryptoNetworkRow,
+                CryptoNetworkModel,
+                CryptoNetworkRecord,
                 models::crypto_network::created
             ),
-            (Deposit, DepositRow, models::deposit::created),
+            (DepositModel, DepositRecord, models::deposit::created),
             (
-                IntroducerChange,
-                IntroducerChangeRow,
+                IntroducerChangeModel,
+                IntroducerChangeRecord,
                 models::introducer_change::created
             ),
-            (User, UserRow, models::user::created),
+            (UserModel, UserRecord, models::user::created),
             (
-                UserCreditTransaction,
-                UserCreditTransactionRow,
+                UserCreditTransactionModel,
+                UserCreditTransactionRecord,
                 models::user_credit_transaction::created
             ),
-            (Withdrawal, WithdrawalRow, models::withdrawal::created),
+            (WithdrawalModel, WithdrawalRecord, models::withdrawal::created),
         );
         let audit_result = audit::created(&self.db, self.admin_id, event, new_data).await;
         model_result?;
@@ -201,61 +201,61 @@ impl ModelObserver for AppModelObserver {
             event,
             old_data,
             changes,
-            (Admin, AdminRow, AdminUpdateChanges, models::admin::updating),
-            (Bank, BankRow, BankUpdateChanges, models::bank::updating),
+            (AdminModel, AdminRecord, AdminChanges, models::admin::updating),
+            (BankModel, BankRecord, BankChanges, models::bank::updating),
             (
-                CompanyBankAccount,
-                CompanyBankAccountRow,
-                CompanyBankAccountUpdateChanges,
+                CompanyBankAccountModel,
+                CompanyBankAccountRecord,
+                CompanyBankAccountChanges,
                 models::company_bank_account::updating
             ),
             (
-                CompanyCryptoAccount,
-                CompanyCryptoAccountRow,
-                CompanyCryptoAccountUpdateChanges,
+                CompanyCryptoAccountModel,
+                CompanyCryptoAccountRecord,
+                CompanyCryptoAccountChanges,
                 models::company_crypto_account::updating
             ),
             (
-                ContentPage,
-                ContentPageRow,
-                ContentPageUpdateChanges,
+                ContentPageModel,
+                ContentPageRecord,
+                ContentPageChanges,
                 models::content_page::updating
             ),
             (
-                Country,
-                CountryRow,
-                CountryUpdateChanges,
+                CountryModel,
+                CountryRecord,
+                CountryChanges,
                 models::country::updating
             ),
             (
-                CryptoNetwork,
-                CryptoNetworkRow,
-                CryptoNetworkUpdateChanges,
+                CryptoNetworkModel,
+                CryptoNetworkRecord,
+                CryptoNetworkChanges,
                 models::crypto_network::updating
             ),
             (
-                Deposit,
-                DepositRow,
-                DepositUpdateChanges,
+                DepositModel,
+                DepositRecord,
+                DepositChanges,
                 models::deposit::updating
             ),
             (
-                IntroducerChange,
-                IntroducerChangeRow,
-                IntroducerChangeUpdateChanges,
+                IntroducerChangeModel,
+                IntroducerChangeRecord,
+                IntroducerChangeChanges,
                 models::introducer_change::updating
             ),
-            (User, UserRow, UserUpdateChanges, models::user::updating),
+            (UserModel, UserRecord, UserChanges, models::user::updating),
             (
-                UserCreditTransaction,
-                UserCreditTransactionRow,
-                UserCreditTransactionUpdateChanges,
+                UserCreditTransactionModel,
+                UserCreditTransactionRecord,
+                UserCreditTransactionChanges,
                 models::user_credit_transaction::updating
             ),
             (
-                Withdrawal,
-                WithdrawalRow,
-                WithdrawalUpdateChanges,
+                WithdrawalModel,
+                WithdrawalRecord,
+                WithdrawalChanges,
                 models::withdrawal::updating
             ),
         )
@@ -271,38 +271,38 @@ impl ModelObserver for AppModelObserver {
             event,
             old_data,
             new_data,
-            (Admin, AdminRow, models::admin::updated),
-            (Bank, BankRow, models::bank::updated),
+            (AdminModel, AdminRecord, models::admin::updated),
+            (BankModel, BankRecord, models::bank::updated),
             (
-                CompanyBankAccount,
-                CompanyBankAccountRow,
+                CompanyBankAccountModel,
+                CompanyBankAccountRecord,
                 models::company_bank_account::updated
             ),
             (
-                CompanyCryptoAccount,
-                CompanyCryptoAccountRow,
+                CompanyCryptoAccountModel,
+                CompanyCryptoAccountRecord,
                 models::company_crypto_account::updated
             ),
-            (ContentPage, ContentPageRow, models::content_page::updated),
-            (Country, CountryRow, models::country::updated),
+            (ContentPageModel, ContentPageRecord, models::content_page::updated),
+            (CountryModel, CountryRecord, models::country::updated),
             (
-                CryptoNetwork,
-                CryptoNetworkRow,
+                CryptoNetworkModel,
+                CryptoNetworkRecord,
                 models::crypto_network::updated
             ),
-            (Deposit, DepositRow, models::deposit::updated),
+            (DepositModel, DepositRecord, models::deposit::updated),
             (
-                IntroducerChange,
-                IntroducerChangeRow,
+                IntroducerChangeModel,
+                IntroducerChangeRecord,
                 models::introducer_change::updated
             ),
-            (User, UserRow, models::user::updated),
+            (UserModel, UserRecord, models::user::updated),
             (
-                UserCreditTransaction,
-                UserCreditTransactionRow,
+                UserCreditTransactionModel,
+                UserCreditTransactionRecord,
                 models::user_credit_transaction::updated
             ),
-            (Withdrawal, WithdrawalRow, models::withdrawal::updated),
+            (WithdrawalModel, WithdrawalRecord, models::withdrawal::updated),
         );
         let audit_result = audit::updated(&self.db, self.admin_id, event, old_data, new_data).await;
         model_result?;
@@ -317,38 +317,38 @@ impl ModelObserver for AppModelObserver {
         dispatch_row_hook!(
             event,
             old_data,
-            (Admin, AdminRow, models::admin::deleting),
-            (Bank, BankRow, models::bank::deleting),
+            (AdminModel, AdminRecord, models::admin::deleting),
+            (BankModel, BankRecord, models::bank::deleting),
             (
-                CompanyBankAccount,
-                CompanyBankAccountRow,
+                CompanyBankAccountModel,
+                CompanyBankAccountRecord,
                 models::company_bank_account::deleting
             ),
             (
-                CompanyCryptoAccount,
-                CompanyCryptoAccountRow,
+                CompanyCryptoAccountModel,
+                CompanyCryptoAccountRecord,
                 models::company_crypto_account::deleting
             ),
-            (ContentPage, ContentPageRow, models::content_page::deleting),
-            (Country, CountryRow, models::country::deleting),
+            (ContentPageModel, ContentPageRecord, models::content_page::deleting),
+            (CountryModel, CountryRecord, models::country::deleting),
             (
-                CryptoNetwork,
-                CryptoNetworkRow,
+                CryptoNetworkModel,
+                CryptoNetworkRecord,
                 models::crypto_network::deleting
             ),
-            (Deposit, DepositRow, models::deposit::deleting),
+            (DepositModel, DepositRecord, models::deposit::deleting),
             (
-                IntroducerChange,
-                IntroducerChangeRow,
+                IntroducerChangeModel,
+                IntroducerChangeRecord,
                 models::introducer_change::deleting
             ),
-            (User, UserRow, models::user::deleting),
+            (UserModel, UserRecord, models::user::deleting),
             (
-                UserCreditTransaction,
-                UserCreditTransactionRow,
+                UserCreditTransactionModel,
+                UserCreditTransactionRecord,
                 models::user_credit_transaction::deleting
             ),
-            (Withdrawal, WithdrawalRow, models::withdrawal::deleting),
+            (WithdrawalModel, WithdrawalRecord, models::withdrawal::deleting),
         )
     }
 
@@ -360,38 +360,38 @@ impl ModelObserver for AppModelObserver {
         let model_result = dispatch_row_hook!(
             event,
             old_data,
-            (Admin, AdminRow, models::admin::deleted),
-            (Bank, BankRow, models::bank::deleted),
+            (AdminModel, AdminRecord, models::admin::deleted),
+            (BankModel, BankRecord, models::bank::deleted),
             (
-                CompanyBankAccount,
-                CompanyBankAccountRow,
+                CompanyBankAccountModel,
+                CompanyBankAccountRecord,
                 models::company_bank_account::deleted
             ),
             (
-                CompanyCryptoAccount,
-                CompanyCryptoAccountRow,
+                CompanyCryptoAccountModel,
+                CompanyCryptoAccountRecord,
                 models::company_crypto_account::deleted
             ),
-            (ContentPage, ContentPageRow, models::content_page::deleted),
-            (Country, CountryRow, models::country::deleted),
+            (ContentPageModel, ContentPageRecord, models::content_page::deleted),
+            (CountryModel, CountryRecord, models::country::deleted),
             (
-                CryptoNetwork,
-                CryptoNetworkRow,
+                CryptoNetworkModel,
+                CryptoNetworkRecord,
                 models::crypto_network::deleted
             ),
-            (Deposit, DepositRow, models::deposit::deleted),
+            (DepositModel, DepositRecord, models::deposit::deleted),
             (
-                IntroducerChange,
-                IntroducerChangeRow,
+                IntroducerChangeModel,
+                IntroducerChangeRecord,
                 models::introducer_change::deleted
             ),
-            (User, UserRow, models::user::deleted),
+            (UserModel, UserRecord, models::user::deleted),
             (
-                UserCreditTransaction,
-                UserCreditTransactionRow,
+                UserCreditTransactionModel,
+                UserCreditTransactionRecord,
                 models::user_credit_transaction::deleted
             ),
-            (Withdrawal, WithdrawalRow, models::withdrawal::deleted),
+            (WithdrawalModel, WithdrawalRecord, models::withdrawal::deleted),
         );
         let audit_result = audit::deleted(&self.db, self.admin_id, event, old_data).await;
         model_result?;

@@ -5,7 +5,8 @@ use anyhow::Result;
 use core_db::{
     common::sql::{DbConn, Op},
     generated::models::{
-        Country as CountryModel, CountryIsDefault, CountryStatus as GeneratedCountryStatus,
+        CountryCol, CountryIsDefault, CountryModel, CountryRecord,
+        CountryStatus as GeneratedCountryStatus,
     },
     platform::countries::{normalize_country_iso2, Country as CountryRuntime, CountryCurrency},
 };
@@ -400,12 +401,10 @@ pub async fn normalize_phone_by_country_iso2(
         return Ok(None);
     };
 
-    let Some(country) = CountryModel::new(DbConn::pool(db), None)
-        .query()
-        .where_iso2(Op::Eq, country_iso2)
+    let Some(country) = CountryModel::query(DbConn::pool(db))
+        .where_col(CountryCol::ISO2, Op::Eq, country_iso2)
         .first()
         .await?
-        .map(|r| r.into_row())
     else {
         return Ok(None);
     };
@@ -445,10 +444,9 @@ impl AsyncRule for IsEnabledCountryIso2 {
         let Some(iso2) = normalize_country_iso2(&self.value) else {
             return Ok(false);
         };
-        let exists = CountryModel::new(DbConn::pool(db), None)
-            .query()
-            .where_iso2(Op::Eq, iso2)
-            .where_status(Op::Eq, GeneratedCountryStatus::Enabled)
+        let exists = CountryModel::query(DbConn::pool(db))
+            .where_col(CountryCol::ISO2, Op::Eq, iso2)
+            .where_col(CountryCol::STATUS, Op::Eq, GeneratedCountryStatus::Enabled)
             .first()
             .await?
             .is_some();
@@ -462,7 +460,7 @@ impl AsyncRule for IsEnabledCountryIso2 {
     }
 }
 
-fn to_runtime_country(country: core_db::generated::models::CountryView) -> CountryRuntime {
+fn to_runtime_country(country: CountryRecord) -> CountryRuntime {
     let currencies =
         serde_json::from_value::<Vec<CountryCurrency>>(country.currencies).unwrap_or_default();
 

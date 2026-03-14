@@ -5,18 +5,18 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
 const HAS_CREATED_AT: bool = true;
 const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct SqlProfilerQueryCreateInput {
+pub struct SqlProfilerQueryCreate {
     pub id: FieldInput<i64>,
     pub request_id: FieldInput<uuid::Uuid>,
     pub table_name: FieldInput<String>,
@@ -29,7 +29,7 @@ pub struct SqlProfilerQueryCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct SqlProfilerQueryUpdateChanges {
+pub struct SqlProfilerQueryChanges {
     pub id: Option<FieldChange<i64>>,
     pub request_id: Option<FieldChange<uuid::Uuid>>,
     pub table_name: Option<FieldChange<String>>,
@@ -56,7 +56,7 @@ pub struct SqlProfilerQueryRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct SqlProfilerQueryView {
+pub struct SqlProfilerQueryRecord {
     pub id: i64,
     pub request_id: uuid::Uuid,
     pub table_name: String,
@@ -68,57 +68,14 @@ pub struct SqlProfilerQueryView {
     pub created_at: time::OffsetDateTime,
 }
 
-impl SqlProfilerQueryView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> SqlProfilerQueryUpdate<'db> {
-        SqlProfilerQuery::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &SqlProfilerQuery<'db>) -> SqlProfilerQueryUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> SqlProfilerQueryJson {
-        SqlProfilerQueryJson {
-            id: self.id.clone(),
-            request_id: self.request_id.clone(),
-            table_name: self.table_name.clone(),
-            operation: self.operation.clone(),
-            sql: self.sql.clone(),
-            binds: self.binds.clone(),
-            duration_us: self.duration_us.clone(),
-            created_at: self.created_at.clone(),
-        }
+impl SqlProfilerQueryRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, SqlProfilerQueryModel> {
+        SqlProfilerQueryModel::query(db.into()).where_col(SqlProfilerQueryDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-pub trait SqlProfilerQueryViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&SqlProfilerQueryView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&SqlProfilerQueryView) -> K) -> std::collections::HashMap<K, SqlProfilerQueryView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&SqlProfilerQueryView) -> K) -> std::collections::HashMap<K, Vec<SqlProfilerQueryView>> where K: Eq + std::hash::Hash;
-}
-
-impl SqlProfilerQueryViewsExt for Vec<SqlProfilerQueryView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&SqlProfilerQueryView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&SqlProfilerQueryView) -> K) -> std::collections::HashMap<K, SqlProfilerQueryView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&SqlProfilerQueryView) -> K) -> std::collections::HashMap<K, Vec<SqlProfilerQueryView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct SqlProfilerQueryJson {
-    pub id: i64,
-    pub request_id: uuid::Uuid,
-    pub table_name: String,
-    pub operation: String,
-    pub sql: String,
-    pub binds: String,
-    pub duration_us: i64,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-}
-
-fn hydrate_view(row: SqlProfilerQueryRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> SqlProfilerQueryView {
-    let view = SqlProfilerQueryView {
+fn hydrate_record(row: SqlProfilerQueryRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> SqlProfilerQueryRecord {
+    let mut record = SqlProfilerQueryRecord {
         id: row.id,
         request_id: row.request_id,
         table_name: row.table_name,
@@ -128,31 +85,38 @@ fn hydrate_view(row: SqlProfilerQueryRow, _loc: &LocalizedMap, _base_url: Option
         duration_us: row.duration_us,
         created_at: row.created_at,
     };
-    view
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct SqlProfilerQueryWithRelations {
-    #[serde(flatten)]
-    pub row: SqlProfilerQueryView,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SqlProfilerQueryCol;
+impl SqlProfilerQueryCol {
+    pub const ID: Column<SqlProfilerQueryModel, i64> = Column::new("id");
+    pub const REQUEST_ID: Column<SqlProfilerQueryModel, uuid::Uuid> = Column::new("request_id");
+    pub const TABLE_NAME: Column<SqlProfilerQueryModel, String> = Column::new("table_name");
+    pub const OPERATION: Column<SqlProfilerQueryModel, String> = Column::new("operation");
+    pub const SQL: Column<SqlProfilerQueryModel, String> = Column::new("sql");
+    pub const BINDS: Column<SqlProfilerQueryModel, String> = Column::new("binds");
+    pub const DURATION_US: Column<SqlProfilerQueryModel, i64> = Column::new("duration_us");
+    pub const CREATED_AT: Column<SqlProfilerQueryModel, time::OffsetDateTime> = Column::new("created_at");
 }
 
-impl SqlProfilerQueryWithRelations {
-    pub fn into_row(self) -> SqlProfilerQueryView { self.row }
-}
-
-impl std::ops::Deref for SqlProfilerQueryWithRelations {
-    type Target = SqlProfilerQueryView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for SqlProfilerQueryWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_sql_profiler_query_db_col(sql: &str) -> Option<SqlProfilerQueryDbCol> {
+    match sql {
+        "id" => Some(SqlProfilerQueryDbCol::Id),
+        "request_id" => Some(SqlProfilerQueryDbCol::RequestId),
+        "table_name" => Some(SqlProfilerQueryDbCol::TableName),
+        "operation" => Some(SqlProfilerQueryDbCol::Operation),
+        "sql" => Some(SqlProfilerQueryDbCol::Sql),
+        "binds" => Some(SqlProfilerQueryDbCol::Binds),
+        "duration_us" => Some(SqlProfilerQueryDbCol::DurationUs),
+        "created_at" => Some(SqlProfilerQueryDbCol::CreatedAt),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum SqlProfilerQueryCol {
+pub enum SqlProfilerQueryDbCol {
     Id,
     RequestId,
     TableName,
@@ -163,47 +127,27 @@ pub enum SqlProfilerQueryCol {
     CreatedAt,
 }
 
-impl SqlProfilerQueryCol {
-    pub const fn all() -> &'static [SqlProfilerQueryCol] {
-        &[SqlProfilerQueryCol::Id, SqlProfilerQueryCol::RequestId, SqlProfilerQueryCol::TableName, SqlProfilerQueryCol::Operation, SqlProfilerQueryCol::Sql, SqlProfilerQueryCol::Binds, SqlProfilerQueryCol::DurationUs, SqlProfilerQueryCol::CreatedAt]
+impl SqlProfilerQueryDbCol {
+    pub const fn all() -> &'static [SqlProfilerQueryDbCol] {
+        &[SqlProfilerQueryDbCol::Id, SqlProfilerQueryDbCol::RequestId, SqlProfilerQueryDbCol::TableName, SqlProfilerQueryDbCol::Operation, SqlProfilerQueryDbCol::Sql, SqlProfilerQueryDbCol::Binds, SqlProfilerQueryDbCol::DurationUs, SqlProfilerQueryDbCol::CreatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            SqlProfilerQueryCol::Id => "id",
-            SqlProfilerQueryCol::RequestId => "request_id",
-            SqlProfilerQueryCol::TableName => "table_name",
-            SqlProfilerQueryCol::Operation => "operation",
-            SqlProfilerQueryCol::Sql => "sql",
-            SqlProfilerQueryCol::Binds => "binds",
-            SqlProfilerQueryCol::DurationUs => "duration_us",
-            SqlProfilerQueryCol::CreatedAt => "created_at",
+            SqlProfilerQueryDbCol::Id => "id",
+            SqlProfilerQueryDbCol::RequestId => "request_id",
+            SqlProfilerQueryDbCol::TableName => "table_name",
+            SqlProfilerQueryDbCol::Operation => "operation",
+            SqlProfilerQueryDbCol::Sql => "sql",
+            SqlProfilerQueryDbCol::Binds => "binds",
+            SqlProfilerQueryDbCol::DurationUs => "duration_us",
+            SqlProfilerQueryDbCol::CreatedAt => "created_at",
         }
     }
 }
 
-pub struct SqlProfilerQuery<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-}
-
-impl<'db> SqlProfilerQuery<'db> {
-    pub const TABLE: &'static str = "sql_profiler_queries";
-    pub const MODEL_KEY: &'static str = "sql_profiler_query";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> SqlProfilerQueryQuery<'db> { SqlProfilerQueryQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> SqlProfilerQueryInsert<'db> { SqlProfilerQueryInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> SqlProfilerQueryUpdate<'db> { SqlProfilerQueryUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<SqlProfilerQueryWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-}
 
 #[derive(Clone)]
-pub struct SqlProfilerQueryQuery<'db> {
+pub struct SqlProfilerQueryQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -226,110 +170,109 @@ pub struct SqlProfilerQueryQuery<'db> {
 
 
 
-impl<'db> SqlProfilerQueryQuery<'db> {
+impl<'db> SqlProfilerQueryQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, request_id, table_name, operation, sql, binds, duration_us, created_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> SqlProfilerQueryUnsafeQuery<'db> { SqlProfilerQueryUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::RequestId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::RequestId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::RequestId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::RequestId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_table_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::TableName.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::TableName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_table_name_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::TableName.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::TableName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_operation(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Operation.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::Operation.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_operation_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Operation.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::Operation.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_sql(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Sql.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::Sql.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_sql_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Sql.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::Sql.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_binds(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Binds.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::Binds.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_binds_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Binds.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::Binds.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_duration_us(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::DurationUs.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::DurationUs.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_duration_us_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::DurationUs.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::DurationUs.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(SqlProfilerQueryCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: SqlProfilerQueryCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(SqlProfilerQueryDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: SqlProfilerQueryDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -348,7 +291,7 @@ impl<'db> SqlProfilerQueryQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: SqlProfilerQueryCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: SqlProfilerQueryDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -363,7 +306,7 @@ impl<'db> SqlProfilerQueryQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: SqlProfilerQueryCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: SqlProfilerQueryDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -375,7 +318,7 @@ impl<'db> SqlProfilerQueryQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: SqlProfilerQueryCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: SqlProfilerQueryDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -383,15 +326,15 @@ impl<'db> SqlProfilerQueryQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: SqlProfilerQueryCol) -> Self {
+    pub fn where_null(mut self, col: SqlProfilerQueryDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: SqlProfilerQueryCol) -> Self {
+    pub fn where_not_null(mut self, col: SqlProfilerQueryDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: SqlProfilerQueryCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: SqlProfilerQueryDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -445,7 +388,7 @@ impl<'db> SqlProfilerQueryQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[SqlProfilerQueryCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[SqlProfilerQueryDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, request_id, table_name, operation, sql, binds, duration_us, created_at".to_string());
         } else {
@@ -457,7 +400,7 @@ impl<'db> SqlProfilerQueryQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[SqlProfilerQueryCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[SqlProfilerQueryDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -538,26 +481,26 @@ impl<'db> SqlProfilerQueryQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: SqlProfilerQueryCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: SqlProfilerQueryDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: SqlProfilerQueryCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: SqlProfilerQueryDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: SqlProfilerQueryCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: SqlProfilerQueryDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[SqlProfilerQueryCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[SqlProfilerQueryDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[SqlProfilerQueryCol]) -> Self {
+    pub fn select(mut self, cols: &[SqlProfilerQueryDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -605,7 +548,7 @@ impl<'db> SqlProfilerQueryQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[SqlProfilerQueryCol]) -> Self {
+    pub fn group_by(mut self, cols: &[SqlProfilerQueryDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -680,7 +623,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<SqlProfilerQueryWithRelations>> {
+    pub async fn get(self) -> Result<Vec<SqlProfilerQueryRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -728,61 +671,61 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
-            out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            out_vec.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let out_vec: Vec<SqlProfilerQueryWithRelations> = out_vec.into_iter().map(|v| SqlProfilerQueryWithRelations { row: v }).collect();
+        let out_vec: Vec<SqlProfilerQueryRecord> = out_vec;
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<SqlProfilerQueryWithRelations>> {
+    pub async fn first(self) -> Result<Option<SqlProfilerQueryRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<SqlProfilerQueryWithRelations> {
+    pub async fn first_or_fail(self) -> Result<SqlProfilerQueryRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("sql_profiler_queries: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<SqlProfilerQueryWithRelations>> {
+    pub async fn find(self, id: i64) -> Result<Option<SqlProfilerQueryRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<SqlProfilerQueryWithRelations> {
+    pub async fn find_or_fail(self, id: i64) -> Result<SqlProfilerQueryRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("sql_profiler_queries: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(SqlProfilerQueryInsert<'db>) -> SqlProfilerQueryInsert<'db>) -> Result<SqlProfilerQueryWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(SqlProfilerQueryCreateInner<'db>) -> SqlProfilerQueryCreateInner<'db>) -> Result<SqlProfilerQueryRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(SqlProfilerQueryInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(SqlProfilerQueryCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        SqlProfilerQuery::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        SqlProfilerQueryQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(SqlProfilerQueryUpdate<'db>) -> SqlProfilerQueryUpdate<'db>,
-        on_create: impl FnOnce(SqlProfilerQueryInsert<'db>) -> SqlProfilerQueryInsert<'db>,
-    ) -> Result<SqlProfilerQueryWithRelations> {
+        on_update: impl FnOnce(SqlProfilerQueryPatchInner<'db>) -> SqlProfilerQueryPatchInner<'db>,
+        on_create: impl FnOnce(SqlProfilerQueryCreateInner<'db>) -> SqlProfilerQueryCreateInner<'db>,
+    ) -> Result<SqlProfilerQueryRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = SqlProfilerQueryUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = SqlProfilerQueryPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return SqlProfilerQuery::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return SqlProfilerQueryQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(SqlProfilerQueryInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(SqlProfilerQueryCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        SqlProfilerQuery::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        SqlProfilerQueryQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: SqlProfilerQueryCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: SqlProfilerQueryDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -795,7 +738,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: SqlProfilerQueryCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: SqlProfilerQueryDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -847,13 +790,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<SqlProfilerQueryWithRelations>) -> Fut,
+        F: FnMut(Vec<SqlProfilerQueryRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = SqlProfilerQueryQuery::new(db.clone(), self.base_url.clone());
+            let mut query = SqlProfilerQueryQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -867,11 +810,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(SqlProfilerQueryCol::CreatedAt, OrderDir::Desc)
+        self.order_by(SqlProfilerQueryDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(SqlProfilerQueryCol::CreatedAt, OrderDir::Asc)
+        self.order_by(SqlProfilerQueryDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -882,7 +825,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<SqlProfilerQueryWithRelations> {
+    pub async fn sole(self) -> Result<SqlProfilerQueryRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -901,7 +844,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&SqlProfilerQueryWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&SqlProfilerQueryRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -909,7 +852,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: SqlProfilerQueryCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: SqlProfilerQueryDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
@@ -928,7 +871,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: SqlProfilerQueryCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: SqlProfilerQueryDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
@@ -947,7 +890,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: SqlProfilerQueryCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: SqlProfilerQueryDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
@@ -966,7 +909,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: SqlProfilerQueryCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: SqlProfilerQueryDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "sql_profiler_queries".to_string());
@@ -985,7 +928,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<SqlProfilerQueryWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<SqlProfilerQueryRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1032,9 +975,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
-            data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            data.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let data: Vec<SqlProfilerQueryWithRelations> = data.into_iter().map(|v| SqlProfilerQueryWithRelations { row: v }).collect();
+        let data: Vec<SqlProfilerQueryRecord> = data;
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn to_sql(&self) -> (String, Vec<BindValue>) {
@@ -1118,38 +1061,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct SqlProfilerQueryUnsafeQuery<'db> {
-    inner: SqlProfilerQueryQuery<'db>,
-}
 
-impl<'db> SqlProfilerQueryUnsafeQuery<'db> {
-    fn new(inner: SqlProfilerQueryQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> SqlProfilerQueryQuery<'db> { self.inner }
-}
-
-
-pub struct SqlProfilerQueryInsert<'db> {
+pub struct SqlProfilerQueryCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<SqlProfilerQueryCol>,
+    cols: Vec<SqlProfilerQueryDbCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<SqlProfilerQueryCol>,
+    conflict_cols: Vec<SqlProfilerQueryDbCol>,
 }
 
-impl<'db> SqlProfilerQueryInsert<'db> {
+impl<'db> SqlProfilerQueryCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1163,109 +1085,109 @@ impl<'db> SqlProfilerQueryInsert<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(SqlProfilerQueryCol::Id);
+        self.cols.push(SqlProfilerQueryDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_request_id(mut self, val: uuid::Uuid) -> Self {
-        self.cols.push(SqlProfilerQueryCol::RequestId);
+        self.cols.push(SqlProfilerQueryDbCol::RequestId);
         self.binds.push(val.into());
         self
     }
     pub fn set_table_name(mut self, val: String) -> Self {
-        self.cols.push(SqlProfilerQueryCol::TableName);
+        self.cols.push(SqlProfilerQueryDbCol::TableName);
         self.binds.push(val.into());
         self
     }
     pub fn set_operation(mut self, val: String) -> Self {
-        self.cols.push(SqlProfilerQueryCol::Operation);
+        self.cols.push(SqlProfilerQueryDbCol::Operation);
         self.binds.push(val.into());
         self
     }
     pub fn set_sql(mut self, val: String) -> Self {
-        self.cols.push(SqlProfilerQueryCol::Sql);
+        self.cols.push(SqlProfilerQueryDbCol::Sql);
         self.binds.push(val.into());
         self
     }
     pub fn set_binds(mut self, val: String) -> Self {
-        self.cols.push(SqlProfilerQueryCol::Binds);
+        self.cols.push(SqlProfilerQueryDbCol::Binds);
         self.binds.push(val.into());
         self
     }
     pub fn set_duration_us(mut self, val: i64) -> Self {
-        self.cols.push(SqlProfilerQueryCol::DurationUs);
+        self.cols.push(SqlProfilerQueryDbCol::DurationUs);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(SqlProfilerQueryCol::CreatedAt);
+        self.cols.push(SqlProfilerQueryDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[SqlProfilerQueryCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[SqlProfilerQueryDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[SqlProfilerQueryCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[SqlProfilerQueryDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<SqlProfilerQueryCreateInput> {
-        let mut input = SqlProfilerQueryCreateInput::default();
+    fn to_create_input(&self) -> Result<SqlProfilerQueryCreate> {
+        let mut input = SqlProfilerQueryCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                SqlProfilerQueryCol::Id => {
+                SqlProfilerQueryDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                SqlProfilerQueryCol::RequestId => {
+                SqlProfilerQueryDbCol::RequestId => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
         };
                     input.request_id = FieldInput::Set(value);
                 }
-                SqlProfilerQueryCol::TableName => {
+                SqlProfilerQueryDbCol::TableName => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.table_name = FieldInput::Set(value);
                 }
-                SqlProfilerQueryCol::Operation => {
+                SqlProfilerQueryDbCol::Operation => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.operation = FieldInput::Set(value);
                 }
-                SqlProfilerQueryCol::Sql => {
+                SqlProfilerQueryDbCol::Sql => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.sql = FieldInput::Set(value);
                 }
-                SqlProfilerQueryCol::Binds => {
+                SqlProfilerQueryDbCol::Binds => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.binds = FieldInput::Set(value);
                 }
-                SqlProfilerQueryCol::DurationUs => {
+                SqlProfilerQueryDbCol::DurationUs => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.duration_us = FieldInput::Set(value);
                 }
-                SqlProfilerQueryCol::CreatedAt => {
+                SqlProfilerQueryDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1278,13 +1200,13 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
 
 
-pub async fn save(self) -> Result<SqlProfilerQueryView> {
+pub async fn save(self) -> Result<SqlProfilerQueryRecord> {
         let db_conn = self.db.clone();
         match db_conn {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1292,25 +1214,25 @@ pub async fn save(self) -> Result<SqlProfilerQueryView> {
                     .map_err(|_| anyhow::anyhow!("transaction scope still has active handles"))?
                     .into_inner();
                 tx.commit().await?;
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
-                Ok(view)
+                let (record, row) = self.save_with_db(db_conn).await?;
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(SqlProfilerQueryView, SqlProfilerQueryRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(SqlProfilerQueryRecord, SqlProfilerQueryRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, SqlProfilerQueryCol::Id)) {
-            cols.push(SqlProfilerQueryCol::Id);
+        if !cols.iter().any(|c| matches!(c, SqlProfilerQueryDbCol::Id)) {
+            cols.push(SqlProfilerQueryDbCol::Id);
             binds.push(generate_snowflake_i64().into());
         }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, SqlProfilerQueryCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, SqlProfilerQueryDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(SqlProfilerQueryCol::CreatedAt);
+            cols.push(SqlProfilerQueryDbCol::CreatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1342,20 +1264,20 @@ pub async fn save(self) -> Result<SqlProfilerQueryView> {
         }
         let row = db.fetch_one(q).await?;
         let localized = LocalizedMap::default();
-        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct SqlProfilerQueryUpdate<'db> {
+pub struct SqlProfilerQueryPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(SqlProfilerQueryCol, BindValue, SetMode)>,
+    sets: Vec<(SqlProfilerQueryDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> SqlProfilerQueryUpdate<'db> {
+impl<'db> SqlProfilerQueryPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1365,106 +1287,105 @@ impl<'db> SqlProfilerQueryUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> SqlProfilerQueryUnsafeUpdate<'db> { SqlProfilerQueryUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((SqlProfilerQueryCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((SqlProfilerQueryDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((SqlProfilerQueryCol::Id, val.into(), SetMode::Increment));
+        self.sets.push((SqlProfilerQueryDbCol::Id, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((SqlProfilerQueryCol::Id, val.into(), SetMode::Decrement));
+        self.sets.push((SqlProfilerQueryDbCol::Id, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_request_id(mut self, val: uuid::Uuid) -> Self {
-        self.sets.push((SqlProfilerQueryCol::RequestId, val.into(), SetMode::Assign));
+        self.sets.push((SqlProfilerQueryDbCol::RequestId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_table_name(mut self, val: String) -> Self {
-        self.sets.push((SqlProfilerQueryCol::TableName, val.into(), SetMode::Assign));
+        self.sets.push((SqlProfilerQueryDbCol::TableName, val.into(), SetMode::Assign));
         self
     }
     pub fn set_operation(mut self, val: String) -> Self {
-        self.sets.push((SqlProfilerQueryCol::Operation, val.into(), SetMode::Assign));
+        self.sets.push((SqlProfilerQueryDbCol::Operation, val.into(), SetMode::Assign));
         self
     }
     pub fn set_sql(mut self, val: String) -> Self {
-        self.sets.push((SqlProfilerQueryCol::Sql, val.into(), SetMode::Assign));
+        self.sets.push((SqlProfilerQueryDbCol::Sql, val.into(), SetMode::Assign));
         self
     }
     pub fn set_binds(mut self, val: String) -> Self {
-        self.sets.push((SqlProfilerQueryCol::Binds, val.into(), SetMode::Assign));
+        self.sets.push((SqlProfilerQueryDbCol::Binds, val.into(), SetMode::Assign));
         self
     }
     pub fn set_duration_us(mut self, val: i64) -> Self {
-        self.sets.push((SqlProfilerQueryCol::DurationUs, val.into(), SetMode::Assign));
+        self.sets.push((SqlProfilerQueryDbCol::DurationUs, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_duration_us(mut self, val: i64) -> Self {
-        self.sets.push((SqlProfilerQueryCol::DurationUs, val.into(), SetMode::Increment));
+        self.sets.push((SqlProfilerQueryDbCol::DurationUs, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_duration_us(mut self, val: i64) -> Self {
-        self.sets.push((SqlProfilerQueryCol::DurationUs, val.into(), SetMode::Decrement));
+        self.sets.push((SqlProfilerQueryDbCol::DurationUs, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((SqlProfilerQueryCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((SqlProfilerQueryDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::RequestId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::RequestId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_table_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::TableName.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::TableName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_operation(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Operation.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::Operation.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_sql(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Sql.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::Sql.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_binds(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::Binds.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::Binds.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_duration_us(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::DurationUs.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::DurationUs.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", SqlProfilerQueryDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: SqlProfilerQueryCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: SqlProfilerQueryDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1483,11 +1404,11 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<SqlProfilerQueryUpdateChanges> {
-        let mut changes = SqlProfilerQueryUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<SqlProfilerQueryChanges> {
+        let mut changes = SqlProfilerQueryChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                SqlProfilerQueryCol::Id => {
+                SqlProfilerQueryDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1498,7 +1419,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                SqlProfilerQueryCol::RequestId => {
+                SqlProfilerQueryDbCol::RequestId => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
@@ -1509,7 +1430,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                SqlProfilerQueryCol::TableName => {
+                SqlProfilerQueryDbCol::TableName => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1520,7 +1441,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                SqlProfilerQueryCol::Operation => {
+                SqlProfilerQueryDbCol::Operation => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1531,7 +1452,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                SqlProfilerQueryCol::Sql => {
+                SqlProfilerQueryDbCol::Sql => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1542,7 +1463,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                SqlProfilerQueryCol::Binds => {
+                SqlProfilerQueryDbCol::Binds => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1553,7 +1474,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                SqlProfilerQueryCol::DurationUs => {
+                SqlProfilerQueryDbCol::DurationUs => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1564,7 +1485,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                SqlProfilerQueryCol::CreatedAt => {
+                SqlProfilerQueryDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1603,7 +1524,7 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<SqlProfilerQueryUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<SqlProfilerQueryChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
@@ -1647,29 +1568,19 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct SqlProfilerQueryUnsafeUpdate<'db> {
-    inner: SqlProfilerQueryUpdate<'db>,
-}
-
-impl<'db> SqlProfilerQueryUnsafeUpdate<'db> {
-    fn new(inner: SqlProfilerQueryUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> SqlProfilerQueryUpdate<'db> { self.inner }
-}
 
 pub struct SqlProfilerQueryTableAdapter;
 impl SqlProfilerQueryTableAdapter {
-    fn parse_col(name: &str) -> Option<SqlProfilerQueryCol> {
+    fn parse_col(name: &str) -> Option<SqlProfilerQueryDbCol> {
         match name {
-            "id" => Some(SqlProfilerQueryCol::Id),
-            "request_id" => Some(SqlProfilerQueryCol::RequestId),
-            "table_name" => Some(SqlProfilerQueryCol::TableName),
-            "operation" => Some(SqlProfilerQueryCol::Operation),
-            "sql" => Some(SqlProfilerQueryCol::Sql),
-            "binds" => Some(SqlProfilerQueryCol::Binds),
-            "duration_us" => Some(SqlProfilerQueryCol::DurationUs),
-            "created_at" => Some(SqlProfilerQueryCol::CreatedAt),
+            "id" => Some(SqlProfilerQueryDbCol::Id),
+            "request_id" => Some(SqlProfilerQueryDbCol::RequestId),
+            "table_name" => Some(SqlProfilerQueryDbCol::TableName),
+            "operation" => Some(SqlProfilerQueryDbCol::Operation),
+            "sql" => Some(SqlProfilerQueryDbCol::Sql),
+            "binds" => Some(SqlProfilerQueryDbCol::Binds),
+            "duration_us" => Some(SqlProfilerQueryDbCol::DurationUs),
+            "created_at" => Some(SqlProfilerQueryDbCol::CreatedAt),
             _ => None,
         }
     }
@@ -1683,12 +1594,12 @@ impl SqlProfilerQueryTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<SqlProfilerQueryCol> {
+    fn parse_like_col(name: &str) -> Option<SqlProfilerQueryDbCol> {
         match name {
-            "table_name" => Some(SqlProfilerQueryCol::TableName),
-            "operation" => Some(SqlProfilerQueryCol::Operation),
-            "sql" => Some(SqlProfilerQueryCol::Sql),
-            "binds" => Some(SqlProfilerQueryCol::Binds),
+            "table_name" => Some(SqlProfilerQueryDbCol::TableName),
+            "operation" => Some(SqlProfilerQueryDbCol::Operation),
+            "sql" => Some(SqlProfilerQueryDbCol::Sql),
+            "binds" => Some(SqlProfilerQueryDbCol::Binds),
             _ => None,
         }
     }
@@ -1732,8 +1643,8 @@ impl SqlProfilerQueryTableAdapter {
     }
 }
 impl GeneratedTableAdapter for SqlProfilerQueryTableAdapter {
-    type Query<'db> = SqlProfilerQueryQuery<'db>;
-    type Row = SqlProfilerQueryWithRelations;
+    type Query<'db> = Query<'db, SqlProfilerQueryModel>;
+    type Row = SqlProfilerQueryRecord;
     fn model_key(&self) -> &'static str { "SqlProfilerQuery" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "request_id", "table_name", "operation", "sql", "binds", "duration_us", "created_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at"] }
@@ -1767,7 +1678,7 @@ impl GeneratedTableAdapter for SqlProfilerQueryTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: SqlProfilerQueryQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<SqlProfilerQueryQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, SqlProfilerQueryModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, SqlProfilerQueryModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -1861,28 +1772,28 @@ impl GeneratedTableAdapter for SqlProfilerQueryTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: SqlProfilerQueryQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<SqlProfilerQueryQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, SqlProfilerQueryModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, SqlProfilerQueryModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(SqlProfilerQueryCol::Id, dir),
-            "request_id" => query.order_by(SqlProfilerQueryCol::RequestId, dir),
-            "table_name" => query.order_by(SqlProfilerQueryCol::TableName, dir),
-            "operation" => query.order_by(SqlProfilerQueryCol::Operation, dir),
-            "sql" => query.order_by(SqlProfilerQueryCol::Sql, dir),
-            "binds" => query.order_by(SqlProfilerQueryCol::Binds, dir),
-            "duration_us" => query.order_by(SqlProfilerQueryCol::DurationUs, dir),
-            "created_at" => query.order_by(SqlProfilerQueryCol::CreatedAt, dir),
+            "id" => query.order_by(SqlProfilerQueryDbCol::Id, dir),
+            "request_id" => query.order_by(SqlProfilerQueryDbCol::RequestId, dir),
+            "table_name" => query.order_by(SqlProfilerQueryDbCol::TableName, dir),
+            "operation" => query.order_by(SqlProfilerQueryDbCol::Operation, dir),
+            "sql" => query.order_by(SqlProfilerQueryDbCol::Sql, dir),
+            "binds" => query.order_by(SqlProfilerQueryDbCol::Binds, dir),
+            "duration_us" => query.order_by(SqlProfilerQueryDbCol::DurationUs, dir),
+            "created_at" => query.order_by(SqlProfilerQueryDbCol::CreatedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: SqlProfilerQueryQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<SqlProfilerQueryQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, SqlProfilerQueryModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, SqlProfilerQueryModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &SqlProfilerQueryWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &SqlProfilerQueryRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "request_id" => Some(row.request_id.to_string()),
@@ -1895,10 +1806,10 @@ impl GeneratedTableAdapter for SqlProfilerQueryTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: SqlProfilerQueryQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, SqlProfilerQueryModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: SqlProfilerQueryQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<SqlProfilerQueryWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, SqlProfilerQueryModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<SqlProfilerQueryRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -1924,13 +1835,13 @@ impl Default for SqlProfilerQueryDataTableConfig {
     }
 }
 pub trait SqlProfilerQueryDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: SqlProfilerQueryQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> SqlProfilerQueryQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, SqlProfilerQueryModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, SqlProfilerQueryModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: SqlProfilerQueryQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<SqlProfilerQueryQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: SqlProfilerQueryQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<SqlProfilerQueryQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut SqlProfilerQueryWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: SqlProfilerQueryWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, SqlProfilerQueryModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, SqlProfilerQueryModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, SqlProfilerQueryModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, SqlProfilerQueryModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut SqlProfilerQueryRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: SqlProfilerQueryRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         if let Some(id_value) = record.get("id").cloned() {
             let id_text = match id_value {
@@ -1942,10 +1853,10 @@ pub trait SqlProfilerQueryDataTableHooks: Send + Sync + 'static {
         }
         Ok(record)
     }
-    fn row_to_record(&self, row: SqlProfilerQueryWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: SqlProfilerQueryRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: SqlProfilerQueryQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, SqlProfilerQueryModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct SqlProfilerQueryDefaultDataTableHooks;
@@ -1983,15 +1894,15 @@ impl<H: SqlProfilerQueryDataTableHooks> SqlProfilerQueryDataTable<H> {
 impl<H: SqlProfilerQueryDataTableHooks> AutoDataTable for SqlProfilerQueryDataTable<H> {
     type Adapter = SqlProfilerQueryTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> SqlProfilerQueryQuery<'db> {
-        self.hooks.scope(SqlProfilerQuery::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, SqlProfilerQueryModel> {
+        self.hooks.scope(SqlProfilerQueryModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: SqlProfilerQueryQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<SqlProfilerQueryQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: SqlProfilerQueryQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<SqlProfilerQueryQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut SqlProfilerQueryWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: SqlProfilerQueryWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: SqlProfilerQueryQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, SqlProfilerQueryModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, SqlProfilerQueryModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, SqlProfilerQueryModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, SqlProfilerQueryModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut SqlProfilerQueryRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: SqlProfilerQueryRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, SqlProfilerQueryModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -2001,10 +1912,471 @@ impl<H: SqlProfilerQueryDataTableHooks> AutoDataTable for SqlProfilerQueryDataTa
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for SqlProfilerQueryView {
+impl ActiveRecord for SqlProfilerQueryRecord {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        SqlProfilerQuery::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        SqlProfilerQueryModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct SqlProfilerQueryModel;
+impl SqlProfilerQueryModel {
+    pub const TABLE: &'static str = "sql_profiler_queries";
+    pub const MODEL_KEY: &'static str = "sql_profiler_query";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, SqlProfilerQueryModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, SqlProfilerQueryModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, SqlProfilerQueryModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, SqlProfilerQueryModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, SqlProfilerQueryModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, SqlProfilerQueryModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<SqlProfilerQueryRecord>> {
+        SqlProfilerQueryQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for SqlProfilerQueryModel {
+    type Pk = i64;
+    type Record = SqlProfilerQueryRecord;
+    type Create = SqlProfilerQueryCreate;
+    type Changes = SqlProfilerQueryChanges;
+    const TABLE: &'static str = SqlProfilerQueryModel::TABLE;
+    const MODEL_KEY: &'static str = SqlProfilerQueryModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for SqlProfilerQueryModel {
+    type InnerQuery<'db> = SqlProfilerQueryQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        SqlProfilerQueryQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for SqlProfilerQueryModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for SqlProfilerQueryModel {
+    type InnerCreate<'db> = SqlProfilerQueryCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        SqlProfilerQueryCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            SqlProfilerQueryQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("sql_profiler_queries: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<SqlProfilerQueryModel> for SqlProfilerQueryDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <SqlProfilerQueryModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<SqlProfilerQueryModel>>::Value) -> anyhow::Result<<SqlProfilerQueryModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            SqlProfilerQueryDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::RequestId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::TableName => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::Operation => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::Sql => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::Binds => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::DurationUs => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<SqlProfilerQueryModel> for Column<SqlProfilerQueryModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <SqlProfilerQueryModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<SqlProfilerQueryModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_sql_profiler_query_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            SqlProfilerQueryDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::RequestId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::TableName => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::Operation => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::Sql => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::Binds => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::DurationUs => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<SqlProfilerQueryModel> for SqlProfilerQueryDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <SqlProfilerQueryModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <SqlProfilerQueryModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <SqlProfilerQueryModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <SqlProfilerQueryModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<SqlProfilerQueryModel> for Column<SqlProfilerQueryModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <SqlProfilerQueryModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <SqlProfilerQueryModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<SqlProfilerQueryDbCol> = fields.iter().map(|field| resolve_sql_profiler_query_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <SqlProfilerQueryModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <SqlProfilerQueryModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<SqlProfilerQueryDbCol> = fields.iter().map(|field| resolve_sql_profiler_query_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for SqlProfilerQueryModel {
+    type InnerQuery<'db> = SqlProfilerQueryQueryInner<'db>;
+    type InnerPatch<'db> = SqlProfilerQueryPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        SqlProfilerQueryPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(SqlProfilerQueryDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = SqlProfilerQueryPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", SqlProfilerQueryDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM sql_profiler_queries", SqlProfilerQueryDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = SqlProfilerQueryQueryInner::new(db, base_url);
+            query.where_in(SqlProfilerQueryDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<SqlProfilerQueryModel> for SqlProfilerQueryDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <SqlProfilerQueryModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<SqlProfilerQueryModel>>::Value) -> anyhow::Result<<SqlProfilerQueryModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            SqlProfilerQueryDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::RequestId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::TableName => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::Operation => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::Sql => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::Binds => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::DurationUs => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<SqlProfilerQueryModel> for Column<SqlProfilerQueryModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <SqlProfilerQueryModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<SqlProfilerQueryModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_sql_profiler_query_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            SqlProfilerQueryDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::RequestId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::TableName => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::Operation => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::Sql => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::Binds => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::DurationUs => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            SqlProfilerQueryDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<SqlProfilerQueryModel> for SqlProfilerQueryDbCol {
+    fn increment<'db>(field: Self, mut builder: <SqlProfilerQueryModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<SqlProfilerQueryModel>>::Value) -> anyhow::Result<<SqlProfilerQueryModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            SqlProfilerQueryDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            SqlProfilerQueryDbCol::DurationUs => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <SqlProfilerQueryModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<SqlProfilerQueryModel>>::Value) -> anyhow::Result<<SqlProfilerQueryModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            SqlProfilerQueryDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            SqlProfilerQueryDbCol::DurationUs => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<SqlProfilerQueryModel> for Column<SqlProfilerQueryModel, i64> {
+    fn increment<'db>(field: Self, mut builder: <SqlProfilerQueryModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<SqlProfilerQueryModel>>::Value) -> anyhow::Result<<SqlProfilerQueryModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_sql_profiler_query_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            SqlProfilerQueryDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            SqlProfilerQueryDbCol::DurationUs => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <SqlProfilerQueryModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<SqlProfilerQueryModel>>::Value) -> anyhow::Result<<SqlProfilerQueryModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_sql_profiler_query_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            SqlProfilerQueryDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            SqlProfilerQueryDbCol::DurationUs => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<SqlProfilerQueryModel> for SqlProfilerQueryDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<SqlProfilerQueryModel>>::Value) -> <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<SqlProfilerQueryModel>>::Value) -> <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<SqlProfilerQueryModel>>::Value]) -> <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<SqlProfilerQueryModel> for Column<SqlProfilerQueryModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_sql_profiler_query_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_sql_profiler_query_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_sql_profiler_query_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_sql_profiler_query_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_sql_profiler_query_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <SqlProfilerQueryModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_sql_profiler_query_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
 

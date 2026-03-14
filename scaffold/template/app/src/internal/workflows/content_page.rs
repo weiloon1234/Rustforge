@@ -1,19 +1,17 @@
 use core_db::common::sql::{DbConn, Op};
 use core_i18n::t;
 use core_web::error::AppError;
-use generated::models::{ContentPage, ContentPageSystemFlag, ContentPageView};
+use generated::models::{ContentPageModel, ContentPageRecord, ContentPageSystemFlag};
 
 use crate::{
     contracts::api::v1::admin::content_page::AdminContentPageUpdateInput,
     internal::api::state::AppApiState,
 };
 
-pub async fn detail(state: &AppApiState, id: i64) -> Result<ContentPageView, AppError> {
-    ContentPage::new(DbConn::pool(&state.db), None)
-        .find(id)
+pub async fn detail(state: &AppApiState, id: i64) -> Result<ContentPageRecord, AppError> {
+    ContentPageModel::find(DbConn::pool(&state.db), id)
         .await
         .map_err(AppError::from)?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("Page not found")))
 }
 
@@ -21,7 +19,7 @@ pub async fn update(
     state: &AppApiState,
     id: i64,
     req: AdminContentPageUpdateInput,
-) -> Result<ContentPageView, AppError> {
+) -> Result<ContentPageRecord, AppError> {
     let tag = normalize_tag(&req.tag)?;
     let existing = detail(state, id).await?;
 
@@ -30,7 +28,7 @@ pub async fn update(
             return Err(AppError::Forbidden(t("Cannot change tag for system page")));
         }
 
-        let existing_title = existing.title_translations.unwrap_or_default();
+        let existing_title = existing.title_translations.clone().unwrap_or_default();
         let title_changed = existing_title.en != req.title.en.clone().unwrap_or_default()
             || existing_title.zh != req.title.zh.clone().unwrap_or_default();
         if title_changed {
@@ -40,13 +38,17 @@ pub async fn update(
         }
     }
 
-    let affected = ContentPage::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_id(Op::Eq, id)
-        .set_tag(tag)
-        .set_title_input(Some(req.title))
-        .set_content_input(Some(req.content))
-        .set_cover_input(req.cover)
+    let scope = DbConn::pool(&state.db)
+        .begin_scope()
+        .await
+        .map_err(AppError::from)?;
+    let conn = scope.conn();
+
+    let affected = ContentPageModel::query(conn.clone())
+        .where_col(generated::models::ContentPageCol::ID, Op::Eq, id)
+        .patch()
+        .assign(generated::models::ContentPageCol::TAG, tag)
+        .map_err(AppError::from)?
         .save()
         .await
         .map_err(AppError::from)?;
@@ -54,6 +56,21 @@ pub async fn update(
     if affected == 0 {
         return Err(AppError::NotFound(t("Page not found")));
     }
+
+    existing
+        .upsert_title(conn.clone(), Some(req.title))
+        .await
+        .map_err(AppError::from)?;
+    existing
+        .upsert_content(conn.clone(), Some(req.content))
+        .await
+        .map_err(AppError::from)?;
+    existing
+        .upsert_cover(conn, req.cover)
+        .await
+        .map_err(AppError::from)?;
+
+    scope.commit().await.map_err(AppError::from)?;
 
     detail(state, id).await
 }
@@ -64,8 +81,9 @@ pub async fn remove(state: &AppApiState, id: i64) -> Result<(), AppError> {
         return Err(AppError::Forbidden(t("Cannot delete system page")));
     }
 
-    let affected = ContentPage::new(DbConn::pool(&state.db), None)
-        .delete(id)
+    let affected = ContentPageModel::query(DbConn::pool(&state.db))
+        .where_col(generated::models::ContentPageCol::ID, Op::Eq, id)
+        .delete()
         .await
         .map_err(AppError::from)?;
     if affected == 0 {

@@ -55,8 +55,8 @@ const MODEL_KEYS: ModelKeyRow[] = [
         remarks: 'Exclude a field from generated JSON projections.',
     },
     {
-        key: '#[rf_view_impl]',
-        syntax: '#[rf_view_impl] impl ArticleView { ... }',
+        key: '#[rf_record_impl]',
+        syntax: '#[rf_record_impl] impl ArticleRecord { ... }',
         defaultValue: 'n/a',
         remarks: 'Adds plain generated methods directly onto XxxView.',
     },
@@ -67,8 +67,8 @@ const MODEL_KEYS: ModelKeyRow[] = [
         remarks: 'Also exports the method value into generated JSON projections.',
     },
     {
-        key: '#[rf_with_relations_impl]',
-        syntax: '#[rf_with_relations_impl] impl ArticleWithRelations { ... }',
+        key: '#[rf_model_impl]',
+        syntax: '#[rf_model_impl] impl ArticleModel { ... }',
         defaultValue: 'n/a',
         remarks: 'Adds methods on relation-loaded read models.',
     },
@@ -153,7 +153,7 @@ pub enum PublishState {
                         <code>i64</code> assumptions in app code.
                     </li>
                     <li>
-                        <code>#[rf_computed]</code> methods live in <code>#[rf_view_impl]</code> blocks inside <code>app/models/*.rs</code>.
+                        <code>#[rf_computed]</code> methods live in <code>#[rf_record_impl]</code> blocks inside <code>app/models/*.rs</code>.
                     </li>
                     <li>
                         Country linkage should use <code>country_iso2</code> and the country model field, not a parallel manual convention.
@@ -203,8 +203,8 @@ pub struct Article {
     pub category: BelongsTo<ArticleCategory>,
 }
 
-#[rf_view_impl]
-impl ArticleView {
+#[rf_record_impl]
+impl ArticleRecord {
     #[rf_computed]
     pub fn status_label(&self) -> String {
         self.status.explained_label()

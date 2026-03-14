@@ -10,7 +10,10 @@ use core_db::{
         auth::token::{generate_token, hash_token},
         sql::{DbConn, Op},
     },
-    generated::models::{PersonalAccessToken, PersonalAccessTokenKind, PersonalAccessTokenView},
+    generated::models::{
+        PersonalAccessTokenCol, PersonalAccessTokenKind, PersonalAccessTokenModel,
+        PersonalAccessTokenRecord,
+    },
 };
 use std::marker::PhantomData;
 use time::{Duration, OffsetDateTime};
@@ -259,11 +262,11 @@ fn abilities_from_json(value: &Option<serde_json::Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn token_row_is_revoked(row: &PersonalAccessTokenView) -> bool {
+fn token_row_is_revoked(row: &PersonalAccessTokenRecord) -> bool {
     row.revoked_at.is_some()
 }
 
-fn token_row_is_expired(row: &PersonalAccessTokenView, now: OffsetDateTime) -> bool {
+fn token_row_is_expired(row: &PersonalAccessTokenRecord, now: OffsetDateTime) -> bool {
     row.expires_at.is_some_and(|exp| exp <= now)
 }
 
@@ -277,22 +280,27 @@ async fn issue_token_row(
     parent_token_id: Option<Uuid>,
     abilities: Option<Vec<String>>,
     expires_at: Option<OffsetDateTime>,
-) -> anyhow::Result<(String, PersonalAccessTokenView)> {
+) -> anyhow::Result<(String, PersonalAccessTokenRecord)> {
     let plain = generate_token();
     let token_hash = hash_token(&plain);
     let abilities = abilities_to_json(abilities)?;
 
-    let row = PersonalAccessToken::new(DbConn::pool(db), None)
-        .insert()
-        .set_tokenable_type(tokenable_type.to_string())
-        .set_tokenable_id(tokenable_id.to_string())
-        .set_name(name.to_string())
-        .set_token(token_hash)
-        .set_token_kind(token_kind)
-        .set_family_id(family_id)
-        .set_parent_token_id(parent_token_id)
-        .set_abilities(abilities)
-        .set_expires_at(expires_at)
+    let row = PersonalAccessTokenModel::create(DbConn::pool(db))
+        .set(
+            PersonalAccessTokenCol::TOKENABLE_TYPE,
+            tokenable_type.to_string(),
+        )?
+        .set(
+            PersonalAccessTokenCol::TOKENABLE_ID,
+            tokenable_id.to_string(),
+        )?
+        .set(PersonalAccessTokenCol::NAME, name.to_string())?
+        .set(PersonalAccessTokenCol::TOKEN, token_hash)?
+        .set(PersonalAccessTokenCol::TOKEN_KIND, token_kind)?
+        .set(PersonalAccessTokenCol::FAMILY_ID, family_id)?
+        .set(PersonalAccessTokenCol::PARENT_TOKEN_ID, parent_token_id)?
+        .set(PersonalAccessTokenCol::ABILITIES, abilities)?
+        .set(PersonalAccessTokenCol::EXPIRES_AT, expires_at)?
         .save()
         .await?;
 
@@ -362,7 +370,7 @@ pub async fn issue_guard_session<G: Guard>(
 }
 
 fn assert_token_row_valid<G: Guard>(
-    pat: &PersonalAccessTokenView,
+    pat: &PersonalAccessTokenRecord,
     expected_kind: PersonalAccessTokenKind,
 ) -> Result<(), AppError> {
     if pat.token_kind != expected_kind {
@@ -394,20 +402,30 @@ pub async fn refresh_guard_session<G: Guard>(
     name: &str,
 ) -> Result<IssuedTokenPair, AppError> {
     let token_hash = hash_token(refresh_plain_token);
-    let refresh_row = PersonalAccessToken::new(DbConn::pool(db), None)
-        .query()
-        .where_token(Op::Eq, token_hash)
-        .where_token_kind(Op::Eq, PersonalAccessTokenKind::Refresh)
+    let refresh_row = PersonalAccessTokenModel::query(DbConn::pool(db))
+        .where_col(PersonalAccessTokenCol::TOKEN, Op::Eq, token_hash)
+        .where_col(
+            PersonalAccessTokenCol::TOKEN_KIND,
+            Op::Eq,
+            PersonalAccessTokenKind::Refresh,
+        )
         .first()
         .await?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::Unauthorized("Invalid refresh token".to_string()))?;
 
     if token_row_is_revoked(&refresh_row) {
-        let _ = PersonalAccessToken::new(DbConn::pool(db), None)
-            .update()
-            .where_family_id(Op::Eq, refresh_row.family_id)
-            .set_revoked_at(Some(OffsetDateTime::now_utc()))
+        let _ = PersonalAccessTokenModel::query(DbConn::pool(db))
+            .where_col(
+                PersonalAccessTokenCol::FAMILY_ID,
+                Op::Eq,
+                refresh_row.family_id,
+            )
+            .patch()
+            .assign(
+                PersonalAccessTokenCol::REVOKED_AT,
+                Some(OffsetDateTime::now_utc()),
+            )
+            .map_err(AppError::from)?
             .save()
             .await;
         return Err(AppError::Unauthorized(
@@ -421,10 +439,14 @@ pub async fn refresh_guard_session<G: Guard>(
         .await?
         .ok_or_else(|| AppError::Unauthorized("Token subject not found".to_string()))?;
 
-    PersonalAccessToken::new(DbConn::pool(db), None)
-        .update()
-        .where_id(Op::Eq, refresh_row.id)
-        .set_revoked_at(Some(OffsetDateTime::now_utc()))
+    PersonalAccessTokenModel::query(DbConn::pool(db))
+        .where_col(PersonalAccessTokenCol::ID, Op::Eq, refresh_row.id)
+        .patch()
+        .assign(
+            PersonalAccessTokenCol::REVOKED_AT,
+            Some(OffsetDateTime::now_utc()),
+        )
+        .map_err(AppError::from)?
         .save()
         .await
         .map_err(AppError::from)?;
@@ -484,10 +506,13 @@ pub async fn refresh_guard_session<G: Guard>(
 }
 
 pub async fn revoke_token(db: &sqlx::PgPool, token_id: Uuid) -> anyhow::Result<()> {
-    PersonalAccessToken::new(DbConn::pool(db), None)
-        .update()
-        .where_id(Op::Eq, token_id)
-        .set_revoked_at(Some(OffsetDateTime::now_utc()))
+    PersonalAccessTokenModel::query(DbConn::pool(db))
+        .where_col(PersonalAccessTokenCol::ID, Op::Eq, token_id)
+        .patch()
+        .assign(
+            PersonalAccessTokenCol::REVOKED_AT,
+            Some(OffsetDateTime::now_utc()),
+        )?
         .save()
         .await?;
     Ok(())
@@ -498,13 +523,15 @@ pub async fn revoke_session_by_refresh_token<G: Guard>(
     refresh_plain_token: &str,
 ) -> Result<(), AppError> {
     let token_hash = hash_token(refresh_plain_token);
-    let refresh_row = PersonalAccessToken::new(DbConn::pool(db), None)
-        .query()
-        .where_token(Op::Eq, token_hash)
-        .where_token_kind(Op::Eq, PersonalAccessTokenKind::Refresh)
+    let refresh_row = PersonalAccessTokenModel::query(DbConn::pool(db))
+        .where_col(PersonalAccessTokenCol::TOKEN, Op::Eq, token_hash)
+        .where_col(
+            PersonalAccessTokenCol::TOKEN_KIND,
+            Op::Eq,
+            PersonalAccessTokenKind::Refresh,
+        )
         .first()
         .await?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::Unauthorized("Invalid refresh token".to_string()))?;
 
     if let Some(expected) = G::tokenable_type() {
@@ -513,10 +540,18 @@ pub async fn revoke_session_by_refresh_token<G: Guard>(
         }
     }
 
-    PersonalAccessToken::new(DbConn::pool(db), None)
-        .update()
-        .where_family_id(Op::Eq, refresh_row.family_id)
-        .set_revoked_at(Some(OffsetDateTime::now_utc()))
+    PersonalAccessTokenModel::query(DbConn::pool(db))
+        .where_col(
+            PersonalAccessTokenCol::FAMILY_ID,
+            Op::Eq,
+            refresh_row.family_id,
+        )
+        .patch()
+        .assign(
+            PersonalAccessTokenCol::REVOKED_AT,
+            Some(OffsetDateTime::now_utc()),
+        )
+        .map_err(AppError::from)?
         .save()
         .await
         .map_err(AppError::from)?;
@@ -538,13 +573,15 @@ pub async fn authenticate_token<G: Guard>(
     plain_token: &str,
 ) -> Result<AuthUser<G>, AppError> {
     let token_hash = hash_token(plain_token);
-    let pat = PersonalAccessToken::new(DbConn::pool(db), None)
-        .query()
-        .where_token(Op::Eq, token_hash)
-        .where_token_kind(Op::Eq, PersonalAccessTokenKind::Access)
+    let pat = PersonalAccessTokenModel::query(DbConn::pool(db))
+        .where_col(PersonalAccessTokenCol::TOKEN, Op::Eq, token_hash)
+        .where_col(
+            PersonalAccessTokenCol::TOKEN_KIND,
+            Op::Eq,
+            PersonalAccessTokenKind::Access,
+        )
         .first()
         .await?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::Unauthorized("Invalid access token".to_string()))?;
 
     assert_token_row_valid::<G>(&pat, PersonalAccessTokenKind::Access)?;
@@ -553,10 +590,14 @@ pub async fn authenticate_token<G: Guard>(
         .await?
         .ok_or_else(|| AppError::Unauthorized("Token subject not found".to_string()))?;
 
-    if let Err(e) = PersonalAccessToken::new(DbConn::pool(db), None)
-        .update()
-        .where_id(Op::Eq, pat.id)
-        .set_last_used_at(Some(OffsetDateTime::now_utc()))
+    if let Err(e) = PersonalAccessTokenModel::query(DbConn::pool(db))
+        .where_col(PersonalAccessTokenCol::ID, Op::Eq, pat.id)
+        .patch()
+        .assign(
+            PersonalAccessTokenCol::LAST_USED_AT,
+            Some(OffsetDateTime::now_utc()),
+        )
+        .map_err(AppError::from)?
         .save()
         .await
     {
@@ -567,7 +608,7 @@ pub async fn authenticate_token<G: Guard>(
 
     Ok(AuthUser::new(
         user,
-        Some(pat.tokenable_id),
+        Some(pat.tokenable_id.clone()),
         Some(pat.id),
         None,
         abilities,

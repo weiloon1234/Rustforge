@@ -1,17 +1,11 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
-use core_db::common::sql::Op;
+use core_db::common::{model_api::Query, sql::Op};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
-use generated::{
-    models::{
-        CompanyBankAccountDataTable, CompanyBankAccountDataTableHooks, CompanyBankAccountQuery,
-        CompanyBankAccountStatus,
-    },
-    permissions::Permission,
-};
+use generated::{models::*, permissions::Permission};
 
 use crate::contracts::datatable::admin::company_bank_account::{
     AdminCompanyBankAccountDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
@@ -24,10 +18,10 @@ pub struct CompanyBankAccountDataTableAppHooks;
 impl CompanyBankAccountDataTableHooks for CompanyBankAccountDataTableAppHooks {
     fn scope<'db>(
         &'db self,
-        query: CompanyBankAccountQuery<'db>,
+        query: Query<'db, CompanyBankAccountModel>,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> CompanyBankAccountQuery<'db> {
+    ) -> Query<'db, CompanyBankAccountModel> {
         query
     }
 
@@ -48,24 +42,24 @@ impl CompanyBankAccountDataTableHooks for CompanyBankAccountDataTableAppHooks {
 
     fn filter_query<'db>(
         &'db self,
-        query: CompanyBankAccountQuery<'db>,
+        query: Query<'db, CompanyBankAccountModel>,
         filter_key: &str,
         value: &str,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<Option<CompanyBankAccountQuery<'db>>> {
+    ) -> anyhow::Result<Option<Query<'db, CompanyBankAccountModel>>> {
         match filter_key {
             "q" => Ok(Some(apply_keyword_filter(query, value))),
             "f-bank_id" => {
                 if let Ok(bank_id) = value.trim().parse::<i64>() {
-                    Ok(Some(query.where_bank_id(Op::Eq, bank_id)))
+                    Ok(Some(query.where_col(CompanyBankAccountCol::BANK_ID, Op::Eq, bank_id)))
                 } else {
                     Ok(Some(query))
                 }
             }
             "f-status" => {
                 if let Some(s) = CompanyBankAccountStatus::from_storage(value) {
-                    Ok(Some(query.where_status(Op::Eq, s)))
+                    Ok(Some(query.where_col(CompanyBankAccountCol::STATUS, Op::Eq, s)))
                 } else {
                     Ok(Some(query))
                 }
@@ -76,7 +70,7 @@ impl CompanyBankAccountDataTableHooks for CompanyBankAccountDataTableAppHooks {
 
     fn map_row(
         &self,
-        _row: &mut generated::models::CompanyBankAccountWithRelations,
+        _row: &mut CompanyBankAccountRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<()> {
@@ -85,7 +79,7 @@ impl CompanyBankAccountDataTableHooks for CompanyBankAccountDataTableAppHooks {
 
     fn row_to_record(
         &self,
-        row: generated::models::CompanyBankAccountWithRelations,
+        row: CompanyBankAccountRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
@@ -106,18 +100,18 @@ impl CompanyBankAccountDataTableHooks for CompanyBankAccountDataTableAppHooks {
 }
 
 fn apply_keyword_filter<'db>(
-    query: CompanyBankAccountQuery<'db>,
+    query: Query<'db, CompanyBankAccountModel>,
     value: &str,
-) -> CompanyBankAccountQuery<'db> {
+) -> Query<'db, CompanyBankAccountModel> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return query;
     }
     if let Ok(id) = trimmed.parse::<i64>() {
-        return query.where_id(Op::Eq, id);
+        return query.where_col(CompanyBankAccountCol::ID, Op::Eq, id);
     }
     let pattern = format!("%{trimmed}%");
-    query.where_account_name(Op::Like, pattern)
+    query.where_col(CompanyBankAccountCol::ACCOUNT_NAME, Op::Like, pattern)
 }
 
 pub type AppCompanyBankAccountDataTable =

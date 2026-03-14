@@ -2,8 +2,8 @@ use core_db::common::sql::{DbConn, Op};
 use core_i18n::t;
 use core_web::error::AppError;
 use generated::models::{
-    BankQuery, BankStatus, CompanyBankAccount, CompanyBankAccountQuery,
-    CompanyBankAccountWithRelations,
+    BankCol, BankModel, BankStatus, CompanyBankAccountCol, CompanyBankAccountModel,
+    CompanyBankAccountRecord,
 };
 use time::OffsetDateTime;
 
@@ -15,18 +15,16 @@ use crate::{
 pub async fn detail(
     state: &AppApiState,
     id: i64,
-) -> Result<CompanyBankAccountWithRelations, AppError> {
-    CompanyBankAccountQuery::new(DbConn::pool(&state.db), None)
-        .where_id(Op::Eq, id)
-        .first()
+) -> Result<CompanyBankAccountRecord, AppError> {
+    CompanyBankAccountModel::find(DbConn::pool(&state.db), id)
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(t("Company bank account not found")))
 }
 
 async fn validate_bank(state: &AppApiState, bank_id: i64) -> Result<(), AppError> {
-    let bank = BankQuery::new(DbConn::pool(&state.db), None)
-        .where_id(Op::Eq, bank_id)
+    let bank = BankModel::query(DbConn::pool(&state.db))
+        .where_col(BankCol::ID, Op::Eq, bank_id)
         .first()
         .await
         .map_err(AppError::from)?
@@ -42,44 +40,56 @@ async fn validate_bank(state: &AppApiState, bank_id: i64) -> Result<(), AppError
 pub async fn create(
     state: &AppApiState,
     req: AdminCompanyBankAccountInput,
-) -> Result<CompanyBankAccountWithRelations, AppError> {
+) -> Result<CompanyBankAccountRecord, AppError> {
     let bank_id: i64 = req.bank_id.into();
     validate_bank(state, bank_id).await?;
 
     let now = OffsetDateTime::now_utc();
-    let row = CompanyBankAccount::new(DbConn::pool(&state.db), None)
-        .insert()
-        .set_bank_id(bank_id)
-        .set_account_name(req.account_name)
-        .set_account_number(req.account_number)
-        .set_status(req.status)
-        .set_sort_order(req.sort_order.unwrap_or(0))
-        .set_created_at(now)
-        .set_updated_at(now)
+    let row = CompanyBankAccountModel::create(DbConn::pool(&state.db))
+        .set(CompanyBankAccountCol::BANK_ID, bank_id)
+        .map_err(AppError::from)?
+        .set(CompanyBankAccountCol::ACCOUNT_NAME, req.account_name)
+        .map_err(AppError::from)?
+        .set(CompanyBankAccountCol::ACCOUNT_NUMBER, req.account_number)
+        .map_err(AppError::from)?
+        .set(CompanyBankAccountCol::STATUS, req.status)
+        .map_err(AppError::from)?
+        .set(CompanyBankAccountCol::SORT_ORDER, req.sort_order.unwrap_or(0))
+        .map_err(AppError::from)?
+        .set(CompanyBankAccountCol::CREATED_AT, now)
+        .map_err(AppError::from)?
+        .set(CompanyBankAccountCol::UPDATED_AT, now)
+        .map_err(AppError::from)?
         .save()
         .await
         .map_err(AppError::from)?;
 
-    detail(state, row.id).await
+    Ok(row)
 }
 
 pub async fn update(
     state: &AppApiState,
     id: i64,
     req: AdminCompanyBankAccountInput,
-) -> Result<CompanyBankAccountWithRelations, AppError> {
+) -> Result<CompanyBankAccountRecord, AppError> {
     let bank_id: i64 = req.bank_id.into();
     validate_bank(state, bank_id).await?;
 
-    let affected = CompanyBankAccount::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_id(Op::Eq, id)
-        .set_bank_id(bank_id)
-        .set_account_name(req.account_name)
-        .set_account_number(req.account_number)
-        .set_status(req.status)
-        .set_sort_order(req.sort_order.unwrap_or(0))
-        .set_updated_at(OffsetDateTime::now_utc())
+    let affected = CompanyBankAccountModel::query(DbConn::pool(&state.db))
+        .where_col(CompanyBankAccountCol::ID, Op::Eq, id)
+        .patch()
+        .assign(CompanyBankAccountCol::BANK_ID, bank_id)
+        .map_err(AppError::from)?
+        .assign(CompanyBankAccountCol::ACCOUNT_NAME, req.account_name)
+        .map_err(AppError::from)?
+        .assign(CompanyBankAccountCol::ACCOUNT_NUMBER, req.account_number)
+        .map_err(AppError::from)?
+        .assign(CompanyBankAccountCol::STATUS, req.status)
+        .map_err(AppError::from)?
+        .assign(CompanyBankAccountCol::SORT_ORDER, req.sort_order.unwrap_or(0))
+        .map_err(AppError::from)?
+        .assign(CompanyBankAccountCol::UPDATED_AT, OffsetDateTime::now_utc())
+        .map_err(AppError::from)?
         .save()
         .await
         .map_err(AppError::from)?;
@@ -92,8 +102,9 @@ pub async fn update(
 }
 
 pub async fn delete(state: &AppApiState, id: i64) -> Result<(), AppError> {
-    let affected = CompanyBankAccount::new(DbConn::pool(&state.db), None)
-        .delete(id)
+    let affected = CompanyBankAccountModel::query(DbConn::pool(&state.db))
+        .where_col(CompanyBankAccountCol::ID, Op::Eq, id)
+        .delete()
         .await
         .map_err(AppError::from)?;
 

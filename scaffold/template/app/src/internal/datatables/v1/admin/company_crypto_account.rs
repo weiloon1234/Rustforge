@@ -1,17 +1,11 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
-use core_db::common::sql::Op;
+use core_db::common::{model_api::Query, sql::Op};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
-use generated::{
-    models::{
-        CompanyCryptoAccountDataTable, CompanyCryptoAccountDataTableHooks,
-        CompanyCryptoAccountQuery, CompanyCryptoAccountStatus,
-    },
-    permissions::Permission,
-};
+use generated::{models::*, permissions::Permission};
 
 use crate::contracts::datatable::admin::company_crypto_account::{
     AdminCompanyCryptoAccountDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
@@ -24,10 +18,10 @@ pub struct CompanyCryptoAccountDataTableAppHooks;
 impl CompanyCryptoAccountDataTableHooks for CompanyCryptoAccountDataTableAppHooks {
     fn scope<'db>(
         &'db self,
-        query: CompanyCryptoAccountQuery<'db>,
+        query: Query<'db, CompanyCryptoAccountModel>,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> CompanyCryptoAccountQuery<'db> {
+    ) -> Query<'db, CompanyCryptoAccountModel> {
         query
     }
 
@@ -48,24 +42,24 @@ impl CompanyCryptoAccountDataTableHooks for CompanyCryptoAccountDataTableAppHook
 
     fn filter_query<'db>(
         &'db self,
-        query: CompanyCryptoAccountQuery<'db>,
+        query: Query<'db, CompanyCryptoAccountModel>,
         filter_key: &str,
         value: &str,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<Option<CompanyCryptoAccountQuery<'db>>> {
+    ) -> anyhow::Result<Option<Query<'db, CompanyCryptoAccountModel>>> {
         match filter_key {
             "q" => Ok(Some(apply_keyword_filter(query, value))),
             "f-crypto_network_id" => {
                 if let Ok(nid) = value.trim().parse::<i64>() {
-                    Ok(Some(query.where_crypto_network_id(Op::Eq, nid)))
+                    Ok(Some(query.where_col(CompanyCryptoAccountCol::CRYPTO_NETWORK_ID, Op::Eq, nid)))
                 } else {
                     Ok(Some(query))
                 }
             }
             "f-status" => {
                 if let Some(s) = CompanyCryptoAccountStatus::from_storage(value) {
-                    Ok(Some(query.where_status(Op::Eq, s)))
+                    Ok(Some(query.where_col(CompanyCryptoAccountCol::STATUS, Op::Eq, s)))
                 } else {
                     Ok(Some(query))
                 }
@@ -76,7 +70,7 @@ impl CompanyCryptoAccountDataTableHooks for CompanyCryptoAccountDataTableAppHook
 
     fn map_row(
         &self,
-        _row: &mut generated::models::CompanyCryptoAccountWithRelations,
+        _row: &mut CompanyCryptoAccountRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<()> {
@@ -85,7 +79,7 @@ impl CompanyCryptoAccountDataTableHooks for CompanyCryptoAccountDataTableAppHook
 
     fn row_to_record(
         &self,
-        row: generated::models::CompanyCryptoAccountWithRelations,
+        row: CompanyCryptoAccountRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
@@ -106,18 +100,18 @@ impl CompanyCryptoAccountDataTableHooks for CompanyCryptoAccountDataTableAppHook
 }
 
 fn apply_keyword_filter<'db>(
-    query: CompanyCryptoAccountQuery<'db>,
+    query: Query<'db, CompanyCryptoAccountModel>,
     value: &str,
-) -> CompanyCryptoAccountQuery<'db> {
+) -> Query<'db, CompanyCryptoAccountModel> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return query;
     }
     if let Ok(id) = trimmed.parse::<i64>() {
-        return query.where_id(Op::Eq, id);
+        return query.where_col(CompanyCryptoAccountCol::ID, Op::Eq, id);
     }
     let pattern = format!("%{trimmed}%");
-    query.where_wallet_address(Op::Like, pattern)
+    query.where_col(CompanyCryptoAccountCol::WALLET_ADDRESS, Op::Like, pattern)
 }
 
 pub type AppCompanyCryptoAccountDataTable =

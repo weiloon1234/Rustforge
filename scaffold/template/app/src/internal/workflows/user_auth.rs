@@ -1,5 +1,5 @@
 use core_db::common::{
-    auth::hash::verify_password,
+    auth::hash::{hash_password, verify_password},
     sql::{generate_snowflake_i64, DbConn, Op},
 };
 use core_i18n::t;
@@ -10,7 +10,7 @@ use core_web::{
 };
 use generated::{
     guards::UserGuard,
-    models::{User, UserBanStatus, UserQuery, UserView},
+    models::{UserBanStatus, UserCol, UserModel, UserRecord},
 };
 
 use crate::contracts::api::v1::user::auth::{
@@ -22,14 +22,13 @@ pub async fn login(
     state: &AppApiState,
     username: &str,
     password: &str,
-) -> Result<(UserView, IssuedTokenPair), AppError> {
+) -> Result<(UserRecord, IssuedTokenPair), AppError> {
     let username = username.trim().to_ascii_lowercase();
-    let user = UserQuery::new(DbConn::pool(&state.db), None)
-        .where_username(Op::Eq, username)
+    let user = UserModel::query(DbConn::pool(&state.db))
+        .where_col(UserCol::USERNAME, Op::Eq, username)
         .first()
         .await
         .map_err(AppError::from)?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::Unauthorized(t("Invalid credentials")))?;
 
     let valid = verify_password(password, &user.password).map_err(AppError::from)?;
@@ -55,54 +54,60 @@ pub async fn login(
 pub async fn register(
     state: &AppApiState,
     req: UserRegisterInput,
-) -> Result<(UserView, IssuedTokenPair), AppError> {
+) -> Result<(UserRecord, IssuedTokenPair), AppError> {
     let id = generate_snowflake_i64();
     let uuid = generate_unique_uuid(state).await?;
+    let password_hash = hash_password(&req.password).map_err(AppError::from)?;
 
     let introducer_user_id = if let Some(ref referral_code) = req.referral_code {
-        let introducer = UserQuery::new(DbConn::pool(&state.db), None)
-            .where_uuid(Op::Eq, referral_code.clone())
+        let introducer = UserModel::query(DbConn::pool(&state.db))
+            .where_col(UserCol::UUID, Op::Eq, referral_code.clone())
             .first()
             .await
             .map_err(AppError::from)?
-            .map(|r| r.into_row());
+            ;
         introducer.map(|u| u.id)
     } else {
         None
     };
 
-    let mut insert = User::new(DbConn::pool(&state.db), None)
-        .insert()
-        .set_id(id)
-        .set_uuid(uuid)
-        .set_username(req.username.to_string())
-        .set_password(&req.password)
+    let mut insert = UserModel::create(DbConn::pool(&state.db))
+        .set(UserCol::ID, id)
+        .map_err(AppError::from)?
+        .set(UserCol::UUID, uuid)
+        .map_err(AppError::from)?
+        .set(UserCol::USERNAME, req.username.to_string())
+        .map_err(AppError::from)?
+        .set(UserCol::PASSWORD, password_hash)
         .map_err(AppError::from)?;
 
     if let Some(name) = &req.name {
-        insert = insert.set_name(Some(name.clone()));
+        insert = insert
+            .set(UserCol::NAME, Some(name.clone()))
+            .map_err(AppError::from)?;
     }
     if let Some(email) = &req.email {
-        insert = insert.set_email(Some(email.clone()));
+        insert = insert
+            .set(UserCol::EMAIL, Some(email.clone()))
+            .map_err(AppError::from)?;
     }
     if let Some(country_iso2) = &req.country_iso2 {
-        insert = insert.set_country_iso2(Some(country_iso2.clone()));
+        insert = insert
+            .set(UserCol::COUNTRY_ISO2, Some(country_iso2.clone()))
+            .map_err(AppError::from)?;
     }
     if let Some(contact_number) = &req.contact_number {
-        insert = insert.set_contact_number(Some(contact_number.clone()));
+        insert = insert
+            .set(UserCol::CONTACT_NUMBER, Some(contact_number.clone()))
+            .map_err(AppError::from)?;
     }
     if let Some(introducer_id) = introducer_user_id {
-        insert = insert.set_introducer_user_id(Some(introducer_id));
+        insert = insert
+            .set(UserCol::INTRODUCER_USER_ID, Some(introducer_id))
+            .map_err(AppError::from)?;
     }
 
-    insert.save().await.map_err(AppError::from)?;
-
-    let user = User::new(DbConn::pool(&state.db), None)
-        .find(id)
-        .await
-        .map_err(AppError::from)?
-        .map(|r| r.into_row())
-        .ok_or_else(|| AppError::BadRequest(t("Failed to create user")))?;
+    let user = insert.save().await.map_err(AppError::from)?;
 
     let tokens = auth::issue_guard_session::<UserGuard>(
         &state.db,
@@ -120,12 +125,11 @@ pub async fn register(
 async fn generate_unique_uuid(state: &AppApiState) -> Result<String, AppError> {
     for _ in 0..10 {
         let uuid = nanoid::nanoid!(8);
-        let existing = UserQuery::new(DbConn::pool(&state.db), None)
-            .where_uuid(Op::Eq, uuid.clone())
+        let existing = UserModel::query(DbConn::pool(&state.db))
+            .where_col(UserCol::UUID, Op::Eq, uuid.clone())
             .first()
             .await
-            .map_err(AppError::from)?
-            .map(|r| r.into_row());
+            .map_err(AppError::from)?;
         if existing.is_none() {
             return Ok(uuid);
         }
@@ -137,12 +141,11 @@ pub async fn resolve_referral(
     state: &AppApiState,
     code: &str,
 ) -> Result<Option<(String, Option<String>)>, AppError> {
-    let user = UserQuery::new(DbConn::pool(&state.db), None)
-        .where_uuid(Op::Eq, code.to_string())
+    let user = UserModel::query(DbConn::pool(&state.db))
+        .where_col(UserCol::UUID, Op::Eq, code.to_string())
         .first()
         .await
-        .map_err(AppError::from)?
-        .map(|r| r.into_row());
+        .map_err(AppError::from)?;
     Ok(user.map(|u| (u.username, u.name)))
 }
 
@@ -167,61 +170,65 @@ pub async fn profile_update(
     state: &AppApiState,
     user_id: i64,
     req: UserProfileUpdateInput,
-) -> Result<UserView, AppError> {
-    let mut update = User::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_id(Op::Eq, user_id);
+) -> Result<UserRecord, AppError> {
+    let mut update = Ok(
+        UserModel::query(DbConn::pool(&state.db))
+            .where_col(UserCol::ID, Op::Eq, user_id)
+            .patch(),
+    );
 
     match req.name {
         Patch::Missing => {}
         Patch::Null => {
-            update = update.set_name(None);
+            update = update.and_then(|patch| patch.assign(UserCol::NAME, None::<String>));
         }
         Patch::Value(name) => {
-            update = update.set_name(Some(name));
+            update = update.and_then(|patch| patch.assign(UserCol::NAME, Some(name)));
         }
     }
 
     match req.email {
         Patch::Missing => {}
         Patch::Null => {
-            update = update.set_email(None);
+            update = update.and_then(|patch| patch.assign(UserCol::EMAIL, None::<String>));
         }
         Patch::Value(email) => {
-            update = update.set_email(Some(email));
+            update = update.and_then(|patch| patch.assign(UserCol::EMAIL, Some(email)));
         }
     }
 
     match req.country_iso2 {
         Patch::Missing => {}
         Patch::Null => {
-            update = update.set_country_iso2(None);
+            update = update.and_then(|patch| patch.assign(UserCol::COUNTRY_ISO2, None::<String>));
         }
         Patch::Value(iso2) => {
-            update = update.set_country_iso2(Some(iso2));
+            update = update.and_then(|patch| patch.assign(UserCol::COUNTRY_ISO2, Some(iso2)));
         }
     }
 
     match req.contact_number {
         Patch::Missing => {}
         Patch::Null => {
-            update = update.set_contact_number(None);
+            update = update.and_then(|patch| patch.assign(UserCol::CONTACT_NUMBER, None::<String>));
         }
         Patch::Value(number) => {
-            update = update.set_contact_number(Some(number));
+            update = update.and_then(|patch| patch.assign(UserCol::CONTACT_NUMBER, Some(number)));
         }
     }
 
-    let affected = update.save().await.map_err(AppError::from)?;
+    let affected = update
+        .map_err(AppError::from)?
+        .save()
+        .await
+        .map_err(AppError::from)?;
     if affected == 0 {
         return Err(AppError::NotFound(t("User not found")));
     }
 
-    User::new(DbConn::pool(&state.db), None)
-        .find(user_id)
+    UserModel::find(DbConn::pool(&state.db), user_id)
         .await
         .map_err(AppError::from)?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("User not found")))
 }
 
@@ -233,10 +240,11 @@ pub async fn locale_update(
     let normalized = core_i18n::match_supported_locale(req.locale.trim())
         .ok_or_else(|| AppError::BadRequest(t("Unsupported locale")))?;
 
-    let affected = User::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_id(Op::Eq, user_id)
-        .set_locale(Some(normalized.to_string()))
+    let affected = UserModel::query(DbConn::pool(&state.db))
+        .where_col(UserCol::ID, Op::Eq, user_id)
+        .patch()
+        .assign(UserCol::LOCALE, Some(normalized.to_string()))
+        .map_err(AppError::from)?
         .save()
         .await
         .map_err(AppError::from)?;
@@ -253,11 +261,9 @@ pub async fn password_update(
     user_id: i64,
     req: UserPasswordUpdateInput,
 ) -> Result<(), AppError> {
-    let user = User::new(DbConn::pool(&state.db), None)
-        .find(user_id)
+    let user = UserModel::find(DbConn::pool(&state.db), user_id)
         .await
         .map_err(AppError::from)?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("User not found")))?;
 
     let valid = verify_password(&req.current_password, &user.password).map_err(AppError::from)?;
@@ -265,13 +271,15 @@ pub async fn password_update(
         return Err(AppError::Unauthorized(t("Current password is incorrect")));
     }
 
-    let update = User::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_id(Op::Eq, user_id)
-        .set_password(&req.password)
+    let password_hash = hash_password(&req.password).map_err(AppError::from)?;
+    let affected = UserModel::query(DbConn::pool(&state.db))
+        .where_col(UserCol::ID, Op::Eq, user_id)
+        .patch()
+        .assign(UserCol::PASSWORD, password_hash)
+        .map_err(AppError::from)?
+        .save()
+        .await
         .map_err(AppError::from)?;
-
-    let affected = update.save().await.map_err(AppError::from)?;
     if affected == 0 {
         return Err(AppError::NotFound(t("User not found")));
     }
@@ -279,7 +287,7 @@ pub async fn password_update(
     Ok(())
 }
 
-fn check_ban(user: &UserView) -> Result<(), AppError> {
+fn check_ban(user: &UserRecord) -> Result<(), AppError> {
     if matches!(user.ban, UserBanStatus::Yes) {
         return Err(AppError::Forbidden(t("Your account has been banned")));
     }
@@ -287,11 +295,9 @@ fn check_ban(user: &UserView) -> Result<(), AppError> {
 }
 
 pub async fn fetch_and_check_ban(state: &AppApiState, user_id: i64) -> Result<(), AppError> {
-    let user = User::new(DbConn::pool(&state.db), None)
-        .find(user_id)
+    let user = UserModel::find(DbConn::pool(&state.db), user_id)
         .await
         .map_err(AppError::from)?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("User not found")))?;
     check_ban(&user)
 }

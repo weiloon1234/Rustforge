@@ -5,12 +5,12 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
@@ -18,7 +18,7 @@ const HAS_UPDATED_AT: bool = true;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct PersonalAccessTokenCreateInput {
+pub struct PersonalAccessTokenCreate {
     pub id: FieldInput<uuid::Uuid>,
     pub tokenable_type: FieldInput<String>,
     pub tokenable_id: FieldInput<String>,
@@ -37,7 +37,7 @@ pub struct PersonalAccessTokenCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct PersonalAccessTokenUpdateChanges {
+pub struct PersonalAccessTokenChanges {
     pub id: Option<FieldChange<uuid::Uuid>>,
     pub tokenable_type: Option<FieldChange<String>>,
     pub tokenable_id: Option<FieldChange<String>>,
@@ -84,7 +84,7 @@ pub struct PersonalAccessTokenRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct PersonalAccessTokenView {
+pub struct PersonalAccessTokenRecord {
     pub id: uuid::Uuid,
     pub tokenable_type: String,
     pub tokenable_id: String,
@@ -107,75 +107,14 @@ pub struct PersonalAccessTokenView {
     pub token_kind_explained: String,
 }
 
-impl PersonalAccessTokenView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> PersonalAccessTokenUpdate<'db> {
-        PersonalAccessToken::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &PersonalAccessToken<'db>) -> PersonalAccessTokenUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> PersonalAccessTokenJson {
-        PersonalAccessTokenJson {
-            id: self.id.clone(),
-            tokenable_type: self.tokenable_type.clone(),
-            tokenable_id: self.tokenable_id.clone(),
-            name: self.name.clone(),
-            token: self.token.clone(),
-            token_kind: self.token_kind.clone(),
-            family_id: self.family_id.clone(),
-            parent_token_id: self.parent_token_id.clone(),
-            abilities: self.abilities.clone(),
-            last_used_at: self.last_used_at.clone(),
-            expires_at: self.expires_at.clone(),
-            revoked_at: self.revoked_at.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            token_kind_explained: self.token_kind_explained.clone(),
-        }
+impl PersonalAccessTokenRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, PersonalAccessTokenModel> {
+        PersonalAccessTokenModel::query(db.into()).where_col(PersonalAccessTokenDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-pub trait PersonalAccessTokenViewsExt {
-    fn ids(&self) -> Vec<uuid::Uuid>;
-    fn pluck<R>(&self, f: impl Fn(&PersonalAccessTokenView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&PersonalAccessTokenView) -> K) -> std::collections::HashMap<K, PersonalAccessTokenView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&PersonalAccessTokenView) -> K) -> std::collections::HashMap<K, Vec<PersonalAccessTokenView>> where K: Eq + std::hash::Hash;
-}
-
-impl PersonalAccessTokenViewsExt for Vec<PersonalAccessTokenView> {
-    fn ids(&self) -> Vec<uuid::Uuid> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&PersonalAccessTokenView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&PersonalAccessTokenView) -> K) -> std::collections::HashMap<K, PersonalAccessTokenView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&PersonalAccessTokenView) -> K) -> std::collections::HashMap<K, Vec<PersonalAccessTokenView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct PersonalAccessTokenJson {
-    pub id: uuid::Uuid,
-    pub tokenable_type: String,
-    pub tokenable_id: String,
-    pub name: String,
-    pub token: String,
-    pub token_kind: PersonalAccessTokenKind,
-    pub family_id: uuid::Uuid,
-    pub parent_token_id: Option<uuid::Uuid>,
-    pub abilities: Option<serde_json::Value>,
-    #[schemars(with = "String")]
-    pub last_used_at: Option<time::OffsetDateTime>,
-    #[schemars(with = "String")]
-    pub expires_at: Option<time::OffsetDateTime>,
-    #[schemars(with = "String")]
-    pub revoked_at: Option<time::OffsetDateTime>,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    pub token_kind_explained: String,
-}
-
-fn hydrate_view(row: PersonalAccessTokenRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> PersonalAccessTokenView {
-    let view = PersonalAccessTokenView {
+fn hydrate_record(row: PersonalAccessTokenRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> PersonalAccessTokenRecord {
+    let mut record = PersonalAccessTokenRecord {
         id: row.id,
         tokenable_type: row.tokenable_type,
         tokenable_id: row.tokenable_id,
@@ -192,31 +131,50 @@ fn hydrate_view(row: PersonalAccessTokenRow, _loc: &LocalizedMap, _base_url: Opt
         updated_at: row.updated_at,
         token_kind_explained: row.token_kind.explained_label(),
     };
-    view
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct PersonalAccessTokenWithRelations {
-    #[serde(flatten)]
-    pub row: PersonalAccessTokenView,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PersonalAccessTokenCol;
+impl PersonalAccessTokenCol {
+    pub const ID: Column<PersonalAccessTokenModel, uuid::Uuid> = Column::new("id");
+    pub const TOKENABLE_TYPE: Column<PersonalAccessTokenModel, String> = Column::new("tokenable_type");
+    pub const TOKENABLE_ID: Column<PersonalAccessTokenModel, String> = Column::new("tokenable_id");
+    pub const NAME: Column<PersonalAccessTokenModel, String> = Column::new("name");
+    pub const TOKEN: Column<PersonalAccessTokenModel, String> = Column::new("token");
+    pub const TOKEN_KIND: Column<PersonalAccessTokenModel, PersonalAccessTokenKind> = Column::new("token_kind");
+    pub const FAMILY_ID: Column<PersonalAccessTokenModel, uuid::Uuid> = Column::new("family_id");
+    pub const PARENT_TOKEN_ID: Column<PersonalAccessTokenModel, Option<uuid::Uuid>> = Column::new("parent_token_id");
+    pub const ABILITIES: Column<PersonalAccessTokenModel, Option<serde_json::Value>> = Column::new("abilities");
+    pub const LAST_USED_AT: Column<PersonalAccessTokenModel, Option<time::OffsetDateTime>> = Column::new("last_used_at");
+    pub const EXPIRES_AT: Column<PersonalAccessTokenModel, Option<time::OffsetDateTime>> = Column::new("expires_at");
+    pub const REVOKED_AT: Column<PersonalAccessTokenModel, Option<time::OffsetDateTime>> = Column::new("revoked_at");
+    pub const CREATED_AT: Column<PersonalAccessTokenModel, time::OffsetDateTime> = Column::new("created_at");
+    pub const UPDATED_AT: Column<PersonalAccessTokenModel, time::OffsetDateTime> = Column::new("updated_at");
 }
 
-impl PersonalAccessTokenWithRelations {
-    pub fn into_row(self) -> PersonalAccessTokenView { self.row }
-}
-
-impl std::ops::Deref for PersonalAccessTokenWithRelations {
-    type Target = PersonalAccessTokenView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for PersonalAccessTokenWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_personal_access_token_db_col(sql: &str) -> Option<PersonalAccessTokenDbCol> {
+    match sql {
+        "id" => Some(PersonalAccessTokenDbCol::Id),
+        "tokenable_type" => Some(PersonalAccessTokenDbCol::TokenableType),
+        "tokenable_id" => Some(PersonalAccessTokenDbCol::TokenableId),
+        "name" => Some(PersonalAccessTokenDbCol::Name),
+        "token" => Some(PersonalAccessTokenDbCol::Token),
+        "token_kind" => Some(PersonalAccessTokenDbCol::TokenKind),
+        "family_id" => Some(PersonalAccessTokenDbCol::FamilyId),
+        "parent_token_id" => Some(PersonalAccessTokenDbCol::ParentTokenId),
+        "abilities" => Some(PersonalAccessTokenDbCol::Abilities),
+        "last_used_at" => Some(PersonalAccessTokenDbCol::LastUsedAt),
+        "expires_at" => Some(PersonalAccessTokenDbCol::ExpiresAt),
+        "revoked_at" => Some(PersonalAccessTokenDbCol::RevokedAt),
+        "created_at" => Some(PersonalAccessTokenDbCol::CreatedAt),
+        "updated_at" => Some(PersonalAccessTokenDbCol::UpdatedAt),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum PersonalAccessTokenCol {
+pub enum PersonalAccessTokenDbCol {
     Id,
     TokenableType,
     TokenableId,
@@ -233,53 +191,33 @@ pub enum PersonalAccessTokenCol {
     UpdatedAt,
 }
 
-impl PersonalAccessTokenCol {
-    pub const fn all() -> &'static [PersonalAccessTokenCol] {
-        &[PersonalAccessTokenCol::Id, PersonalAccessTokenCol::TokenableType, PersonalAccessTokenCol::TokenableId, PersonalAccessTokenCol::Name, PersonalAccessTokenCol::Token, PersonalAccessTokenCol::TokenKind, PersonalAccessTokenCol::FamilyId, PersonalAccessTokenCol::ParentTokenId, PersonalAccessTokenCol::Abilities, PersonalAccessTokenCol::LastUsedAt, PersonalAccessTokenCol::ExpiresAt, PersonalAccessTokenCol::RevokedAt, PersonalAccessTokenCol::CreatedAt, PersonalAccessTokenCol::UpdatedAt]
+impl PersonalAccessTokenDbCol {
+    pub const fn all() -> &'static [PersonalAccessTokenDbCol] {
+        &[PersonalAccessTokenDbCol::Id, PersonalAccessTokenDbCol::TokenableType, PersonalAccessTokenDbCol::TokenableId, PersonalAccessTokenDbCol::Name, PersonalAccessTokenDbCol::Token, PersonalAccessTokenDbCol::TokenKind, PersonalAccessTokenDbCol::FamilyId, PersonalAccessTokenDbCol::ParentTokenId, PersonalAccessTokenDbCol::Abilities, PersonalAccessTokenDbCol::LastUsedAt, PersonalAccessTokenDbCol::ExpiresAt, PersonalAccessTokenDbCol::RevokedAt, PersonalAccessTokenDbCol::CreatedAt, PersonalAccessTokenDbCol::UpdatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            PersonalAccessTokenCol::Id => "id",
-            PersonalAccessTokenCol::TokenableType => "tokenable_type",
-            PersonalAccessTokenCol::TokenableId => "tokenable_id",
-            PersonalAccessTokenCol::Name => "name",
-            PersonalAccessTokenCol::Token => "token",
-            PersonalAccessTokenCol::TokenKind => "token_kind",
-            PersonalAccessTokenCol::FamilyId => "family_id",
-            PersonalAccessTokenCol::ParentTokenId => "parent_token_id",
-            PersonalAccessTokenCol::Abilities => "abilities",
-            PersonalAccessTokenCol::LastUsedAt => "last_used_at",
-            PersonalAccessTokenCol::ExpiresAt => "expires_at",
-            PersonalAccessTokenCol::RevokedAt => "revoked_at",
-            PersonalAccessTokenCol::CreatedAt => "created_at",
-            PersonalAccessTokenCol::UpdatedAt => "updated_at",
+            PersonalAccessTokenDbCol::Id => "id",
+            PersonalAccessTokenDbCol::TokenableType => "tokenable_type",
+            PersonalAccessTokenDbCol::TokenableId => "tokenable_id",
+            PersonalAccessTokenDbCol::Name => "name",
+            PersonalAccessTokenDbCol::Token => "token",
+            PersonalAccessTokenDbCol::TokenKind => "token_kind",
+            PersonalAccessTokenDbCol::FamilyId => "family_id",
+            PersonalAccessTokenDbCol::ParentTokenId => "parent_token_id",
+            PersonalAccessTokenDbCol::Abilities => "abilities",
+            PersonalAccessTokenDbCol::LastUsedAt => "last_used_at",
+            PersonalAccessTokenDbCol::ExpiresAt => "expires_at",
+            PersonalAccessTokenDbCol::RevokedAt => "revoked_at",
+            PersonalAccessTokenDbCol::CreatedAt => "created_at",
+            PersonalAccessTokenDbCol::UpdatedAt => "updated_at",
         }
     }
 }
 
-pub struct PersonalAccessToken<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-}
-
-impl<'db> PersonalAccessToken<'db> {
-    pub const TABLE: &'static str = "personal_access_tokens";
-    pub const MODEL_KEY: &'static str = "personal_access_token";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> PersonalAccessTokenQuery<'db> { PersonalAccessTokenQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> PersonalAccessTokenInsert<'db> { PersonalAccessTokenInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> PersonalAccessTokenUpdate<'db> { PersonalAccessTokenUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: uuid::Uuid) -> Result<Option<PersonalAccessTokenWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: uuid::Uuid) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-}
 
 #[derive(Clone)]
-pub struct PersonalAccessTokenQuery<'db> {
+pub struct PersonalAccessTokenQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -302,182 +240,181 @@ pub struct PersonalAccessTokenQuery<'db> {
 
 
 
-impl<'db> PersonalAccessTokenQuery<'db> {
+impl<'db> PersonalAccessTokenQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, tokenable_type, tokenable_id, name, token, token_kind, family_id, parent_token_id, abilities, last_used_at, expires_at, revoked_at, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> PersonalAccessTokenUnsafeQuery<'db> { PersonalAccessTokenUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_tokenable_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenableType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::TokenableType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_tokenable_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenableType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::TokenableType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_tokenable_id(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenableId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::TokenableId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_tokenable_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenableId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::TokenableId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_token(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Token.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::Token.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_token_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Token.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::Token.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_token_kind(mut self, op: Op, val: PersonalAccessTokenKind) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenKind.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::TokenKind.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_token_kind_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenKind.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::TokenKind.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_family_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::FamilyId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::FamilyId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_family_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::FamilyId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::FamilyId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_parent_token_id(mut self, op: Op, val: Option<uuid::Uuid>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::ParentTokenId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::ParentTokenId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_parent_token_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::ParentTokenId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::ParentTokenId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_abilities(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::Abilities.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_abilities_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::Abilities.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_last_used_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::LastUsedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::LastUsedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_last_used_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::LastUsedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::LastUsedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_expires_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::ExpiresAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::ExpiresAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_expires_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::ExpiresAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::ExpiresAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_revoked_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::RevokedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::RevokedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_revoked_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::RevokedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::RevokedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: uuid::Uuid) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(PersonalAccessTokenCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: PersonalAccessTokenCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(PersonalAccessTokenDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: PersonalAccessTokenDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -496,7 +433,7 @@ impl<'db> PersonalAccessTokenQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: PersonalAccessTokenCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: PersonalAccessTokenDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -511,7 +448,7 @@ impl<'db> PersonalAccessTokenQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: PersonalAccessTokenCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: PersonalAccessTokenDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -523,7 +460,7 @@ impl<'db> PersonalAccessTokenQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: PersonalAccessTokenCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: PersonalAccessTokenDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -531,15 +468,15 @@ impl<'db> PersonalAccessTokenQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: PersonalAccessTokenCol) -> Self {
+    pub fn where_null(mut self, col: PersonalAccessTokenDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: PersonalAccessTokenCol) -> Self {
+    pub fn where_not_null(mut self, col: PersonalAccessTokenDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: PersonalAccessTokenCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: PersonalAccessTokenDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -593,7 +530,7 @@ impl<'db> PersonalAccessTokenQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[PersonalAccessTokenCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[PersonalAccessTokenDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, tokenable_type, tokenable_id, name, token, token_kind, family_id, parent_token_id, abilities, last_used_at, expires_at, revoked_at, created_at, updated_at".to_string());
         } else {
@@ -605,7 +542,7 @@ impl<'db> PersonalAccessTokenQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[PersonalAccessTokenCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[PersonalAccessTokenDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -686,26 +623,26 @@ impl<'db> PersonalAccessTokenQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: PersonalAccessTokenCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: PersonalAccessTokenDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: PersonalAccessTokenCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: PersonalAccessTokenDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: PersonalAccessTokenCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: PersonalAccessTokenDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[PersonalAccessTokenCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[PersonalAccessTokenDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[PersonalAccessTokenCol]) -> Self {
+    pub fn select(mut self, cols: &[PersonalAccessTokenDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -753,7 +690,7 @@ impl<'db> PersonalAccessTokenQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[PersonalAccessTokenCol]) -> Self {
+    pub fn group_by(mut self, cols: &[PersonalAccessTokenDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -828,7 +765,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<PersonalAccessTokenWithRelations>> {
+    pub async fn get(self) -> Result<Vec<PersonalAccessTokenRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -878,61 +815,61 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
-            out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            out_vec.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let out_vec: Vec<PersonalAccessTokenWithRelations> = out_vec.into_iter().map(|v| PersonalAccessTokenWithRelations { row: v }).collect();
+        let out_vec: Vec<PersonalAccessTokenRecord> = out_vec;
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<PersonalAccessTokenWithRelations>> {
+    pub async fn first(self) -> Result<Option<PersonalAccessTokenRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<PersonalAccessTokenWithRelations> {
+    pub async fn first_or_fail(self) -> Result<PersonalAccessTokenRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("personal_access_tokens: record not found"))
     }
 
-    pub async fn find(self, id: uuid::Uuid) -> Result<Option<PersonalAccessTokenWithRelations>> {
+    pub async fn find(self, id: uuid::Uuid) -> Result<Option<PersonalAccessTokenRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<PersonalAccessTokenWithRelations> {
+    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<PersonalAccessTokenRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("personal_access_tokens: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(PersonalAccessTokenInsert<'db>) -> PersonalAccessTokenInsert<'db>) -> Result<PersonalAccessTokenWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(PersonalAccessTokenCreateInner<'db>) -> PersonalAccessTokenCreateInner<'db>) -> Result<PersonalAccessTokenRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(PersonalAccessTokenInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(PersonalAccessTokenCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        PersonalAccessToken::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        PersonalAccessTokenQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(PersonalAccessTokenUpdate<'db>) -> PersonalAccessTokenUpdate<'db>,
-        on_create: impl FnOnce(PersonalAccessTokenInsert<'db>) -> PersonalAccessTokenInsert<'db>,
-    ) -> Result<PersonalAccessTokenWithRelations> {
+        on_update: impl FnOnce(PersonalAccessTokenPatchInner<'db>) -> PersonalAccessTokenPatchInner<'db>,
+        on_create: impl FnOnce(PersonalAccessTokenCreateInner<'db>) -> PersonalAccessTokenCreateInner<'db>,
+    ) -> Result<PersonalAccessTokenRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = PersonalAccessTokenUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = PersonalAccessTokenPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return PersonalAccessToken::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return PersonalAccessTokenQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(PersonalAccessTokenInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(PersonalAccessTokenCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        PersonalAccessToken::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        PersonalAccessTokenQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: PersonalAccessTokenCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: PersonalAccessTokenDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -947,7 +884,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: PersonalAccessTokenCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: PersonalAccessTokenDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -1003,13 +940,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<PersonalAccessTokenWithRelations>) -> Fut,
+        F: FnMut(Vec<PersonalAccessTokenRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = PersonalAccessTokenQuery::new(db.clone(), self.base_url.clone());
+            let mut query = PersonalAccessTokenQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -1023,11 +960,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(PersonalAccessTokenCol::CreatedAt, OrderDir::Desc)
+        self.order_by(PersonalAccessTokenDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(PersonalAccessTokenCol::CreatedAt, OrderDir::Asc)
+        self.order_by(PersonalAccessTokenDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -1038,7 +975,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<PersonalAccessTokenWithRelations> {
+    pub async fn sole(self) -> Result<PersonalAccessTokenRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -1057,7 +994,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&PersonalAccessTokenWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&PersonalAccessTokenRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -1065,7 +1002,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: PersonalAccessTokenCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: PersonalAccessTokenDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "personal_access_tokens".to_string());
@@ -1086,7 +1023,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: PersonalAccessTokenCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: PersonalAccessTokenDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "personal_access_tokens".to_string());
@@ -1107,7 +1044,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: PersonalAccessTokenCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: PersonalAccessTokenDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "personal_access_tokens".to_string());
@@ -1128,7 +1065,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: PersonalAccessTokenCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: PersonalAccessTokenDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "personal_access_tokens".to_string());
@@ -1149,7 +1086,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<PersonalAccessTokenWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<PersonalAccessTokenRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1200,9 +1137,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
-            data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            data.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let data: Vec<PersonalAccessTokenWithRelations> = data.into_iter().map(|v| PersonalAccessTokenWithRelations { row: v }).collect();
+        let data: Vec<PersonalAccessTokenRecord> = data;
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn to_sql(&self) -> (String, Vec<BindValue>) {
@@ -1322,38 +1259,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct PersonalAccessTokenUnsafeQuery<'db> {
-    inner: PersonalAccessTokenQuery<'db>,
-}
 
-impl<'db> PersonalAccessTokenUnsafeQuery<'db> {
-    fn new(inner: PersonalAccessTokenQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> PersonalAccessTokenQuery<'db> { self.inner }
-}
-
-
-pub struct PersonalAccessTokenInsert<'db> {
+pub struct PersonalAccessTokenCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<PersonalAccessTokenCol>,
+    cols: Vec<PersonalAccessTokenDbCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<PersonalAccessTokenCol>,
+    conflict_cols: Vec<PersonalAccessTokenDbCol>,
 }
 
-impl<'db> PersonalAccessTokenInsert<'db> {
+impl<'db> PersonalAccessTokenCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1367,125 +1283,125 @@ impl<'db> PersonalAccessTokenInsert<'db> {
 
 
 pub fn set_id(mut self, val: uuid::Uuid) -> Self {
-        self.cols.push(PersonalAccessTokenCol::Id);
+        self.cols.push(PersonalAccessTokenDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_tokenable_type(mut self, val: String) -> Self {
-        self.cols.push(PersonalAccessTokenCol::TokenableType);
+        self.cols.push(PersonalAccessTokenDbCol::TokenableType);
         self.binds.push(val.into());
         self
     }
     pub fn set_tokenable_id(mut self, val: String) -> Self {
-        self.cols.push(PersonalAccessTokenCol::TokenableId);
+        self.cols.push(PersonalAccessTokenDbCol::TokenableId);
         self.binds.push(val.into());
         self
     }
     pub fn set_name(mut self, val: String) -> Self {
-        self.cols.push(PersonalAccessTokenCol::Name);
+        self.cols.push(PersonalAccessTokenDbCol::Name);
         self.binds.push(val.into());
         self
     }
     pub fn set_token(mut self, val: String) -> Self {
-        self.cols.push(PersonalAccessTokenCol::Token);
+        self.cols.push(PersonalAccessTokenDbCol::Token);
         self.binds.push(val.into());
         self
     }
     pub fn set_token_kind(mut self, val: PersonalAccessTokenKind) -> Self {
-        self.cols.push(PersonalAccessTokenCol::TokenKind);
+        self.cols.push(PersonalAccessTokenDbCol::TokenKind);
         self.binds.push(val.into());
         self
     }
     pub fn set_family_id(mut self, val: uuid::Uuid) -> Self {
-        self.cols.push(PersonalAccessTokenCol::FamilyId);
+        self.cols.push(PersonalAccessTokenDbCol::FamilyId);
         self.binds.push(val.into());
         self
     }
     pub fn set_parent_token_id(mut self, val: Option<uuid::Uuid>) -> Self {
-        self.cols.push(PersonalAccessTokenCol::ParentTokenId);
+        self.cols.push(PersonalAccessTokenDbCol::ParentTokenId);
         self.binds.push(val.into());
         self
     }
     pub fn set_abilities(mut self, val: Option<serde_json::Value>) -> Self {
-        self.cols.push(PersonalAccessTokenCol::Abilities);
+        self.cols.push(PersonalAccessTokenDbCol::Abilities);
         self.binds.push(val.into());
         self
     }
     pub fn set_last_used_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.cols.push(PersonalAccessTokenCol::LastUsedAt);
+        self.cols.push(PersonalAccessTokenDbCol::LastUsedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_expires_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.cols.push(PersonalAccessTokenCol::ExpiresAt);
+        self.cols.push(PersonalAccessTokenDbCol::ExpiresAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_revoked_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.cols.push(PersonalAccessTokenCol::RevokedAt);
+        self.cols.push(PersonalAccessTokenDbCol::RevokedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(PersonalAccessTokenCol::CreatedAt);
+        self.cols.push(PersonalAccessTokenDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(PersonalAccessTokenCol::UpdatedAt);
+        self.cols.push(PersonalAccessTokenDbCol::UpdatedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[PersonalAccessTokenCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[PersonalAccessTokenDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[PersonalAccessTokenCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[PersonalAccessTokenDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<PersonalAccessTokenCreateInput> {
-        let mut input = PersonalAccessTokenCreateInput::default();
+    fn to_create_input(&self) -> Result<PersonalAccessTokenCreate> {
+        let mut input = PersonalAccessTokenCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                PersonalAccessTokenCol::Id => {
+                PersonalAccessTokenDbCol::Id => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                PersonalAccessTokenCol::TokenableType => {
+                PersonalAccessTokenDbCol::TokenableType => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.tokenable_type = FieldInput::Set(value);
                 }
-                PersonalAccessTokenCol::TokenableId => {
+                PersonalAccessTokenDbCol::TokenableId => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.tokenable_id = FieldInput::Set(value);
                 }
-                PersonalAccessTokenCol::Name => {
+                PersonalAccessTokenDbCol::Name => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.name = FieldInput::Set(value);
                 }
-                PersonalAccessTokenCol::Token => {
+                PersonalAccessTokenDbCol::Token => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.token = FieldInput::Set(value);
                 }
-                PersonalAccessTokenCol::TokenKind => {
+                PersonalAccessTokenDbCol::TokenKind => {
                     let value = match bind {
                 BindValue::String(value) => PersonalAccessTokenKind::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'PersonalAccessTokenKind'", value))?,
@@ -1498,56 +1414,56 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
             };
                     input.token_kind = FieldInput::Set(value);
                 }
-                PersonalAccessTokenCol::FamilyId => {
+                PersonalAccessTokenDbCol::FamilyId => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
         };
                     input.family_id = FieldInput::Set(value);
                 }
-                PersonalAccessTokenCol::ParentTokenId => {
+                PersonalAccessTokenDbCol::ParentTokenId => {
                     let value = match bind {
                 BindValue::UuidOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<uuid::Uuid>'", other),
             };
                     input.parent_token_id = FieldInput::Set(value);
                 }
-                PersonalAccessTokenCol::Abilities => {
+                PersonalAccessTokenDbCol::Abilities => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
             };
                     input.abilities = FieldInput::Set(value);
                 }
-                PersonalAccessTokenCol::LastUsedAt => {
+                PersonalAccessTokenDbCol::LastUsedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
             };
                     input.last_used_at = FieldInput::Set(value);
                 }
-                PersonalAccessTokenCol::ExpiresAt => {
+                PersonalAccessTokenDbCol::ExpiresAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
             };
                     input.expires_at = FieldInput::Set(value);
                 }
-                PersonalAccessTokenCol::RevokedAt => {
+                PersonalAccessTokenDbCol::RevokedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
             };
                     input.revoked_at = FieldInput::Set(value);
                 }
-                PersonalAccessTokenCol::CreatedAt => {
+                PersonalAccessTokenDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                PersonalAccessTokenCol::UpdatedAt => {
+                PersonalAccessTokenDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1560,7 +1476,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
     }
 
 
-pub async fn save(self) -> Result<PersonalAccessTokenView> {
+pub async fn save(self) -> Result<PersonalAccessTokenRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -1578,7 +1494,7 @@ pub async fn save(self) -> Result<PersonalAccessTokenView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1597,10 +1513,10 @@ pub async fn save(self) -> Result<PersonalAccessTokenView> {
                         Err(err) => log_observer_error("created", "personal_access_token", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "personal_access_token", table: "personal_access_tokens", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -1612,22 +1528,22 @@ pub async fn save(self) -> Result<PersonalAccessTokenView> {
                         Err(err) => log_observer_error("created", "personal_access_token", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(PersonalAccessTokenView, PersonalAccessTokenRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(PersonalAccessTokenRecord, PersonalAccessTokenRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, PersonalAccessTokenCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, PersonalAccessTokenDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(PersonalAccessTokenCol::CreatedAt);
+            cols.push(PersonalAccessTokenDbCol::CreatedAt);
             binds.push(now.into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, PersonalAccessTokenCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, PersonalAccessTokenDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(PersonalAccessTokenCol::UpdatedAt);
+            cols.push(PersonalAccessTokenDbCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1661,20 +1577,20 @@ pub async fn save(self) -> Result<PersonalAccessTokenView> {
         let row = db.fetch_one(q).await?;
         record_profiled_query("personal_access_tokens", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
-        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct PersonalAccessTokenUpdate<'db> {
+pub struct PersonalAccessTokenPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(PersonalAccessTokenCol, BindValue, SetMode)>,
+    sets: Vec<(PersonalAccessTokenDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> PersonalAccessTokenUpdate<'db> {
+impl<'db> PersonalAccessTokenPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1684,150 +1600,149 @@ impl<'db> PersonalAccessTokenUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> PersonalAccessTokenUnsafeUpdate<'db> { PersonalAccessTokenUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: uuid::Uuid) -> Self {
-        self.sets.push((PersonalAccessTokenCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn set_tokenable_type(mut self, val: String) -> Self {
-        self.sets.push((PersonalAccessTokenCol::TokenableType, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::TokenableType, val.into(), SetMode::Assign));
         self
     }
     pub fn set_tokenable_id(mut self, val: String) -> Self {
-        self.sets.push((PersonalAccessTokenCol::TokenableId, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::TokenableId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_name(mut self, val: String) -> Self {
-        self.sets.push((PersonalAccessTokenCol::Name, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::Name, val.into(), SetMode::Assign));
         self
     }
     pub fn set_token(mut self, val: String) -> Self {
-        self.sets.push((PersonalAccessTokenCol::Token, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::Token, val.into(), SetMode::Assign));
         self
     }
     pub fn set_token_kind(mut self, val: PersonalAccessTokenKind) -> Self {
-        self.sets.push((PersonalAccessTokenCol::TokenKind, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::TokenKind, val.into(), SetMode::Assign));
         self
     }
     pub fn set_family_id(mut self, val: uuid::Uuid) -> Self {
-        self.sets.push((PersonalAccessTokenCol::FamilyId, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::FamilyId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_parent_token_id(mut self, val: Option<uuid::Uuid>) -> Self {
-        self.sets.push((PersonalAccessTokenCol::ParentTokenId, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::ParentTokenId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_abilities(mut self, val: Option<serde_json::Value>) -> Self {
-        self.sets.push((PersonalAccessTokenCol::Abilities, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::Abilities, val.into(), SetMode::Assign));
         self
     }
     pub fn set_last_used_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((PersonalAccessTokenCol::LastUsedAt, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::LastUsedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_expires_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((PersonalAccessTokenCol::ExpiresAt, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::ExpiresAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_revoked_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((PersonalAccessTokenCol::RevokedAt, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::RevokedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((PersonalAccessTokenCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((PersonalAccessTokenCol::UpdatedAt, val.into(), SetMode::Assign));
+        self.sets.push((PersonalAccessTokenDbCol::UpdatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_tokenable_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenableType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::TokenableType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_tokenable_id(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenableId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::TokenableId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_token(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Token.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::Token.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_token_kind(mut self, op: Op, val: PersonalAccessTokenKind) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::TokenKind.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::TokenKind.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_family_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::FamilyId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::FamilyId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_parent_token_id(mut self, op: Op, val: Option<uuid::Uuid>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::ParentTokenId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::ParentTokenId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_abilities(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::Abilities.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_last_used_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::LastUsedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::LastUsedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_expires_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::ExpiresAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::ExpiresAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_revoked_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::RevokedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::RevokedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", PersonalAccessTokenDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: PersonalAccessTokenCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: PersonalAccessTokenDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1846,11 +1761,11 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<PersonalAccessTokenUpdateChanges> {
-        let mut changes = PersonalAccessTokenUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<PersonalAccessTokenChanges> {
+        let mut changes = PersonalAccessTokenChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                PersonalAccessTokenCol::Id => {
+                PersonalAccessTokenDbCol::Id => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
@@ -1861,7 +1776,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                PersonalAccessTokenCol::TokenableType => {
+                PersonalAccessTokenDbCol::TokenableType => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1872,7 +1787,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                PersonalAccessTokenCol::TokenableId => {
+                PersonalAccessTokenDbCol::TokenableId => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1883,7 +1798,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                PersonalAccessTokenCol::Name => {
+                PersonalAccessTokenDbCol::Name => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1894,7 +1809,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                PersonalAccessTokenCol::Token => {
+                PersonalAccessTokenDbCol::Token => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1905,7 +1820,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                PersonalAccessTokenCol::TokenKind => {
+                PersonalAccessTokenDbCol::TokenKind => {
                     let value = match bind {
                 BindValue::String(value) => PersonalAccessTokenKind::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'PersonalAccessTokenKind'", value))?,
@@ -1922,7 +1837,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                PersonalAccessTokenCol::FamilyId => {
+                PersonalAccessTokenDbCol::FamilyId => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
@@ -1933,7 +1848,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                PersonalAccessTokenCol::ParentTokenId => {
+                PersonalAccessTokenDbCol::ParentTokenId => {
                     let value = match bind {
                 BindValue::UuidOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<uuid::Uuid>'", other),
@@ -1944,7 +1859,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                PersonalAccessTokenCol::Abilities => {
+                PersonalAccessTokenDbCol::Abilities => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
@@ -1955,7 +1870,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                PersonalAccessTokenCol::LastUsedAt => {
+                PersonalAccessTokenDbCol::LastUsedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
@@ -1966,7 +1881,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                PersonalAccessTokenCol::ExpiresAt => {
+                PersonalAccessTokenDbCol::ExpiresAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
@@ -1977,7 +1892,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                PersonalAccessTokenCol::RevokedAt => {
+                PersonalAccessTokenDbCol::RevokedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
@@ -1988,7 +1903,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                PersonalAccessTokenCol::CreatedAt => {
+                PersonalAccessTokenDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1999,7 +1914,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                PersonalAccessTokenCol::UpdatedAt => {
+                PersonalAccessTokenDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2043,14 +1958,14 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<PersonalAccessTokenUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<PersonalAccessTokenChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, PersonalAccessTokenCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, PersonalAccessTokenDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(PersonalAccessTokenCol::UpdatedAt);
+            cols.push(PersonalAccessTokenDbCol::UpdatedAt);
             set_binds.push(now.into());
             set_modes.push(SetMode::Assign);
         }
@@ -2140,35 +2055,25 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct PersonalAccessTokenUnsafeUpdate<'db> {
-    inner: PersonalAccessTokenUpdate<'db>,
-}
-
-impl<'db> PersonalAccessTokenUnsafeUpdate<'db> {
-    fn new(inner: PersonalAccessTokenUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> PersonalAccessTokenUpdate<'db> { self.inner }
-}
 
 pub struct PersonalAccessTokenTableAdapter;
 impl PersonalAccessTokenTableAdapter {
-    fn parse_col(name: &str) -> Option<PersonalAccessTokenCol> {
+    fn parse_col(name: &str) -> Option<PersonalAccessTokenDbCol> {
         match name {
-            "id" => Some(PersonalAccessTokenCol::Id),
-            "tokenable_type" => Some(PersonalAccessTokenCol::TokenableType),
-            "tokenable_id" => Some(PersonalAccessTokenCol::TokenableId),
-            "name" => Some(PersonalAccessTokenCol::Name),
-            "token" => Some(PersonalAccessTokenCol::Token),
-            "token_kind" => Some(PersonalAccessTokenCol::TokenKind),
-            "family_id" => Some(PersonalAccessTokenCol::FamilyId),
-            "parent_token_id" => Some(PersonalAccessTokenCol::ParentTokenId),
-            "abilities" => Some(PersonalAccessTokenCol::Abilities),
-            "last_used_at" => Some(PersonalAccessTokenCol::LastUsedAt),
-            "expires_at" => Some(PersonalAccessTokenCol::ExpiresAt),
-            "revoked_at" => Some(PersonalAccessTokenCol::RevokedAt),
-            "created_at" => Some(PersonalAccessTokenCol::CreatedAt),
-            "updated_at" => Some(PersonalAccessTokenCol::UpdatedAt),
+            "id" => Some(PersonalAccessTokenDbCol::Id),
+            "tokenable_type" => Some(PersonalAccessTokenDbCol::TokenableType),
+            "tokenable_id" => Some(PersonalAccessTokenDbCol::TokenableId),
+            "name" => Some(PersonalAccessTokenDbCol::Name),
+            "token" => Some(PersonalAccessTokenDbCol::Token),
+            "token_kind" => Some(PersonalAccessTokenDbCol::TokenKind),
+            "family_id" => Some(PersonalAccessTokenDbCol::FamilyId),
+            "parent_token_id" => Some(PersonalAccessTokenDbCol::ParentTokenId),
+            "abilities" => Some(PersonalAccessTokenDbCol::Abilities),
+            "last_used_at" => Some(PersonalAccessTokenDbCol::LastUsedAt),
+            "expires_at" => Some(PersonalAccessTokenDbCol::ExpiresAt),
+            "revoked_at" => Some(PersonalAccessTokenDbCol::RevokedAt),
+            "created_at" => Some(PersonalAccessTokenDbCol::CreatedAt),
+            "updated_at" => Some(PersonalAccessTokenDbCol::UpdatedAt),
             _ => None,
         }
     }
@@ -2182,12 +2087,12 @@ impl PersonalAccessTokenTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<PersonalAccessTokenCol> {
+    fn parse_like_col(name: &str) -> Option<PersonalAccessTokenDbCol> {
         match name {
-            "tokenable_type" => Some(PersonalAccessTokenCol::TokenableType),
-            "tokenable_id" => Some(PersonalAccessTokenCol::TokenableId),
-            "name" => Some(PersonalAccessTokenCol::Name),
-            "token" => Some(PersonalAccessTokenCol::Token),
+            "tokenable_type" => Some(PersonalAccessTokenDbCol::TokenableType),
+            "tokenable_id" => Some(PersonalAccessTokenDbCol::TokenableId),
+            "name" => Some(PersonalAccessTokenDbCol::Name),
+            "token" => Some(PersonalAccessTokenDbCol::Token),
             _ => None,
         }
     }
@@ -2237,8 +2142,8 @@ impl PersonalAccessTokenTableAdapter {
     }
 }
 impl GeneratedTableAdapter for PersonalAccessTokenTableAdapter {
-    type Query<'db> = PersonalAccessTokenQuery<'db>;
-    type Row = PersonalAccessTokenWithRelations;
+    type Query<'db> = Query<'db, PersonalAccessTokenModel>;
+    type Row = PersonalAccessTokenRecord;
     fn model_key(&self) -> &'static str { "PersonalAccessToken" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "tokenable_type", "tokenable_id", "name", "token", "token_kind", "family_id", "parent_token_id", "last_used_at", "expires_at", "revoked_at", "created_at", "updated_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["last_used_at", "expires_at", "revoked_at", "created_at", "updated_at"] }
@@ -2278,7 +2183,7 @@ impl GeneratedTableAdapter for PersonalAccessTokenTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: PersonalAccessTokenQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<PersonalAccessTokenQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, PersonalAccessTokenModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, PersonalAccessTokenModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -2372,34 +2277,34 @@ impl GeneratedTableAdapter for PersonalAccessTokenTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: PersonalAccessTokenQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<PersonalAccessTokenQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, PersonalAccessTokenModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, PersonalAccessTokenModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(PersonalAccessTokenCol::Id, dir),
-            "tokenable_type" => query.order_by(PersonalAccessTokenCol::TokenableType, dir),
-            "tokenable_id" => query.order_by(PersonalAccessTokenCol::TokenableId, dir),
-            "name" => query.order_by(PersonalAccessTokenCol::Name, dir),
-            "token" => query.order_by(PersonalAccessTokenCol::Token, dir),
-            "token_kind" => query.order_by(PersonalAccessTokenCol::TokenKind, dir),
-            "family_id" => query.order_by(PersonalAccessTokenCol::FamilyId, dir),
-            "parent_token_id" => query.order_by(PersonalAccessTokenCol::ParentTokenId, dir),
-            "abilities" => query.order_by(PersonalAccessTokenCol::Abilities, dir),
-            "last_used_at" => query.order_by(PersonalAccessTokenCol::LastUsedAt, dir),
-            "expires_at" => query.order_by(PersonalAccessTokenCol::ExpiresAt, dir),
-            "revoked_at" => query.order_by(PersonalAccessTokenCol::RevokedAt, dir),
-            "created_at" => query.order_by(PersonalAccessTokenCol::CreatedAt, dir),
-            "updated_at" => query.order_by(PersonalAccessTokenCol::UpdatedAt, dir),
+            "id" => query.order_by(PersonalAccessTokenDbCol::Id, dir),
+            "tokenable_type" => query.order_by(PersonalAccessTokenDbCol::TokenableType, dir),
+            "tokenable_id" => query.order_by(PersonalAccessTokenDbCol::TokenableId, dir),
+            "name" => query.order_by(PersonalAccessTokenDbCol::Name, dir),
+            "token" => query.order_by(PersonalAccessTokenDbCol::Token, dir),
+            "token_kind" => query.order_by(PersonalAccessTokenDbCol::TokenKind, dir),
+            "family_id" => query.order_by(PersonalAccessTokenDbCol::FamilyId, dir),
+            "parent_token_id" => query.order_by(PersonalAccessTokenDbCol::ParentTokenId, dir),
+            "abilities" => query.order_by(PersonalAccessTokenDbCol::Abilities, dir),
+            "last_used_at" => query.order_by(PersonalAccessTokenDbCol::LastUsedAt, dir),
+            "expires_at" => query.order_by(PersonalAccessTokenDbCol::ExpiresAt, dir),
+            "revoked_at" => query.order_by(PersonalAccessTokenDbCol::RevokedAt, dir),
+            "created_at" => query.order_by(PersonalAccessTokenDbCol::CreatedAt, dir),
+            "updated_at" => query.order_by(PersonalAccessTokenDbCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: PersonalAccessTokenQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<PersonalAccessTokenQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, PersonalAccessTokenModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, PersonalAccessTokenModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &PersonalAccessTokenWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &PersonalAccessTokenRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "tokenable_type" => Some(row.tokenable_type.clone()),
@@ -2416,10 +2321,10 @@ impl GeneratedTableAdapter for PersonalAccessTokenTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: PersonalAccessTokenQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, PersonalAccessTokenModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: PersonalAccessTokenQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<PersonalAccessTokenWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, PersonalAccessTokenModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<PersonalAccessTokenRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -2445,20 +2350,20 @@ impl Default for PersonalAccessTokenDataTableConfig {
     }
 }
 pub trait PersonalAccessTokenDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: PersonalAccessTokenQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> PersonalAccessTokenQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, PersonalAccessTokenModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, PersonalAccessTokenModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: PersonalAccessTokenQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<PersonalAccessTokenQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: PersonalAccessTokenQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<PersonalAccessTokenQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut PersonalAccessTokenWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: PersonalAccessTokenWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, PersonalAccessTokenModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, PersonalAccessTokenModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, PersonalAccessTokenModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, PersonalAccessTokenModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut PersonalAccessTokenRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: PersonalAccessTokenRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         Ok(record)
     }
-    fn row_to_record(&self, row: PersonalAccessTokenWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: PersonalAccessTokenRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: PersonalAccessTokenQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, PersonalAccessTokenModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct PersonalAccessTokenDefaultDataTableHooks;
@@ -2496,15 +2401,15 @@ impl<H: PersonalAccessTokenDataTableHooks> PersonalAccessTokenDataTable<H> {
 impl<H: PersonalAccessTokenDataTableHooks> AutoDataTable for PersonalAccessTokenDataTable<H> {
     type Adapter = PersonalAccessTokenTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> PersonalAccessTokenQuery<'db> {
-        self.hooks.scope(PersonalAccessToken::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, PersonalAccessTokenModel> {
+        self.hooks.scope(PersonalAccessTokenModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: PersonalAccessTokenQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<PersonalAccessTokenQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: PersonalAccessTokenQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<PersonalAccessTokenQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut PersonalAccessTokenWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: PersonalAccessTokenWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: PersonalAccessTokenQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, PersonalAccessTokenModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, PersonalAccessTokenModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, PersonalAccessTokenModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, PersonalAccessTokenModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut PersonalAccessTokenRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: PersonalAccessTokenRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, PersonalAccessTokenModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -2514,10 +2419,543 @@ impl<H: PersonalAccessTokenDataTableHooks> AutoDataTable for PersonalAccessToken
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for PersonalAccessTokenView {
+impl ActiveRecord for PersonalAccessTokenRecord {
     type Id = uuid::Uuid;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        PersonalAccessToken::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        PersonalAccessTokenModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct PersonalAccessTokenModel;
+impl PersonalAccessTokenModel {
+    pub const TABLE: &'static str = "personal_access_tokens";
+    pub const MODEL_KEY: &'static str = "personal_access_token";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, PersonalAccessTokenModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, PersonalAccessTokenModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, PersonalAccessTokenModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, PersonalAccessTokenModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, PersonalAccessTokenModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, PersonalAccessTokenModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: uuid::Uuid) -> Result<Option<PersonalAccessTokenRecord>> {
+        PersonalAccessTokenQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for PersonalAccessTokenModel {
+    type Pk = uuid::Uuid;
+    type Record = PersonalAccessTokenRecord;
+    type Create = PersonalAccessTokenCreate;
+    type Changes = PersonalAccessTokenChanges;
+    const TABLE: &'static str = PersonalAccessTokenModel::TABLE;
+    const MODEL_KEY: &'static str = PersonalAccessTokenModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for PersonalAccessTokenModel {
+    type InnerQuery<'db> = PersonalAccessTokenQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        PersonalAccessTokenQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for PersonalAccessTokenModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for PersonalAccessTokenModel {
+    type InnerCreate<'db> = PersonalAccessTokenCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        PersonalAccessTokenCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            PersonalAccessTokenQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("personal_access_tokens: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<PersonalAccessTokenModel> for PersonalAccessTokenDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <PersonalAccessTokenModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<PersonalAccessTokenModel>>::Value) -> anyhow::Result<<PersonalAccessTokenModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            PersonalAccessTokenDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::TokenableType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::TokenableId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::Name => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::Token => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::TokenKind => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::FamilyId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::ParentTokenId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::Abilities => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::LastUsedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::ExpiresAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::RevokedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<PersonalAccessTokenModel> for Column<PersonalAccessTokenModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <PersonalAccessTokenModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<PersonalAccessTokenModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_personal_access_token_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            PersonalAccessTokenDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::TokenableType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::TokenableId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::Name => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::Token => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::TokenKind => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::FamilyId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::ParentTokenId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::Abilities => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::LastUsedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::ExpiresAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::RevokedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<PersonalAccessTokenModel> for PersonalAccessTokenDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <PersonalAccessTokenModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <PersonalAccessTokenModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <PersonalAccessTokenModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <PersonalAccessTokenModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<PersonalAccessTokenModel> for Column<PersonalAccessTokenModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <PersonalAccessTokenModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <PersonalAccessTokenModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<PersonalAccessTokenDbCol> = fields.iter().map(|field| resolve_personal_access_token_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <PersonalAccessTokenModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <PersonalAccessTokenModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<PersonalAccessTokenDbCol> = fields.iter().map(|field| resolve_personal_access_token_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for PersonalAccessTokenModel {
+    type InnerQuery<'db> = PersonalAccessTokenQueryInner<'db>;
+    type InnerPatch<'db> = PersonalAccessTokenPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        PersonalAccessTokenPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(PersonalAccessTokenDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = PersonalAccessTokenPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", PersonalAccessTokenDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM personal_access_tokens", PersonalAccessTokenDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, uuid::Uuid>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = PersonalAccessTokenQueryInner::new(db, base_url);
+            query.where_in(PersonalAccessTokenDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<PersonalAccessTokenModel> for PersonalAccessTokenDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <PersonalAccessTokenModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<PersonalAccessTokenModel>>::Value) -> anyhow::Result<<PersonalAccessTokenModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            PersonalAccessTokenDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::TokenableType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::TokenableId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::Name => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::Token => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::TokenKind => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::FamilyId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::ParentTokenId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::Abilities => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::LastUsedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::ExpiresAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::RevokedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<PersonalAccessTokenModel> for Column<PersonalAccessTokenModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <PersonalAccessTokenModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<PersonalAccessTokenModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_personal_access_token_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            PersonalAccessTokenDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::TokenableType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::TokenableId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::Name => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::Token => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::TokenKind => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::FamilyId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::ParentTokenId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::Abilities => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::LastUsedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::ExpiresAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::RevokedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            PersonalAccessTokenDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<PersonalAccessTokenModel> for PersonalAccessTokenDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<PersonalAccessTokenModel>>::Value) -> <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<PersonalAccessTokenModel>>::Value) -> <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<PersonalAccessTokenModel>>::Value]) -> <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<PersonalAccessTokenModel> for Column<PersonalAccessTokenModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_personal_access_token_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_personal_access_token_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_personal_access_token_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_personal_access_token_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_personal_access_token_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <PersonalAccessTokenModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_personal_access_token_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
 

@@ -3,10 +3,11 @@ use core_datatable::{
     DataTableRegistry, GeneratedTableAdapter, SortDirection,
 };
 use core_db::{
-    common::sql::{DbConn, Op, OrderDir},
-    generated::models::{
-        Country as CountryModel, CountryCol, CountryIsDefault, CountryQuery, CountryStatus,
+    common::{
+        model_api::Query,
+        sql::{DbConn, Op, OrderDir},
     },
+    generated::models::{CountryCol, CountryIsDefault, CountryModel, CountryRecord, CountryStatus},
 };
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
@@ -111,7 +112,7 @@ pub struct CountryQueryState {
     keyword: Option<String>,
     status: Option<CountryStatus>,
     region: Option<String>,
-    sorting_column: CountryCol,
+    sorting_column: &'static str,
     sorting: SortDirection,
 }
 
@@ -121,7 +122,7 @@ impl Default for CountryQueryState {
             keyword: None,
             status: None,
             region: None,
-            sorting_column: CountryCol::Name,
+            sorting_column: "name",
             sorting: SortDirection::Asc,
         }
     }
@@ -182,7 +183,7 @@ impl GeneratedTableAdapter for CountryTableAdapter {
     {
         let db = self.db.clone();
         Box::pin(async move {
-            let base_query = CountryModel::new(DbConn::pool(&db), None).query();
+            let base_query = CountryModel::query(DbConn::pool(&db));
             let filtered_query = apply_country_filters(base_query, &query);
             Ok(filtered_query.count().await?)
         })
@@ -203,29 +204,28 @@ impl GeneratedTableAdapter for CountryTableAdapter {
             let safe_per_page = per_page.max(1);
             let offset = (safe_page - 1) * safe_per_page;
 
-            let base_query = CountryModel::new(DbConn::pool(&db), None).query();
-            let filtered_query = apply_country_filters(base_query, &query)
-                .order_by(query.sorting_column, to_order_direction(query.sorting))
-                .order_by(CountryCol::Iso2, OrderDir::Asc)
-                .offset(offset)
-                .limit(safe_per_page);
+            let base_query = CountryModel::query(DbConn::pool(&db));
+            let filtered_query = apply_default_country_sort(apply_country_sort(
+                apply_country_filters(base_query, &query),
+                query.sorting_column,
+                to_order_direction(query.sorting),
+            ))
+            .offset(offset)
+            .limit(safe_per_page);
 
-            let rows = filtered_query.get().await?;
+            let rows = filtered_query.all().await?;
             let out = rows
                 .into_iter()
-                .map(|r| {
-                    let row = r.into_row();
-                    CountryDatatableRow {
-                        id: row.iso2.clone(),
-                        iso2: row.iso2,
-                        iso3: row.iso3,
-                        name: row.name,
-                        region: row.region,
-                        calling_code: row.calling_code,
-                        status: row.status.as_str().to_string(),
-                        is_default: matches!(row.is_default, CountryIsDefault::Yes),
-                        updated_at: format_rfc3339(row.updated_at),
-                    }
+                .map(|row: CountryRecord| CountryDatatableRow {
+                    id: row.iso2.clone(),
+                    iso2: row.iso2,
+                    iso3: row.iso3,
+                    name: row.name,
+                    region: row.region,
+                    calling_code: row.calling_code,
+                    status: row.status.as_str().to_string(),
+                    is_default: matches!(row.is_default, CountryIsDefault::Yes),
+                    updated_at: format_rfc3339(row.updated_at),
                 })
                 .collect();
 
@@ -361,25 +361,25 @@ where
 }
 
 fn apply_country_filters<'db>(
-    mut query: CountryQuery<'db>,
+    mut query: Query<'db, CountryModel>,
     filters: &CountryQueryState,
-) -> CountryQuery<'db> {
+) -> Query<'db, CountryModel> {
     if let Some(keyword) = filters.keyword.as_deref().and_then(to_non_empty) {
         let pattern = format!("%{}%", keyword.trim());
         query = query
-            .where_col(CountryCol::Iso2, Op::ILike, pattern.clone())
-            .or_where_col(CountryCol::Iso3, Op::ILike, pattern.clone())
-            .or_where_col(CountryCol::Name, Op::ILike, pattern.clone())
-            .or_where_col(CountryCol::CallingCode, Op::ILike, pattern);
+            .where_col(CountryCol::ISO2, Op::ILike, pattern.clone())
+            .or_where_col(CountryCol::ISO3, Op::ILike, pattern.clone())
+            .or_where_col(CountryCol::NAME, Op::ILike, pattern.clone())
+            .or_where_col(CountryCol::CALLING_CODE, Op::ILike, pattern);
     }
 
     if let Some(status) = filters.status {
-        query = query.where_status(Op::Eq, status);
+        query = query.where_col(CountryCol::STATUS, Op::Eq, status);
     }
 
     if let Some(region) = filters.region.as_deref().and_then(to_non_empty) {
         query = query.where_col(
-            CountryCol::Region,
+            CountryCol::REGION,
             Op::ILike,
             format!("%{}%", region.trim()),
         );
@@ -404,18 +404,39 @@ fn to_non_empty(value: &str) -> Option<&str> {
     }
 }
 
-fn normalize_sort_column(value: &str) -> Option<CountryCol> {
+fn normalize_sort_column(value: &str) -> Option<&'static str> {
     match value.trim().to_ascii_lowercase().as_str() {
-        "iso2" => Some(CountryCol::Iso2),
-        "iso3" => Some(CountryCol::Iso3),
-        "name" => Some(CountryCol::Name),
-        "status" => Some(CountryCol::Status),
-        "region" => Some(CountryCol::Region),
-        "calling_code" => Some(CountryCol::CallingCode),
-        "is_default" => Some(CountryCol::IsDefault),
-        "updated_at" => Some(CountryCol::UpdatedAt),
+        "iso2" => Some("iso2"),
+        "iso3" => Some("iso3"),
+        "name" => Some("name"),
+        "status" => Some("status"),
+        "region" => Some("region"),
+        "calling_code" => Some("calling_code"),
+        "is_default" => Some("is_default"),
+        "updated_at" => Some("updated_at"),
         _ => None,
     }
+}
+
+fn apply_country_sort<'db>(
+    query: Query<'db, CountryModel>,
+    sorting_column: &str,
+    direction: OrderDir,
+) -> Query<'db, CountryModel> {
+    match sorting_column {
+        "iso2" => query.order_by(CountryCol::ISO2, direction),
+        "iso3" => query.order_by(CountryCol::ISO3, direction),
+        "status" => query.order_by(CountryCol::STATUS, direction),
+        "region" => query.order_by(CountryCol::REGION, direction),
+        "calling_code" => query.order_by(CountryCol::CALLING_CODE, direction),
+        "is_default" => query.order_by(CountryCol::IS_DEFAULT, direction),
+        "updated_at" => query.order_by(CountryCol::UPDATED_AT, direction),
+        _ => query.order_by(CountryCol::NAME, direction),
+    }
+}
+
+fn apply_default_country_sort<'db>(query: Query<'db, CountryModel>) -> Query<'db, CountryModel> {
+    query.order_by(CountryCol::ISO2, OrderDir::Asc)
 }
 
 fn format_rfc3339(value: time::OffsetDateTime) -> String {

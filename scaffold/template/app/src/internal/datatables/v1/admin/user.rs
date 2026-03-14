@@ -1,14 +1,11 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
-use core_db::common::sql::{Op, RawClause};
+use core_db::common::{model_api::Query, sql::{Op, RawClause}};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
-use generated::{
-    models::{User, UserBanStatus, UserCol, UserDataTable, UserDataTableHooks, UserQuery},
-    permissions::Permission,
-};
+use generated::{models::*, permissions::Permission};
 
 use crate::contracts::datatable::admin::user::{
     AdminUserDataTableContract, UserDatatableSummaryOutput, ROUTE_PREFIX, SCOPED_KEY,
@@ -21,10 +18,10 @@ pub struct UserDataTableAppHooks;
 impl UserDataTableHooks for UserDataTableAppHooks {
     fn scope<'db>(
         &'db self,
-        query: UserQuery<'db>,
+        query: Query<'db, UserModel>,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> UserQuery<'db> {
+    ) -> Query<'db, UserModel> {
         query
     }
 
@@ -46,12 +43,12 @@ impl UserDataTableHooks for UserDataTableAppHooks {
 
     fn filter_query<'db>(
         &'db self,
-        query: UserQuery<'db>,
+        query: Query<'db, UserModel>,
         filter_key: &str,
         value: &str,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<Option<UserQuery<'db>>> {
+    ) -> anyhow::Result<Option<Query<'db, UserModel>>> {
         match filter_key {
             "q" => Ok(Some(apply_keyword_filter(query, value))),
             _ => Ok(None),
@@ -60,7 +57,7 @@ impl UserDataTableHooks for UserDataTableAppHooks {
 
     fn row_to_record(
         &self,
-        row: generated::models::UserWithRelations,
+        row: generated::models::UserRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
@@ -74,16 +71,16 @@ fn parse_user_ban_status(value: &str) -> Option<UserBanStatus> {
     UserBanStatus::from_storage(value)
 }
 
-fn apply_keyword_filter<'db>(query: UserQuery<'db>, value: &str) -> UserQuery<'db> {
+fn apply_keyword_filter<'db>(query: Query<'db, UserModel>, value: &str) -> Query<'db, UserModel> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return query;
     }
     let pattern = format!("%{trimmed}%");
     query.where_group(|q| {
-        q.where_col(UserCol::Username, Op::Like, pattern.clone())
-            .or_where_col(UserCol::Name, Op::Like, pattern.clone())
-            .or_where_col(UserCol::Email, Op::Like, pattern)
+        q.where_col(UserCol::USERNAME, Op::Like, pattern.clone())
+            .or_where_col(UserCol::NAME, Op::Like, pattern.clone())
+            .or_where_col(UserCol::EMAIL, Op::Like, pattern)
     })
 }
 
@@ -111,9 +108,9 @@ fn parse_datetime(raw: &str, end_of_day: bool) -> Option<time::OffsetDateTime> {
 }
 
 fn apply_summary_filters<'db>(
-    mut query: UserQuery<'db>,
+    mut query: Query<'db, UserModel>,
     input: &DataTableInput,
-) -> UserQuery<'db> {
+) -> Query<'db, UserModel> {
     for (key, value) in input.filter_entries() {
         let trimmed = value.trim();
         if trimmed.is_empty() {
@@ -121,17 +118,17 @@ fn apply_summary_filters<'db>(
         }
         match key {
             "f-like-email" => {
-                query = query.where_col(UserCol::Email, Op::Like, format!("%{trimmed}%"));
+                query = query.where_col(UserCol::EMAIL, Op::Like, format!("%{trimmed}%"));
             }
             "f-like-username" => {
-                query = query.where_col(UserCol::Username, Op::Like, format!("%{trimmed}%"));
+                query = query.where_col(UserCol::USERNAME, Op::Like, format!("%{trimmed}%"));
             }
             "f-like-country_iso2" => {
-                query = query.where_col(UserCol::CountryIso2, Op::Like, format!("%{trimmed}%"));
+                query = query.where_col(UserCol::COUNTRY_ISO2, Op::Like, format!("%{trimmed}%"));
             }
             "f-ban" => {
                 if let Some(ban) = parse_user_ban_status(trimmed) {
-                    query = query.where_ban(Op::Eq, ban);
+                    query = query.where_col(UserCol::BAN, Op::Eq, ban);
                 }
             }
             "f-like-introducer" => {
@@ -140,17 +137,18 @@ fn apply_summary_filters<'db>(
                     "introducer_user_id IN (SELECT id FROM users WHERE username LIKE ?)",
                     [pattern],
                 ) {
-                    query = query.unsafe_sql().where_raw(clause).done();
+                    let (sql, binds) = clause.into_parts();
+                    query = query.unsafe_sql().where_raw(sql, binds).done();
                 }
             }
             "f-date-from-created_at" => {
                 if let Some(ts) = parse_datetime(trimmed, false) {
-                    query = query.where_col(UserCol::CreatedAt, Op::Ge, ts);
+                    query = query.where_col(UserCol::CREATED_AT, Op::Ge, ts);
                 }
             }
             "f-date-to-created_at" => {
                 if let Some(ts) = parse_datetime(trimmed, true) {
-                    query = query.where_col(UserCol::CreatedAt, Op::Le, ts);
+                    query = query.where_col(UserCol::CREATED_AT, Op::Le, ts);
                 }
             }
             _ => {}
@@ -171,12 +169,12 @@ pub async fn build_user_summary_output(
     input: &DataTableInput,
     _ctx: &DataTableContext,
 ) -> anyhow::Result<UserDatatableSummaryOutput> {
-    let base = User::new(db, None).query();
+    let base = UserModel::query(db);
     let filtered = apply_summary_filters(base, input);
 
     let total_filtered = filtered.clone().count().await?;
     let banned_count = filtered
-        .where_ban(Op::Eq, UserBanStatus::Yes)
+        .where_col(UserCol::BAN, Op::Eq, UserBanStatus::Yes)
         .count()
         .await?;
 

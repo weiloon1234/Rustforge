@@ -1,5 +1,5 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
-use core_db::common::sql::Op;
+use core_db::common::{model_api::Query, sql::Op};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
@@ -8,7 +8,7 @@ use core_web::openapi::ApiRouter;
 use generated::{
     models::{
         AdminCol, IntroducerChangeDataTable, IntroducerChangeDataTableHooks,
-        IntroducerChangeQuery, IntroducerChangeWithRelations, UserCol,
+        IntroducerChangeModel, IntroducerChangeRecord, IntroducerChangeRel, UserCol,
     },
     permissions::Permission,
 };
@@ -24,10 +24,10 @@ pub struct IntroducerChangeDataTableAppHooks;
 impl IntroducerChangeDataTableHooks for IntroducerChangeDataTableAppHooks {
     fn scope<'db>(
         &'db self,
-        query: IntroducerChangeQuery<'db>,
+        query: Query<'db, IntroducerChangeModel>,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> IntroducerChangeQuery<'db> {
+    ) -> Query<'db, IntroducerChangeModel> {
         query
     }
 
@@ -45,12 +45,12 @@ impl IntroducerChangeDataTableHooks for IntroducerChangeDataTableAppHooks {
 
     fn filter_query<'db>(
         &'db self,
-        query: IntroducerChangeQuery<'db>,
+        query: Query<'db, IntroducerChangeModel>,
         filter_key: &str,
         value: &str,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<Option<IntroducerChangeQuery<'db>>> {
+    ) -> anyhow::Result<Option<Query<'db, IntroducerChangeModel>>> {
         match filter_key {
             "q" => Ok(Some(apply_keyword_filter(query, value))),
             _ => Ok(None),
@@ -59,7 +59,7 @@ impl IntroducerChangeDataTableHooks for IntroducerChangeDataTableAppHooks {
 
     fn row_to_record(
         &self,
-        row: IntroducerChangeWithRelations,
+        row: IntroducerChangeRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
@@ -81,19 +81,19 @@ impl IntroducerChangeDataTableHooks for IntroducerChangeDataTableAppHooks {
 }
 
 fn apply_keyword_filter<'db>(
-    query: IntroducerChangeQuery<'db>,
+    query: Query<'db, IntroducerChangeModel>,
     value: &str,
-) -> IntroducerChangeQuery<'db> {
+) -> Query<'db, IntroducerChangeModel> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return query;
     }
     let pattern = format!("%{trimmed}%");
     query
-        .where_has_user(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone()))
-        .or_where_has_from_user(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone()))
-        .or_where_has_to_user(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone()))
-        .or_where_has_admin(|rq| rq.where_col(AdminCol::Username, Op::Like, pattern))
+        .where_has(IntroducerChangeRel::USER, |rq| rq.where_col(UserCol::USERNAME, Op::Like, pattern.clone()))
+        .or_where_has(IntroducerChangeRel::FROM_USER, |rq| rq.where_col(UserCol::USERNAME, Op::Like, pattern.clone()))
+        .or_where_has(IntroducerChangeRel::TO_USER, |rq| rq.where_col(UserCol::USERNAME, Op::Like, pattern.clone()))
+        .or_where_has(IntroducerChangeRel::ADMIN, |rq| rq.where_col(AdminCol::USERNAME, Op::Like, pattern))
 }
 
 pub type AppIntroducerChangeDataTable =

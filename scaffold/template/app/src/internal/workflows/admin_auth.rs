@@ -1,5 +1,5 @@
 use core_db::common::{
-    auth::hash::verify_password,
+    auth::hash::{hash_password, verify_password},
     sql::{DbConn, Op},
 };
 use core_i18n::t;
@@ -10,7 +10,7 @@ use core_web::{
 };
 use generated::{
     guards::AdminGuard,
-    models::{admin::admin_permissions, Admin, AdminQuery, AdminType, AdminView},
+    models::{AdminCol, AdminModel, AdminRecord, AdminType},
 };
 
 use crate::contracts::api::v1::admin::auth::{
@@ -18,11 +18,22 @@ use crate::contracts::api::v1::admin::auth::{
 };
 use crate::internal::api::state::AppApiState;
 
-pub fn resolve_scope_grant(admin: &AdminView) -> TokenScopeGrant {
+pub fn resolve_scope_grant(admin: &AdminRecord) -> TokenScopeGrant {
     match admin.admin_type {
         AdminType::Developer | AdminType::SuperAdmin => TokenScopeGrant::Wildcard,
         AdminType::Admin => {
-            let explicit = admin_permissions(admin);
+            let explicit = if admin
+                .abilities
+                .as_array()
+                .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("*")))
+            {
+                vec!["*".to_string()]
+            } else {
+                admin.parsed_abilities()
+                    .into_iter()
+                    .map(|permission| permission.as_str().to_string())
+                    .collect::<Vec<_>>()
+            };
             if explicit.is_empty() {
                 TokenScopeGrant::AuthOnly
             } else {
@@ -36,14 +47,13 @@ pub async fn login(
     state: &AppApiState,
     username: &str,
     password: &str,
-) -> Result<(AdminView, IssuedTokenPair), AppError> {
+) -> Result<(AdminRecord, IssuedTokenPair), AppError> {
     let username = username.trim().to_ascii_lowercase();
-    let admin = AdminQuery::new(DbConn::pool(&state.db), None)
-        .where_username(Op::Eq, username)
+    let admin = AdminModel::query(DbConn::pool(&state.db))
+        .where_col(AdminCol::USERNAME, Op::Eq, username)
         .first()
         .await
         .map_err(AppError::from)?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::Unauthorized(t("Invalid credentials")))?;
 
     let valid = verify_password(password, &admin.password).map_err(AppError::from)?;
@@ -86,23 +96,30 @@ pub async fn profile_update(
     state: &AppApiState,
     admin_id: i64,
     req: AdminProfileUpdateInput,
-) -> Result<AdminView, AppError> {
-    let mut update = Admin::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_id(Op::Eq, admin_id)
-        .set_name(req.name.trim().to_string());
+) -> Result<AdminRecord, AppError> {
+    let mut update = AdminModel::query(DbConn::pool(&state.db))
+        .where_col(AdminCol::ID, Op::Eq, admin_id)
+        .patch()
+        .assign(AdminCol::NAME, req.name.trim().to_string())
+        .map_err(AppError::from)?;
 
     match req.email {
         Patch::Missing => {}
         Patch::Null => {
-            update = update.set_email(None);
+            update = update
+                .assign(AdminCol::EMAIL, None::<String>)
+                .map_err(AppError::from)?;
         }
         Patch::Value(email) => {
             let email = email.trim().to_ascii_lowercase();
             if email.is_empty() {
-                update = update.set_email(None);
+                update = update
+                    .assign(AdminCol::EMAIL, None::<String>)
+                    .map_err(AppError::from)?;
             } else {
-                update = update.set_email(Some(email));
+                update = update
+                    .assign(AdminCol::EMAIL, Some(email))
+                    .map_err(AppError::from)?;
             }
         }
     }
@@ -112,11 +129,9 @@ pub async fn profile_update(
         return Err(AppError::NotFound(t("Admin not found")));
     }
 
-    Admin::new(DbConn::pool(&state.db), None)
-        .find(admin_id)
+    AdminModel::find(DbConn::pool(&state.db), admin_id)
         .await
         .map_err(AppError::from)?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("Admin not found")))
 }
 
@@ -128,10 +143,11 @@ pub async fn locale_update(
     let normalized = core_i18n::match_supported_locale(req.locale.trim())
         .ok_or_else(|| AppError::BadRequest(t("Unsupported locale")))?;
 
-    let affected = Admin::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_id(Op::Eq, admin_id)
-        .set_locale(Some(normalized.to_string()))
+    let affected = AdminModel::query(DbConn::pool(&state.db))
+        .where_col(AdminCol::ID, Op::Eq, admin_id)
+        .patch()
+        .assign(AdminCol::LOCALE, Some(normalized.to_string()))
+        .map_err(AppError::from)?
         .save()
         .await
         .map_err(AppError::from)?;
@@ -148,11 +164,9 @@ pub async fn password_update(
     admin_id: i64,
     req: AdminPasswordUpdateInput,
 ) -> Result<(), AppError> {
-    let admin = Admin::new(DbConn::pool(&state.db), None)
-        .find(admin_id)
+    let admin = AdminModel::find(DbConn::pool(&state.db), admin_id)
         .await
         .map_err(AppError::from)?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("Admin not found")))?;
 
     let valid = verify_password(&req.current_password, &admin.password).map_err(AppError::from)?;
@@ -160,13 +174,15 @@ pub async fn password_update(
         return Err(AppError::Unauthorized(t("Current password is incorrect")));
     }
 
-    let update = Admin::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_id(Op::Eq, admin_id)
-        .set_password(&req.password)
+    let password_hash = hash_password(&req.password).map_err(AppError::from)?;
+    let affected = AdminModel::query(DbConn::pool(&state.db))
+        .where_col(AdminCol::ID, Op::Eq, admin_id)
+        .patch()
+        .assign(AdminCol::PASSWORD, password_hash)
+        .map_err(AppError::from)?
+        .save()
+        .await
         .map_err(AppError::from)?;
-
-    let affected = update.save().await.map_err(AppError::from)?;
     if affected == 0 {
         return Err(AppError::NotFound(t("Admin not found")));
     }

@@ -54,10 +54,10 @@ fn first_non_empty(value: Option<&str>) -> Option<&str> {
     })
 }
 
-pub fn admin_permissions(admin: &AdminView) -> Vec<String> {
+pub fn admin_permissions(abilities: &serde_json::Value) -> Vec<String> {
     let mut out = Vec::new();
 
-    if let Some(items) = admin.abilities.as_array() {
+    if let Some(items) = abilities.as_array() {
         for item in items {
             let Some(raw) = item.as_str() else {
                 continue;
@@ -81,8 +81,8 @@ pub fn admin_permissions(admin: &AdminView) -> Vec<String> {
     out
 }
 
-#[rf_view_impl]
-impl AdminView {
+#[rf_record_impl]
+impl AdminRecord {
     #[rf_computed]
     pub fn identity(&self) -> String {
         admin_identity(
@@ -101,7 +101,7 @@ impl AdminView {
             return true;
         }
 
-        let granted = admin_permissions(self);
+        let granted = admin_permissions(&self.abilities);
         granted_has_permission(&granted, permission.as_str())
     }
 

@@ -48,35 +48,13 @@ fn main() {
     )
     .expect("failed to generate framework models");
 
-    let mut modules = fs::read_dir(&models_dir)
-        .expect("failed to read generated model directory")
-        .collect::<Result<Vec<_>, std::io::Error>>()
-        .expect("failed to collect generated model entries")
-        .into_iter()
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("rs"))
-        .filter_map(|path| {
-            path.file_stem()
-                .and_then(|stem| stem.to_str())
-                .map(|stem| stem.to_string())
-        })
-        .filter(|stem| stem != "mod")
-        .collect::<Vec<_>>();
-
-    modules.sort();
-
     let mut out = String::new();
-    out.push_str("pub mod models {\n");
-    for module in &modules {
-        let module_path = models_dir
-            .join(format!("{module}.rs"))
-            .display()
-            .to_string()
-            .replace('\\', "\\\\");
-        let _ = writeln!(out, "    #[path = \"{module_path}\"] pub mod {module};");
-        let _ = writeln!(out, "    pub use {module}::*;");
-    }
-    out.push_str("}\n");
+    let models_mod_path = models_dir
+        .join("mod.rs")
+        .display()
+        .to_string()
+        .replace('\\', "\\\\");
+    let _ = writeln!(out, "#[path = \"{models_mod_path}\"] pub mod models;");
 
     fs::write(out_dir.join("framework_generated.rs"), out)
         .expect("failed to write framework generated root include");

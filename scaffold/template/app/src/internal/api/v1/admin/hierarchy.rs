@@ -52,7 +52,8 @@ async fn resolve_user(
     _auth: AuthUser<AdminGuard>,
     Query(query): Query<ResolveUserQuery>,
 ) -> Result<ApiResponse<ResolvedUser>, AppError> {
-    let user = ic_workflow::resolve_user_by_username(&state, &query.username).await?;
+    let user = ic_workflow::resolve_user_by_username(&state, &query.username)
+        .await?;
     Ok(ApiResponse::success(
         ResolvedUser {
             id: user.id.into(),
@@ -69,7 +70,8 @@ async fn downlines(
     _auth: AuthUser<AdminGuard>,
     Path(id): Path<i64>,
 ) -> Result<ApiResponse<AdminDownlinesOutput>, AppError> {
-    let user = crate::internal::workflows::user_manage::detail(&state, id).await?;
+    let user = crate::internal::workflows::user_manage::detail(&state, id)
+        .await?;
     let rows = team_workflow::list_downlines(&state, id).await?;
 
     let downlines = rows

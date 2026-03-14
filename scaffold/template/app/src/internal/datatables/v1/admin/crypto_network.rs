@@ -1,17 +1,11 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
-use core_db::common::sql::Op;
+use core_db::common::{model_api::Query, sql::Op};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
-use generated::{
-    models::{
-        CryptoNetworkDataTable, CryptoNetworkDataTableHooks, CryptoNetworkQuery,
-        CryptoNetworkStatus,
-    },
-    permissions::Permission,
-};
+use generated::{models::*, permissions::Permission};
 
 use crate::contracts::datatable::admin::crypto_network::{
     AdminCryptoNetworkDataTableContract, ROUTE_PREFIX, SCOPED_KEY,
@@ -24,10 +18,10 @@ pub struct CryptoNetworkDataTableAppHooks;
 impl CryptoNetworkDataTableHooks for CryptoNetworkDataTableAppHooks {
     fn scope<'db>(
         &'db self,
-        query: CryptoNetworkQuery<'db>,
+        query: Query<'db, CryptoNetworkModel>,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> CryptoNetworkQuery<'db> {
+    ) -> Query<'db, CryptoNetworkModel> {
         query
     }
 
@@ -48,17 +42,17 @@ impl CryptoNetworkDataTableHooks for CryptoNetworkDataTableAppHooks {
 
     fn filter_query<'db>(
         &'db self,
-        query: CryptoNetworkQuery<'db>,
+        query: Query<'db, CryptoNetworkModel>,
         filter_key: &str,
         value: &str,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<Option<CryptoNetworkQuery<'db>>> {
+    ) -> anyhow::Result<Option<Query<'db, CryptoNetworkModel>>> {
         match filter_key {
             "q" => Ok(Some(apply_keyword_filter(query, value))),
             "f-status" => {
                 if let Some(s) = CryptoNetworkStatus::from_storage(value) {
-                    Ok(Some(query.where_status(Op::Eq, s)))
+                    Ok(Some(query.where_col(CryptoNetworkCol::STATUS, Op::Eq, s)))
                 } else {
                     Ok(Some(query))
                 }
@@ -69,7 +63,7 @@ impl CryptoNetworkDataTableHooks for CryptoNetworkDataTableAppHooks {
 
     fn map_row(
         &self,
-        _row: &mut generated::models::CryptoNetworkWithRelations,
+        _row: &mut CryptoNetworkRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<()> {
@@ -78,7 +72,7 @@ impl CryptoNetworkDataTableHooks for CryptoNetworkDataTableAppHooks {
 
     fn row_to_record(
         &self,
-        row: generated::models::CryptoNetworkWithRelations,
+        row: CryptoNetworkRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
@@ -92,18 +86,18 @@ impl CryptoNetworkDataTableHooks for CryptoNetworkDataTableAppHooks {
 }
 
 fn apply_keyword_filter<'db>(
-    query: CryptoNetworkQuery<'db>,
+    query: Query<'db, CryptoNetworkModel>,
     value: &str,
-) -> CryptoNetworkQuery<'db> {
+) -> Query<'db, CryptoNetworkModel> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return query;
     }
     if let Ok(id) = trimmed.parse::<i64>() {
-        return query.where_id(Op::Eq, id);
+        return query.where_col(CryptoNetworkCol::ID, Op::Eq, id);
     }
     let pattern = format!("%{trimmed}%");
-    query.where_name(Op::Like, pattern)
+    query.where_col(CryptoNetworkCol::NAME, Op::Like, pattern)
 }
 
 pub type AppCryptoNetworkDataTable = CryptoNetworkDataTable<CryptoNetworkDataTableAppHooks>;

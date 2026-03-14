@@ -1,5 +1,5 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
-use core_db::common::sql::Op;
+use core_db::common::{model_api::Query, sql::Op};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
@@ -18,10 +18,10 @@ pub struct DepositDataTableAppHooks;
 impl DepositDataTableHooks for DepositDataTableAppHooks {
     fn scope<'db>(
         &'db self,
-        query: DepositQuery<'db>,
+        query: Query<'db, DepositModel>,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> DepositQuery<'db> {
+    ) -> Query<'db, DepositModel> {
         query
     }
 
@@ -39,38 +39,38 @@ impl DepositDataTableHooks for DepositDataTableAppHooks {
 
     fn filter_query<'db>(
         &'db self,
-        query: DepositQuery<'db>,
+        query: Query<'db, DepositModel>,
         filter_key: &str,
         value: &str,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<Option<DepositQuery<'db>>> {
+    ) -> anyhow::Result<Option<Query<'db, DepositModel>>> {
         match filter_key {
             "q" => Ok(Some(apply_keyword_filter(query, value))),
             "f-owner_type" => {
                 if let Some(ot) = OwnerType::from_storage(value) {
-                    Ok(Some(query.where_owner_type(Op::Eq, ot)))
+                    Ok(Some(query.where_col(DepositCol::OWNER_TYPE, Op::Eq, ot)))
                 } else {
                     Ok(Some(query))
                 }
             }
             "f-credit_type" => {
                 if let Some(ct) = CreditType::from_storage(value) {
-                    Ok(Some(query.where_credit_type(Op::Eq, ct)))
+                    Ok(Some(query.where_col(DepositCol::CREDIT_TYPE, Op::Eq, ct)))
                 } else {
                     Ok(Some(query))
                 }
             }
             "f-deposit_method" => {
                 if let Some(dm) = DepositMethod::from_storage(value) {
-                    Ok(Some(query.where_deposit_method(Op::Eq, dm)))
+                    Ok(Some(query.where_col(DepositCol::DEPOSIT_METHOD, Op::Eq, dm)))
                 } else {
                     Ok(Some(query))
                 }
             }
             "f-status" => {
                 if let Some(s) = DepositStatus::from_storage(value) {
-                    Ok(Some(query.where_status(Op::Eq, s)))
+                    Ok(Some(query.where_col(DepositCol::STATUS, Op::Eq, s)))
                 } else {
                     Ok(Some(query))
                 }
@@ -81,7 +81,7 @@ impl DepositDataTableHooks for DepositDataTableAppHooks {
 
     fn map_row(
         &self,
-        _row: &mut generated::models::DepositWithRelations,
+        _row: &mut DepositRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<()> {
@@ -90,7 +90,7 @@ impl DepositDataTableHooks for DepositDataTableAppHooks {
 
     fn row_to_record(
         &self,
-        row: generated::models::DepositWithRelations,
+        row: DepositRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
@@ -125,18 +125,18 @@ impl DepositDataTableHooks for DepositDataTableAppHooks {
     }
 }
 
-fn apply_keyword_filter<'db>(query: DepositQuery<'db>, value: &str) -> DepositQuery<'db> {
+fn apply_keyword_filter<'db>(query: Query<'db, DepositModel>, value: &str) -> Query<'db, DepositModel> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return query;
     }
     // Try to parse as ID first
     if let Ok(id) = trimmed.parse::<i64>() {
-        return query.where_id(Op::Eq, id);
+        return query.where_col(DepositCol::ID, Op::Eq, id);
     }
     // Otherwise search by related_key
     let pattern = format!("%{trimmed}%");
-    query.where_related_key(Op::Like, Some(pattern))
+    query.where_col(DepositCol::RELATED_KEY, Op::Like, Some(pattern))
 }
 
 pub type AppDepositDataTable = DepositDataTable<DepositDataTableAppHooks>;

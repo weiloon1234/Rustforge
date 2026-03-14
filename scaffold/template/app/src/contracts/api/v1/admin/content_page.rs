@@ -85,8 +85,8 @@ pub struct AdminContentPageDeleteOutput {
     pub deleted: bool,
 }
 
-impl From<generated::models::ContentPageView> for AdminContentPageOutput {
-    fn from(value: generated::models::ContentPageView) -> Self {
+impl From<generated::models::ContentPageRecord> for AdminContentPageOutput {
+    fn from(value: generated::models::ContentPageRecord) -> Self {
         let cover = value.cover_translations.unwrap_or_default();
         let cover_url = attachment_urls_from_localized_text(&cover);
         Self {
@@ -103,8 +103,8 @@ impl From<generated::models::ContentPageView> for AdminContentPageOutput {
     }
 }
 
-impl From<generated::models::ContentPageView> for AdminContentPageUpdateOutput {
-    fn from(value: generated::models::ContentPageView) -> Self {
+impl From<generated::models::ContentPageRecord> for AdminContentPageUpdateOutput {
+    fn from(value: generated::models::ContentPageRecord) -> Self {
         let cover = value.cover_translations.unwrap_or_default();
         let cover_url = attachment_urls_from_localized_text(&cover);
         Self {

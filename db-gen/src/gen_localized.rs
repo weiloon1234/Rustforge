@@ -73,12 +73,8 @@ fn render_imports(has_loader_functions: bool, needs_resize_rule: bool) -> String
         out.push_str("use std::collections::HashMap;\n");
         out.push_str("use core_db::common::sql::{generate_snowflake_i64, DbConn, Op};\n");
         out.push_str(
-            "use crate::generated::models::attachment::{Attachment as AttachmentModel, AttachmentCol};\n",
+            "use crate::generated::models::{AttachmentCol, AttachmentModel, LocalizedCol, LocalizedModel, MetaCol, MetaModel};\n",
         );
-        out.push_str(
-            "use crate::generated::models::localized::{Localized as LocalizedModel, LocalizedCol};\n",
-        );
-        out.push_str("use crate::generated::models::meta::{Meta as MetaModel, MetaCol};\n");
         out.push_str("use uuid::Uuid;\n");
     }
     if needs_resize_rule {
@@ -123,30 +119,28 @@ fn render_upsert_localized_many_function() -> String {
     values: &HashMap<String, String>,
 ) -> Result<()> {
     for (locale, value) in values {
-        let current = LocalizedModel::new(db.clone(), None)
-            .query()
-            .where_owner_type(Op::Eq, owner_type.to_string())
-            .where_owner_id(Op::Eq, owner_id)
-            .where_field(Op::Eq, field.to_string())
-            .where_locale(Op::Eq, locale.clone())
+        let current = LocalizedModel::query(db.clone())
+            .where_col(LocalizedCol::OWNER_TYPE, Op::Eq, owner_type.to_string())
+            .where_col(LocalizedCol::OWNER_ID, Op::Eq, owner_id)
+            .where_col(LocalizedCol::FIELD, Op::Eq, field.to_string())
+            .where_col(LocalizedCol::LOCALE, Op::Eq, locale.clone())
             .first()
             .await?;
         if let Some(current) = current {
-            LocalizedModel::new(db.clone(), None)
-                .update()
-                .where_id(Op::Eq, current.id)
-                .set_value(value.clone())
+            LocalizedModel::query(db.clone())
+                .where_col(LocalizedCol::ID, Op::Eq, current.id)
+                .patch()
+                .assign(LocalizedCol::VALUE, value.clone())?
                 .save()
                 .await?;
         } else {
-            LocalizedModel::new(db.clone(), None)
-                .insert()
-                .set_id(generate_snowflake_i64())
-                .set_owner_type(owner_type.to_string())
-                .set_owner_id(owner_id)
-                .set_field(field.to_string())
-                .set_locale(locale.clone())
-                .set_value(value.clone())
+            LocalizedModel::create(db.clone())
+                .set(LocalizedCol::ID, generate_snowflake_i64())?
+                .set(LocalizedCol::OWNER_TYPE, owner_type.to_string())?
+                .set(LocalizedCol::OWNER_ID, owner_id)?
+                .set(LocalizedCol::FIELD, field.to_string())?
+                .set(LocalizedCol::LOCALE, locale.clone())?
+                .set(LocalizedCol::VALUE, value.clone())?
                 .save()
                 .await?;
         }
@@ -166,17 +160,15 @@ fn render_delete_localized_field_function() -> String {
     owner_id: i64,
     field: &str,
 ) -> Result<()> {
-    let rows = LocalizedModel::new(db.clone(), None)
-        .query()
-        .where_owner_type(Op::Eq, owner_type.to_string())
-        .where_owner_id(Op::Eq, owner_id)
-        .where_field(Op::Eq, field.to_string())
-        .get()
+    let rows = LocalizedModel::query(db.clone())
+        .where_col(LocalizedCol::OWNER_TYPE, Op::Eq, owner_type.to_string())
+        .where_col(LocalizedCol::OWNER_ID, Op::Eq, owner_id)
+        .where_col(LocalizedCol::FIELD, Op::Eq, field.to_string())
+        .all()
         .await?;
     for row in rows {
-        LocalizedModel::new(db.clone(), None)
-            .query()
-            .where_id(Op::Eq, row.id)
+        LocalizedModel::query(db.clone())
+            .where_col(LocalizedCol::ID, Op::Eq, row.id)
             .delete()
             .await?;
     }
@@ -200,12 +192,11 @@ fn render_load_owner_localized_function() -> String {
     }
     let owner_ids: Vec<i64> = ids.to_vec();
     let field_names: Vec<String> = fields.iter().map(|field| (*field).to_string()).collect();
-    let rows = LocalizedModel::new(db, None)
-        .query()
-        .where_owner_type(Op::Eq, owner_type.to_string())
-        .where_in(LocalizedCol::OwnerId, &owner_ids)
-        .where_in(LocalizedCol::Field, &field_names)
-        .get()
+    let rows = LocalizedModel::query(db)
+        .where_col(LocalizedCol::OWNER_TYPE, Op::Eq, owner_type.to_string())
+        .where_in(LocalizedCol::OWNER_ID, owner_ids.clone())
+        .where_in(LocalizedCol::FIELD, field_names.clone())
+        .all()
         .await?;
     let mut out: HashMap<String, HashMap<i64, HashMap<String, String>>> = HashMap::new();
     for row in rows {
@@ -231,28 +222,26 @@ fn render_upsert_meta_many_function() -> String {
     values: &HashMap<String, serde_json::Value>,
 ) -> Result<()> {
     for (field, value) in values {
-        let current = MetaModel::new(db.clone(), None)
-            .query()
-            .where_owner_type(Op::Eq, owner_type.to_string())
-            .where_owner_id(Op::Eq, owner_id)
-            .where_field(Op::Eq, field.clone())
+        let current = MetaModel::query(db.clone())
+            .where_col(MetaCol::OWNER_TYPE, Op::Eq, owner_type.to_string())
+            .where_col(MetaCol::OWNER_ID, Op::Eq, owner_id)
+            .where_col(MetaCol::FIELD, Op::Eq, field.clone())
             .first()
             .await?;
         if let Some(current) = current {
-            MetaModel::new(db.clone(), None)
-                .update()
-                .where_id(Op::Eq, current.id)
-                .set_value(value.clone())
+            MetaModel::query(db.clone())
+                .where_col(MetaCol::ID, Op::Eq, current.id)
+                .patch()
+                .assign(MetaCol::VALUE, value.clone())?
                 .save()
                 .await?;
         } else {
-            MetaModel::new(db.clone(), None)
-                .insert()
-                .set_id(generate_snowflake_i64())
-                .set_owner_type(owner_type.to_string())
-                .set_owner_id(owner_id)
-                .set_field(field.clone())
-                .set_value(value.clone())
+            MetaModel::create(db.clone())
+                .set(MetaCol::ID, generate_snowflake_i64())?
+                .set(MetaCol::OWNER_TYPE, owner_type.to_string())?
+                .set(MetaCol::OWNER_ID, owner_id)?
+                .set(MetaCol::FIELD, field.clone())?
+                .set(MetaCol::VALUE, value.clone())?
                 .save()
                 .await?;
         }
@@ -277,12 +266,11 @@ fn render_load_owner_meta_function() -> String {
     }
     let owner_ids: Vec<i64> = ids.to_vec();
     let field_names: Vec<String> = fields.iter().map(|field| (*field).to_string()).collect();
-    let rows = MetaModel::new(db, None)
-        .query()
-        .where_owner_type(Op::Eq, owner_type.to_string())
-        .where_in(MetaCol::OwnerId, &owner_ids)
-        .where_in(MetaCol::Field, &field_names)
-        .get()
+    let rows = MetaModel::query(db)
+        .where_col(MetaCol::OWNER_TYPE, Op::Eq, owner_type.to_string())
+        .where_in(MetaCol::OWNER_ID, owner_ids.clone())
+        .where_in(MetaCol::FIELD, field_names.clone())
+        .all()
         .await?;
     let mut out: HashMap<String, HashMap<i64, serde_json::Value>> = HashMap::new();
     for row in rows {
@@ -305,17 +293,15 @@ fn render_clear_attachment_field_function() -> String {
     owner_id: i64,
     field: &str,
 ) -> Result<()> {
-    let rows = AttachmentModel::new(db.clone(), None)
-        .query()
-        .where_owner_type(Op::Eq, owner_type.to_string())
-        .where_owner_id(Op::Eq, owner_id)
-        .where_field(Op::Eq, field.to_string())
-        .get()
+    let rows = AttachmentModel::query(db.clone())
+        .where_col(AttachmentCol::OWNER_TYPE, Op::Eq, owner_type.to_string())
+        .where_col(AttachmentCol::OWNER_ID, Op::Eq, owner_id)
+        .where_col(AttachmentCol::FIELD, Op::Eq, field.to_string())
+        .all()
         .await?;
     for row in rows {
-        AttachmentModel::new(db.clone(), None)
-            .query()
-            .where_id(Op::Eq, row.id)
+        AttachmentModel::query(db.clone())
+            .where_col(AttachmentCol::ID, Op::Eq, row.id)
             .delete()
             .await?;
     }
@@ -338,19 +324,18 @@ fn render_add_attachments_function() -> String {
     for value in values {
         let now = time::OffsetDateTime::now_utc();
         let attachment_id = value.id.unwrap_or_else(Uuid::new_v4);
-        AttachmentModel::new(db.clone(), None)
-            .insert()
-            .set_id(attachment_id)
-            .set_owner_type(owner_type.to_string())
-            .set_owner_id(owner_id)
-            .set_field(field.to_string())
-            .set_path(value.path.clone())
-            .set_content_type(value.content_type.clone())
-            .set_size(value.size)
-            .set_width(value.width)
-            .set_height(value.height)
-            .set_created_at(now)
-            .set_updated_at(now)
+        AttachmentModel::create(db.clone())
+            .set(AttachmentCol::ID, attachment_id)?
+            .set(AttachmentCol::OWNER_TYPE, owner_type.to_string())?
+            .set(AttachmentCol::OWNER_ID, owner_id)?
+            .set(AttachmentCol::FIELD, field.to_string())?
+            .set(AttachmentCol::PATH, value.path.clone())?
+            .set(AttachmentCol::CONTENT_TYPE, value.content_type.clone())?
+            .set(AttachmentCol::SIZE, value.size)?
+            .set(AttachmentCol::WIDTH, value.width)?
+            .set(AttachmentCol::HEIGHT, value.height)?
+            .set(AttachmentCol::CREATED_AT, now)?
+            .set(AttachmentCol::UPDATED_AT, now)?
             .save()
             .await?;
     }
@@ -388,12 +373,11 @@ fn render_delete_attachment_ids_function() -> String {
     ids: &[Uuid],
 ) -> Result<()> {
     for id in ids {
-        AttachmentModel::new(db.clone(), None)
-            .query()
-            .where_id(Op::Eq, *id)
-            .where_owner_type(Op::Eq, owner_type.to_string())
-            .where_owner_id(Op::Eq, owner_id)
-            .where_field(Op::Eq, field.to_string())
+        AttachmentModel::query(db.clone())
+            .where_col(AttachmentCol::ID, Op::Eq, *id)
+            .where_col(AttachmentCol::OWNER_TYPE, Op::Eq, owner_type.to_string())
+            .where_col(AttachmentCol::OWNER_ID, Op::Eq, owner_id)
+            .where_col(AttachmentCol::FIELD, Op::Eq, field.to_string())
             .delete()
             .await?;
     }
@@ -417,16 +401,14 @@ fn render_load_owner_attachments_function() -> String {
     }
     let owner_ids: Vec<i64> = ids.to_vec();
     let field_names: Vec<String> = fields.iter().map(|field| (*field).to_string()).collect();
-    let rows = AttachmentModel::new(db, None)
-        .query()
-        .where_owner_type(Op::Eq, owner_type.to_string())
-        .where_in(AttachmentCol::OwnerId, &owner_ids)
-        .where_in(AttachmentCol::Field, &field_names)
-        .get()
+    let rows = AttachmentModel::query(db)
+        .where_col(AttachmentCol::OWNER_TYPE, Op::Eq, owner_type.to_string())
+        .where_in(AttachmentCol::OWNER_ID, owner_ids.clone())
+        .where_in(AttachmentCol::FIELD, field_names.clone())
+        .all()
         .await?;
     let mut out: HashMap<String, HashMap<i64, Vec<core_db::platform::attachments::types::Attachment>>> = HashMap::new();
-    for wr in rows {
-        let row = wr.into_row();
+    for row in rows {
         out.entry(row.field.clone())
             .or_default()
             .entry(row.owner_id)
@@ -435,7 +417,7 @@ fn render_load_owner_attachments_function() -> String {
                 id: row.id,
                 path: row.path.clone(),
                 url: core_db::platform::attachments::types::attachment_url(&row.path, None),
-                content_type: row.content_type,
+                content_type: row.content_type.clone(),
                 size: row.size,
                 width: row.width,
                 height: row.height,

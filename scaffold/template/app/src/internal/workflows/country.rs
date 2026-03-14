@@ -1,7 +1,7 @@
 use core_db::{
     common::sql::{DbConn, Op, OrderDir},
     generated::models::{
-        Country as CountryModel, CountryCol, CountryIsDefault,
+        CountryCol, CountryIsDefault, CountryModel, CountryRecord,
         CountryStatus as GeneratedCountryStatus,
     },
     platform::countries::{
@@ -29,11 +29,13 @@ pub async fn update_status(
     let status_enum = GeneratedCountryStatus::from_storage(status)
         .ok_or_else(|| AppError::BadRequest(t("Invalid country status")))?;
 
-    let affected = CountryModel::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_iso2(Op::Eq, iso2.clone())
-        .set_status(status_enum)
-        .set_updated_at(time::OffsetDateTime::now_utc())
+    let affected = CountryModel::query(DbConn::pool(&state.db))
+        .where_col(CountryCol::ISO2, Op::Eq, iso2.clone())
+        .patch()
+        .assign(CountryCol::STATUS, status_enum)
+        .map_err(AppError::from)?
+        .assign(CountryCol::UPDATED_AT, time::OffsetDateTime::now_utc())
+        .map_err(AppError::from)?
         .save()
         .await
         .map_err(AppError::from)?;
@@ -42,17 +44,15 @@ pub async fn update_status(
         return Err(AppError::NotFound(t("Country not found")));
     }
 
-    let updated = CountryModel::new(DbConn::pool(&state.db), None)
-        .query()
-        .where_iso2(Op::Eq, iso2)
+    let updated = CountryModel::query(DbConn::pool(&state.db))
+        .where_col(CountryCol::ISO2, Op::Eq, iso2)
         .first()
         .await
         .map_err(AppError::from)?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("Country not found")))?;
 
     invalidate_bootstrap_country_cache(state).await?;
-    Ok(country_view_to_runtime(updated))
+    Ok(country_record_to_runtime(updated))
 }
 
 pub async fn list_enabled_for_bootstrap(state: &AppApiState) -> Result<Vec<Country>, AppError> {
@@ -64,16 +64,15 @@ pub async fn list_enabled_for_bootstrap(state: &AppApiState) -> Result<Vec<Count
             BOOTSTRAP_COUNTRIES_CACHE_KEY,
             BOOTSTRAP_COUNTRIES_CACHE_TTL_SECS,
             move || async move {
-                let rows = CountryModel::new(DbConn::pool(&db), None)
-                    .query()
-                    .where_status(Op::Eq, GeneratedCountryStatus::Enabled)
-                    .order_by(CountryCol::Name, OrderDir::Asc)
-                    .order_by(CountryCol::Iso2, OrderDir::Asc)
-                    .get()
+                let rows = CountryModel::query(DbConn::pool(&db))
+                    .where_col(CountryCol::STATUS, Op::Eq, GeneratedCountryStatus::Enabled)
+                    .order_by(CountryCol::NAME, OrderDir::Asc)
+                    .order_by(CountryCol::ISO2, OrderDir::Asc)
+                    .all()
                     .await?;
                 Ok(rows
                     .into_iter()
-                    .map(|r| country_view_to_runtime(r.into_row()))
+                    .map(country_record_to_runtime)
                     .filter(|country| country.status == COUNTRY_STATUS_ENABLED)
                     .collect::<Vec<_>>())
             },
@@ -98,11 +97,13 @@ pub async fn set_default(
         .map_err(AppError::from)?;
 
     // Set the target as default
-    let affected = CountryModel::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_iso2(Op::Eq, iso2.clone())
-        .set_is_default(CountryIsDefault::Yes)
-        .set_updated_at(time::OffsetDateTime::now_utc())
+    let affected = CountryModel::query(DbConn::pool(&state.db))
+        .where_col(CountryCol::ISO2, Op::Eq, iso2.clone())
+        .patch()
+        .assign(CountryCol::IS_DEFAULT, CountryIsDefault::Yes)
+        .map_err(AppError::from)?
+        .assign(CountryCol::UPDATED_AT, time::OffsetDateTime::now_utc())
+        .map_err(AppError::from)?
         .save()
         .await
         .map_err(AppError::from)?;
@@ -111,17 +112,15 @@ pub async fn set_default(
         return Err(AppError::NotFound(t("Country not found")));
     }
 
-    let updated = CountryModel::new(DbConn::pool(&state.db), None)
-        .query()
-        .where_iso2(Op::Eq, iso2)
+    let updated = CountryModel::query(DbConn::pool(&state.db))
+        .where_col(CountryCol::ISO2, Op::Eq, iso2)
         .first()
         .await
         .map_err(AppError::from)?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("Country not found")))?;
 
     invalidate_bootstrap_country_cache(state).await?;
-    Ok(country_view_to_runtime(updated))
+    Ok(country_record_to_runtime(updated))
 }
 
 pub async fn invalidate_bootstrap_country_cache(state: &AppApiState) -> Result<(), AppError> {
@@ -132,7 +131,7 @@ pub async fn invalidate_bootstrap_country_cache(state: &AppApiState) -> Result<(
         .map_err(AppError::from)
 }
 
-fn country_view_to_runtime(view: core_db::generated::models::CountryView) -> Country {
+fn country_record_to_runtime(view: CountryRecord) -> Country {
     let currencies =
         serde_json::from_value::<Vec<CountryCurrency>>(view.currencies).unwrap_or_default();
 

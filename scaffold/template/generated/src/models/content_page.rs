@@ -6,12 +6,12 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
 use crate::generated::localized;
 use core_i18n::current_locale;
 use crate::generated::localized::LocalizedMapHelper;
@@ -22,7 +22,7 @@ const HAS_UPDATED_AT: bool = true;
 const HAS_SOFT_DELETE: bool = true;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct ContentPageCreateInput {
+pub struct ContentPageCreate {
     pub id: FieldInput<i64>,
     pub tag: FieldInput<String>,
     pub is_system: FieldInput<ContentPageSystemFlag>,
@@ -33,7 +33,7 @@ pub struct ContentPageCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct ContentPageUpdateChanges {
+pub struct ContentPageChanges {
     pub id: Option<FieldChange<i64>>,
     pub tag: Option<FieldChange<String>>,
     pub is_system: Option<FieldChange<ContentPageSystemFlag>>,
@@ -60,7 +60,7 @@ pub struct ContentPageRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ContentPageView {
+pub struct ContentPageRecord {
     pub id: i64,
     pub tag: String,
     pub is_system: ContentPageSystemFlag,
@@ -79,29 +79,9 @@ pub struct ContentPageView {
     pub cover_translations: Option<localized::LocalizedText>,
 }
 
-impl ContentPageView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> ContentPageUpdate<'db> {
-        ContentPage::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &ContentPage<'db>) -> ContentPageUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> ContentPageJson {
-        ContentPageJson {
-            id: self.id.clone(),
-            tag: self.tag.clone(),
-            is_system: self.is_system.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            deleted_at: self.deleted_at.clone(),
-            is_system_explained: self.is_system_explained.clone(),
-            title: self.title.clone(),
-            title_translations: self.title_translations.clone(),
-            content: self.content.clone(),
-            content_translations: self.content_translations.clone(),
-            cover: self.cover.clone(),
-            cover_translations: self.cover_translations.clone(),
-        }
+impl ContentPageRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, ContentPageModel> {
+        ContentPageModel::query(db.into()).where_col(ContentPageDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
     pub async fn upsert_title<'a>(&self, db: DbConn<'a>, input: Option<localized::LocalizedInput>) -> Result<()> {
         let Some(input) = input else { return Ok(()); };
@@ -132,44 +112,9 @@ impl ContentPageView {
     }
 }
 
-pub trait ContentPageViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&ContentPageView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&ContentPageView) -> K) -> std::collections::HashMap<K, ContentPageView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&ContentPageView) -> K) -> std::collections::HashMap<K, Vec<ContentPageView>> where K: Eq + std::hash::Hash;
-}
-
-impl ContentPageViewsExt for Vec<ContentPageView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&ContentPageView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&ContentPageView) -> K) -> std::collections::HashMap<K, ContentPageView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&ContentPageView) -> K) -> std::collections::HashMap<K, Vec<ContentPageView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct ContentPageJson {
-    pub id: i64,
-    pub tag: String,
-    pub is_system: ContentPageSystemFlag,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub deleted_at: Option<time::OffsetDateTime>,
-    pub is_system_explained: String,
-    pub title: Option<String>,
-    pub title_translations: Option<localized::LocalizedText>,
-    pub content: Option<String>,
-    pub content_translations: Option<localized::LocalizedText>,
-    pub cover: Option<String>,
-    pub cover_translations: Option<localized::LocalizedText>,
-}
-
-fn hydrate_view(row: ContentPageRow, loc: &LocalizedMap, _base_url: Option<&str>) -> ContentPageView {
+fn hydrate_record(row: ContentPageRow, loc: &LocalizedMap, _base_url: Option<&str>) -> ContentPageRecord {
     let locale = current_locale();
-    let mut view = ContentPageView {
+    let mut record = ContentPageRecord {
         id: row.id,
         tag: row.tag,
         is_system: row.is_system,
@@ -184,46 +129,49 @@ fn hydrate_view(row: ContentPageRow, loc: &LocalizedMap, _base_url: Option<&str>
         cover: None,
         cover_translations: None,
     };
-    let ml_title = loc.get_localized_text("title", view.id);
+    let ml_title = loc.get_localized_text("title", record.id);
     if let Some(ref ml) = ml_title {
-        view.title = Some(ml.get(locale).to_string());
+        record.title = Some(ml.get(locale).to_string());
     }
-    view.title_translations = ml_title;
-    let ml_content = loc.get_localized_text("content", view.id);
+    record.title_translations = ml_title;
+    let ml_content = loc.get_localized_text("content", record.id);
     if let Some(ref ml) = ml_content {
-        view.content = Some(ml.get(locale).to_string());
+        record.content = Some(ml.get(locale).to_string());
     }
-    view.content_translations = ml_content;
-    let ml_cover = loc.get_localized_text("cover", view.id);
+    record.content_translations = ml_content;
+    let ml_cover = loc.get_localized_text("cover", record.id);
     if let Some(ref ml) = ml_cover {
-        view.cover = Some(ml.get(locale).to_string());
+        record.cover = Some(ml.get(locale).to_string());
     }
-    view.cover_translations = ml_cover;
-    view
+    record.cover_translations = ml_cover;
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct ContentPageWithRelations {
-    #[serde(flatten)]
-    pub row: ContentPageView,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ContentPageCol;
+impl ContentPageCol {
+    pub const ID: Column<ContentPageModel, i64> = Column::new("id");
+    pub const TAG: Column<ContentPageModel, String> = Column::new("tag");
+    pub const IS_SYSTEM: Column<ContentPageModel, ContentPageSystemFlag> = Column::new("is_system");
+    pub const CREATED_AT: Column<ContentPageModel, time::OffsetDateTime> = Column::new("created_at");
+    pub const UPDATED_AT: Column<ContentPageModel, time::OffsetDateTime> = Column::new("updated_at");
+    pub const DELETED_AT: Column<ContentPageModel, Option<time::OffsetDateTime>> = Column::new("deleted_at");
 }
 
-impl ContentPageWithRelations {
-    pub fn into_row(self) -> ContentPageView { self.row }
-}
-
-impl std::ops::Deref for ContentPageWithRelations {
-    type Target = ContentPageView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for ContentPageWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_content_page_db_col(sql: &str) -> Option<ContentPageDbCol> {
+    match sql {
+        "id" => Some(ContentPageDbCol::Id),
+        "tag" => Some(ContentPageDbCol::Tag),
+        "is_system" => Some(ContentPageDbCol::IsSystem),
+        "created_at" => Some(ContentPageDbCol::CreatedAt),
+        "updated_at" => Some(ContentPageDbCol::UpdatedAt),
+        "deleted_at" => Some(ContentPageDbCol::DeletedAt),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum ContentPageCol {
+pub enum ContentPageDbCol {
     Id,
     Tag,
     IsSystem,
@@ -232,48 +180,25 @@ pub enum ContentPageCol {
     DeletedAt,
 }
 
-impl ContentPageCol {
-    pub const fn all() -> &'static [ContentPageCol] {
-        &[ContentPageCol::Id, ContentPageCol::Tag, ContentPageCol::IsSystem, ContentPageCol::CreatedAt, ContentPageCol::UpdatedAt, ContentPageCol::DeletedAt]
+impl ContentPageDbCol {
+    pub const fn all() -> &'static [ContentPageDbCol] {
+        &[ContentPageDbCol::Id, ContentPageDbCol::Tag, ContentPageDbCol::IsSystem, ContentPageDbCol::CreatedAt, ContentPageDbCol::UpdatedAt, ContentPageDbCol::DeletedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            ContentPageCol::Id => "id",
-            ContentPageCol::Tag => "tag",
-            ContentPageCol::IsSystem => "is_system",
-            ContentPageCol::CreatedAt => "created_at",
-            ContentPageCol::UpdatedAt => "updated_at",
-            ContentPageCol::DeletedAt => "deleted_at",
+            ContentPageDbCol::Id => "id",
+            ContentPageDbCol::Tag => "tag",
+            ContentPageDbCol::IsSystem => "is_system",
+            ContentPageDbCol::CreatedAt => "created_at",
+            ContentPageDbCol::UpdatedAt => "updated_at",
+            ContentPageDbCol::DeletedAt => "deleted_at",
         }
     }
 }
 
-pub struct ContentPage<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-}
-
-impl<'db> ContentPage<'db> {
-    pub const TABLE: &'static str = "content_pages";
-    pub const MODEL_KEY: &'static str = "content_page";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> ContentPageQuery<'db> { ContentPageQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> ContentPageInsert<'db> { ContentPageInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> ContentPageUpdate<'db> { ContentPageUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<ContentPageWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-    pub async fn restore(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).restore().await
-    }
-}
 
 #[derive(Clone)]
-pub struct ContentPageQuery<'db> {
+pub struct ContentPageQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -298,86 +223,85 @@ pub struct ContentPageQuery<'db> {
 
 
 
-impl<'db> ContentPageQuery<'db> {
+impl<'db> ContentPageQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, tag, is_system, created_at, updated_at, deleted_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![], with_deleted: false, only_deleted: false }
     }
-    pub fn unsafe_sql(self) -> ContentPageUnsafeQuery<'db> { ContentPageUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_tag(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::Tag.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::Tag.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_tag_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::Tag.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::Tag.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_is_system(mut self, op: Op, val: ContentPageSystemFlag) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::IsSystem.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::IsSystem.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_is_system_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::IsSystem.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::IsSystem.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(ContentPageCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: ContentPageCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(ContentPageDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: ContentPageDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -396,7 +320,7 @@ impl<'db> ContentPageQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: ContentPageCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: ContentPageDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -411,7 +335,7 @@ impl<'db> ContentPageQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: ContentPageCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: ContentPageDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -423,7 +347,7 @@ impl<'db> ContentPageQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: ContentPageCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: ContentPageDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -431,15 +355,15 @@ impl<'db> ContentPageQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: ContentPageCol) -> Self {
+    pub fn where_null(mut self, col: ContentPageDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: ContentPageCol) -> Self {
+    pub fn where_not_null(mut self, col: ContentPageDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: ContentPageCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: ContentPageDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -493,7 +417,7 @@ impl<'db> ContentPageQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[ContentPageCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[ContentPageDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, tag, is_system, created_at, updated_at, deleted_at".to_string());
         } else {
@@ -505,7 +429,7 @@ impl<'db> ContentPageQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[ContentPageCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[ContentPageDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -586,26 +510,26 @@ impl<'db> ContentPageQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: ContentPageCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: ContentPageDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: ContentPageCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: ContentPageDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: ContentPageCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: ContentPageDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[ContentPageCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[ContentPageDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[ContentPageCol]) -> Self {
+    pub fn select(mut self, cols: &[ContentPageDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -653,7 +577,7 @@ impl<'db> ContentPageQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[ContentPageCol]) -> Self {
+    pub fn group_by(mut self, cols: &[ContentPageDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -730,14 +654,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<ContentPageWithRelations>> {
+    pub async fn get(self) -> Result<Vec<ContentPageRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , with_deleted, only_deleted, .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageDbCol::DeletedAt.as_sql()));
             }
         }
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -787,66 +711,66 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = localized::load_content_page_localized(db.clone(), &ids).await?;
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
-            out_vec.push(hydrate_view(r, &localized, base_url.as_deref()));
+            out_vec.push(hydrate_record(r, &localized, base_url.as_deref()));
         }
-        let out_vec: Vec<ContentPageWithRelations> = out_vec.into_iter().map(|v| ContentPageWithRelations { row: v }).collect();
+        let out_vec: Vec<ContentPageRecord> = out_vec;
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<ContentPageWithRelations>> {
+    pub async fn first(self) -> Result<Option<ContentPageRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<ContentPageWithRelations> {
+    pub async fn first_or_fail(self) -> Result<ContentPageRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("content_pages: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<ContentPageWithRelations>> {
+    pub async fn find(self, id: i64) -> Result<Option<ContentPageRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<ContentPageWithRelations> {
+    pub async fn find_or_fail(self, id: i64) -> Result<ContentPageRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("content_pages: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(ContentPageInsert<'db>) -> ContentPageInsert<'db>) -> Result<ContentPageWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(ContentPageCreateInner<'db>) -> ContentPageCreateInner<'db>) -> Result<ContentPageRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(ContentPageInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(ContentPageCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        ContentPage::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        ContentPageQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(ContentPageUpdate<'db>) -> ContentPageUpdate<'db>,
-        on_create: impl FnOnce(ContentPageInsert<'db>) -> ContentPageInsert<'db>,
-    ) -> Result<ContentPageWithRelations> {
+        on_update: impl FnOnce(ContentPagePatchInner<'db>) -> ContentPagePatchInner<'db>,
+        on_create: impl FnOnce(ContentPageCreateInner<'db>) -> ContentPageCreateInner<'db>,
+    ) -> Result<ContentPageRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = ContentPageUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = ContentPagePatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return ContentPage::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return ContentPageQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(ContentPageInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(ContentPageCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        ContentPage::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        ContentPageQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: ContentPageCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: ContentPageDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
         if HAS_SOFT_DELETE && !self.with_deleted {
-            where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
+            where_sql.push(format!("{} IS NULL", ContentPageDbCol::DeletedAt.as_sql()));
         }
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let sql = format!("UPDATE content_pages SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
@@ -859,7 +783,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: ContentPageCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: ContentPageDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -868,9 +792,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
@@ -897,9 +821,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
@@ -929,13 +853,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<ContentPageWithRelations>) -> Fut,
+        F: FnMut(Vec<ContentPageRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = ContentPageQuery::new(db.clone(), self.base_url.clone());
+            let mut query = ContentPageQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -949,11 +873,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(ContentPageCol::CreatedAt, OrderDir::Desc)
+        self.order_by(ContentPageDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(ContentPageCol::CreatedAt, OrderDir::Asc)
+        self.order_by(ContentPageDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -964,7 +888,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<ContentPageWithRelations> {
+    pub async fn sole(self) -> Result<ContentPageRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -983,7 +907,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&ContentPageWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&ContentPageRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -991,14 +915,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: ContentPageCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: ContentPageDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
@@ -1019,14 +943,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: ContentPageCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: ContentPageDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
@@ -1047,14 +971,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: ContentPageCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: ContentPageDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
@@ -1075,14 +999,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: ContentPageCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: ContentPageDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "content_pages".to_string());
@@ -1103,16 +1027,16 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<ContentPageWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<ContentPageRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , with_deleted, only_deleted, .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageDbCol::DeletedAt.as_sql()));
             }
         }
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -1161,9 +1085,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = localized::load_content_page_localized(db, &ids).await?;
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
-            data.push(hydrate_view(r, &localized, base_url.as_deref()));
+            data.push(hydrate_record(r, &localized, base_url.as_deref()));
         }
-        let data: Vec<ContentPageWithRelations> = data.into_iter().map(|v| ContentPageWithRelations { row: v }).collect();
+        let data: Vec<ContentPageRecord> = data;
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn to_sql(&self) -> (String, Vec<BindValue>) {
@@ -1186,9 +1110,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let only_deleted = self.only_deleted;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageDbCol::DeletedAt.as_sql()));
             }
         }
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -1235,9 +1159,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageDbCol::DeletedAt.as_sql()));
             }
         }
         (where_sql, binds)
@@ -1271,12 +1195,12 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         if HAS_SOFT_DELETE {
             let mut where_sql = where_sql;
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", ContentPageDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", ContentPageCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", ContentPageDbCol::DeletedAt.as_sql()));
             }
             let idx = binds.len() + 1;
-            let mut sql = format!("UPDATE content_pages SET {} = ${}", ContentPageCol::DeletedAt.as_sql(), idx);
+            let mut sql = format!("UPDATE content_pages SET {} = ${}", ContentPageDbCol::DeletedAt.as_sql(), idx);
             if !where_sql.is_empty() {
                 sql.push_str(" WHERE ");
                 sql.push_str(&where_sql.join(" AND "));
@@ -1340,9 +1264,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         if where_sql.is_empty() { anyhow::bail!("restore(): no conditions set"); }
         let mut where_sql = where_sql;
         if !with_deleted && !only_deleted {
-            where_sql.push(format!("{} IS NOT NULL", ContentPageCol::DeletedAt.as_sql()));
+            where_sql.push(format!("{} IS NOT NULL", ContentPageDbCol::DeletedAt.as_sql()));
         }
-        let mut sql = format!("UPDATE content_pages SET {} = NULL", ContentPageCol::DeletedAt.as_sql());
+        let mut sql = format!("UPDATE content_pages SET {} = NULL", ContentPageDbCol::DeletedAt.as_sql());
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&where_sql.join(" AND "));
@@ -1359,39 +1283,18 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct ContentPageUnsafeQuery<'db> {
-    inner: ContentPageQuery<'db>,
-}
 
-impl<'db> ContentPageUnsafeQuery<'db> {
-    fn new(inner: ContentPageQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> ContentPageQuery<'db> { self.inner }
-}
-
-
-pub struct ContentPageInsert<'db> {
+pub struct ContentPageCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<ContentPageCol>,
+    cols: Vec<ContentPageDbCol>,
     binds: Vec<BindValue>,
     translations: HashMap<&'static str, HashMap<String, String>>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<ContentPageCol>,
+    conflict_cols: Vec<ContentPageDbCol>,
 }
 
-impl<'db> ContentPageInsert<'db> {
+impl<'db> ContentPageCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1406,32 +1309,32 @@ impl<'db> ContentPageInsert<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(ContentPageCol::Id);
+        self.cols.push(ContentPageDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_tag(mut self, val: String) -> Self {
-        self.cols.push(ContentPageCol::Tag);
+        self.cols.push(ContentPageDbCol::Tag);
         self.binds.push(val.into());
         self
     }
     pub fn set_is_system(mut self, val: ContentPageSystemFlag) -> Self {
-        self.cols.push(ContentPageCol::IsSystem);
+        self.cols.push(ContentPageDbCol::IsSystem);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(ContentPageCol::CreatedAt);
+        self.cols.push(ContentPageDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(ContentPageCol::UpdatedAt);
+        self.cols.push(ContentPageDbCol::UpdatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.cols.push(ContentPageCol::DeletedAt);
+        self.cols.push(ContentPageDbCol::DeletedAt);
         self.binds.push(val.into());
         self
     }
@@ -1489,35 +1392,35 @@ pub fn set_id(mut self, val: i64) -> Self {
         }
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[ContentPageCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[ContentPageDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[ContentPageCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[ContentPageDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<ContentPageCreateInput> {
-        let mut input = ContentPageCreateInput::default();
+    fn to_create_input(&self) -> Result<ContentPageCreate> {
+        let mut input = ContentPageCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                ContentPageCol::Id => {
+                ContentPageDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                ContentPageCol::Tag => {
+                ContentPageDbCol::Tag => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.tag = FieldInput::Set(value);
                 }
-                ContentPageCol::IsSystem => {
+                ContentPageDbCol::IsSystem => {
                     let value = match bind {
                 BindValue::String(value) => ContentPageSystemFlag::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ContentPageSystemFlag'", value))?,
@@ -1530,21 +1433,21 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.is_system = FieldInput::Set(value);
                 }
-                ContentPageCol::CreatedAt => {
+                ContentPageDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                ContentPageCol::UpdatedAt => {
+                ContentPageDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.updated_at = FieldInput::Set(value);
                 }
-                ContentPageCol::DeletedAt => {
+                ContentPageDbCol::DeletedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
@@ -1557,7 +1460,7 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
 
 
-pub async fn save(self) -> Result<ContentPageView> {
+pub async fn save(self) -> Result<ContentPageRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -1575,7 +1478,7 @@ pub async fn save(self) -> Result<ContentPageView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1594,10 +1497,10 @@ pub async fn save(self) -> Result<ContentPageView> {
                         Err(err) => log_observer_error("created", "content_page", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "content_page", table: "content_pages", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -1609,26 +1512,26 @@ pub async fn save(self) -> Result<ContentPageView> {
                         Err(err) => log_observer_error("created", "content_page", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(ContentPageView, ContentPageRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(ContentPageRecord, ContentPageRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, ContentPageCol::Id)) {
-            cols.push(ContentPageCol::Id);
+        if !cols.iter().any(|c| matches!(c, ContentPageDbCol::Id)) {
+            cols.push(ContentPageDbCol::Id);
             binds.push(generate_snowflake_i64().into());
         }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, ContentPageCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, ContentPageDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(ContentPageCol::CreatedAt);
+            cols.push(ContentPageDbCol::CreatedAt);
             binds.push(now.into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, ContentPageCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, ContentPageDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(ContentPageCol::UpdatedAt);
+            cols.push(ContentPageDbCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1692,21 +1595,21 @@ pub async fn save(self) -> Result<ContentPageView> {
             }
         }
         let localized = localized::load_content_page_localized(db, &[row.id]).await?;
-        let view = hydrate_view(row.clone(), &localized, self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &localized, self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct ContentPageUpdate<'db> {
+pub struct ContentPagePatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(ContentPageCol, BindValue, SetMode)>,
+    sets: Vec<(ContentPageDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
     translations: HashMap<&'static str, HashMap<String, String>>,
 }
 
-impl<'db> ContentPageUpdate<'db> {
+impl<'db> ContentPagePatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1717,39 +1620,38 @@ impl<'db> ContentPageUpdate<'db> {
             translations: HashMap::new(),
         }
     }
-    pub fn unsafe_sql(self) -> ContentPageUnsafeUpdate<'db> { ContentPageUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((ContentPageCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((ContentPageDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((ContentPageCol::Id, val.into(), SetMode::Increment));
+        self.sets.push((ContentPageDbCol::Id, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((ContentPageCol::Id, val.into(), SetMode::Decrement));
+        self.sets.push((ContentPageDbCol::Id, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_tag(mut self, val: String) -> Self {
-        self.sets.push((ContentPageCol::Tag, val.into(), SetMode::Assign));
+        self.sets.push((ContentPageDbCol::Tag, val.into(), SetMode::Assign));
         self
     }
     pub fn set_is_system(mut self, val: ContentPageSystemFlag) -> Self {
-        self.sets.push((ContentPageCol::IsSystem, val.into(), SetMode::Assign));
+        self.sets.push((ContentPageDbCol::IsSystem, val.into(), SetMode::Assign));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((ContentPageCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((ContentPageDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((ContentPageCol::UpdatedAt, val.into(), SetMode::Assign));
+        self.sets.push((ContentPageDbCol::UpdatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((ContentPageCol::DeletedAt, val.into(), SetMode::Assign));
+        self.sets.push((ContentPageDbCol::DeletedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_title_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
@@ -1808,41 +1710,41 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_tag(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::Tag.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::Tag.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_is_system(mut self, op: Op, val: ContentPageSystemFlag) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::IsSystem.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::IsSystem.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ContentPageCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ContentPageDbCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: ContentPageCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: ContentPageDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1861,11 +1763,11 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<ContentPageUpdateChanges> {
-        let mut changes = ContentPageUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<ContentPageChanges> {
+        let mut changes = ContentPageChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                ContentPageCol::Id => {
+                ContentPageDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1876,7 +1778,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                ContentPageCol::Tag => {
+                ContentPageDbCol::Tag => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1887,7 +1789,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                ContentPageCol::IsSystem => {
+                ContentPageDbCol::IsSystem => {
                     let value = match bind {
                 BindValue::String(value) => ContentPageSystemFlag::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ContentPageSystemFlag'", value))?,
@@ -1904,7 +1806,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                ContentPageCol::CreatedAt => {
+                ContentPageDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1915,7 +1817,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                ContentPageCol::UpdatedAt => {
+                ContentPageDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1926,7 +1828,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                ContentPageCol::DeletedAt => {
+                ContentPageDbCol::DeletedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
@@ -1970,14 +1872,14 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<ContentPageUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<ContentPageChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, ContentPageCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, ContentPageDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(ContentPageCol::UpdatedAt);
+            cols.push(ContentPageDbCol::UpdatedAt);
             set_binds.push(now.into());
             set_modes.push(SetMode::Assign);
         }
@@ -2103,27 +2005,17 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct ContentPageUnsafeUpdate<'db> {
-    inner: ContentPageUpdate<'db>,
-}
-
-impl<'db> ContentPageUnsafeUpdate<'db> {
-    fn new(inner: ContentPageUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> ContentPageUpdate<'db> { self.inner }
-}
 
 pub struct ContentPageTableAdapter;
 impl ContentPageTableAdapter {
-    fn parse_col(name: &str) -> Option<ContentPageCol> {
+    fn parse_col(name: &str) -> Option<ContentPageDbCol> {
         match name {
-            "id" => Some(ContentPageCol::Id),
-            "tag" => Some(ContentPageCol::Tag),
-            "is_system" => Some(ContentPageCol::IsSystem),
-            "created_at" => Some(ContentPageCol::CreatedAt),
-            "updated_at" => Some(ContentPageCol::UpdatedAt),
-            "deleted_at" => Some(ContentPageCol::DeletedAt),
+            "id" => Some(ContentPageDbCol::Id),
+            "tag" => Some(ContentPageDbCol::Tag),
+            "is_system" => Some(ContentPageDbCol::IsSystem),
+            "created_at" => Some(ContentPageDbCol::CreatedAt),
+            "updated_at" => Some(ContentPageDbCol::UpdatedAt),
+            "deleted_at" => Some(ContentPageDbCol::DeletedAt),
             _ => None,
         }
     }
@@ -2140,9 +2032,9 @@ impl ContentPageTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<ContentPageCol> {
+    fn parse_like_col(name: &str) -> Option<ContentPageDbCol> {
         match name {
-            "tag" => Some(ContentPageCol::Tag),
+            "tag" => Some(ContentPageDbCol::Tag),
             _ => None,
         }
     }
@@ -2184,8 +2076,8 @@ impl ContentPageTableAdapter {
     }
 }
 impl GeneratedTableAdapter for ContentPageTableAdapter {
-    type Query<'db> = ContentPageQuery<'db>;
-    type Row = ContentPageWithRelations;
+    type Query<'db> = Query<'db, ContentPageModel>;
+    type Row = ContentPageRecord;
     fn model_key(&self) -> &'static str { "ContentPage" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "tag", "is_system", "created_at", "updated_at", "deleted_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at", "deleted_at"] }
@@ -2222,7 +2114,7 @@ impl GeneratedTableAdapter for ContentPageTableAdapter {
             "f-locale-like-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: ContentPageQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<ContentPageQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, ContentPageModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, ContentPageModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -2259,14 +2151,14 @@ impl GeneratedTableAdapter for ContentPageTableAdapter {
                 let Some(field) = Self::parse_locale_field(column.as_str()) else { return Ok(None); };
                 let locale = core_i18n::current_locale().to_string();
                 let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = content_pages.id AND l.field = ? AND l.locale = ? AND l.value = ?)".to_string();
-                Ok(Some(query.where_exists(clause, vec![localized::CONTENT_PAGE_OWNER_TYPE.to_string(), field.to_string(), locale, trimmed.to_string()])))
+                Ok(Some(query.where_exists_raw(clause, vec![localized::CONTENT_PAGE_OWNER_TYPE.to_string(), field.to_string(), locale, trimmed.to_string()])))
             }
             ParsedFilter::LocaleLike { column } => {
                 let Some(field) = Self::parse_locale_field(column.as_str()) else { return Ok(None); };
                 let locale = core_i18n::current_locale().to_string();
                 let pattern = format!("%{}%", trimmed);
                 let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = content_pages.id AND l.field = ? AND l.locale = ? AND l.value LIKE ?)".to_string();
-                Ok(Some(query.where_exists(clause, vec![localized::CONTENT_PAGE_OWNER_TYPE.to_string(), field.to_string(), locale, pattern])))
+                Ok(Some(query.where_exists_raw(clause, vec![localized::CONTENT_PAGE_OWNER_TYPE.to_string(), field.to_string(), locale, pattern])))
             }
             ParsedFilter::LikeAny { columns } => {
                 let mut applied = false;
@@ -2323,26 +2215,26 @@ impl GeneratedTableAdapter for ContentPageTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: ContentPageQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<ContentPageQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, ContentPageModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, ContentPageModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(ContentPageCol::Id, dir),
-            "tag" => query.order_by(ContentPageCol::Tag, dir),
-            "is_system" => query.order_by(ContentPageCol::IsSystem, dir),
-            "created_at" => query.order_by(ContentPageCol::CreatedAt, dir),
-            "updated_at" => query.order_by(ContentPageCol::UpdatedAt, dir),
-            "deleted_at" => query.order_by(ContentPageCol::DeletedAt, dir),
+            "id" => query.order_by(ContentPageDbCol::Id, dir),
+            "tag" => query.order_by(ContentPageDbCol::Tag, dir),
+            "is_system" => query.order_by(ContentPageDbCol::IsSystem, dir),
+            "created_at" => query.order_by(ContentPageDbCol::CreatedAt, dir),
+            "updated_at" => query.order_by(ContentPageDbCol::UpdatedAt, dir),
+            "deleted_at" => query.order_by(ContentPageDbCol::DeletedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: ContentPageQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<ContentPageQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, ContentPageModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, ContentPageModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &ContentPageWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &ContentPageRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "tag" => Some(row.tag.clone()),
@@ -2352,10 +2244,10 @@ impl GeneratedTableAdapter for ContentPageTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: ContentPageQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, ContentPageModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: ContentPageQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<ContentPageWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, ContentPageModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<ContentPageRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -2381,13 +2273,13 @@ impl Default for ContentPageDataTableConfig {
     }
 }
 pub trait ContentPageDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: ContentPageQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> ContentPageQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, ContentPageModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, ContentPageModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: ContentPageQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<ContentPageQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: ContentPageQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<ContentPageQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut ContentPageWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: ContentPageWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, ContentPageModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, ContentPageModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, ContentPageModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, ContentPageModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut ContentPageRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: ContentPageRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         if let Some(id_value) = record.get("id").cloned() {
             let id_text = match id_value {
@@ -2399,10 +2291,10 @@ pub trait ContentPageDataTableHooks: Send + Sync + 'static {
         }
         Ok(record)
     }
-    fn row_to_record(&self, row: ContentPageWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: ContentPageRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: ContentPageQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, ContentPageModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct ContentPageDefaultDataTableHooks;
@@ -2440,15 +2332,15 @@ impl<H: ContentPageDataTableHooks> ContentPageDataTable<H> {
 impl<H: ContentPageDataTableHooks> AutoDataTable for ContentPageDataTable<H> {
     type Adapter = ContentPageTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> ContentPageQuery<'db> {
-        self.hooks.scope(ContentPage::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, ContentPageModel> {
+        self.hooks.scope(ContentPageModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: ContentPageQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<ContentPageQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: ContentPageQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<ContentPageQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut ContentPageWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: ContentPageWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: ContentPageQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, ContentPageModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, ContentPageModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, ContentPageModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, ContentPageModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut ContentPageRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: ContentPageRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, ContentPageModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -2458,10 +2350,432 @@ impl<H: ContentPageDataTableHooks> AutoDataTable for ContentPageDataTable<H> {
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for ContentPageView {
+impl ActiveRecord for ContentPageRecord {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        ContentPage::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        ContentPageModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct ContentPageModel;
+impl ContentPageModel {
+    pub const TABLE: &'static str = "content_pages";
+    pub const MODEL_KEY: &'static str = "content_page";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, ContentPageModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, ContentPageModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, ContentPageModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, ContentPageModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, ContentPageModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, ContentPageModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<ContentPageRecord>> {
+        ContentPageQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for ContentPageModel {
+    type Pk = i64;
+    type Record = ContentPageRecord;
+    type Create = ContentPageCreate;
+    type Changes = ContentPageChanges;
+    const TABLE: &'static str = ContentPageModel::TABLE;
+    const MODEL_KEY: &'static str = ContentPageModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for ContentPageModel {
+    type InnerQuery<'db> = ContentPageQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        ContentPageQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for ContentPageModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for ContentPageModel {
+    type InnerCreate<'db> = ContentPageCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        ContentPageCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            ContentPageQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("content_pages: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<ContentPageModel> for ContentPageDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <ContentPageModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<ContentPageModel>>::Value) -> anyhow::Result<<ContentPageModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            ContentPageDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ContentPageDbCol::Tag => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ContentPageDbCol::IsSystem => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ContentPageDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ContentPageDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ContentPageDbCol::DeletedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<ContentPageModel> for Column<ContentPageModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <ContentPageModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<ContentPageModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_content_page_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            ContentPageDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ContentPageDbCol::Tag => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ContentPageDbCol::IsSystem => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ContentPageDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ContentPageDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ContentPageDbCol::DeletedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<ContentPageModel> for ContentPageDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <ContentPageModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <ContentPageModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <ContentPageModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <ContentPageModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<ContentPageModel> for Column<ContentPageModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <ContentPageModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <ContentPageModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<ContentPageDbCol> = fields.iter().map(|field| resolve_content_page_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <ContentPageModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <ContentPageModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<ContentPageDbCol> = fields.iter().map(|field| resolve_content_page_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for ContentPageModel {
+    type InnerQuery<'db> = ContentPageQueryInner<'db>;
+    type InnerPatch<'db> = ContentPagePatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        ContentPagePatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(ContentPageDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = ContentPagePatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", ContentPageDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM content_pages", ContentPageDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = ContentPageQueryInner::new(db, base_url);
+            query = query.with_deleted();
+            query.where_in(ContentPageDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<ContentPageModel> for ContentPageDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <ContentPageModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ContentPageModel>>::Value) -> anyhow::Result<<ContentPageModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            ContentPageDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ContentPageDbCol::Tag => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ContentPageDbCol::IsSystem => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ContentPageDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ContentPageDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ContentPageDbCol::DeletedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<ContentPageModel> for Column<ContentPageModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <ContentPageModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<ContentPageModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_content_page_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            ContentPageDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ContentPageDbCol::Tag => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ContentPageDbCol::IsSystem => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ContentPageDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ContentPageDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ContentPageDbCol::DeletedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<ContentPageModel> for ContentPageDbCol {
+    fn increment<'db>(field: Self, mut builder: <ContentPageModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ContentPageModel>>::Value) -> anyhow::Result<<ContentPageModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            ContentPageDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <ContentPageModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ContentPageModel>>::Value) -> anyhow::Result<<ContentPageModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            ContentPageDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<ContentPageModel> for Column<ContentPageModel, i64> {
+    fn increment<'db>(field: Self, mut builder: <ContentPageModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ContentPageModel>>::Value) -> anyhow::Result<<ContentPageModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_content_page_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            ContentPageDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <ContentPageModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ContentPageModel>>::Value) -> anyhow::Result<<ContentPageModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_content_page_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            ContentPageDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<ContentPageModel> for ContentPageDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<ContentPageModel>>::Value) -> <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<ContentPageModel>>::Value) -> <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<ContentPageModel>>::Value]) -> <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<ContentPageModel> for Column<ContentPageModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_content_page_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_content_page_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_content_page_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_content_page_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_content_page_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ContentPageModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_content_page_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
 

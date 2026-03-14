@@ -6,7 +6,7 @@ use core_web::{
     openapi::{aide::axum::routing::get_with, ApiRouter},
     response::ApiResponse,
 };
-use generated::{guards::UserGuard, models::User};
+use generated::{guards::UserGuard, models::UserModel};
 
 use crate::{
     contracts::api::v1::user::team::{DownlineNode, DownlinesOutput, DownlinesQuery},
@@ -34,11 +34,9 @@ async fn downlines(
         None => auth.user.id,
     };
 
-    let parent = User::new(core_db::common::sql::DbConn::pool(&state.db), None)
-        .find(parent_id)
+    let parent = UserModel::find(core_db::common::sql::DbConn::pool(&state.db), parent_id)
         .await
         .map_err(AppError::from)?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("User not found")))?;
 
     let rows = workflow::list_downlines(&state, parent_id).await?;

@@ -33,7 +33,7 @@ export function GeneratedApi() {
                     </li>
                     <li>
                         <strong>Manual extension surface:</strong> app code adds <code>XxxView</code> and <code>XxxWithRelations</code>
-                        methods in <code>app/models/*.rs</code> via <code>#[rf_view_impl]</code> and <code>#[rf_with_relations_impl]</code>.
+                        methods in <code>app/models/*.rs</code> via <code>#[rf_record_impl]</code> and <code>#[rf_model_impl]</code>.
                     </li>
                 </ol>
 

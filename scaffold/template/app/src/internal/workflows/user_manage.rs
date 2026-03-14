@@ -1,9 +1,12 @@
-use core_db::common::sql::{generate_snowflake_i64, DbConn, Op};
+use core_db::common::{
+    auth::hash::hash_password,
+    sql::{generate_snowflake_i64, DbConn, Op},
+};
 use core_i18n::t;
 use core_web::{error::AppError, Patch};
 use generated::{
     guards::user_guard,
-    models::{User, UserBanStatus, UserQuery, UserView},
+    models::{UserBanStatus, UserCol, UserModel, UserRecord},
 };
 
 use crate::{
@@ -11,69 +14,84 @@ use crate::{
     internal::api::state::AppApiState,
 };
 
-pub async fn detail(state: &AppApiState, id: i64) -> Result<UserView, AppError> {
-    User::new(DbConn::pool(&state.db), None)
-        .find(id)
+pub async fn detail(state: &AppApiState, id: i64) -> Result<UserRecord, AppError> {
+    UserModel::find(DbConn::pool(&state.db), id)
         .await
         .map_err(AppError::from)?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("User not found")))
 }
 
-pub async fn create(state: &AppApiState, req: CreateUserInput) -> Result<UserView, AppError> {
+pub async fn create(state: &AppApiState, req: CreateUserInput) -> Result<UserRecord, AppError> {
     let username = req.username.trim().to_ascii_lowercase();
     let uuid = generate_unique_uuid(state).await?;
+    let password_hash = hash_password(&req.password).map_err(AppError::from)?;
 
-    let mut insert = User::new(DbConn::pool(&state.db), None)
-        .insert()
-        .set_id(generate_snowflake_i64())
-        .set_uuid(uuid)
-        .set_username(username)
-        .set_ban(UserBanStatus::No);
+    let mut insert = UserModel::create(DbConn::pool(&state.db))
+        .set(UserCol::ID, generate_snowflake_i64())
+        .map_err(AppError::from)?
+        .set(UserCol::UUID, uuid)
+        .map_err(AppError::from)?
+        .set(UserCol::USERNAME, username)
+        .map_err(AppError::from)?
+        .set(UserCol::BAN, UserBanStatus::No)
+        .map_err(AppError::from)?
+        .set(UserCol::PASSWORD, password_hash)
+        .map_err(AppError::from)?;
 
     if let Some(ref introducer_username) = req.introducer_username {
-        let introducer = UserQuery::new(DbConn::pool(&state.db), None)
-            .where_username(Op::Eq, introducer_username.clone())
+        let introducer = UserModel::query(DbConn::pool(&state.db))
+            .where_col(UserCol::USERNAME, Op::Eq, introducer_username.clone())
             .first()
             .await
             .map_err(AppError::from)?
-            .map(|r| r.into_row())
             .ok_or_else(|| AppError::NotFound(t("Introducer not found")))?;
-        insert = insert.set_introducer_user_id(Some(introducer.id));
+        insert = insert
+            .set(UserCol::INTRODUCER_USER_ID, Some(introducer.id))
+            .map_err(AppError::from)?;
     }
 
     if let Some(name) = &req.name {
-        insert = insert.set_name(Some(name.clone()));
+        insert = insert
+            .set(UserCol::NAME, Some(name.clone()))
+            .map_err(AppError::from)?;
     }
     if let Some(email) = &req.email {
-        insert = insert.set_email(Some(email.clone()));
+        insert = insert
+            .set(UserCol::EMAIL, Some(email.clone()))
+            .map_err(AppError::from)?;
     }
     if let Some(country_iso2) = &req.country_iso2 {
-        insert = insert.set_country_iso2(Some(country_iso2.clone()));
+        insert = insert
+            .set(UserCol::COUNTRY_ISO2, Some(country_iso2.clone()))
+            .map_err(AppError::from)?;
     }
     if let Some(contact_number) = &req.contact_number {
-        insert = insert.set_contact_number(Some(contact_number.clone()));
+        insert = insert
+            .set(UserCol::CONTACT_NUMBER, Some(contact_number.clone()))
+            .map_err(AppError::from)?;
     }
 
-    let insert = insert.set_password(&req.password).map_err(AppError::from)?;
-    insert.save().await.map_err(AppError::from)
+    let created = insert.save().await.map_err(AppError::from)?;
+    Ok(created)
 }
 
 pub async fn update(
     state: &AppApiState,
     id: i64,
     req: UpdateUserInput,
-) -> Result<UserView, AppError> {
+) -> Result<UserRecord, AppError> {
     let existing = detail(state, id).await?;
-    let mut update = User::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_id(Op::Eq, id);
+    let mut update = Ok(
+        UserModel::query(DbConn::pool(&state.db))
+            .where_col(UserCol::ID, Op::Eq, id)
+            .patch(),
+    );
     let mut touched = false;
 
     if let Some(username) = req.username {
         let username = username.trim().to_ascii_lowercase();
         if username != existing.username {
-            update = update.set_username(username);
+            update = update.and_then(|patch| patch.assign(UserCol::USERNAME, username));
             touched = true;
         }
     }
@@ -82,13 +100,13 @@ pub async fn update(
         Patch::Missing => {}
         Patch::Null => {
             if existing.name.is_some() {
-                update = update.set_name(None);
+                update = update.and_then(|patch| patch.assign(UserCol::NAME, None::<String>));
                 touched = true;
             }
         }
         Patch::Value(name) => {
             if existing.name.as_deref() != Some(&name) {
-                update = update.set_name(Some(name));
+                update = update.and_then(|patch| patch.assign(UserCol::NAME, Some(name)));
                 touched = true;
             }
         }
@@ -98,13 +116,13 @@ pub async fn update(
         Patch::Missing => {}
         Patch::Null => {
             if existing.email.is_some() {
-                update = update.set_email(None);
+                update = update.and_then(|patch| patch.assign(UserCol::EMAIL, None::<String>));
                 touched = true;
             }
         }
         Patch::Value(email) => {
             if existing.email.as_deref() != Some(&email) {
-                update = update.set_email(Some(email));
+                update = update.and_then(|patch| patch.assign(UserCol::EMAIL, Some(email)));
                 touched = true;
             }
         }
@@ -114,13 +132,13 @@ pub async fn update(
         Patch::Missing => {}
         Patch::Null => {
             if existing.country_iso2.is_some() {
-                update = update.set_country_iso2(None);
+                update = update.and_then(|patch| patch.assign(UserCol::COUNTRY_ISO2, None::<String>));
                 touched = true;
             }
         }
         Patch::Value(value) => {
             if existing.country_iso2.as_deref() != Some(&value) {
-                update = update.set_country_iso2(Some(value));
+                update = update.and_then(|patch| patch.assign(UserCol::COUNTRY_ISO2, Some(value)));
                 touched = true;
             }
         }
@@ -130,20 +148,21 @@ pub async fn update(
         Patch::Missing => {}
         Patch::Null => {
             if existing.contact_number.is_some() {
-                update = update.set_contact_number(None);
+                update = update.and_then(|patch| patch.assign(UserCol::CONTACT_NUMBER, None::<String>));
                 touched = true;
             }
         }
         Patch::Value(value) => {
             if existing.contact_number.as_deref() != Some(&value) {
-                update = update.set_contact_number(Some(value));
+                update = update.and_then(|patch| patch.assign(UserCol::CONTACT_NUMBER, Some(value)));
                 touched = true;
             }
         }
     }
 
     if let Some(password) = req.password {
-        update = update.set_password(&password).map_err(AppError::from)?;
+        let password_hash = hash_password(&password).map_err(AppError::from)?;
+        update = update.and_then(|patch| patch.assign(UserCol::PASSWORD, password_hash));
         touched = true;
     }
 
@@ -151,7 +170,11 @@ pub async fn update(
         return Ok(existing);
     }
 
-    let affected = update.save().await.map_err(AppError::from)?;
+    let affected = update
+        .map_err(AppError::from)?
+        .save()
+        .await
+        .map_err(AppError::from)?;
     if affected == 0 {
         return Err(AppError::NotFound(t("User not found")));
     }
@@ -166,13 +189,14 @@ pub async fn set_ban(
     state: &AppApiState,
     id: i64,
     ban: UserBanStatus,
-) -> Result<UserView, AppError> {
+) -> Result<UserRecord, AppError> {
     let _existing = detail(state, id).await?;
 
-    let affected = User::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_id(Op::Eq, id)
-        .set_ban(ban)
+    let affected = UserModel::query(DbConn::pool(&state.db))
+        .where_col(UserCol::ID, Op::Eq, id)
+        .patch()
+        .assign(UserCol::BAN, ban)
+        .map_err(AppError::from)?
         .save()
         .await
         .map_err(AppError::from)?;
@@ -197,8 +221,7 @@ pub async fn batch_resolve_usernames(
 
     let mut results = Vec::new();
     for &id in ids {
-        if let Ok(Some(user)) = User::new(DbConn::pool(&state.db), None).find(id).await {
-            let user = user.into_row();
+        if let Ok(Some(user)) = UserModel::find(DbConn::pool(&state.db), id).await {
             results.push((user.id, user.username, user.name));
         }
     }
@@ -208,12 +231,11 @@ pub async fn batch_resolve_usernames(
 async fn generate_unique_uuid(state: &AppApiState) -> Result<String, AppError> {
     for _ in 0..10 {
         let uuid = nanoid::nanoid!(8);
-        let existing = UserQuery::new(DbConn::pool(&state.db), None)
-            .where_uuid(Op::Eq, uuid.clone())
+        let existing = UserModel::query(DbConn::pool(&state.db))
+            .where_col(UserCol::UUID, Op::Eq, uuid.clone())
             .first()
             .await
-            .map_err(AppError::from)?
-            .map(|r| r.into_row());
+            .map_err(AppError::from)?;
         if existing.is_none() {
             return Ok(uuid);
         }

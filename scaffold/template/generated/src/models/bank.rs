@@ -6,14 +6,14 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::attachments::types::{Attachment, AttachmentInput, AttachmentMap};
 use uuid::Uuid;
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
 use crate::generated::localized;
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
@@ -22,7 +22,7 @@ const HAS_UPDATED_AT: bool = true;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct BankCreateInput {
+pub struct BankCreate {
     pub id: FieldInput<i64>,
     pub country_iso2: FieldInput<String>,
     pub name: FieldInput<String>,
@@ -35,7 +35,7 @@ pub struct BankCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct BankUpdateChanges {
+pub struct BankChanges {
     pub id: Option<FieldChange<i64>>,
     pub country_iso2: Option<FieldChange<String>>,
     pub name: Option<FieldChange<String>>,
@@ -64,7 +64,7 @@ pub struct BankRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct BankView {
+pub struct BankRecord {
     pub id: i64,
     pub country_iso2: String,
     pub name: String,
@@ -80,64 +80,14 @@ pub struct BankView {
     pub logo_url: Option<String>,
 }
 
-impl BankView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> BankUpdate<'db> {
-        Bank::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &Bank<'db>) -> BankUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> BankJson {
-        BankJson {
-            id: self.id.clone(),
-            country_iso2: self.country_iso2.clone(),
-            name: self.name.clone(),
-            code: self.code.clone(),
-            status: self.status.clone(),
-            sort_order: self.sort_order.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            status_explained: self.status_explained.clone(),
-            logo: self.logo.clone(),
-            logo_url: self.logo_url.clone(),
-        }
+impl BankRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, BankModel> {
+        BankModel::query(db.into()).where_col(BankDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-pub trait BankViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&BankView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&BankView) -> K) -> std::collections::HashMap<K, BankView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&BankView) -> K) -> std::collections::HashMap<K, Vec<BankView>> where K: Eq + std::hash::Hash;
-}
-
-impl BankViewsExt for Vec<BankView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&BankView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&BankView) -> K) -> std::collections::HashMap<K, BankView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&BankView) -> K) -> std::collections::HashMap<K, Vec<BankView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct BankJson {
-    pub id: i64,
-    pub country_iso2: String,
-    pub name: String,
-    pub code: Option<String>,
-    pub status: BankStatus,
-    pub sort_order: i32,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    pub status_explained: String,
-    pub logo: Option<Attachment>,
-    pub logo_url: Option<String>,
-}
-
-fn hydrate_view(row: BankRow, _loc: &LocalizedMap, attachments: &AttachmentMap, base_url: Option<&str>) -> BankView {
-    let mut view = BankView {
+fn hydrate_record(row: BankRow, _loc: &LocalizedMap, attachments: &AttachmentMap, base_url: Option<&str>) -> BankRecord {
+    let mut record = BankRecord {
         id: row.id,
         country_iso2: row.country_iso2,
         name: row.name,
@@ -150,33 +100,40 @@ fn hydrate_view(row: BankRow, _loc: &LocalizedMap, attachments: &AttachmentMap, 
         logo: None,
         logo_url: None,
     };
-    view.logo = attachments.get_single("logo", view.id);
-    view.logo_url = view.logo.as_ref().map(|a| a.url_with_base(base_url));
-    view
+    record.logo = attachments.get_single("logo", record.id);
+    record.logo_url = record.logo.as_ref().map(|a| a.url_with_base(base_url));
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct BankWithRelations {
-    #[serde(flatten)]
-    pub row: BankView,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BankCol;
+impl BankCol {
+    pub const ID: Column<BankModel, i64> = Column::new("id");
+    pub const COUNTRY_ISO2: Column<BankModel, String> = Column::new("country_iso2");
+    pub const NAME: Column<BankModel, String> = Column::new("name");
+    pub const CODE: Column<BankModel, Option<String>> = Column::new("code");
+    pub const STATUS: Column<BankModel, BankStatus> = Column::new("status");
+    pub const SORT_ORDER: Column<BankModel, i32> = Column::new("sort_order");
+    pub const CREATED_AT: Column<BankModel, time::OffsetDateTime> = Column::new("created_at");
+    pub const UPDATED_AT: Column<BankModel, time::OffsetDateTime> = Column::new("updated_at");
 }
 
-impl BankWithRelations {
-    pub fn into_row(self) -> BankView { self.row }
-}
-
-impl std::ops::Deref for BankWithRelations {
-    type Target = BankView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for BankWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_bank_db_col(sql: &str) -> Option<BankDbCol> {
+    match sql {
+        "id" => Some(BankDbCol::Id),
+        "country_iso2" => Some(BankDbCol::CountryIso2),
+        "name" => Some(BankDbCol::Name),
+        "code" => Some(BankDbCol::Code),
+        "status" => Some(BankDbCol::Status),
+        "sort_order" => Some(BankDbCol::SortOrder),
+        "created_at" => Some(BankDbCol::CreatedAt),
+        "updated_at" => Some(BankDbCol::UpdatedAt),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum BankCol {
+pub enum BankDbCol {
     Id,
     CountryIso2,
     Name,
@@ -187,47 +144,27 @@ pub enum BankCol {
     UpdatedAt,
 }
 
-impl BankCol {
-    pub const fn all() -> &'static [BankCol] {
-        &[BankCol::Id, BankCol::CountryIso2, BankCol::Name, BankCol::Code, BankCol::Status, BankCol::SortOrder, BankCol::CreatedAt, BankCol::UpdatedAt]
+impl BankDbCol {
+    pub const fn all() -> &'static [BankDbCol] {
+        &[BankDbCol::Id, BankDbCol::CountryIso2, BankDbCol::Name, BankDbCol::Code, BankDbCol::Status, BankDbCol::SortOrder, BankDbCol::CreatedAt, BankDbCol::UpdatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            BankCol::Id => "id",
-            BankCol::CountryIso2 => "country_iso2",
-            BankCol::Name => "name",
-            BankCol::Code => "code",
-            BankCol::Status => "status",
-            BankCol::SortOrder => "sort_order",
-            BankCol::CreatedAt => "created_at",
-            BankCol::UpdatedAt => "updated_at",
+            BankDbCol::Id => "id",
+            BankDbCol::CountryIso2 => "country_iso2",
+            BankDbCol::Name => "name",
+            BankDbCol::Code => "code",
+            BankDbCol::Status => "status",
+            BankDbCol::SortOrder => "sort_order",
+            BankDbCol::CreatedAt => "created_at",
+            BankDbCol::UpdatedAt => "updated_at",
         }
     }
 }
 
-pub struct Bank<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-}
-
-impl<'db> Bank<'db> {
-    pub const TABLE: &'static str = "banks";
-    pub const MODEL_KEY: &'static str = "bank";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> BankQuery<'db> { BankQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> BankInsert<'db> { BankInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> BankUpdate<'db> { BankUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<BankWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-}
 
 #[derive(Clone)]
-pub struct BankQuery<'db> {
+pub struct BankQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -250,110 +187,109 @@ pub struct BankQuery<'db> {
 
 
 
-impl<'db> BankQuery<'db> {
+impl<'db> BankQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, country_iso2, name, code, status, sort_order, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> BankUnsafeQuery<'db> { BankUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_country_iso2(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::CountryIso2.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::CountryIso2.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_country_iso2_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::CountryIso2.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::CountryIso2.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_code(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::Code.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::Code.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_code_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::Code.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::Code.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status(mut self, op: Op, val: BankStatus) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_sort_order(mut self, op: Op, val: i32) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::SortOrder.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::SortOrder.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_sort_order_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::SortOrder.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::SortOrder.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(BankCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: BankCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(BankDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: BankDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -372,7 +308,7 @@ impl<'db> BankQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: BankCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: BankDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -387,7 +323,7 @@ impl<'db> BankQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: BankCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: BankDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -399,7 +335,7 @@ impl<'db> BankQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: BankCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: BankDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -407,15 +343,15 @@ impl<'db> BankQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: BankCol) -> Self {
+    pub fn where_null(mut self, col: BankDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: BankCol) -> Self {
+    pub fn where_not_null(mut self, col: BankDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: BankCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: BankDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -469,7 +405,7 @@ impl<'db> BankQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[BankCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[BankDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, country_iso2, name, code, status, sort_order, created_at, updated_at".to_string());
         } else {
@@ -481,7 +417,7 @@ impl<'db> BankQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[BankCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[BankDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -562,26 +498,26 @@ impl<'db> BankQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: BankCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: BankDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: BankCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: BankDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: BankCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: BankDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[BankCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[BankDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[BankCol]) -> Self {
+    pub fn select(mut self, cols: &[BankDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -629,7 +565,7 @@ impl<'db> BankQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[BankCol]) -> Self {
+    pub fn group_by(mut self, cols: &[BankDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -704,7 +640,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<BankWithRelations>> {
+    pub async fn get(self) -> Result<Vec<BankRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -755,61 +691,61 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let attachments = localized::load_bank_attachments(db.clone(), &ids).await?;
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
-            out_vec.push(hydrate_view(r, &localized, &attachments, base_url.as_deref()));
+            out_vec.push(hydrate_record(r, &localized, &attachments, base_url.as_deref()));
         }
-        let out_vec: Vec<BankWithRelations> = out_vec.into_iter().map(|v| BankWithRelations { row: v }).collect();
+        let out_vec: Vec<BankRecord> = out_vec;
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<BankWithRelations>> {
+    pub async fn first(self) -> Result<Option<BankRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<BankWithRelations> {
+    pub async fn first_or_fail(self) -> Result<BankRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("banks: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<BankWithRelations>> {
+    pub async fn find(self, id: i64) -> Result<Option<BankRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<BankWithRelations> {
+    pub async fn find_or_fail(self, id: i64) -> Result<BankRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("banks: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(BankInsert<'db>) -> BankInsert<'db>) -> Result<BankWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(BankCreateInner<'db>) -> BankCreateInner<'db>) -> Result<BankRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(BankInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(BankCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Bank::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        BankQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(BankUpdate<'db>) -> BankUpdate<'db>,
-        on_create: impl FnOnce(BankInsert<'db>) -> BankInsert<'db>,
-    ) -> Result<BankWithRelations> {
+        on_update: impl FnOnce(BankPatchInner<'db>) -> BankPatchInner<'db>,
+        on_create: impl FnOnce(BankCreateInner<'db>) -> BankCreateInner<'db>,
+    ) -> Result<BankRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = BankUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = BankPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Bank::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return BankQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(BankInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(BankCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Bank::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        BankQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: BankCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: BankDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -824,7 +760,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: BankCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: BankDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -880,13 +816,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<BankWithRelations>) -> Fut,
+        F: FnMut(Vec<BankRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = BankQuery::new(db.clone(), self.base_url.clone());
+            let mut query = BankQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -900,11 +836,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(BankCol::CreatedAt, OrderDir::Desc)
+        self.order_by(BankDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(BankCol::CreatedAt, OrderDir::Asc)
+        self.order_by(BankDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -915,7 +851,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<BankWithRelations> {
+    pub async fn sole(self) -> Result<BankRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -934,7 +870,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&BankWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&BankRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -942,7 +878,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: BankCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: BankDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "banks".to_string());
@@ -963,7 +899,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: BankCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: BankDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "banks".to_string());
@@ -984,7 +920,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: BankCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: BankDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "banks".to_string());
@@ -1005,7 +941,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: BankCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: BankDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "banks".to_string());
@@ -1026,7 +962,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<BankWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<BankRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1078,9 +1014,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let attachments = localized::load_bank_attachments(db, &ids).await?;
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
-            data.push(hydrate_view(r, &localized, &attachments, base_url.as_deref()));
+            data.push(hydrate_record(r, &localized, &attachments, base_url.as_deref()));
         }
-        let data: Vec<BankWithRelations> = data.into_iter().map(|v| BankWithRelations { row: v }).collect();
+        let data: Vec<BankRecord> = data;
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn to_sql(&self) -> (String, Vec<BindValue>) {
@@ -1200,40 +1136,19 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct BankUnsafeQuery<'db> {
-    inner: BankQuery<'db>,
-}
 
-impl<'db> BankUnsafeQuery<'db> {
-    fn new(inner: BankQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> BankQuery<'db> { self.inner }
-}
-
-
-pub struct BankInsert<'db> {
+pub struct BankCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<BankCol>,
+    cols: Vec<BankDbCol>,
     binds: Vec<BindValue>,
     attachments_single: HashMap<&'static str, AttachmentInput>,
     attachments_multi: HashMap<&'static str, Vec<AttachmentInput>>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<BankCol>,
+    conflict_cols: Vec<BankDbCol>,
 }
 
-impl<'db> BankInsert<'db> {
+impl<'db> BankCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1249,42 +1164,42 @@ impl<'db> BankInsert<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(BankCol::Id);
+        self.cols.push(BankDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_country_iso2(mut self, val: String) -> Self {
-        self.cols.push(BankCol::CountryIso2);
+        self.cols.push(BankDbCol::CountryIso2);
         self.binds.push(val.into());
         self
     }
     pub fn set_name(mut self, val: String) -> Self {
-        self.cols.push(BankCol::Name);
+        self.cols.push(BankDbCol::Name);
         self.binds.push(val.into());
         self
     }
     pub fn set_code(mut self, val: Option<String>) -> Self {
-        self.cols.push(BankCol::Code);
+        self.cols.push(BankDbCol::Code);
         self.binds.push(val.into());
         self
     }
     pub fn set_status(mut self, val: BankStatus) -> Self {
-        self.cols.push(BankCol::Status);
+        self.cols.push(BankDbCol::Status);
         self.binds.push(val.into());
         self
     }
     pub fn set_sort_order(mut self, val: i32) -> Self {
-        self.cols.push(BankCol::SortOrder);
+        self.cols.push(BankDbCol::SortOrder);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(BankCol::CreatedAt);
+        self.cols.push(BankDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(BankCol::UpdatedAt);
+        self.cols.push(BankDbCol::UpdatedAt);
         self.binds.push(val.into());
         self
     }
@@ -1292,49 +1207,49 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.attachments_single.insert("logo", att);
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[BankCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[BankDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[BankCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[BankDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<BankCreateInput> {
-        let mut input = BankCreateInput::default();
+    fn to_create_input(&self) -> Result<BankCreate> {
+        let mut input = BankCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                BankCol::Id => {
+                BankDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                BankCol::CountryIso2 => {
+                BankDbCol::CountryIso2 => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.country_iso2 = FieldInput::Set(value);
                 }
-                BankCol::Name => {
+                BankDbCol::Name => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.name = FieldInput::Set(value);
                 }
-                BankCol::Code => {
+                BankDbCol::Code => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.code = FieldInput::Set(value);
                 }
-                BankCol::Status => {
+                BankDbCol::Status => {
                     let value = match bind {
                 BindValue::String(value) => BankStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'BankStatus'", value))?,
@@ -1347,21 +1262,21 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.status = FieldInput::Set(value);
                 }
-                BankCol::SortOrder => {
+                BankDbCol::SortOrder => {
                     let value = match bind {
             BindValue::I32(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i32'", other),
         };
                     input.sort_order = FieldInput::Set(value);
                 }
-                BankCol::CreatedAt => {
+                BankDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                BankCol::UpdatedAt => {
+                BankDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1374,7 +1289,7 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
 
 
-pub async fn save(self) -> Result<BankView> {
+pub async fn save(self) -> Result<BankRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -1392,7 +1307,7 @@ pub async fn save(self) -> Result<BankView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1411,10 +1326,10 @@ pub async fn save(self) -> Result<BankView> {
                         Err(err) => log_observer_error("created", "bank", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "bank", table: "banks", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -1426,26 +1341,26 @@ pub async fn save(self) -> Result<BankView> {
                         Err(err) => log_observer_error("created", "bank", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(BankView, BankRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(BankRecord, BankRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, BankCol::Id)) {
-            cols.push(BankCol::Id);
+        if !cols.iter().any(|c| matches!(c, BankDbCol::Id)) {
+            cols.push(BankDbCol::Id);
             binds.push(generate_snowflake_i64().into());
         }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, BankCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, BankDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(BankCol::CreatedAt);
+            cols.push(BankDbCol::CreatedAt);
             binds.push(now.into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, BankCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, BankDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(BankCol::UpdatedAt);
+            cols.push(BankDbCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1488,15 +1403,15 @@ pub async fn save(self) -> Result<BankView> {
         }
         let localized = LocalizedMap::default();
         let attachments = localized::load_bank_attachments(db, &[row.id]).await?;
-        let view = hydrate_view(row.clone(), &localized, &attachments, self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &localized, &attachments, self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct BankUpdate<'db> {
+pub struct BankPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(BankCol, BindValue, SetMode)>,
+    sets: Vec<(BankDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
     attachments_single: HashMap<&'static str, AttachmentInput>,
@@ -1505,7 +1420,7 @@ pub struct BankUpdate<'db> {
     attachments_delete_multi: HashMap<&'static str, Vec<Uuid>>,
 }
 
-impl<'db> BankUpdate<'db> {
+impl<'db> BankPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1519,55 +1434,54 @@ impl<'db> BankUpdate<'db> {
             attachments_delete_multi: HashMap::new(),
         }
     }
-    pub fn unsafe_sql(self) -> BankUnsafeUpdate<'db> { BankUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((BankCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((BankDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((BankCol::Id, val.into(), SetMode::Increment));
+        self.sets.push((BankDbCol::Id, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((BankCol::Id, val.into(), SetMode::Decrement));
+        self.sets.push((BankDbCol::Id, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_country_iso2(mut self, val: String) -> Self {
-        self.sets.push((BankCol::CountryIso2, val.into(), SetMode::Assign));
+        self.sets.push((BankDbCol::CountryIso2, val.into(), SetMode::Assign));
         self
     }
     pub fn set_name(mut self, val: String) -> Self {
-        self.sets.push((BankCol::Name, val.into(), SetMode::Assign));
+        self.sets.push((BankDbCol::Name, val.into(), SetMode::Assign));
         self
     }
     pub fn set_code(mut self, val: Option<String>) -> Self {
-        self.sets.push((BankCol::Code, val.into(), SetMode::Assign));
+        self.sets.push((BankDbCol::Code, val.into(), SetMode::Assign));
         self
     }
     pub fn set_status(mut self, val: BankStatus) -> Self {
-        self.sets.push((BankCol::Status, val.into(), SetMode::Assign));
+        self.sets.push((BankDbCol::Status, val.into(), SetMode::Assign));
         self
     }
     pub fn set_sort_order(mut self, val: i32) -> Self {
-        self.sets.push((BankCol::SortOrder, val.into(), SetMode::Assign));
+        self.sets.push((BankDbCol::SortOrder, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_sort_order(mut self, val: i32) -> Self {
-        self.sets.push((BankCol::SortOrder, val.into(), SetMode::Increment));
+        self.sets.push((BankDbCol::SortOrder, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_sort_order(mut self, val: i32) -> Self {
-        self.sets.push((BankCol::SortOrder, val.into(), SetMode::Decrement));
+        self.sets.push((BankDbCol::SortOrder, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((BankCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((BankDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((BankCol::UpdatedAt, val.into(), SetMode::Assign));
+        self.sets.push((BankDbCol::UpdatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_attachment_logo(mut self, att: AttachmentInput) -> Self {
@@ -1580,53 +1494,53 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_country_iso2(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::CountryIso2.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::CountryIso2.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_code(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::Code.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::Code.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status(mut self, op: Op, val: BankStatus) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_sort_order(mut self, op: Op, val: i32) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::SortOrder.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::SortOrder.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", BankCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", BankDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: BankCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: BankDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1645,11 +1559,11 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<BankUpdateChanges> {
-        let mut changes = BankUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<BankChanges> {
+        let mut changes = BankChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                BankCol::Id => {
+                BankDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1660,7 +1574,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                BankCol::CountryIso2 => {
+                BankDbCol::CountryIso2 => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1671,7 +1585,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                BankCol::Name => {
+                BankDbCol::Name => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1682,7 +1596,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                BankCol::Code => {
+                BankDbCol::Code => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -1693,7 +1607,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                BankCol::Status => {
+                BankDbCol::Status => {
                     let value = match bind {
                 BindValue::String(value) => BankStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'BankStatus'", value))?,
@@ -1710,7 +1624,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                BankCol::SortOrder => {
+                BankDbCol::SortOrder => {
                     let value = match bind {
             BindValue::I32(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i32'", other),
@@ -1721,7 +1635,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                BankCol::CreatedAt => {
+                BankDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1732,7 +1646,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                BankCol::UpdatedAt => {
+                BankDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1776,14 +1690,14 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<BankUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<BankChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, BankCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, BankDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(BankCol::UpdatedAt);
+            cols.push(BankDbCol::UpdatedAt);
             set_binds.push(now.into());
             set_modes.push(SetMode::Assign);
         }
@@ -1889,29 +1803,19 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct BankUnsafeUpdate<'db> {
-    inner: BankUpdate<'db>,
-}
-
-impl<'db> BankUnsafeUpdate<'db> {
-    fn new(inner: BankUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> BankUpdate<'db> { self.inner }
-}
 
 pub struct BankTableAdapter;
 impl BankTableAdapter {
-    fn parse_col(name: &str) -> Option<BankCol> {
+    fn parse_col(name: &str) -> Option<BankDbCol> {
         match name {
-            "id" => Some(BankCol::Id),
-            "country_iso2" => Some(BankCol::CountryIso2),
-            "name" => Some(BankCol::Name),
-            "code" => Some(BankCol::Code),
-            "status" => Some(BankCol::Status),
-            "sort_order" => Some(BankCol::SortOrder),
-            "created_at" => Some(BankCol::CreatedAt),
-            "updated_at" => Some(BankCol::UpdatedAt),
+            "id" => Some(BankDbCol::Id),
+            "country_iso2" => Some(BankDbCol::CountryIso2),
+            "name" => Some(BankDbCol::Name),
+            "code" => Some(BankDbCol::Code),
+            "status" => Some(BankDbCol::Status),
+            "sort_order" => Some(BankDbCol::SortOrder),
+            "created_at" => Some(BankDbCol::CreatedAt),
+            "updated_at" => Some(BankDbCol::UpdatedAt),
             _ => None,
         }
     }
@@ -1925,11 +1829,11 @@ impl BankTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<BankCol> {
+    fn parse_like_col(name: &str) -> Option<BankDbCol> {
         match name {
-            "country_iso2" => Some(BankCol::CountryIso2),
-            "name" => Some(BankCol::Name),
-            "code" => Some(BankCol::Code),
+            "country_iso2" => Some(BankDbCol::CountryIso2),
+            "name" => Some(BankDbCol::Name),
+            "code" => Some(BankDbCol::Code),
             _ => None,
         }
     }
@@ -1973,8 +1877,8 @@ impl BankTableAdapter {
     }
 }
 impl GeneratedTableAdapter for BankTableAdapter {
-    type Query<'db> = BankQuery<'db>;
-    type Row = BankWithRelations;
+    type Query<'db> = Query<'db, BankModel>;
+    type Row = BankRecord;
     fn model_key(&self) -> &'static str { "Bank" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "country_iso2", "name", "code", "status", "sort_order", "created_at", "updated_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at"] }
@@ -2008,7 +1912,7 @@ impl GeneratedTableAdapter for BankTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: BankQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<BankQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, BankModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, BankModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -2102,28 +2006,28 @@ impl GeneratedTableAdapter for BankTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: BankQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<BankQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, BankModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, BankModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(BankCol::Id, dir),
-            "country_iso2" => query.order_by(BankCol::CountryIso2, dir),
-            "name" => query.order_by(BankCol::Name, dir),
-            "code" => query.order_by(BankCol::Code, dir),
-            "status" => query.order_by(BankCol::Status, dir),
-            "sort_order" => query.order_by(BankCol::SortOrder, dir),
-            "created_at" => query.order_by(BankCol::CreatedAt, dir),
-            "updated_at" => query.order_by(BankCol::UpdatedAt, dir),
+            "id" => query.order_by(BankDbCol::Id, dir),
+            "country_iso2" => query.order_by(BankDbCol::CountryIso2, dir),
+            "name" => query.order_by(BankDbCol::Name, dir),
+            "code" => query.order_by(BankDbCol::Code, dir),
+            "status" => query.order_by(BankDbCol::Status, dir),
+            "sort_order" => query.order_by(BankDbCol::SortOrder, dir),
+            "created_at" => query.order_by(BankDbCol::CreatedAt, dir),
+            "updated_at" => query.order_by(BankDbCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: BankQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<BankQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, BankModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, BankModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &BankWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &BankRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "country_iso2" => Some(row.country_iso2.clone()),
@@ -2135,10 +2039,10 @@ impl GeneratedTableAdapter for BankTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: BankQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, BankModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: BankQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<BankWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, BankModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<BankRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -2164,13 +2068,13 @@ impl Default for BankDataTableConfig {
     }
 }
 pub trait BankDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: BankQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BankQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, BankModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, BankModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: BankQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<BankQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: BankQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<BankQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut BankWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: BankWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, BankModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, BankModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, BankModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, BankModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut BankRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: BankRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         if let Some(id_value) = record.get("id").cloned() {
             let id_text = match id_value {
@@ -2182,10 +2086,10 @@ pub trait BankDataTableHooks: Send + Sync + 'static {
         }
         Ok(record)
     }
-    fn row_to_record(&self, row: BankWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: BankRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: BankQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, BankModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct BankDefaultDataTableHooks;
@@ -2223,15 +2127,15 @@ impl<H: BankDataTableHooks> BankDataTable<H> {
 impl<H: BankDataTableHooks> AutoDataTable for BankDataTable<H> {
     type Adapter = BankTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> BankQuery<'db> {
-        self.hooks.scope(Bank::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, BankModel> {
+        self.hooks.scope(BankModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: BankQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<BankQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: BankQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<BankQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut BankWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: BankWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: BankQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, BankModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, BankModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, BankModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, BankModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut BankRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: BankRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, BankModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -2241,10 +2145,486 @@ impl<H: BankDataTableHooks> AutoDataTable for BankDataTable<H> {
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for BankView {
+impl ActiveRecord for BankRecord {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Bank::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        BankModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct BankModel;
+impl BankModel {
+    pub const TABLE: &'static str = "banks";
+    pub const MODEL_KEY: &'static str = "bank";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, BankModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, BankModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, BankModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, BankModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, BankModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, BankModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<BankRecord>> {
+        BankQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for BankModel {
+    type Pk = i64;
+    type Record = BankRecord;
+    type Create = BankCreate;
+    type Changes = BankChanges;
+    const TABLE: &'static str = BankModel::TABLE;
+    const MODEL_KEY: &'static str = BankModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for BankModel {
+    type InnerQuery<'db> = BankQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        BankQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for BankModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for BankModel {
+    type InnerCreate<'db> = BankCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        BankCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            BankQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("banks: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<BankModel> for BankDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <BankModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<BankModel>>::Value) -> anyhow::Result<<BankModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            BankDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::CountryIso2 => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::Name => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::Code => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::Status => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::SortOrder => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<BankModel> for Column<BankModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <BankModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<BankModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            BankDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::CountryIso2 => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::Name => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::Code => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::Status => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::SortOrder => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            BankDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<BankModel> for BankDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <BankModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <BankModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <BankModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <BankModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<BankModel> for Column<BankModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <BankModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <BankModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<BankDbCol> = fields.iter().map(|field| resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <BankModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <BankModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<BankDbCol> = fields.iter().map(|field| resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for BankModel {
+    type InnerQuery<'db> = BankQueryInner<'db>;
+    type InnerPatch<'db> = BankPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        BankPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(BankDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = BankPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", BankDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM banks", BankDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = BankQueryInner::new(db, base_url);
+            query.where_in(BankDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<BankModel> for BankDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<BankModel>>::Value) -> anyhow::Result<<BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            BankDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::CountryIso2 => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::Name => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::Code => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::Status => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::SortOrder => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<BankModel> for Column<BankModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            BankDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::CountryIso2 => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::Name => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::Code => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::Status => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::SortOrder => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            BankDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<BankModel> for BankDbCol {
+    fn increment<'db>(field: Self, mut builder: <BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<BankModel>>::Value) -> anyhow::Result<<BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            BankDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            BankDbCol::SortOrder => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<BankModel>>::Value) -> anyhow::Result<<BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            BankDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            BankDbCol::SortOrder => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<BankModel> for Column<BankModel, i32> {
+    fn increment<'db>(field: Self, mut builder: <BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<BankModel>>::Value) -> anyhow::Result<<BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            BankDbCol::SortOrder => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<BankModel>>::Value) -> anyhow::Result<<BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            BankDbCol::SortOrder => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<BankModel> for Column<BankModel, i64> {
+    fn increment<'db>(field: Self, mut builder: <BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<BankModel>>::Value) -> anyhow::Result<<BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            BankDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<BankModel>>::Value) -> anyhow::Result<<BankModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            BankDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<BankModel> for BankDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<BankModel>>::Value) -> <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<BankModel>>::Value) -> <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<BankModel>>::Value]) -> <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<BankModel> for Column<BankModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <BankModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_bank_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
 

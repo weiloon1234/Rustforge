@@ -2,8 +2,9 @@ use core_db::common::sql::{DbConn, Op};
 use core_i18n::t;
 use core_web::error::AppError;
 use generated::models::{
-    CreditTransactionType, CreditType, OwnerType, User, UserCreditTransaction, Withdrawal,
-    WithdrawalQuery, WithdrawalReviewAction, WithdrawalStatus, WithdrawalWithRelations,
+    CreditTransactionType, CreditType, OwnerType, UserCol, UserCreditTransactionModel, UserModel,
+    UserCreditTransactionCol, WithdrawalCol, WithdrawalModel, WithdrawalRecord,
+    WithdrawalReviewAction, WithdrawalStatus,
 };
 use time::OffsetDateTime;
 
@@ -15,10 +16,8 @@ use crate::{
 pub async fn detail(
     state: &AppApiState,
     withdrawal_id: i64,
-) -> Result<WithdrawalWithRelations, AppError> {
-    WithdrawalQuery::new(DbConn::pool(&state.db), None)
-        .where_id(Op::Eq, withdrawal_id)
-        .first()
+) -> Result<WithdrawalRecord, AppError> {
+    WithdrawalModel::find(DbConn::pool(&state.db), withdrawal_id)
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(t("Withdrawal not found")))
@@ -29,10 +28,8 @@ pub async fn review_withdrawal(
     admin_id: i64,
     withdrawal_id: i64,
     req: AdminWithdrawalReviewInput,
-) -> Result<WithdrawalWithRelations, AppError> {
-    let withdrawal = WithdrawalQuery::new(DbConn::pool(&state.db), None)
-        .where_id(Op::Eq, withdrawal_id)
-        .first()
+) -> Result<WithdrawalRecord, AppError> {
+    let withdrawal = WithdrawalModel::find(DbConn::pool(&state.db), withdrawal_id)
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(t("Withdrawal not found")))?;
@@ -45,13 +42,17 @@ pub async fn review_withdrawal(
                 return Err(AppError::BadRequest(t("Withdrawal is not pending")));
             }
 
-            Withdrawal::new(DbConn::pool(&state.db), None)
-                .update()
-                .where_id(Op::Eq, withdrawal_id)
-                .set_status(WithdrawalStatus::Processing)
-                .set_admin_id(Some(admin_id))
-                .set_admin_remark(req.admin_remark)
-                .set_reviewed_at(Some(now))
+            WithdrawalModel::query(DbConn::pool(&state.db))
+                .where_col(WithdrawalCol::ID, Op::Eq, withdrawal_id)
+                .patch()
+                .assign(WithdrawalCol::STATUS, WithdrawalStatus::Processing)
+                .map_err(AppError::from)?
+                .assign(WithdrawalCol::ADMIN_ID, Some(admin_id))
+                .map_err(AppError::from)?
+                .assign(WithdrawalCol::ADMIN_REMARK, req.admin_remark)
+                .map_err(AppError::from)?
+                .assign(WithdrawalCol::REVIEWED_AT, Some(now))
+                .map_err(AppError::from)?
                 .save()
                 .await
                 .map_err(AppError::from)?;
@@ -65,13 +66,17 @@ pub async fn review_withdrawal(
             let conn = scope.conn();
 
             // Update withdrawal status
-            Withdrawal::new(conn.clone(), None)
-                .update()
-                .where_id(Op::Eq, withdrawal_id)
-                .set_status(WithdrawalStatus::Approved)
-                .set_admin_id(Some(admin_id))
-                .set_admin_remark(req.admin_remark)
-                .set_reviewed_at(Some(now))
+            WithdrawalModel::query(conn.clone())
+                .where_col(WithdrawalCol::ID, Op::Eq, withdrawal_id)
+                .patch()
+                .assign(WithdrawalCol::STATUS, WithdrawalStatus::Approved)
+                .map_err(AppError::from)?
+                .assign(WithdrawalCol::ADMIN_ID, Some(admin_id))
+                .map_err(AppError::from)?
+                .assign(WithdrawalCol::ADMIN_REMARK, req.admin_remark)
+                .map_err(AppError::from)?
+                .assign(WithdrawalCol::REVIEWED_AT, Some(now))
+                .map_err(AppError::from)?
                 .save()
                 .await
                 .map_err(AppError::from)?;
@@ -79,27 +84,44 @@ pub async fn review_withdrawal(
             // Deduct balance for User owner_type
             if withdrawal.owner_type == OwnerType::User {
                 // Insert credit transaction for withdrawal (net_amount = amount after fees)
-                UserCreditTransaction::new(conn.clone(), None)
-                    .insert()
-                    .set_user_id(withdrawal.owner_id)
-                    .set_admin_id(Some(admin_id))
-                    .set_credit_type(withdrawal.credit_type)
-                    .set_amount(-withdrawal.net_amount)
-                    .set_transaction_type(CreditTransactionType::Withdraw)
-                    .set_related_key(Some(withdrawal_id.to_string()))
-                    .set_remark(Some(format!("Withdrawal #{}", withdrawal_id)))
-                    .set_custom_description(false)
+                UserCreditTransactionModel::create(conn.clone())
+                    .set(UserCreditTransactionCol::USER_ID, withdrawal.owner_id)?
+                    .set(UserCreditTransactionCol::ADMIN_ID, Some(admin_id))?
+                    .set(UserCreditTransactionCol::CREDIT_TYPE, withdrawal.credit_type)?
+                    .set(UserCreditTransactionCol::AMOUNT, -withdrawal.net_amount)?
+                    .set(
+                        UserCreditTransactionCol::TRANSACTION_TYPE,
+                        CreditTransactionType::Withdraw,
+                    )?
+                    .set(
+                        UserCreditTransactionCol::RELATED_KEY,
+                        Some(withdrawal_id.to_string()),
+                    )?
+                    .set(
+                        UserCreditTransactionCol::REMARK,
+                        Some(format!("Withdrawal #{}", withdrawal_id)),
+                    )?
+                    .set(UserCreditTransactionCol::CUSTOM_DESCRIPTION, false)?
                     .save()
                     .await
                     .map_err(AppError::from)?;
 
                 // Decrement user balance atomically
-                let mut update = User::new(conn, None).update().where_id(Op::Eq, withdrawal.owner_id);
-                update = match withdrawal.credit_type {
-                    CreditType::Credit1 => update.increment_credit_1(-withdrawal.net_amount),
-                    CreditType::Credit2 => update.increment_credit_2(-withdrawal.net_amount),
+                let update = match withdrawal.credit_type {
+                    CreditType::Credit1 => UserModel::query(conn.clone())
+                        .where_col(UserCol::ID, Op::Eq, withdrawal.owner_id)
+                        .patch()
+                        .increment(UserCol::CREDIT_1, -withdrawal.net_amount),
+                    CreditType::Credit2 => UserModel::query(conn.clone())
+                        .where_col(UserCol::ID, Op::Eq, withdrawal.owner_id)
+                        .patch()
+                        .increment(UserCol::CREDIT_2, -withdrawal.net_amount),
                 };
-                update.save().await.map_err(AppError::from)?;
+                update
+                    .map_err(AppError::from)?
+                    .save()
+                    .await
+                    .map_err(AppError::from)?;
             }
 
             scope.commit().await.map_err(AppError::from)?;
@@ -111,13 +133,17 @@ pub async fn review_withdrawal(
                 return Err(AppError::BadRequest(t("Withdrawal cannot be rejected in current status")));
             }
 
-            Withdrawal::new(DbConn::pool(&state.db), None)
-                .update()
-                .where_id(Op::Eq, withdrawal_id)
-                .set_status(WithdrawalStatus::Rejected)
-                .set_admin_id(Some(admin_id))
-                .set_admin_remark(req.admin_remark)
-                .set_reviewed_at(Some(now))
+            WithdrawalModel::query(DbConn::pool(&state.db))
+                .where_col(WithdrawalCol::ID, Op::Eq, withdrawal_id)
+                .patch()
+                .assign(WithdrawalCol::STATUS, WithdrawalStatus::Rejected)
+                .map_err(AppError::from)?
+                .assign(WithdrawalCol::ADMIN_ID, Some(admin_id))
+                .map_err(AppError::from)?
+                .assign(WithdrawalCol::ADMIN_REMARK, req.admin_remark)
+                .map_err(AppError::from)?
+                .assign(WithdrawalCol::REVIEWED_AT, Some(now))
+                .map_err(AppError::from)?
                 .save()
                 .await
                 .map_err(AppError::from)?;

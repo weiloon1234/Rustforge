@@ -5,12 +5,12 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
@@ -20,11 +20,11 @@ use crate :: permissions :: Permission ;
 use core_db :: common :: auth :: permissions :: has_permission as granted_has_permission ;
 pub fn admin_identity (username : Option < & str > , name : Option < & str > , email : Option < & str > , id : Option < i64 > ,) -> String { if let Some (value) = first_non_empty (username) { return value . to_string () ; } if let Some (value) = first_non_empty (name) { return value . to_string () ; } if let Some (value) = first_non_empty (email) { return value . to_string () ; } id . map (| value | value . to_string ()) . unwrap_or_else (| | "unknown" . to_string ()) }
 fn first_non_empty (value : Option < & str >) -> Option < & str > { value . and_then (| v | { let trimmed = v . trim () ; if trimmed . is_empty () { None } else { Some (trimmed) } }) }
-pub fn admin_permissions (admin : & AdminView) -> Vec < String > { let mut out = Vec :: new () ; if let Some (items) = admin . abilities . as_array () { for item in items { let Some (raw) = item . as_str () else { continue ; } ; let value = raw . trim () ; if value . is_empty () { continue ; } if value == "*" { out . push ("*" . to_string ()) ; continue ; } if let Some (permission) = Permission :: from_str (value) { out . push (permission . as_str () . to_string ()) ; } } } out . sort () ; out . dedup () ; out }
+pub fn admin_permissions (abilities : & serde_json :: Value) -> Vec < String > { let mut out = Vec :: new () ; if let Some (items) = abilities . as_array () { for item in items { let Some (raw) = item . as_str () else { continue ; } ; let value = raw . trim () ; if value . is_empty () { continue ; } if value == "*" { out . push ("*" . to_string ()) ; continue ; } if let Some (permission) = Permission :: from_str (value) { out . push (permission . as_str () . to_string ()) ; } } } out . sort () ; out . dedup () ; out }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct AdminCreateInput {
+pub struct AdminCreate {
     pub id: FieldInput<i64>,
     pub username: FieldInput<String>,
     pub email: FieldInput<Option<String>>,
@@ -40,7 +40,7 @@ pub struct AdminCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct AdminUpdateChanges {
+pub struct AdminChanges {
     pub id: Option<FieldChange<i64>>,
     pub username: Option<FieldChange<String>>,
     pub email: Option<FieldChange<Option<String>>>,
@@ -77,7 +77,7 @@ pub struct AdminRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AdminView {
+pub struct AdminRecord {
     pub id: i64,
     pub username: String,
     pub email: Option<String>,
@@ -95,77 +95,14 @@ pub struct AdminView {
     pub admin_type_explained: String,
 }
 
-impl AdminView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> AdminUpdate<'db> {
-        Admin::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &Admin<'db>) -> AdminUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> AdminJson {
-        AdminJson {
-            id: self.id.clone(),
-            username: self.username.clone(),
-            email: self.email.clone(),
-            locale: self.locale.clone(),
-            password: self.password.clone(),
-            name: self.name.clone(),
-            admin_type: self.admin_type.clone(),
-            abilities: self.abilities.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            deleted_at: self.deleted_at.clone(),
-            admin_type_explained: self.admin_type_explained.clone(),
-            identity: self.identity(),
-        }
+impl AdminRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, AdminModel> {
+        AdminModel::query(db.into()).where_col(AdminDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-impl AdminView {
-    pub fn identity (& self) -> String { admin_identity (Some (self . username . as_str ()) , Some (self . name . as_str ()) , self . email . as_deref () , Some (self . id) ,) }
-    pub fn has_permission (& self , permission : Permission) -> bool { if matches ! (self . admin_type , AdminType :: Developer | AdminType :: SuperAdmin) { return true ; } let granted = admin_permissions (self) ; granted_has_permission (& granted , permission . as_str ()) }
-    pub fn has_any_permissions (& self , permissions : & [Permission]) -> bool { permissions . iter () . copied () . any (| permission | self . has_permission (permission)) }
-    pub fn has_all_permissions (& self , permissions : & [Permission]) -> bool { permissions . iter () . copied () . all (| permission | self . has_permission (permission)) }
-    pub fn parsed_abilities (& self) -> Vec < Permission > { self . abilities . as_array () . map (| items | { items . iter () . filter_map (| item | item . as_str ()) . filter_map (Permission :: from_str) . collect () }) . unwrap_or_default () }
-}
-
-pub trait AdminViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&AdminView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, AdminView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, Vec<AdminView>> where K: Eq + std::hash::Hash;
-}
-
-impl AdminViewsExt for Vec<AdminView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&AdminView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, AdminView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&AdminView) -> K) -> std::collections::HashMap<K, Vec<AdminView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct AdminJson {
-    pub id: i64,
-    pub username: String,
-    pub email: Option<String>,
-    pub locale: Option<String>,
-    pub password: String,
-    pub name: String,
-    pub admin_type: AdminType,
-    pub abilities: serde_json::Value,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub deleted_at: Option<time::OffsetDateTime>,
-    pub admin_type_explained: String,
-    pub identity: String,
-}
-
-fn hydrate_view(row: AdminRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> AdminView {
-    let view = AdminView {
+fn hydrate_record(row: AdminRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> AdminRecord {
+    let mut record = AdminRecord {
         id: row.id,
         username: row.username,
         email: row.email,
@@ -179,31 +116,52 @@ fn hydrate_view(row: AdminRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> 
         deleted_at: row.deleted_at,
         admin_type_explained: row.admin_type.explained_label(),
     };
-    view
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct AdminWithRelations {
-    #[serde(flatten)]
-    pub row: AdminView,
+impl AdminRecord {
+    pub fn identity (& self) -> String { admin_identity (Some (self . username . as_str ()) , Some (self . name . as_str ()) , self . email . as_deref () , Some (self . id) ,) }
+    pub fn has_permission (& self , permission : Permission) -> bool { if matches ! (self . admin_type , AdminType :: Developer | AdminType :: SuperAdmin) { return true ; } let granted = admin_permissions (& self . abilities) ; granted_has_permission (& granted , permission . as_str ()) }
+    pub fn has_any_permissions (& self , permissions : & [Permission]) -> bool { permissions . iter () . copied () . any (| permission | self . has_permission (permission)) }
+    pub fn has_all_permissions (& self , permissions : & [Permission]) -> bool { permissions . iter () . copied () . all (| permission | self . has_permission (permission)) }
+    pub fn parsed_abilities (& self) -> Vec < Permission > { self . abilities . as_array () . map (| items | { items . iter () . filter_map (| item | item . as_str ()) . filter_map (Permission :: from_str) . collect () }) . unwrap_or_default () }
 }
 
-impl AdminWithRelations {
-    pub fn into_row(self) -> AdminView { self.row }
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AdminCol;
+impl AdminCol {
+    pub const ID: Column<AdminModel, i64> = Column::new("id");
+    pub const USERNAME: Column<AdminModel, String> = Column::new("username");
+    pub const EMAIL: Column<AdminModel, Option<String>> = Column::new("email");
+    pub const LOCALE: Column<AdminModel, Option<String>> = Column::new("locale");
+    pub const PASSWORD: Column<AdminModel, String> = Column::new("password");
+    pub const NAME: Column<AdminModel, String> = Column::new("name");
+    pub const ADMIN_TYPE: Column<AdminModel, AdminType> = Column::new("admin_type");
+    pub const ABILITIES: Column<AdminModel, serde_json::Value> = Column::new("abilities");
+    pub const CREATED_AT: Column<AdminModel, time::OffsetDateTime> = Column::new("created_at");
+    pub const UPDATED_AT: Column<AdminModel, time::OffsetDateTime> = Column::new("updated_at");
+    pub const DELETED_AT: Column<AdminModel, Option<time::OffsetDateTime>> = Column::new("deleted_at");
 }
 
-impl std::ops::Deref for AdminWithRelations {
-    type Target = AdminView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for AdminWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_admin_db_col(sql: &str) -> Option<AdminDbCol> {
+    match sql {
+        "id" => Some(AdminDbCol::Id),
+        "username" => Some(AdminDbCol::Username),
+        "email" => Some(AdminDbCol::Email),
+        "locale" => Some(AdminDbCol::Locale),
+        "password" => Some(AdminDbCol::Password),
+        "name" => Some(AdminDbCol::Name),
+        "admin_type" => Some(AdminDbCol::AdminType),
+        "abilities" => Some(AdminDbCol::Abilities),
+        "created_at" => Some(AdminDbCol::CreatedAt),
+        "updated_at" => Some(AdminDbCol::UpdatedAt),
+        "deleted_at" => Some(AdminDbCol::DeletedAt),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum AdminCol {
+pub enum AdminDbCol {
     Id,
     Username,
     Email,
@@ -217,53 +175,30 @@ pub enum AdminCol {
     DeletedAt,
 }
 
-impl AdminCol {
-    pub const fn all() -> &'static [AdminCol] {
-        &[AdminCol::Id, AdminCol::Username, AdminCol::Email, AdminCol::Locale, AdminCol::Password, AdminCol::Name, AdminCol::AdminType, AdminCol::Abilities, AdminCol::CreatedAt, AdminCol::UpdatedAt, AdminCol::DeletedAt]
+impl AdminDbCol {
+    pub const fn all() -> &'static [AdminDbCol] {
+        &[AdminDbCol::Id, AdminDbCol::Username, AdminDbCol::Email, AdminDbCol::Locale, AdminDbCol::Password, AdminDbCol::Name, AdminDbCol::AdminType, AdminDbCol::Abilities, AdminDbCol::CreatedAt, AdminDbCol::UpdatedAt, AdminDbCol::DeletedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            AdminCol::Id => "id",
-            AdminCol::Username => "username",
-            AdminCol::Email => "email",
-            AdminCol::Locale => "locale",
-            AdminCol::Password => "password",
-            AdminCol::Name => "name",
-            AdminCol::AdminType => "admin_type",
-            AdminCol::Abilities => "abilities",
-            AdminCol::CreatedAt => "created_at",
-            AdminCol::UpdatedAt => "updated_at",
-            AdminCol::DeletedAt => "deleted_at",
+            AdminDbCol::Id => "id",
+            AdminDbCol::Username => "username",
+            AdminDbCol::Email => "email",
+            AdminDbCol::Locale => "locale",
+            AdminDbCol::Password => "password",
+            AdminDbCol::Name => "name",
+            AdminDbCol::AdminType => "admin_type",
+            AdminDbCol::Abilities => "abilities",
+            AdminDbCol::CreatedAt => "created_at",
+            AdminDbCol::UpdatedAt => "updated_at",
+            AdminDbCol::DeletedAt => "deleted_at",
         }
     }
 }
 
-pub struct Admin<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-}
-
-impl<'db> Admin<'db> {
-    pub const TABLE: &'static str = "admin";
-    pub const MODEL_KEY: &'static str = "admin";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> AdminQuery<'db> { AdminQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> AdminInsert<'db> { AdminInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> AdminUpdate<'db> { AdminUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<AdminWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-    pub async fn restore(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).restore().await
-    }
-}
 
 #[derive(Clone)]
-pub struct AdminQuery<'db> {
+pub struct AdminQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -288,146 +223,145 @@ pub struct AdminQuery<'db> {
 
 
 
-impl<'db> AdminQuery<'db> {
+impl<'db> AdminQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![], with_deleted: false, only_deleted: false }
     }
-    pub fn unsafe_sql(self) -> AdminUnsafeQuery<'db> { AdminUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_username(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Username.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_username_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Username.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_email(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Email.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_email_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Email.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_locale(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Locale.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_locale_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Locale.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_password(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Password.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Password.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_password_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Password.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Password.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_type(mut self, op: Op, val: AdminType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::AdminType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::AdminType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::AdminType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::AdminType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_abilities(mut self, op: Op, val: serde_json::Value) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Abilities.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_abilities_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Abilities.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(AdminCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AdminCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(AdminDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: AdminDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -446,7 +380,7 @@ impl<'db> AdminQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: AdminCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: AdminDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -461,7 +395,7 @@ impl<'db> AdminQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: AdminCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: AdminDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -473,7 +407,7 @@ impl<'db> AdminQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: AdminCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: AdminDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -481,15 +415,15 @@ impl<'db> AdminQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: AdminCol) -> Self {
+    pub fn where_null(mut self, col: AdminDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: AdminCol) -> Self {
+    pub fn where_not_null(mut self, col: AdminDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: AdminCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: AdminDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -543,7 +477,7 @@ impl<'db> AdminQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[AdminCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[AdminDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, username, email, locale, password, name, admin_type, abilities, created_at, updated_at, deleted_at".to_string());
         } else {
@@ -555,7 +489,7 @@ impl<'db> AdminQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[AdminCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[AdminDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -636,26 +570,26 @@ impl<'db> AdminQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: AdminCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: AdminDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: AdminCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: AdminDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: AdminCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: AdminDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[AdminCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[AdminDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[AdminCol]) -> Self {
+    pub fn select(mut self, cols: &[AdminDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -703,7 +637,7 @@ impl<'db> AdminQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[AdminCol]) -> Self {
+    pub fn group_by(mut self, cols: &[AdminDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -780,14 +714,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<AdminWithRelations>> {
+    pub async fn get(self) -> Result<Vec<AdminRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , with_deleted, only_deleted, .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AdminDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AdminDbCol::DeletedAt.as_sql()));
             }
         }
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -837,66 +771,66 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
-            out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            out_vec.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let out_vec: Vec<AdminWithRelations> = out_vec.into_iter().map(|v| AdminWithRelations { row: v }).collect();
+        let out_vec: Vec<AdminRecord> = out_vec;
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<AdminWithRelations>> {
+    pub async fn first(self) -> Result<Option<AdminRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<AdminWithRelations> {
+    pub async fn first_or_fail(self) -> Result<AdminRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("admin: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<AdminWithRelations>> {
+    pub async fn find(self, id: i64) -> Result<Option<AdminRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<AdminWithRelations> {
+    pub async fn find_or_fail(self, id: i64) -> Result<AdminRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("admin: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(AdminInsert<'db>) -> AdminInsert<'db>) -> Result<AdminWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(AdminCreateInner<'db>) -> AdminCreateInner<'db>) -> Result<AdminRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(AdminInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(AdminCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Admin::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        AdminQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(AdminUpdate<'db>) -> AdminUpdate<'db>,
-        on_create: impl FnOnce(AdminInsert<'db>) -> AdminInsert<'db>,
-    ) -> Result<AdminWithRelations> {
+        on_update: impl FnOnce(AdminPatchInner<'db>) -> AdminPatchInner<'db>,
+        on_create: impl FnOnce(AdminCreateInner<'db>) -> AdminCreateInner<'db>,
+    ) -> Result<AdminRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = AdminUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = AdminPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Admin::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return AdminQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(AdminInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(AdminCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Admin::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        AdminQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: AdminCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: AdminDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
         if HAS_SOFT_DELETE && !self.with_deleted {
-            where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+            where_sql.push(format!("{} IS NULL", AdminDbCol::DeletedAt.as_sql()));
         }
         let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
         let sql = format!("UPDATE admin SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
@@ -909,7 +843,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: AdminCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: AdminDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -918,9 +852,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AdminDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AdminDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
@@ -947,9 +881,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AdminDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AdminDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
@@ -979,13 +913,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<AdminWithRelations>) -> Fut,
+        F: FnMut(Vec<AdminRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = AdminQuery::new(db.clone(), self.base_url.clone());
+            let mut query = AdminQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -999,11 +933,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(AdminCol::CreatedAt, OrderDir::Desc)
+        self.order_by(AdminDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(AdminCol::CreatedAt, OrderDir::Asc)
+        self.order_by(AdminDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -1014,7 +948,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<AdminWithRelations> {
+    pub async fn sole(self) -> Result<AdminRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -1033,7 +967,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&AdminWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&AdminRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -1041,14 +975,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: AdminCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: AdminDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AdminDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AdminDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
@@ -1069,14 +1003,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: AdminCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: AdminDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AdminDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AdminDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
@@ -1097,14 +1031,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: AdminCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: AdminDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AdminDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AdminDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
@@ -1125,14 +1059,14 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: AdminCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: AdminDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds , with_deleted, only_deleted , .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AdminDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AdminDbCol::DeletedAt.as_sql()));
             }
         }
         let table_name = from_sql.unwrap_or_else(|| "admin".to_string());
@@ -1153,16 +1087,16 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<AdminWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<AdminRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , with_deleted, only_deleted, .. } = self;
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AdminDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AdminDbCol::DeletedAt.as_sql()));
             }
         }
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -1211,9 +1145,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
-            data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            data.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let data: Vec<AdminWithRelations> = data.into_iter().map(|v| AdminWithRelations { row: v }).collect();
+        let data: Vec<AdminRecord> = data;
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn to_sql(&self) -> (String, Vec<BindValue>) {
@@ -1236,9 +1170,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let only_deleted = self.only_deleted;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AdminDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AdminDbCol::DeletedAt.as_sql()));
             }
         }
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -1285,9 +1219,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let mut where_sql = where_sql;
         if HAS_SOFT_DELETE {
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AdminDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AdminDbCol::DeletedAt.as_sql()));
             }
         }
         (where_sql, binds)
@@ -1321,12 +1255,12 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         if HAS_SOFT_DELETE {
             let mut where_sql = where_sql;
             if only_deleted {
-                where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NOT NULL", AdminDbCol::DeletedAt.as_sql()));
             } else if !with_deleted {
-                where_sql.push(format!("{} IS NULL", AdminCol::DeletedAt.as_sql()));
+                where_sql.push(format!("{} IS NULL", AdminDbCol::DeletedAt.as_sql()));
             }
             let idx = binds.len() + 1;
-            let mut sql = format!("UPDATE admin SET {} = ${}", AdminCol::DeletedAt.as_sql(), idx);
+            let mut sql = format!("UPDATE admin SET {} = ${}", AdminDbCol::DeletedAt.as_sql(), idx);
             if !where_sql.is_empty() {
                 sql.push_str(" WHERE ");
                 sql.push_str(&where_sql.join(" AND "));
@@ -1390,9 +1324,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         if where_sql.is_empty() { anyhow::bail!("restore(): no conditions set"); }
         let mut where_sql = where_sql;
         if !with_deleted && !only_deleted {
-            where_sql.push(format!("{} IS NOT NULL", AdminCol::DeletedAt.as_sql()));
+            where_sql.push(format!("{} IS NOT NULL", AdminDbCol::DeletedAt.as_sql()));
         }
-        let mut sql = format!("UPDATE admin SET {} = NULL", AdminCol::DeletedAt.as_sql());
+        let mut sql = format!("UPDATE admin SET {} = NULL", AdminDbCol::DeletedAt.as_sql());
         if !where_sql.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&where_sql.join(" AND "));
@@ -1409,38 +1343,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct AdminUnsafeQuery<'db> {
-    inner: AdminQuery<'db>,
-}
 
-impl<'db> AdminUnsafeQuery<'db> {
-    fn new(inner: AdminQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> AdminQuery<'db> { self.inner }
-}
-
-
-pub struct AdminInsert<'db> {
+pub struct AdminCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<AdminCol>,
+    cols: Vec<AdminDbCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<AdminCol>,
+    conflict_cols: Vec<AdminDbCol>,
 }
 
-impl<'db> AdminInsert<'db> {
+impl<'db> AdminCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1454,123 +1367,123 @@ impl<'db> AdminInsert<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(AdminCol::Id);
+        self.cols.push(AdminDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_username(mut self, val: String) -> Self {
-        self.cols.push(AdminCol::Username);
+        self.cols.push(AdminDbCol::Username);
         self.binds.push(val.into());
         self
     }
     pub fn set_email(mut self, val: Option<String>) -> Self {
-        self.cols.push(AdminCol::Email);
+        self.cols.push(AdminDbCol::Email);
         self.binds.push(val.into());
         self
     }
     pub fn set_locale(mut self, val: Option<String>) -> Self {
-        self.cols.push(AdminCol::Locale);
+        self.cols.push(AdminDbCol::Locale);
         self.binds.push(val.into());
         self
     }
     pub fn set_password(mut self, val: &str) -> anyhow::Result<Self> {
         let hashed = core_db::common::auth::hash::hash_password(val)?;
-        self.cols.push(AdminCol::Password);
+        self.cols.push(AdminDbCol::Password);
         self.binds.push(hashed.into());
         Ok(self)
     }
     pub fn set_password_raw(mut self, val: String) -> Self {
-        self.cols.push(AdminCol::Password);
+        self.cols.push(AdminDbCol::Password);
         self.binds.push(val.into());
         self
     }
     pub fn set_name(mut self, val: String) -> Self {
-        self.cols.push(AdminCol::Name);
+        self.cols.push(AdminDbCol::Name);
         self.binds.push(val.into());
         self
     }
     pub fn set_admin_type(mut self, val: AdminType) -> Self {
-        self.cols.push(AdminCol::AdminType);
+        self.cols.push(AdminDbCol::AdminType);
         self.binds.push(val.into());
         self
     }
     pub fn set_abilities(mut self, val: serde_json::Value) -> Self {
-        self.cols.push(AdminCol::Abilities);
+        self.cols.push(AdminDbCol::Abilities);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AdminCol::CreatedAt);
+        self.cols.push(AdminDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AdminCol::UpdatedAt);
+        self.cols.push(AdminDbCol::UpdatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.cols.push(AdminCol::DeletedAt);
+        self.cols.push(AdminDbCol::DeletedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[AdminCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[AdminDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[AdminCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[AdminDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<AdminCreateInput> {
-        let mut input = AdminCreateInput::default();
+    fn to_create_input(&self) -> Result<AdminCreate> {
+        let mut input = AdminCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                AdminCol::Id => {
+                AdminDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                AdminCol::Username => {
+                AdminDbCol::Username => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.username = FieldInput::Set(value);
                 }
-                AdminCol::Email => {
+                AdminDbCol::Email => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.email = FieldInput::Set(value);
                 }
-                AdminCol::Locale => {
+                AdminDbCol::Locale => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.locale = FieldInput::Set(value);
                 }
-                AdminCol::Password => {
+                AdminDbCol::Password => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.password = FieldInput::Set(value);
                 }
-                AdminCol::Name => {
+                AdminDbCol::Name => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.name = FieldInput::Set(value);
                 }
-                AdminCol::AdminType => {
+                AdminDbCol::AdminType => {
                     let value = match bind {
                 BindValue::String(value) => AdminType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'AdminType'", value))?,
@@ -1583,28 +1496,28 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.admin_type = FieldInput::Set(value);
                 }
-                AdminCol::Abilities => {
+                AdminDbCol::Abilities => {
                     let value = match bind {
             BindValue::Json(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'serde_json::Value'", other),
         };
                     input.abilities = FieldInput::Set(value);
                 }
-                AdminCol::CreatedAt => {
+                AdminDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                AdminCol::UpdatedAt => {
+                AdminDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.updated_at = FieldInput::Set(value);
                 }
-                AdminCol::DeletedAt => {
+                AdminDbCol::DeletedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
@@ -1617,7 +1530,7 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
 
 
-pub async fn save(self) -> Result<AdminView> {
+pub async fn save(self) -> Result<AdminRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -1635,7 +1548,7 @@ pub async fn save(self) -> Result<AdminView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1654,10 +1567,10 @@ pub async fn save(self) -> Result<AdminView> {
                         Err(err) => log_observer_error("created", "admin", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "admin", table: "admin", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -1669,26 +1582,26 @@ pub async fn save(self) -> Result<AdminView> {
                         Err(err) => log_observer_error("created", "admin", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(AdminView, AdminRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(AdminRecord, AdminRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, AdminCol::Id)) {
-            cols.push(AdminCol::Id);
+        if !cols.iter().any(|c| matches!(c, AdminDbCol::Id)) {
+            cols.push(AdminDbCol::Id);
             binds.push(generate_snowflake_i64().into());
         }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, AdminDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AdminCol::CreatedAt);
+            cols.push(AdminDbCol::CreatedAt);
             binds.push(now.into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AdminDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AdminCol::UpdatedAt);
+            cols.push(AdminDbCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1722,20 +1635,20 @@ pub async fn save(self) -> Result<AdminView> {
         let row = db.fetch_one(q).await?;
         record_profiled_query("admin", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
-        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct AdminUpdate<'db> {
+pub struct AdminPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(AdminCol, BindValue, SetMode)>,
+    sets: Vec<(AdminDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> AdminUpdate<'db> {
+impl<'db> AdminPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1745,133 +1658,132 @@ impl<'db> AdminUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> AdminUnsafeUpdate<'db> { AdminUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((AdminCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((AdminDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((AdminCol::Id, val.into(), SetMode::Increment));
+        self.sets.push((AdminDbCol::Id, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((AdminCol::Id, val.into(), SetMode::Decrement));
+        self.sets.push((AdminDbCol::Id, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_username(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Username, val.into(), SetMode::Assign));
+        self.sets.push((AdminDbCol::Username, val.into(), SetMode::Assign));
         self
     }
     pub fn set_email(mut self, val: Option<String>) -> Self {
-        self.sets.push((AdminCol::Email, val.into(), SetMode::Assign));
+        self.sets.push((AdminDbCol::Email, val.into(), SetMode::Assign));
         self
     }
     pub fn set_locale(mut self, val: Option<String>) -> Self {
-        self.sets.push((AdminCol::Locale, val.into(), SetMode::Assign));
+        self.sets.push((AdminDbCol::Locale, val.into(), SetMode::Assign));
         self
     }
     pub fn set_password(mut self, val: &str) -> anyhow::Result<Self> {
         let hashed = core_db::common::auth::hash::hash_password(val)?;
-        self.sets.push((AdminCol::Password, hashed.into(), SetMode::Assign));
+        self.sets.push((AdminDbCol::Password, hashed.into(), SetMode::Assign));
         Ok(self)
     }
     pub fn set_password_raw(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Password, val.into(), SetMode::Assign));
+        self.sets.push((AdminDbCol::Password, val.into(), SetMode::Assign));
         self
     }
     pub fn set_name(mut self, val: String) -> Self {
-        self.sets.push((AdminCol::Name, val.into(), SetMode::Assign));
+        self.sets.push((AdminDbCol::Name, val.into(), SetMode::Assign));
         self
     }
     pub fn set_admin_type(mut self, val: AdminType) -> Self {
-        self.sets.push((AdminCol::AdminType, val.into(), SetMode::Assign));
+        self.sets.push((AdminDbCol::AdminType, val.into(), SetMode::Assign));
         self
     }
     pub fn set_abilities(mut self, val: serde_json::Value) -> Self {
-        self.sets.push((AdminCol::Abilities, val.into(), SetMode::Assign));
+        self.sets.push((AdminDbCol::Abilities, val.into(), SetMode::Assign));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AdminCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((AdminDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AdminCol::UpdatedAt, val.into(), SetMode::Assign));
+        self.sets.push((AdminDbCol::UpdatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_deleted_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((AdminCol::DeletedAt, val.into(), SetMode::Assign));
+        self.sets.push((AdminDbCol::DeletedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_username(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Username.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_email(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Email.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Email.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_locale(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Locale.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Locale.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_password(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Password.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Password.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_type(mut self, op: Op, val: AdminType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::AdminType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::AdminType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_abilities(mut self, op: Op, val: serde_json::Value) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::Abilities.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::Abilities.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deleted_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AdminCol::DeletedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AdminDbCol::DeletedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AdminCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: AdminDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1890,11 +1802,11 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<AdminUpdateChanges> {
-        let mut changes = AdminUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<AdminChanges> {
+        let mut changes = AdminChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                AdminCol::Id => {
+                AdminDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1905,7 +1817,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AdminCol::Username => {
+                AdminDbCol::Username => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1916,7 +1828,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AdminCol::Email => {
+                AdminDbCol::Email => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -1927,7 +1839,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AdminCol::Locale => {
+                AdminDbCol::Locale => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -1938,7 +1850,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AdminCol::Password => {
+                AdminDbCol::Password => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1949,7 +1861,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AdminCol::Name => {
+                AdminDbCol::Name => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1960,7 +1872,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AdminCol::AdminType => {
+                AdminDbCol::AdminType => {
                     let value = match bind {
                 BindValue::String(value) => AdminType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'AdminType'", value))?,
@@ -1977,7 +1889,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AdminCol::Abilities => {
+                AdminDbCol::Abilities => {
                     let value = match bind {
             BindValue::Json(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'serde_json::Value'", other),
@@ -1988,7 +1900,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AdminCol::CreatedAt => {
+                AdminDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1999,7 +1911,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AdminCol::UpdatedAt => {
+                AdminDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2010,7 +1922,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AdminCol::DeletedAt => {
+                AdminDbCol::DeletedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
@@ -2054,14 +1966,14 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<AdminUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<AdminChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AdminCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, AdminDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AdminCol::UpdatedAt);
+            cols.push(AdminDbCol::UpdatedAt);
             set_binds.push(now.into());
             set_modes.push(SetMode::Assign);
         }
@@ -2151,32 +2063,22 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct AdminUnsafeUpdate<'db> {
-    inner: AdminUpdate<'db>,
-}
-
-impl<'db> AdminUnsafeUpdate<'db> {
-    fn new(inner: AdminUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> AdminUpdate<'db> { self.inner }
-}
 
 pub struct AdminTableAdapter;
 impl AdminTableAdapter {
-    fn parse_col(name: &str) -> Option<AdminCol> {
+    fn parse_col(name: &str) -> Option<AdminDbCol> {
         match name {
-            "id" => Some(AdminCol::Id),
-            "username" => Some(AdminCol::Username),
-            "email" => Some(AdminCol::Email),
-            "locale" => Some(AdminCol::Locale),
-            "password" => Some(AdminCol::Password),
-            "name" => Some(AdminCol::Name),
-            "admin_type" => Some(AdminCol::AdminType),
-            "abilities" => Some(AdminCol::Abilities),
-            "created_at" => Some(AdminCol::CreatedAt),
-            "updated_at" => Some(AdminCol::UpdatedAt),
-            "deleted_at" => Some(AdminCol::DeletedAt),
+            "id" => Some(AdminDbCol::Id),
+            "username" => Some(AdminDbCol::Username),
+            "email" => Some(AdminDbCol::Email),
+            "locale" => Some(AdminDbCol::Locale),
+            "password" => Some(AdminDbCol::Password),
+            "name" => Some(AdminDbCol::Name),
+            "admin_type" => Some(AdminDbCol::AdminType),
+            "abilities" => Some(AdminDbCol::Abilities),
+            "created_at" => Some(AdminDbCol::CreatedAt),
+            "updated_at" => Some(AdminDbCol::UpdatedAt),
+            "deleted_at" => Some(AdminDbCol::DeletedAt),
             _ => None,
         }
     }
@@ -2190,13 +2092,13 @@ impl AdminTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<AdminCol> {
+    fn parse_like_col(name: &str) -> Option<AdminDbCol> {
         match name {
-            "username" => Some(AdminCol::Username),
-            "email" => Some(AdminCol::Email),
-            "locale" => Some(AdminCol::Locale),
-            "password" => Some(AdminCol::Password),
-            "name" => Some(AdminCol::Name),
+            "username" => Some(AdminDbCol::Username),
+            "email" => Some(AdminDbCol::Email),
+            "locale" => Some(AdminDbCol::Locale),
+            "password" => Some(AdminDbCol::Password),
+            "name" => Some(AdminDbCol::Name),
             _ => None,
         }
     }
@@ -2243,8 +2145,8 @@ impl AdminTableAdapter {
     }
 }
 impl GeneratedTableAdapter for AdminTableAdapter {
-    type Query<'db> = AdminQuery<'db>;
-    type Row = AdminWithRelations;
+    type Query<'db> = Query<'db, AdminModel>;
+    type Row = AdminRecord;
     fn model_key(&self) -> &'static str { "Admin" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "username", "email", "locale", "password", "name", "admin_type", "created_at", "updated_at", "deleted_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at", "deleted_at"] }
@@ -2281,7 +2183,7 @@ impl GeneratedTableAdapter for AdminTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: AdminQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<AdminQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, AdminModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, AdminModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -2375,31 +2277,31 @@ impl GeneratedTableAdapter for AdminTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: AdminQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<AdminQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, AdminModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, AdminModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(AdminCol::Id, dir),
-            "username" => query.order_by(AdminCol::Username, dir),
-            "email" => query.order_by(AdminCol::Email, dir),
-            "locale" => query.order_by(AdminCol::Locale, dir),
-            "password" => query.order_by(AdminCol::Password, dir),
-            "name" => query.order_by(AdminCol::Name, dir),
-            "admin_type" => query.order_by(AdminCol::AdminType, dir),
-            "abilities" => query.order_by(AdminCol::Abilities, dir),
-            "created_at" => query.order_by(AdminCol::CreatedAt, dir),
-            "updated_at" => query.order_by(AdminCol::UpdatedAt, dir),
-            "deleted_at" => query.order_by(AdminCol::DeletedAt, dir),
+            "id" => query.order_by(AdminDbCol::Id, dir),
+            "username" => query.order_by(AdminDbCol::Username, dir),
+            "email" => query.order_by(AdminDbCol::Email, dir),
+            "locale" => query.order_by(AdminDbCol::Locale, dir),
+            "password" => query.order_by(AdminDbCol::Password, dir),
+            "name" => query.order_by(AdminDbCol::Name, dir),
+            "admin_type" => query.order_by(AdminDbCol::AdminType, dir),
+            "abilities" => query.order_by(AdminDbCol::Abilities, dir),
+            "created_at" => query.order_by(AdminDbCol::CreatedAt, dir),
+            "updated_at" => query.order_by(AdminDbCol::UpdatedAt, dir),
+            "deleted_at" => query.order_by(AdminDbCol::DeletedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: AdminQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<AdminQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, AdminModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, AdminModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &AdminWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &AdminRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "username" => Some(row.username.clone()),
@@ -2413,10 +2315,10 @@ impl GeneratedTableAdapter for AdminTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: AdminQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, AdminModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: AdminQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<AdminWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, AdminModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<AdminRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -2442,13 +2344,13 @@ impl Default for AdminDataTableConfig {
     }
 }
 pub trait AdminDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> AdminQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, AdminModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, AdminModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: AdminQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<AdminQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<AdminQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut AdminWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: AdminWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, AdminModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, AdminModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, AdminModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, AdminModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut AdminRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: AdminRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         if let Some(id_value) = record.get("id").cloned() {
             let id_text = match id_value {
@@ -2458,12 +2360,13 @@ pub trait AdminDataTableHooks: Send + Sync + 'static {
             };
             record.insert("id".to_string(), serde_json::Value::String(id_text));
         }
+        record.insert("identity".to_string(), serde_json::to_value(row.identity())?);
         Ok(record)
     }
-    fn row_to_record(&self, row: AdminWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: AdminRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: AdminQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, AdminModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct AdminDefaultDataTableHooks;
@@ -2501,15 +2404,15 @@ impl<H: AdminDataTableHooks> AdminDataTable<H> {
 impl<H: AdminDataTableHooks> AutoDataTable for AdminDataTable<H> {
     type Adapter = AdminTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> AdminQuery<'db> {
-        self.hooks.scope(Admin::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, AdminModel> {
+        self.hooks.scope(AdminModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: AdminQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<AdminQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: AdminQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<AdminQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut AdminWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: AdminWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: AdminQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, AdminModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, AdminModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, AdminModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, AdminModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut AdminRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: AdminRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, AdminModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -2519,10 +2422,538 @@ impl<H: AdminDataTableHooks> AutoDataTable for AdminDataTable<H> {
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for AdminView {
+impl ActiveRecord for AdminRecord {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Admin::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        AdminModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct AdminModel;
+impl AdminModel {
+    pub const TABLE: &'static str = "admin";
+    pub const MODEL_KEY: &'static str = "admin";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, AdminModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, AdminModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, AdminModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, AdminModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, AdminModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, AdminModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<AdminRecord>> {
+        AdminQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for AdminModel {
+    type Pk = i64;
+    type Record = AdminRecord;
+    type Create = AdminCreate;
+    type Changes = AdminChanges;
+    const TABLE: &'static str = AdminModel::TABLE;
+    const MODEL_KEY: &'static str = AdminModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for AdminModel {
+    type InnerQuery<'db> = AdminQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        AdminQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for AdminModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for AdminModel {
+    type InnerCreate<'db> = AdminCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        AdminCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            AdminQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("admin: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<AdminModel> for AdminDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <AdminModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<AdminModel>>::Value) -> anyhow::Result<<AdminModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            AdminDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::Username => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::Email => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::Locale => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::Password => {
+                let BindValue::String(value) = value else {
+                    anyhow::bail!("column '{}' expects String input before hashing, got '{:?}'", AdminDbCol::Password.as_sql(), value);
+                };
+                let hashed = core_db::common::auth::hash::hash_password(&value)?;
+                builder.cols.push(field);
+                builder.binds.push(hashed.into());
+                Ok(builder)
+            }
+            AdminDbCol::Name => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::AdminType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::Abilities => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::DeletedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<AdminModel> for Column<AdminModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <AdminModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<AdminModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_admin_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            AdminDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::Username => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::Email => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::Locale => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::Password => {
+                let BindValue::String(value) = value else {
+                    anyhow::bail!("column '{}' expects String input before hashing, got '{:?}'", AdminDbCol::Password.as_sql(), value);
+                };
+                let hashed = core_db::common::auth::hash::hash_password(&value)?;
+                builder.cols.push(field);
+                builder.binds.push(hashed.into());
+                Ok(builder)
+            }
+            AdminDbCol::Name => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::AdminType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::Abilities => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AdminDbCol::DeletedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<AdminModel> for AdminDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <AdminModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <AdminModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <AdminModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <AdminModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<AdminModel> for Column<AdminModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <AdminModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <AdminModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<AdminDbCol> = fields.iter().map(|field| resolve_admin_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <AdminModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <AdminModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<AdminDbCol> = fields.iter().map(|field| resolve_admin_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for AdminModel {
+    type InnerQuery<'db> = AdminQueryInner<'db>;
+    type InnerPatch<'db> = AdminPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        AdminPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(AdminDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = AdminPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", AdminDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM admin", AdminDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = AdminQueryInner::new(db, base_url);
+            query = query.with_deleted();
+            query.where_in(AdminDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<AdminModel> for AdminDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <AdminModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AdminModel>>::Value) -> anyhow::Result<<AdminModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            AdminDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::Username => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::Email => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::Locale => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::Password => {
+                let BindValue::String(value) = value else {
+                    anyhow::bail!("column '{}' expects String input before hashing, got '{:?}'", AdminDbCol::Password.as_sql(), value);
+                };
+                let hashed = core_db::common::auth::hash::hash_password(&value)?;
+                builder.sets.push((field, hashed.into(), SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::Name => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::AdminType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::Abilities => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::DeletedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<AdminModel> for Column<AdminModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <AdminModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<AdminModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_admin_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            AdminDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::Username => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::Email => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::Locale => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::Password => {
+                let BindValue::String(value) = value else {
+                    anyhow::bail!("column '{}' expects String input before hashing, got '{:?}'", AdminDbCol::Password.as_sql(), value);
+                };
+                let hashed = core_db::common::auth::hash::hash_password(&value)?;
+                builder.sets.push((field, hashed.into(), SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::Name => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::AdminType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::Abilities => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AdminDbCol::DeletedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<AdminModel> for AdminDbCol {
+    fn increment<'db>(field: Self, mut builder: <AdminModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AdminModel>>::Value) -> anyhow::Result<<AdminModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            AdminDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <AdminModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AdminModel>>::Value) -> anyhow::Result<<AdminModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            AdminDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<AdminModel> for Column<AdminModel, i64> {
+    fn increment<'db>(field: Self, mut builder: <AdminModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AdminModel>>::Value) -> anyhow::Result<<AdminModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_admin_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            AdminDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <AdminModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AdminModel>>::Value) -> anyhow::Result<<AdminModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_admin_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            AdminDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<AdminModel> for AdminDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<AdminModel>>::Value) -> <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<AdminModel>>::Value) -> <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<AdminModel>>::Value]) -> <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<AdminModel> for Column<AdminModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_admin_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_admin_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_admin_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_admin_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_admin_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <AdminModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_admin_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
 

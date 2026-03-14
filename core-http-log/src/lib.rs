@@ -24,7 +24,9 @@ pub use webhook_middleware::WebhookLogLayer;
 use anyhow::Result;
 use core_db::{
     common::sql::{DbConn, Op},
-    generated::models::{HttpClientLog as HttpClientLogModel, WebhookLog as WebhookLogModel},
+    generated::models::{
+        HttpClientLogCol, HttpClientLogModel, WebhookLogCol, WebhookLogModel,
+    },
 };
 use sqlx::PgPool;
 use time::OffsetDateTime;
@@ -37,15 +39,13 @@ pub async fn cleanup_logs(db: &PgPool, retention_days: u64) -> Result<()> {
 
     let cutoff = OffsetDateTime::now_utc() - time::Duration::days(retention_days as i64);
 
-    WebhookLogModel::new(DbConn::pool(db), None)
-        .query()
-        .where_created_at(Op::Lt, cutoff)
+    WebhookLogModel::query(DbConn::pool(db))
+        .where_col(WebhookLogCol::CREATED_AT, Op::Lt, cutoff)
         .delete()
         .await?;
 
-    HttpClientLogModel::new(DbConn::pool(db), None)
-        .query()
-        .where_created_at(Op::Lt, cutoff)
+    HttpClientLogModel::query(DbConn::pool(db))
+        .where_col(HttpClientLogCol::CREATED_AT, Op::Lt, cutoff)
         .delete()
         .await?;
 

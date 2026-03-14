@@ -1,12 +1,12 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
-use core_db::common::sql::Op;
+use core_db::common::{model_api::Query, sql::Op};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
 use generated::{
-    models::{admin::admin_identity, *},
+    models::*,
     permissions::Permission,
 };
 
@@ -21,10 +21,10 @@ pub struct AdminDataTableAppHooks;
 impl AdminDataTableHooks for AdminDataTableAppHooks {
     fn scope<'db>(
         &'db self,
-        query: AdminQuery<'db>,
+        query: Query<'db, AdminModel>,
         _input: &DataTableInput,
         ctx: &DataTableContext,
-    ) -> AdminQuery<'db> {
+    ) -> Query<'db, AdminModel> {
         apply_actor_scope(query, ctx)
     }
 
@@ -46,12 +46,12 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
 
     fn filter_query<'db>(
         &'db self,
-        query: AdminQuery<'db>,
+        query: Query<'db, AdminModel>,
         filter_key: &str,
         value: &str,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<Option<AdminQuery<'db>>> {
+    ) -> anyhow::Result<Option<Query<'db, AdminModel>>> {
         match filter_key {
             "q" => Ok(Some(apply_keyword_filter(query, value))),
             _ => Ok(None),
@@ -60,34 +60,12 @@ impl AdminDataTableHooks for AdminDataTableAppHooks {
 
     fn row_to_record(
         &self,
-        row: generated::models::AdminWithRelations,
+        row: generated::models::AdminRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let identity = row.identity();
         let mut record = self.default_row_to_record(row)?;
-
-        let username = record
-            .get("username")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|v| !v.is_empty());
-        let name = record
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|v| !v.is_empty());
-        let email = record
-            .get("email")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|v| !v.is_empty());
-        let id = record.get("id").and_then(|value| match value {
-            serde_json::Value::Number(number) => number.as_i64(),
-            serde_json::Value::String(text) => text.trim().parse::<i64>().ok(),
-            _ => None,
-        });
-
-        let identity = admin_identity(username, name, email, id);
         record.insert("identity".to_string(), serde_json::Value::String(identity));
         record.remove("password");
         record.remove("deleted_at");
@@ -104,9 +82,9 @@ fn parse_admin_type(value: &str) -> Option<AdminType> {
     }
 }
 
-fn apply_actor_scope<'db>(query: AdminQuery<'db>, ctx: &DataTableContext) -> AdminQuery<'db> {
+fn apply_actor_scope<'db>(query: Query<'db, AdminModel>, ctx: &DataTableContext) -> Query<'db, AdminModel> {
     let Some(actor) = ctx.actor.as_ref() else {
-        return query.where_id(Op::Eq, -1);
+        return query.where_col(AdminCol::ID, Op::Eq, -1);
     };
 
     let admin_type = actor
@@ -117,22 +95,22 @@ fn apply_actor_scope<'db>(query: AdminQuery<'db>, ctx: &DataTableContext) -> Adm
 
     match admin_type {
         Some(AdminType::Developer) => query,
-        Some(AdminType::SuperAdmin) => query.where_admin_type(Op::Ne, AdminType::Developer),
-        Some(AdminType::Admin) => query.where_admin_type(Op::Eq, AdminType::Admin),
-        None => query.where_id(Op::Eq, -1),
+        Some(AdminType::SuperAdmin) => query.where_col(AdminCol::ADMIN_TYPE, Op::Ne, AdminType::Developer),
+        Some(AdminType::Admin) => query.where_col(AdminCol::ADMIN_TYPE, Op::Eq, AdminType::Admin),
+        None => query.where_col(AdminCol::ID, Op::Eq, -1),
     }
 }
 
-fn apply_keyword_filter<'db>(query: AdminQuery<'db>, value: &str) -> AdminQuery<'db> {
+fn apply_keyword_filter<'db>(query: Query<'db, AdminModel>, value: &str) -> Query<'db, AdminModel> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return query;
     }
     let pattern = format!("%{trimmed}%");
     query.where_group(|q| {
-        q.where_col(AdminCol::Username, Op::Like, pattern.clone())
-            .or_where_col(AdminCol::Name, Op::Like, pattern.clone())
-            .or_where_col(AdminCol::Email, Op::Like, pattern)
+        q.where_col(AdminCol::USERNAME, Op::Like, pattern.clone())
+            .or_where_col(AdminCol::NAME, Op::Like, pattern.clone())
+            .or_where_col(AdminCol::EMAIL, Op::Like, pattern)
     })
 }
 
@@ -160,9 +138,9 @@ fn parse_datetime(raw: &str, end_of_day: bool) -> Option<time::OffsetDateTime> {
 }
 
 fn apply_summary_filters<'db>(
-    mut query: AdminQuery<'db>,
+    mut query: Query<'db, AdminModel>,
     input: &DataTableInput,
-) -> AdminQuery<'db> {
+) -> Query<'db, AdminModel> {
     for (key, value) in input.filter_entries() {
         let trimmed = value.trim();
         if trimmed.is_empty() {
@@ -170,24 +148,24 @@ fn apply_summary_filters<'db>(
         }
         match key {
             "f-like-email" => {
-                query = query.where_col(AdminCol::Email, Op::Like, format!("%{trimmed}%"));
+                query = query.where_col(AdminCol::EMAIL, Op::Like, format!("%{trimmed}%"));
             }
             "f-like-username" => {
-                query = query.where_col(AdminCol::Username, Op::Like, format!("%{trimmed}%"));
+                query = query.where_col(AdminCol::USERNAME, Op::Like, format!("%{trimmed}%"));
             }
             "f-admin_type" => {
                 if let Some(admin_type) = parse_admin_type(trimmed) {
-                    query = query.where_admin_type(Op::Eq, admin_type);
+                    query = query.where_col(AdminCol::ADMIN_TYPE, Op::Eq, admin_type);
                 }
             }
             "f-date-from-created_at" => {
                 if let Some(ts) = parse_datetime(trimmed, false) {
-                    query = query.where_col(AdminCol::CreatedAt, Op::Ge, ts);
+                    query = query.where_col(AdminCol::CREATED_AT, Op::Ge, ts);
                 }
             }
             "f-date-to-created_at" => {
                 if let Some(ts) = parse_datetime(trimmed, true) {
-                    query = query.where_col(AdminCol::CreatedAt, Op::Le, ts);
+                    query = query.where_col(AdminCol::CREATED_AT, Op::Le, ts);
                 }
             }
             _ => {}
@@ -208,22 +186,22 @@ pub async fn build_admin_summary_output(
     input: &DataTableInput,
     ctx: &DataTableContext,
 ) -> anyhow::Result<AdminDatatableSummaryOutput> {
-    let scoped = apply_actor_scope(Admin::new(db, None).query(), ctx);
+    let scoped = apply_actor_scope(AdminModel::query(db), ctx);
     let filtered = apply_summary_filters(scoped, input);
 
     let total_filtered = filtered.clone().count().await?;
     let developer_count = filtered
         .clone()
-        .where_admin_type(Op::Eq, AdminType::Developer)
+        .where_col(AdminCol::ADMIN_TYPE, Op::Eq, AdminType::Developer)
         .count()
         .await?;
     let superadmin_count = filtered
         .clone()
-        .where_admin_type(Op::Eq, AdminType::SuperAdmin)
+        .where_col(AdminCol::ADMIN_TYPE, Op::Eq, AdminType::SuperAdmin)
         .count()
         .await?;
     let admin_count = filtered
-        .where_admin_type(Op::Eq, AdminType::Admin)
+        .where_col(AdminCol::ADMIN_TYPE, Op::Eq, AdminType::Admin)
         .count()
         .await?;
 

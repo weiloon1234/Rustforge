@@ -6,17 +6,17 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
-use crate::generated::models::admin::{AdminCol, AdminQuery, AdminRow};
-use crate::generated::models::company_bank_account::{CompanyBankAccountCol, CompanyBankAccountQuery, CompanyBankAccountRow};
-use crate::generated::models::company_crypto_account::{CompanyCryptoAccountCol, CompanyCryptoAccountQuery, CompanyCryptoAccountRow};
-use crate::generated::models::bank::{BankCol, BankQuery, BankRow};
-use crate::generated::models::crypto_network::{CryptoNetworkCol, CryptoNetworkQuery, CryptoNetworkRow};
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
+use crate::generated::models::admin::{AdminDbCol, AdminModel, AdminRow};
+use crate::generated::models::company_bank_account::{CompanyBankAccountDbCol, CompanyBankAccountModel, CompanyBankAccountRow, CompanyBankAccountRel};
+use crate::generated::models::company_crypto_account::{CompanyCryptoAccountDbCol, CompanyCryptoAccountModel, CompanyCryptoAccountRow, CompanyCryptoAccountRel};
+use crate::generated::models::bank::{BankDbCol, BankModel, BankRow};
+use crate::generated::models::crypto_network::{CryptoNetworkDbCol, CryptoNetworkModel, CryptoNetworkRow};
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
@@ -24,7 +24,7 @@ const HAS_UPDATED_AT: bool = true;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct DepositCreateInput {
+pub struct DepositCreate {
     pub id: FieldInput<i64>,
     pub owner_type: FieldInput<OwnerType>,
     pub owner_id: FieldInput<i64>,
@@ -49,7 +49,7 @@ pub struct DepositCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct DepositUpdateChanges {
+pub struct DepositChanges {
     pub id: Option<FieldChange<i64>>,
     pub owner_type: Option<FieldChange<OwnerType>>,
     pub owner_id: Option<FieldChange<i64>>,
@@ -104,7 +104,7 @@ pub struct DepositRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct DepositView {
+pub struct DepositRecord {
     pub id: i64,
     pub owner_type: OwnerType,
     pub owner_id: i64,
@@ -132,93 +132,19 @@ pub struct DepositView {
     pub credit_type_explained: String,
     pub deposit_method_explained: String,
     pub status_explained: String,
+    pub admin: Option<AdminRow>,
+    pub company_bank_account: Option<CompanyBankAccountRow>,
+    pub company_crypto_account: Option<CompanyCryptoAccountRow>,
 }
 
-impl DepositView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> DepositUpdate<'db> {
-        Deposit::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &Deposit<'db>) -> DepositUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> DepositJson {
-        DepositJson {
-            id: self.id.clone(),
-            owner_type: self.owner_type.clone(),
-            owner_id: self.owner_id.clone(),
-            admin_id: self.admin_id.clone(),
-            credit_type: self.credit_type.clone(),
-            deposit_method: self.deposit_method.clone(),
-            company_bank_account_id: self.company_bank_account_id.clone(),
-            company_crypto_account_id: self.company_crypto_account_id.clone(),
-            conversion_rate: self.conversion_rate.clone(),
-            status: self.status.clone(),
-            amount: self.amount.clone(),
-            fee: self.fee.clone(),
-            net_amount: self.net_amount.clone(),
-            related_key: self.related_key.clone(),
-            params: self.params.clone(),
-            remark: self.remark.clone(),
-            admin_remark: self.admin_remark.clone(),
-            reviewed_at: self.reviewed_at.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            owner_type_explained: self.owner_type_explained.clone(),
-            credit_type_explained: self.credit_type_explained.clone(),
-            deposit_method_explained: self.deposit_method_explained.clone(),
-            status_explained: self.status_explained.clone(),
-        }
+impl DepositRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, DepositModel> {
+        DepositModel::query(db.into()).where_col(DepositDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-pub trait DepositViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&DepositView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&DepositView) -> K) -> std::collections::HashMap<K, DepositView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&DepositView) -> K) -> std::collections::HashMap<K, Vec<DepositView>> where K: Eq + std::hash::Hash;
-}
-
-impl DepositViewsExt for Vec<DepositView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&DepositView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&DepositView) -> K) -> std::collections::HashMap<K, DepositView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&DepositView) -> K) -> std::collections::HashMap<K, Vec<DepositView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct DepositJson {
-    pub id: i64,
-    pub owner_type: OwnerType,
-    pub owner_id: i64,
-    pub admin_id: Option<i64>,
-    pub credit_type: CreditType,
-    pub deposit_method: DepositMethod,
-    pub company_bank_account_id: Option<i64>,
-    pub company_crypto_account_id: Option<i64>,
-    pub conversion_rate: Option<rust_decimal::Decimal>,
-    pub status: DepositStatus,
-    pub amount: rust_decimal::Decimal,
-    pub fee: rust_decimal::Decimal,
-    pub net_amount: rust_decimal::Decimal,
-    pub related_key: Option<String>,
-    pub params: Option<serde_json::Value>,
-    pub remark: Option<String>,
-    pub admin_remark: Option<String>,
-    #[schemars(with = "String")]
-    pub reviewed_at: Option<time::OffsetDateTime>,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    pub owner_type_explained: String,
-    pub credit_type_explained: String,
-    pub deposit_method_explained: String,
-    pub status_explained: String,
-}
-
-fn hydrate_view(row: DepositRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> DepositView {
-    let view = DepositView {
+fn hydrate_record(row: DepositRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> DepositRecord {
+    let mut record = DepositRecord {
         id: row.id,
         owner_type: row.owner_type,
         owner_id: row.owner_id,
@@ -243,39 +169,85 @@ fn hydrate_view(row: DepositRow, _loc: &LocalizedMap, _base_url: Option<&str>) -
         credit_type_explained: row.credit_type.explained_label(),
         deposit_method_explained: row.deposit_method.explained_label(),
         status_explained: row.status.explained_label(),
+        admin: None,
+        company_bank_account: None,
+        company_crypto_account: None,
     };
-    view
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct DepositWithRelations {
-    #[serde(flatten)]
-    pub row: DepositView,
-    pub admin: Option<AdminRow>,
-    pub company_bank_account: Option<CompanyBankAccountRow>,
-    pub company_crypto_account: Option<CompanyCryptoAccountRow>,
+impl DepositRecord {
+    pub fn one<R>(&self, relation: R) -> Option<&R::Target>
+    where
+        R: core_db::common::model_api::RecordOneRelation<DepositModel>,
+    {
+        R::get(relation, self)
+    }
+    pub fn many<R>(&self, relation: R) -> &[R::Target]
+    where
+        R: core_db::common::model_api::RecordManyRelation<DepositModel>,
+    {
+        R::get(relation, self)
+    }
 }
 
-impl DepositWithRelations {
-    pub fn into_row(self) -> DepositView { self.row }
-}
-
-impl std::ops::Deref for DepositWithRelations {
-    type Target = DepositView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for DepositWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
-}
-
-impl DepositWithRelations {
+impl DepositRecord {
     pub fn status_label (& self) -> String { self . status . explained_label () . to_string () }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DepositCol;
+impl DepositCol {
+    pub const ID: Column<DepositModel, i64> = Column::new("id");
+    pub const OWNER_TYPE: Column<DepositModel, OwnerType> = Column::new("owner_type");
+    pub const OWNER_ID: Column<DepositModel, i64> = Column::new("owner_id");
+    pub const ADMIN_ID: Column<DepositModel, Option<i64>> = Column::new("admin_id");
+    pub const CREDIT_TYPE: Column<DepositModel, CreditType> = Column::new("credit_type");
+    pub const DEPOSIT_METHOD: Column<DepositModel, DepositMethod> = Column::new("deposit_method");
+    pub const COMPANY_BANK_ACCOUNT_ID: Column<DepositModel, Option<i64>> = Column::new("company_bank_account_id");
+    pub const COMPANY_CRYPTO_ACCOUNT_ID: Column<DepositModel, Option<i64>> = Column::new("company_crypto_account_id");
+    pub const CONVERSION_RATE: Column<DepositModel, Option<rust_decimal::Decimal>> = Column::new("conversion_rate");
+    pub const STATUS: Column<DepositModel, DepositStatus> = Column::new("status");
+    pub const AMOUNT: Column<DepositModel, rust_decimal::Decimal> = Column::new("amount");
+    pub const FEE: Column<DepositModel, rust_decimal::Decimal> = Column::new("fee");
+    pub const NET_AMOUNT: Column<DepositModel, rust_decimal::Decimal> = Column::new("net_amount");
+    pub const RELATED_KEY: Column<DepositModel, Option<String>> = Column::new("related_key");
+    pub const PARAMS: Column<DepositModel, Option<serde_json::Value>> = Column::new("params");
+    pub const REMARK: Column<DepositModel, Option<String>> = Column::new("remark");
+    pub const ADMIN_REMARK: Column<DepositModel, Option<String>> = Column::new("admin_remark");
+    pub const REVIEWED_AT: Column<DepositModel, Option<time::OffsetDateTime>> = Column::new("reviewed_at");
+    pub const CREATED_AT: Column<DepositModel, time::OffsetDateTime> = Column::new("created_at");
+    pub const UPDATED_AT: Column<DepositModel, time::OffsetDateTime> = Column::new("updated_at");
+}
+
+fn resolve_deposit_db_col(sql: &str) -> Option<DepositDbCol> {
+    match sql {
+        "id" => Some(DepositDbCol::Id),
+        "owner_type" => Some(DepositDbCol::OwnerType),
+        "owner_id" => Some(DepositDbCol::OwnerId),
+        "admin_id" => Some(DepositDbCol::AdminId),
+        "credit_type" => Some(DepositDbCol::CreditType),
+        "deposit_method" => Some(DepositDbCol::DepositMethod),
+        "company_bank_account_id" => Some(DepositDbCol::CompanyBankAccountId),
+        "company_crypto_account_id" => Some(DepositDbCol::CompanyCryptoAccountId),
+        "conversion_rate" => Some(DepositDbCol::ConversionRate),
+        "status" => Some(DepositDbCol::Status),
+        "amount" => Some(DepositDbCol::Amount),
+        "fee" => Some(DepositDbCol::Fee),
+        "net_amount" => Some(DepositDbCol::NetAmount),
+        "related_key" => Some(DepositDbCol::RelatedKey),
+        "params" => Some(DepositDbCol::Params),
+        "remark" => Some(DepositDbCol::Remark),
+        "admin_remark" => Some(DepositDbCol::AdminRemark),
+        "reviewed_at" => Some(DepositDbCol::ReviewedAt),
+        "created_at" => Some(DepositDbCol::CreatedAt),
+        "updated_at" => Some(DepositDbCol::UpdatedAt),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum DepositCol {
+pub enum DepositDbCol {
     Id,
     OwnerType,
     OwnerId,
@@ -298,56 +270,45 @@ pub enum DepositCol {
     UpdatedAt,
 }
 
-impl DepositCol {
-    pub const fn all() -> &'static [DepositCol] {
-        &[DepositCol::Id, DepositCol::OwnerType, DepositCol::OwnerId, DepositCol::AdminId, DepositCol::CreditType, DepositCol::DepositMethod, DepositCol::CompanyBankAccountId, DepositCol::CompanyCryptoAccountId, DepositCol::ConversionRate, DepositCol::Status, DepositCol::Amount, DepositCol::Fee, DepositCol::NetAmount, DepositCol::RelatedKey, DepositCol::Params, DepositCol::Remark, DepositCol::AdminRemark, DepositCol::ReviewedAt, DepositCol::CreatedAt, DepositCol::UpdatedAt]
+impl DepositDbCol {
+    pub const fn all() -> &'static [DepositDbCol] {
+        &[DepositDbCol::Id, DepositDbCol::OwnerType, DepositDbCol::OwnerId, DepositDbCol::AdminId, DepositDbCol::CreditType, DepositDbCol::DepositMethod, DepositDbCol::CompanyBankAccountId, DepositDbCol::CompanyCryptoAccountId, DepositDbCol::ConversionRate, DepositDbCol::Status, DepositDbCol::Amount, DepositDbCol::Fee, DepositDbCol::NetAmount, DepositDbCol::RelatedKey, DepositDbCol::Params, DepositDbCol::Remark, DepositDbCol::AdminRemark, DepositDbCol::ReviewedAt, DepositDbCol::CreatedAt, DepositDbCol::UpdatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            DepositCol::Id => "id",
-            DepositCol::OwnerType => "owner_type",
-            DepositCol::OwnerId => "owner_id",
-            DepositCol::AdminId => "admin_id",
-            DepositCol::CreditType => "credit_type",
-            DepositCol::DepositMethod => "deposit_method",
-            DepositCol::CompanyBankAccountId => "company_bank_account_id",
-            DepositCol::CompanyCryptoAccountId => "company_crypto_account_id",
-            DepositCol::ConversionRate => "conversion_rate",
-            DepositCol::Status => "status",
-            DepositCol::Amount => "amount",
-            DepositCol::Fee => "fee",
-            DepositCol::NetAmount => "net_amount",
-            DepositCol::RelatedKey => "related_key",
-            DepositCol::Params => "params",
-            DepositCol::Remark => "remark",
-            DepositCol::AdminRemark => "admin_remark",
-            DepositCol::ReviewedAt => "reviewed_at",
-            DepositCol::CreatedAt => "created_at",
-            DepositCol::UpdatedAt => "updated_at",
+            DepositDbCol::Id => "id",
+            DepositDbCol::OwnerType => "owner_type",
+            DepositDbCol::OwnerId => "owner_id",
+            DepositDbCol::AdminId => "admin_id",
+            DepositDbCol::CreditType => "credit_type",
+            DepositDbCol::DepositMethod => "deposit_method",
+            DepositDbCol::CompanyBankAccountId => "company_bank_account_id",
+            DepositDbCol::CompanyCryptoAccountId => "company_crypto_account_id",
+            DepositDbCol::ConversionRate => "conversion_rate",
+            DepositDbCol::Status => "status",
+            DepositDbCol::Amount => "amount",
+            DepositDbCol::Fee => "fee",
+            DepositDbCol::NetAmount => "net_amount",
+            DepositDbCol::RelatedKey => "related_key",
+            DepositDbCol::Params => "params",
+            DepositDbCol::Remark => "remark",
+            DepositDbCol::AdminRemark => "admin_remark",
+            DepositDbCol::ReviewedAt => "reviewed_at",
+            DepositDbCol::CreatedAt => "created_at",
+            DepositDbCol::UpdatedAt => "updated_at",
         }
     }
 }
 
-pub struct Deposit<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DepositRel;
+impl DepositRel {
+    pub const ADMIN: OneRelation<DepositModel, AdminRow, 0> = OneRelation::<DepositModel, AdminRow, 0>::new("admin");
+    pub const COMPANY_BANK_ACCOUNT: OneRelation<DepositModel, CompanyBankAccountRow, 1> = OneRelation::<DepositModel, CompanyBankAccountRow, 1>::new("company_bank_account");
+    pub const COMPANY_CRYPTO_ACCOUNT: OneRelation<DepositModel, CompanyCryptoAccountRow, 2> = OneRelation::<DepositModel, CompanyCryptoAccountRow, 2>::new("company_crypto_account");
 }
 
-impl<'db> Deposit<'db> {
-    pub const TABLE: &'static str = "deposits";
-    pub const MODEL_KEY: &'static str = "deposit";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> DepositQuery<'db> { DepositQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> DepositInsert<'db> { DepositInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> DepositUpdate<'db> { DepositUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<DepositWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-    pub async fn load_admin(&self, parents: &[DepositRow]) -> Result<HashMap<i64, Option<AdminRow>>> {
+async fn load_admin<'db>(db: DbConn<'db>, parents: &[DepositRow]) -> Result<HashMap<i64, Option<AdminRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -359,7 +320,7 @@ impl<'db> Deposit<'db> {
         let sql = format!("SELECT * FROM admin WHERE id IN ({})", placeholders.join(", "));
         let mut q = sqlx::query_as::<_, AdminRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
-        let rows = self.db.fetch_all(q).await?;
+        let rows = db.fetch_all(q).await?;
         let mut by_pk: HashMap<i64, AdminRow> = HashMap::new();
         for row in rows { by_pk.insert(row.id.clone(), row); }
         let mut out = HashMap::new();
@@ -368,7 +329,7 @@ impl<'db> Deposit<'db> {
         }
         Ok(out)
     }
-    pub async fn load_company_bank_account(&self, parents: &[DepositRow]) -> Result<HashMap<i64, Option<CompanyBankAccountRow>>> {
+async fn load_company_bank_account<'db>(db: DbConn<'db>, parents: &[DepositRow]) -> Result<HashMap<i64, Option<CompanyBankAccountRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -380,7 +341,7 @@ impl<'db> Deposit<'db> {
         let sql = format!("SELECT * FROM company_bank_accounts WHERE id IN ({})", placeholders.join(", "));
         let mut q = sqlx::query_as::<_, CompanyBankAccountRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
-        let rows = self.db.fetch_all(q).await?;
+        let rows = db.fetch_all(q).await?;
         let mut by_pk: HashMap<i64, CompanyBankAccountRow> = HashMap::new();
         for row in rows { by_pk.insert(row.id.clone(), row); }
         let mut out = HashMap::new();
@@ -389,7 +350,7 @@ impl<'db> Deposit<'db> {
         }
         Ok(out)
     }
-    pub async fn load_company_crypto_account(&self, parents: &[DepositRow]) -> Result<HashMap<i64, Option<CompanyCryptoAccountRow>>> {
+async fn load_company_crypto_account<'db>(db: DbConn<'db>, parents: &[DepositRow]) -> Result<HashMap<i64, Option<CompanyCryptoAccountRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -401,7 +362,7 @@ impl<'db> Deposit<'db> {
         let sql = format!("SELECT * FROM company_crypto_accounts WHERE id IN ({})", placeholders.join(", "));
         let mut q = sqlx::query_as::<_, CompanyCryptoAccountRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
-        let rows = self.db.fetch_all(q).await?;
+        let rows = db.fetch_all(q).await?;
         let mut by_pk: HashMap<i64, CompanyCryptoAccountRow> = HashMap::new();
         for row in rows { by_pk.insert(row.id.clone(), row); }
         let mut out = HashMap::new();
@@ -410,10 +371,9 @@ impl<'db> Deposit<'db> {
         }
         Ok(out)
     }
-}
 
 #[derive(Clone)]
-pub struct DepositQuery<'db> {
+pub struct DepositQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -436,254 +396,253 @@ pub struct DepositQuery<'db> {
 
 
 
-impl<'db> DepositQuery<'db> {
+impl<'db> DepositQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, owner_type, owner_id, admin_id, credit_type, deposit_method, company_bank_account_id, company_crypto_account_id, conversion_rate, status, amount, fee, net_amount, related_key, params, remark, admin_remark, reviewed_at, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> DepositUnsafeQuery<'db> { DepositUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_type(mut self, op: Op, val: OwnerType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_type(mut self, op: Op, val: CreditType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::CreditType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::CreditType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::CreditType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::CreditType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deposit_method(mut self, op: Op, val: DepositMethod) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::DepositMethod.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::DepositMethod.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deposit_method_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::DepositMethod.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::DepositMethod.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_company_bank_account_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::CompanyBankAccountId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::CompanyBankAccountId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_company_bank_account_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::CompanyBankAccountId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::CompanyBankAccountId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_company_crypto_account_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::CompanyCryptoAccountId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::CompanyCryptoAccountId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_company_crypto_account_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::CompanyCryptoAccountId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::CompanyCryptoAccountId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_conversion_rate(mut self, op: Op, val: Option<rust_decimal::Decimal>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::ConversionRate.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::ConversionRate.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_conversion_rate_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::ConversionRate.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::ConversionRate.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status(mut self, op: Op, val: DepositStatus) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_amount(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Amount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Amount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_amount_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Amount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Amount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_fee(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Fee.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Fee.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_fee_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Fee.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Fee.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_net_amount(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::NetAmount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::NetAmount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_net_amount_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::NetAmount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::NetAmount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_related_key(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::RelatedKey.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::RelatedKey.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_related_key_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::RelatedKey.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::RelatedKey.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_params(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Params.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Params.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_params_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Params.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Params.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_remark(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Remark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Remark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_remark_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Remark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Remark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_remark(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::AdminRemark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::AdminRemark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_remark_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::AdminRemark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::AdminRemark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_reviewed_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::ReviewedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::ReviewedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_reviewed_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::ReviewedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::ReviewedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(DepositCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: DepositCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(DepositDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: DepositDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -702,7 +661,7 @@ impl<'db> DepositQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: DepositCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: DepositDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -717,7 +676,7 @@ impl<'db> DepositQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: DepositCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: DepositDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -729,7 +688,7 @@ impl<'db> DepositQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: DepositCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: DepositDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -737,15 +696,15 @@ impl<'db> DepositQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: DepositCol) -> Self {
+    pub fn where_null(mut self, col: DepositDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: DepositCol) -> Self {
+    pub fn where_not_null(mut self, col: DepositDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: DepositCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: DepositDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -799,7 +758,7 @@ impl<'db> DepositQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[DepositCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[DepositDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, owner_type, owner_id, admin_id, credit_type, deposit_method, company_bank_account_id, company_crypto_account_id, conversion_rate, status, amount, fee, net_amount, related_key, params, remark, admin_remark, reviewed_at, created_at, updated_at".to_string());
         } else {
@@ -811,7 +770,7 @@ impl<'db> DepositQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[DepositCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[DepositDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -892,26 +851,26 @@ impl<'db> DepositQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: DepositCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: DepositDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: DepositCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: DepositDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: DepositCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: DepositDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[DepositCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[DepositDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[DepositCol]) -> Self {
+    pub fn select(mut self, cols: &[DepositDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -959,7 +918,7 @@ impl<'db> DepositQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[DepositCol]) -> Self {
+    pub fn group_by(mut self, cols: &[DepositDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -986,10 +945,10 @@ impl<'db> DepositQuery<'db> {
         self.offset = Some(n);
         self
     }
-    pub fn where_has_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+    pub fn where_has_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "admin.id = deposits.admin_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -999,10 +958,10 @@ impl<'db> DepositQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_has_company_bank_account(mut self, scope: impl FnOnce(CompanyBankAccountQuery<'db>) -> CompanyBankAccountQuery<'db>) -> Self {
+    pub fn where_has_company_bank_account(mut self, scope: impl FnOnce(Query<'db, CompanyBankAccountModel>) -> Query<'db, CompanyBankAccountModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(CompanyBankAccountQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(CompanyBankAccountModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "company_bank_accounts.id = deposits.company_bank_account_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM company_bank_accounts WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1012,10 +971,10 @@ impl<'db> DepositQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_has_company_crypto_account(mut self, scope: impl FnOnce(CompanyCryptoAccountQuery<'db>) -> CompanyCryptoAccountQuery<'db>) -> Self {
+    pub fn where_has_company_crypto_account(mut self, scope: impl FnOnce(Query<'db, CompanyCryptoAccountModel>) -> Query<'db, CompanyCryptoAccountModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(CompanyCryptoAccountQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(CompanyCryptoAccountModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "company_crypto_accounts.id = deposits.company_crypto_account_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM company_crypto_accounts WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1025,10 +984,10 @@ impl<'db> DepositQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_doesnt_have_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+    pub fn where_doesnt_have_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "admin.id = deposits.admin_id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM admin WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1038,10 +997,10 @@ impl<'db> DepositQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_doesnt_have_company_bank_account(mut self, scope: impl FnOnce(CompanyBankAccountQuery<'db>) -> CompanyBankAccountQuery<'db>) -> Self {
+    pub fn where_doesnt_have_company_bank_account(mut self, scope: impl FnOnce(Query<'db, CompanyBankAccountModel>) -> Query<'db, CompanyBankAccountModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(CompanyBankAccountQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(CompanyBankAccountModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "company_bank_accounts.id = deposits.company_bank_account_id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM company_bank_accounts WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1051,10 +1010,10 @@ impl<'db> DepositQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_doesnt_have_company_crypto_account(mut self, scope: impl FnOnce(CompanyCryptoAccountQuery<'db>) -> CompanyCryptoAccountQuery<'db>) -> Self {
+    pub fn where_doesnt_have_company_crypto_account(mut self, scope: impl FnOnce(Query<'db, CompanyCryptoAccountModel>) -> Query<'db, CompanyCryptoAccountModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(CompanyCryptoAccountQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(CompanyCryptoAccountModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "company_crypto_accounts.id = deposits.company_crypto_account_id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM company_crypto_accounts WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1064,10 +1023,10 @@ impl<'db> DepositQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn or_where_has_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+    pub fn or_where_has_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "admin.id = deposits.admin_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1081,10 +1040,10 @@ impl<'db> DepositQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn or_where_has_company_bank_account(mut self, scope: impl FnOnce(CompanyBankAccountQuery<'db>) -> CompanyBankAccountQuery<'db>) -> Self {
+    pub fn or_where_has_company_bank_account(mut self, scope: impl FnOnce(Query<'db, CompanyBankAccountModel>) -> Query<'db, CompanyBankAccountModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(CompanyBankAccountQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(CompanyBankAccountModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "company_bank_accounts.id = deposits.company_bank_account_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM company_bank_accounts WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1098,10 +1057,10 @@ impl<'db> DepositQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn or_where_has_company_crypto_account(mut self, scope: impl FnOnce(CompanyCryptoAccountQuery<'db>) -> CompanyCryptoAccountQuery<'db>) -> Self {
+    pub fn or_where_has_company_crypto_account(mut self, scope: impl FnOnce(Query<'db, CompanyCryptoAccountModel>) -> Query<'db, CompanyCryptoAccountModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(CompanyCryptoAccountQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(CompanyCryptoAccountModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "company_crypto_accounts.id = deposits.company_crypto_account_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM company_crypto_accounts WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1163,7 +1122,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<DepositWithRelations>> {
+    pub async fn get(self) -> Result<Vec<DepositRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -1209,75 +1168,72 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("deposits", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = Deposit { db: db.clone(), base_url: base_url.clone() };
-        let admin = m.load_admin(&rows).await?;
-        let company_bank_account = m.load_company_bank_account(&rows).await?;
-        let company_crypto_account = m.load_company_crypto_account(&rows).await?;
+        let admin = load_admin(db.clone(), &rows).await?;
+        let company_bank_account = load_company_bank_account(db.clone(), &rows).await?;
+        let company_crypto_account = load_company_crypto_account(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
             let key = r.id.clone();
-            let view = hydrate_view(r.clone(), &LocalizedMap::default(), base_url.as_deref());
-            out_vec.push(DepositWithRelations {
-                row: view,
-                admin: admin.get(&key).cloned().unwrap_or(None),
-                company_bank_account: company_bank_account.get(&key).cloned().unwrap_or(None),
-                company_crypto_account: company_crypto_account.get(&key).cloned().unwrap_or(None),
-            });
+            let mut record = hydrate_record(r.clone(), &LocalizedMap::default(), base_url.as_deref());
+            record.admin = admin.get(&key).cloned().unwrap_or(None);
+            record.company_bank_account = company_bank_account.get(&key).cloned().unwrap_or(None);
+            record.company_crypto_account = company_crypto_account.get(&key).cloned().unwrap_or(None);
+            out_vec.push(record);
         }
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<DepositWithRelations>> {
+    pub async fn first(self) -> Result<Option<DepositRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<DepositWithRelations> {
+    pub async fn first_or_fail(self) -> Result<DepositRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("deposits: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<DepositWithRelations>> {
+    pub async fn find(self, id: i64) -> Result<Option<DepositRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<DepositWithRelations> {
+    pub async fn find_or_fail(self, id: i64) -> Result<DepositRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("deposits: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(DepositInsert<'db>) -> DepositInsert<'db>) -> Result<DepositWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(DepositCreateInner<'db>) -> DepositCreateInner<'db>) -> Result<DepositRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(DepositInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(DepositCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Deposit::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        DepositQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(DepositUpdate<'db>) -> DepositUpdate<'db>,
-        on_create: impl FnOnce(DepositInsert<'db>) -> DepositInsert<'db>,
-    ) -> Result<DepositWithRelations> {
+        on_update: impl FnOnce(DepositPatchInner<'db>) -> DepositPatchInner<'db>,
+        on_create: impl FnOnce(DepositCreateInner<'db>) -> DepositCreateInner<'db>,
+    ) -> Result<DepositRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = DepositUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = DepositPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Deposit::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return DepositQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(DepositInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(DepositCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Deposit::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        DepositQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: DepositCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: DepositDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -1292,7 +1248,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: DepositCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: DepositDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -1348,13 +1304,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<DepositWithRelations>) -> Fut,
+        F: FnMut(Vec<DepositRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = DepositQuery::new(db.clone(), self.base_url.clone());
+            let mut query = DepositQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -1368,11 +1324,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(DepositCol::CreatedAt, OrderDir::Desc)
+        self.order_by(DepositDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(DepositCol::CreatedAt, OrderDir::Asc)
+        self.order_by(DepositDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -1383,7 +1339,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<DepositWithRelations> {
+    pub async fn sole(self) -> Result<DepositRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -1402,7 +1358,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&DepositWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&DepositRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -1410,7 +1366,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: DepositCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: DepositDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "deposits".to_string());
@@ -1431,7 +1387,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: DepositCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: DepositDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "deposits".to_string());
@@ -1452,7 +1408,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: DepositCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: DepositDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "deposits".to_string());
@@ -1473,7 +1429,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: DepositCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: DepositDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "deposits".to_string());
@@ -1494,7 +1450,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<DepositWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<DepositRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1541,22 +1497,19 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("deposits", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = Deposit { db: db.clone(), base_url: base_url.clone() };
-        let admin = m.load_admin(&rows).await?;
-        let company_bank_account = m.load_company_bank_account(&rows).await?;
-        let company_crypto_account = m.load_company_crypto_account(&rows).await?;
+        let admin = load_admin(db.clone(), &rows).await?;
+        let company_bank_account = load_company_bank_account(db.clone(), &rows).await?;
+        let company_crypto_account = load_company_crypto_account(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for row in rows {
             let key = row.id.clone();
-            let view = hydrate_view(row.clone(), &LocalizedMap::default(), base_url.as_deref());
-            data.push(DepositWithRelations {
-                row: view,
-                admin: admin.get(&key).cloned().unwrap_or(None),
-                company_bank_account: company_bank_account.get(&key).cloned().unwrap_or(None),
-                company_crypto_account: company_crypto_account.get(&key).cloned().unwrap_or(None),
-            });
+            let mut record = hydrate_record(row.clone(), &LocalizedMap::default(), base_url.as_deref());
+            record.admin = admin.get(&key).cloned().unwrap_or(None);
+            record.company_bank_account = company_bank_account.get(&key).cloned().unwrap_or(None);
+            record.company_crypto_account = company_crypto_account.get(&key).cloned().unwrap_or(None);
+            data.push(record);
         }
         Ok(Page { data, total, per_page, current_page, last_page })
     }
@@ -1677,38 +1630,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct DepositUnsafeQuery<'db> {
-    inner: DepositQuery<'db>,
-}
 
-impl<'db> DepositUnsafeQuery<'db> {
-    fn new(inner: DepositQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> DepositQuery<'db> { self.inner }
-}
-
-
-pub struct DepositInsert<'db> {
+pub struct DepositCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<DepositCol>,
+    cols: Vec<DepositDbCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<DepositCol>,
+    conflict_cols: Vec<DepositDbCol>,
 }
 
-impl<'db> DepositInsert<'db> {
+impl<'db> DepositCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1722,127 +1654,127 @@ impl<'db> DepositInsert<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(DepositCol::Id);
+        self.cols.push(DepositDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_owner_type(mut self, val: OwnerType) -> Self {
-        self.cols.push(DepositCol::OwnerType);
+        self.cols.push(DepositDbCol::OwnerType);
         self.binds.push(val.into());
         self
     }
     pub fn set_owner_id(mut self, val: i64) -> Self {
-        self.cols.push(DepositCol::OwnerId);
+        self.cols.push(DepositDbCol::OwnerId);
         self.binds.push(val.into());
         self
     }
     pub fn set_admin_id(mut self, val: Option<i64>) -> Self {
-        self.cols.push(DepositCol::AdminId);
+        self.cols.push(DepositDbCol::AdminId);
         self.binds.push(val.into());
         self
     }
     pub fn set_credit_type(mut self, val: CreditType) -> Self {
-        self.cols.push(DepositCol::CreditType);
+        self.cols.push(DepositDbCol::CreditType);
         self.binds.push(val.into());
         self
     }
     pub fn set_deposit_method(mut self, val: DepositMethod) -> Self {
-        self.cols.push(DepositCol::DepositMethod);
+        self.cols.push(DepositDbCol::DepositMethod);
         self.binds.push(val.into());
         self
     }
     pub fn set_company_bank_account_id(mut self, val: Option<i64>) -> Self {
-        self.cols.push(DepositCol::CompanyBankAccountId);
+        self.cols.push(DepositDbCol::CompanyBankAccountId);
         self.binds.push(val.into());
         self
     }
     pub fn set_company_crypto_account_id(mut self, val: Option<i64>) -> Self {
-        self.cols.push(DepositCol::CompanyCryptoAccountId);
+        self.cols.push(DepositDbCol::CompanyCryptoAccountId);
         self.binds.push(val.into());
         self
     }
     pub fn set_conversion_rate(mut self, val: Option<rust_decimal::Decimal>) -> Self {
-        self.cols.push(DepositCol::ConversionRate);
+        self.cols.push(DepositDbCol::ConversionRate);
         self.binds.push(val.into());
         self
     }
     pub fn set_status(mut self, val: DepositStatus) -> Self {
-        self.cols.push(DepositCol::Status);
+        self.cols.push(DepositDbCol::Status);
         self.binds.push(val.into());
         self
     }
     pub fn set_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.cols.push(DepositCol::Amount);
+        self.cols.push(DepositDbCol::Amount);
         self.binds.push(val.into());
         self
     }
     pub fn set_fee(mut self, val: rust_decimal::Decimal) -> Self {
-        self.cols.push(DepositCol::Fee);
+        self.cols.push(DepositDbCol::Fee);
         self.binds.push(val.into());
         self
     }
     pub fn set_net_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.cols.push(DepositCol::NetAmount);
+        self.cols.push(DepositDbCol::NetAmount);
         self.binds.push(val.into());
         self
     }
     pub fn set_related_key(mut self, val: Option<String>) -> Self {
-        self.cols.push(DepositCol::RelatedKey);
+        self.cols.push(DepositDbCol::RelatedKey);
         self.binds.push(val.into());
         self
     }
     pub fn set_params(mut self, val: Option<serde_json::Value>) -> Self {
-        self.cols.push(DepositCol::Params);
+        self.cols.push(DepositDbCol::Params);
         self.binds.push(val.into());
         self
     }
     pub fn set_remark(mut self, val: Option<String>) -> Self {
-        self.cols.push(DepositCol::Remark);
+        self.cols.push(DepositDbCol::Remark);
         self.binds.push(val.into());
         self
     }
     pub fn set_admin_remark(mut self, val: Option<String>) -> Self {
-        self.cols.push(DepositCol::AdminRemark);
+        self.cols.push(DepositDbCol::AdminRemark);
         self.binds.push(val.into());
         self
     }
     pub fn set_reviewed_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.cols.push(DepositCol::ReviewedAt);
+        self.cols.push(DepositDbCol::ReviewedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(DepositCol::CreatedAt);
+        self.cols.push(DepositDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(DepositCol::UpdatedAt);
+        self.cols.push(DepositDbCol::UpdatedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[DepositCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[DepositDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[DepositCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[DepositDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<DepositCreateInput> {
-        let mut input = DepositCreateInput::default();
+    fn to_create_input(&self) -> Result<DepositCreate> {
+        let mut input = DepositCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                DepositCol::Id => {
+                DepositDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                DepositCol::OwnerType => {
+                DepositDbCol::OwnerType => {
                     let value = match bind {
                 BindValue::String(value) => OwnerType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'OwnerType'", value))?,
@@ -1855,21 +1787,21 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.owner_type = FieldInput::Set(value);
                 }
-                DepositCol::OwnerId => {
+                DepositDbCol::OwnerId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.owner_id = FieldInput::Set(value);
                 }
-                DepositCol::AdminId => {
+                DepositDbCol::AdminId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
             };
                     input.admin_id = FieldInput::Set(value);
                 }
-                DepositCol::CreditType => {
+                DepositDbCol::CreditType => {
                     let value = match bind {
                 BindValue::String(value) => CreditType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'CreditType'", value))?,
@@ -1882,7 +1814,7 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.credit_type = FieldInput::Set(value);
                 }
-                DepositCol::DepositMethod => {
+                DepositDbCol::DepositMethod => {
                     let value = match bind {
                 BindValue::String(value) => DepositMethod::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'DepositMethod'", value))?,
@@ -1895,28 +1827,28 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.deposit_method = FieldInput::Set(value);
                 }
-                DepositCol::CompanyBankAccountId => {
+                DepositDbCol::CompanyBankAccountId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
             };
                     input.company_bank_account_id = FieldInput::Set(value);
                 }
-                DepositCol::CompanyCryptoAccountId => {
+                DepositDbCol::CompanyCryptoAccountId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
             };
                     input.company_crypto_account_id = FieldInput::Set(value);
                 }
-                DepositCol::ConversionRate => {
+                DepositDbCol::ConversionRate => {
                     let value = match bind {
                 BindValue::DecimalOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<rust_decimal::Decimal>'", other),
             };
                     input.conversion_rate = FieldInput::Set(value);
                 }
-                DepositCol::Status => {
+                DepositDbCol::Status => {
                     let value = match bind {
                 BindValue::String(value) => DepositStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'DepositStatus'", value))?,
@@ -1929,70 +1861,70 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.status = FieldInput::Set(value);
                 }
-                DepositCol::Amount => {
+                DepositDbCol::Amount => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
         };
                     input.amount = FieldInput::Set(value);
                 }
-                DepositCol::Fee => {
+                DepositDbCol::Fee => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
         };
                     input.fee = FieldInput::Set(value);
                 }
-                DepositCol::NetAmount => {
+                DepositDbCol::NetAmount => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
         };
                     input.net_amount = FieldInput::Set(value);
                 }
-                DepositCol::RelatedKey => {
+                DepositDbCol::RelatedKey => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.related_key = FieldInput::Set(value);
                 }
-                DepositCol::Params => {
+                DepositDbCol::Params => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
             };
                     input.params = FieldInput::Set(value);
                 }
-                DepositCol::Remark => {
+                DepositDbCol::Remark => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.remark = FieldInput::Set(value);
                 }
-                DepositCol::AdminRemark => {
+                DepositDbCol::AdminRemark => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.admin_remark = FieldInput::Set(value);
                 }
-                DepositCol::ReviewedAt => {
+                DepositDbCol::ReviewedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
             };
                     input.reviewed_at = FieldInput::Set(value);
                 }
-                DepositCol::CreatedAt => {
+                DepositDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                DepositCol::UpdatedAt => {
+                DepositDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2005,7 +1937,7 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
 
 
-pub async fn save(self) -> Result<DepositView> {
+pub async fn save(self) -> Result<DepositRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -2023,7 +1955,7 @@ pub async fn save(self) -> Result<DepositView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -2042,10 +1974,10 @@ pub async fn save(self) -> Result<DepositView> {
                         Err(err) => log_observer_error("created", "deposit", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "deposit", table: "deposits", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -2057,26 +1989,26 @@ pub async fn save(self) -> Result<DepositView> {
                         Err(err) => log_observer_error("created", "deposit", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(DepositView, DepositRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(DepositRecord, DepositRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, DepositCol::Id)) {
-            cols.push(DepositCol::Id);
+        if !cols.iter().any(|c| matches!(c, DepositDbCol::Id)) {
+            cols.push(DepositDbCol::Id);
             binds.push(generate_snowflake_i64().into());
         }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, DepositCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, DepositDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(DepositCol::CreatedAt);
+            cols.push(DepositDbCol::CreatedAt);
             binds.push(now.into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, DepositCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, DepositDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(DepositCol::UpdatedAt);
+            cols.push(DepositDbCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -2110,20 +2042,20 @@ pub async fn save(self) -> Result<DepositView> {
         let row = db.fetch_one(q).await?;
         record_profiled_query("deposits", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
-        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct DepositUpdate<'db> {
+pub struct DepositPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(DepositCol, BindValue, SetMode)>,
+    sets: Vec<(DepositDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> DepositUpdate<'db> {
+impl<'db> DepositPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -2133,250 +2065,249 @@ impl<'db> DepositUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> DepositUnsafeUpdate<'db> { DepositUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((DepositCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((DepositCol::Id, val.into(), SetMode::Increment));
+        self.sets.push((DepositDbCol::Id, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((DepositCol::Id, val.into(), SetMode::Decrement));
+        self.sets.push((DepositDbCol::Id, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_owner_type(mut self, val: OwnerType) -> Self {
-        self.sets.push((DepositCol::OwnerType, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::OwnerType, val.into(), SetMode::Assign));
         self
     }
     pub fn set_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((DepositCol::OwnerId, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::OwnerId, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((DepositCol::OwnerId, val.into(), SetMode::Increment));
+        self.sets.push((DepositDbCol::OwnerId, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((DepositCol::OwnerId, val.into(), SetMode::Decrement));
+        self.sets.push((DepositDbCol::OwnerId, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_admin_id(mut self, val: Option<i64>) -> Self {
-        self.sets.push((DepositCol::AdminId, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::AdminId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_credit_type(mut self, val: CreditType) -> Self {
-        self.sets.push((DepositCol::CreditType, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::CreditType, val.into(), SetMode::Assign));
         self
     }
     pub fn set_deposit_method(mut self, val: DepositMethod) -> Self {
-        self.sets.push((DepositCol::DepositMethod, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::DepositMethod, val.into(), SetMode::Assign));
         self
     }
     pub fn set_company_bank_account_id(mut self, val: Option<i64>) -> Self {
-        self.sets.push((DepositCol::CompanyBankAccountId, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::CompanyBankAccountId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_company_crypto_account_id(mut self, val: Option<i64>) -> Self {
-        self.sets.push((DepositCol::CompanyCryptoAccountId, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::CompanyCryptoAccountId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_conversion_rate(mut self, val: Option<rust_decimal::Decimal>) -> Self {
-        self.sets.push((DepositCol::ConversionRate, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::ConversionRate, val.into(), SetMode::Assign));
         self
     }
     pub fn set_status(mut self, val: DepositStatus) -> Self {
-        self.sets.push((DepositCol::Status, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::Status, val.into(), SetMode::Assign));
         self
     }
     pub fn set_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((DepositCol::Amount, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::Amount, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((DepositCol::Amount, val.into(), SetMode::Increment));
+        self.sets.push((DepositDbCol::Amount, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((DepositCol::Amount, val.into(), SetMode::Decrement));
+        self.sets.push((DepositDbCol::Amount, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_fee(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((DepositCol::Fee, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::Fee, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_fee(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((DepositCol::Fee, val.into(), SetMode::Increment));
+        self.sets.push((DepositDbCol::Fee, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_fee(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((DepositCol::Fee, val.into(), SetMode::Decrement));
+        self.sets.push((DepositDbCol::Fee, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_net_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((DepositCol::NetAmount, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::NetAmount, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_net_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((DepositCol::NetAmount, val.into(), SetMode::Increment));
+        self.sets.push((DepositDbCol::NetAmount, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_net_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((DepositCol::NetAmount, val.into(), SetMode::Decrement));
+        self.sets.push((DepositDbCol::NetAmount, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_related_key(mut self, val: Option<String>) -> Self {
-        self.sets.push((DepositCol::RelatedKey, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::RelatedKey, val.into(), SetMode::Assign));
         self
     }
     pub fn set_params(mut self, val: Option<serde_json::Value>) -> Self {
-        self.sets.push((DepositCol::Params, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::Params, val.into(), SetMode::Assign));
         self
     }
     pub fn set_remark(mut self, val: Option<String>) -> Self {
-        self.sets.push((DepositCol::Remark, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::Remark, val.into(), SetMode::Assign));
         self
     }
     pub fn set_admin_remark(mut self, val: Option<String>) -> Self {
-        self.sets.push((DepositCol::AdminRemark, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::AdminRemark, val.into(), SetMode::Assign));
         self
     }
     pub fn set_reviewed_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((DepositCol::ReviewedAt, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::ReviewedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((DepositCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((DepositCol::UpdatedAt, val.into(), SetMode::Assign));
+        self.sets.push((DepositDbCol::UpdatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_type(mut self, op: Op, val: OwnerType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_type(mut self, op: Op, val: CreditType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::CreditType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::CreditType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_deposit_method(mut self, op: Op, val: DepositMethod) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::DepositMethod.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::DepositMethod.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_company_bank_account_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::CompanyBankAccountId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::CompanyBankAccountId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_company_crypto_account_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::CompanyCryptoAccountId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::CompanyCryptoAccountId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_conversion_rate(mut self, op: Op, val: Option<rust_decimal::Decimal>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::ConversionRate.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::ConversionRate.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status(mut self, op: Op, val: DepositStatus) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_amount(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Amount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Amount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_fee(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Fee.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Fee.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_net_amount(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::NetAmount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::NetAmount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_related_key(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::RelatedKey.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::RelatedKey.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_params(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Params.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Params.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_remark(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::Remark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::Remark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_remark(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::AdminRemark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::AdminRemark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_reviewed_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::ReviewedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::ReviewedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", DepositCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", DepositDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: DepositCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: DepositDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -2395,11 +2326,11 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<DepositUpdateChanges> {
-        let mut changes = DepositUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<DepositChanges> {
+        let mut changes = DepositChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                DepositCol::Id => {
+                DepositDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -2410,7 +2341,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::OwnerType => {
+                DepositDbCol::OwnerType => {
                     let value = match bind {
                 BindValue::String(value) => OwnerType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'OwnerType'", value))?,
@@ -2427,7 +2358,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::OwnerId => {
+                DepositDbCol::OwnerId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -2438,7 +2369,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::AdminId => {
+                DepositDbCol::AdminId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
@@ -2449,7 +2380,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::CreditType => {
+                DepositDbCol::CreditType => {
                     let value = match bind {
                 BindValue::String(value) => CreditType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'CreditType'", value))?,
@@ -2466,7 +2397,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::DepositMethod => {
+                DepositDbCol::DepositMethod => {
                     let value = match bind {
                 BindValue::String(value) => DepositMethod::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'DepositMethod'", value))?,
@@ -2483,7 +2414,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::CompanyBankAccountId => {
+                DepositDbCol::CompanyBankAccountId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
@@ -2494,7 +2425,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::CompanyCryptoAccountId => {
+                DepositDbCol::CompanyCryptoAccountId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
@@ -2505,7 +2436,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::ConversionRate => {
+                DepositDbCol::ConversionRate => {
                     let value = match bind {
                 BindValue::DecimalOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<rust_decimal::Decimal>'", other),
@@ -2516,7 +2447,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::Status => {
+                DepositDbCol::Status => {
                     let value = match bind {
                 BindValue::String(value) => DepositStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'DepositStatus'", value))?,
@@ -2533,7 +2464,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::Amount => {
+                DepositDbCol::Amount => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
@@ -2544,7 +2475,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::Fee => {
+                DepositDbCol::Fee => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
@@ -2555,7 +2486,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::NetAmount => {
+                DepositDbCol::NetAmount => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
@@ -2566,7 +2497,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::RelatedKey => {
+                DepositDbCol::RelatedKey => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2577,7 +2508,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::Params => {
+                DepositDbCol::Params => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
@@ -2588,7 +2519,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::Remark => {
+                DepositDbCol::Remark => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2599,7 +2530,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::AdminRemark => {
+                DepositDbCol::AdminRemark => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2610,7 +2541,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::ReviewedAt => {
+                DepositDbCol::ReviewedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
@@ -2621,7 +2552,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::CreatedAt => {
+                DepositDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2632,7 +2563,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                DepositCol::UpdatedAt => {
+                DepositDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2676,14 +2607,14 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<DepositUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<DepositChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, DepositCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, DepositDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(DepositCol::UpdatedAt);
+            cols.push(DepositDbCol::UpdatedAt);
             set_binds.push(now.into());
             set_modes.push(SetMode::Assign);
         }
@@ -2773,41 +2704,31 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct DepositUnsafeUpdate<'db> {
-    inner: DepositUpdate<'db>,
-}
-
-impl<'db> DepositUnsafeUpdate<'db> {
-    fn new(inner: DepositUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> DepositUpdate<'db> { self.inner }
-}
 
 pub struct DepositTableAdapter;
 impl DepositTableAdapter {
-    fn parse_col(name: &str) -> Option<DepositCol> {
+    fn parse_col(name: &str) -> Option<DepositDbCol> {
         match name {
-            "id" => Some(DepositCol::Id),
-            "owner_type" => Some(DepositCol::OwnerType),
-            "owner_id" => Some(DepositCol::OwnerId),
-            "admin_id" => Some(DepositCol::AdminId),
-            "credit_type" => Some(DepositCol::CreditType),
-            "deposit_method" => Some(DepositCol::DepositMethod),
-            "company_bank_account_id" => Some(DepositCol::CompanyBankAccountId),
-            "company_crypto_account_id" => Some(DepositCol::CompanyCryptoAccountId),
-            "conversion_rate" => Some(DepositCol::ConversionRate),
-            "status" => Some(DepositCol::Status),
-            "amount" => Some(DepositCol::Amount),
-            "fee" => Some(DepositCol::Fee),
-            "net_amount" => Some(DepositCol::NetAmount),
-            "related_key" => Some(DepositCol::RelatedKey),
-            "params" => Some(DepositCol::Params),
-            "remark" => Some(DepositCol::Remark),
-            "admin_remark" => Some(DepositCol::AdminRemark),
-            "reviewed_at" => Some(DepositCol::ReviewedAt),
-            "created_at" => Some(DepositCol::CreatedAt),
-            "updated_at" => Some(DepositCol::UpdatedAt),
+            "id" => Some(DepositDbCol::Id),
+            "owner_type" => Some(DepositDbCol::OwnerType),
+            "owner_id" => Some(DepositDbCol::OwnerId),
+            "admin_id" => Some(DepositDbCol::AdminId),
+            "credit_type" => Some(DepositDbCol::CreditType),
+            "deposit_method" => Some(DepositDbCol::DepositMethod),
+            "company_bank_account_id" => Some(DepositDbCol::CompanyBankAccountId),
+            "company_crypto_account_id" => Some(DepositDbCol::CompanyCryptoAccountId),
+            "conversion_rate" => Some(DepositDbCol::ConversionRate),
+            "status" => Some(DepositDbCol::Status),
+            "amount" => Some(DepositDbCol::Amount),
+            "fee" => Some(DepositDbCol::Fee),
+            "net_amount" => Some(DepositDbCol::NetAmount),
+            "related_key" => Some(DepositDbCol::RelatedKey),
+            "params" => Some(DepositDbCol::Params),
+            "remark" => Some(DepositDbCol::Remark),
+            "admin_remark" => Some(DepositDbCol::AdminRemark),
+            "reviewed_at" => Some(DepositDbCol::ReviewedAt),
+            "created_at" => Some(DepositDbCol::CreatedAt),
+            "updated_at" => Some(DepositDbCol::UpdatedAt),
             _ => None,
         }
     }
@@ -2821,11 +2742,11 @@ impl DepositTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<DepositCol> {
+    fn parse_like_col(name: &str) -> Option<DepositDbCol> {
         match name {
-            "related_key" => Some(DepositCol::RelatedKey),
-            "remark" => Some(DepositCol::Remark),
-            "admin_remark" => Some(DepositCol::AdminRemark),
+            "related_key" => Some(DepositDbCol::RelatedKey),
+            "remark" => Some(DepositDbCol::Remark),
+            "admin_remark" => Some(DepositDbCol::AdminRemark),
             _ => None,
         }
     }
@@ -2923,8 +2844,8 @@ impl DepositTableAdapter {
     }
 }
 impl GeneratedTableAdapter for DepositTableAdapter {
-    type Query<'db> = DepositQuery<'db>;
-    type Row = DepositWithRelations;
+    type Query<'db> = Query<'db, DepositModel>;
+    type Row = DepositRecord;
     fn model_key(&self) -> &'static str { "Deposit" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "owner_type", "owner_id", "admin_id", "credit_type", "deposit_method", "company_bank_account_id", "company_crypto_account_id", "conversion_rate", "status", "amount", "fee", "net_amount", "related_key", "remark", "admin_remark", "reviewed_at", "created_at", "updated_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["reviewed_at", "created_at", "updated_at"] }
@@ -3012,7 +2933,7 @@ impl GeneratedTableAdapter for DepositTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: DepositQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<DepositQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, DepositModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, DepositModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -3080,67 +3001,67 @@ impl GeneratedTableAdapter for DepositTableAdapter {
             }
             ParsedFilter::Has { relation, column } => {
                 match (relation.as_str(), column.as_str()) {
-                    ("admin", "id") => { let Some(bind) = Self::parse_bind_for_relation("admin", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Id, Op::Eq, bind)))) },
-                    ("admin", "username") => { let Some(bind) = Self::parse_bind_for_relation("admin", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Username, Op::Eq, bind)))) },
-                    ("admin", "email") => { let Some(bind) = Self::parse_bind_for_relation("admin", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Email, Op::Eq, bind)))) },
-                    ("admin", "locale") => { let Some(bind) = Self::parse_bind_for_relation("admin", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Locale, Op::Eq, bind)))) },
-                    ("admin", "password") => { let Some(bind) = Self::parse_bind_for_relation("admin", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Password, Op::Eq, bind)))) },
-                    ("admin", "name") => { let Some(bind) = Self::parse_bind_for_relation("admin", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Name, Op::Eq, bind)))) },
-                    ("admin", "admin_type") => { let Some(bind) = Self::parse_bind_for_relation("admin", "admin_type", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::AdminType, Op::Eq, bind)))) },
-                    ("admin", "abilities") => { let Some(bind) = Self::parse_bind_for_relation("admin", "abilities", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Abilities, Op::Eq, bind)))) },
-                    ("admin", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::CreatedAt, Op::Eq, bind)))) },
-                    ("admin", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::UpdatedAt, Op::Eq, bind)))) },
-                    ("admin", "deleted_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "deleted_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::DeletedAt, Op::Eq, bind)))) },
-                    ("company_bank_account", "id") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_col(CompanyBankAccountCol::Id, Op::Eq, bind)))) },
-                    ("company_bank_account", "bank_id") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "bank_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_col(CompanyBankAccountCol::BankId, Op::Eq, bind)))) },
-                    ("company_bank_account", "account_name") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "account_name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_col(CompanyBankAccountCol::AccountName, Op::Eq, bind)))) },
-                    ("company_bank_account", "account_number") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "account_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_col(CompanyBankAccountCol::AccountNumber, Op::Eq, bind)))) },
-                    ("company_bank_account", "status") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_col(CompanyBankAccountCol::Status, Op::Eq, bind)))) },
-                    ("company_bank_account", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_col(CompanyBankAccountCol::SortOrder, Op::Eq, bind)))) },
-                    ("company_bank_account", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_col(CompanyBankAccountCol::CreatedAt, Op::Eq, bind)))) },
-                    ("company_bank_account", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_col(CompanyBankAccountCol::UpdatedAt, Op::Eq, bind)))) },
-                    ("company_bank_account__bank", "id") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_has_bank(|rq| rq.where_col(BankCol::Id, Op::Eq, bind))))) },
-                    ("company_bank_account__bank", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_has_bank(|rq| rq.where_col(BankCol::CountryIso2, Op::Eq, bind))))) },
-                    ("company_bank_account__bank", "name") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_has_bank(|rq| rq.where_col(BankCol::Name, Op::Eq, bind))))) },
-                    ("company_bank_account__bank", "code") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "code", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_has_bank(|rq| rq.where_col(BankCol::Code, Op::Eq, bind))))) },
-                    ("company_bank_account__bank", "status") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_has_bank(|rq| rq.where_col(BankCol::Status, Op::Eq, bind))))) },
-                    ("company_bank_account__bank", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_has_bank(|rq| rq.where_col(BankCol::SortOrder, Op::Eq, bind))))) },
-                    ("company_bank_account__bank", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_has_bank(|rq| rq.where_col(BankCol::CreatedAt, Op::Eq, bind))))) },
-                    ("company_bank_account__bank", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_bank_account(|rq| rq.where_has_bank(|rq| rq.where_col(BankCol::UpdatedAt, Op::Eq, bind))))) },
-                    ("company_crypto_account", "id") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_col(CompanyCryptoAccountCol::Id, Op::Eq, bind)))) },
-                    ("company_crypto_account", "crypto_network_id") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "crypto_network_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_col(CompanyCryptoAccountCol::CryptoNetworkId, Op::Eq, bind)))) },
-                    ("company_crypto_account", "wallet_address") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "wallet_address", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_col(CompanyCryptoAccountCol::WalletAddress, Op::Eq, bind)))) },
-                    ("company_crypto_account", "conversion_rate") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "conversion_rate", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_col(CompanyCryptoAccountCol::ConversionRate, Op::Eq, bind)))) },
-                    ("company_crypto_account", "status") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_col(CompanyCryptoAccountCol::Status, Op::Eq, bind)))) },
-                    ("company_crypto_account", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_col(CompanyCryptoAccountCol::SortOrder, Op::Eq, bind)))) },
-                    ("company_crypto_account", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_col(CompanyCryptoAccountCol::CreatedAt, Op::Eq, bind)))) },
-                    ("company_crypto_account", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_col(CompanyCryptoAccountCol::UpdatedAt, Op::Eq, bind)))) },
-                    ("company_crypto_account__crypto_network", "id") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Id, Op::Eq, bind))))) },
-                    ("company_crypto_account__crypto_network", "name") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Name, Op::Eq, bind))))) },
-                    ("company_crypto_account__crypto_network", "symbol") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "symbol", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Symbol, Op::Eq, bind))))) },
-                    ("company_crypto_account__crypto_network", "status") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Status, Op::Eq, bind))))) },
-                    ("company_crypto_account__crypto_network", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::SortOrder, Op::Eq, bind))))) },
-                    ("company_crypto_account__crypto_network", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::CreatedAt, Op::Eq, bind))))) },
-                    ("company_crypto_account__crypto_network", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::UpdatedAt, Op::Eq, bind))))) },
+                    ("admin", "id") => { let Some(bind) = Self::parse_bind_for_relation("admin", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::Id, Op::Eq, bind)))) },
+                    ("admin", "username") => { let Some(bind) = Self::parse_bind_for_relation("admin", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::Username, Op::Eq, bind)))) },
+                    ("admin", "email") => { let Some(bind) = Self::parse_bind_for_relation("admin", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::Email, Op::Eq, bind)))) },
+                    ("admin", "locale") => { let Some(bind) = Self::parse_bind_for_relation("admin", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::Locale, Op::Eq, bind)))) },
+                    ("admin", "password") => { let Some(bind) = Self::parse_bind_for_relation("admin", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::Password, Op::Eq, bind)))) },
+                    ("admin", "name") => { let Some(bind) = Self::parse_bind_for_relation("admin", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::Name, Op::Eq, bind)))) },
+                    ("admin", "admin_type") => { let Some(bind) = Self::parse_bind_for_relation("admin", "admin_type", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::AdminType, Op::Eq, bind)))) },
+                    ("admin", "abilities") => { let Some(bind) = Self::parse_bind_for_relation("admin", "abilities", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::Abilities, Op::Eq, bind)))) },
+                    ("admin", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::CreatedAt, Op::Eq, bind)))) },
+                    ("admin", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("admin", "deleted_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "deleted_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::DeletedAt, Op::Eq, bind)))) },
+                    ("company_bank_account", "id") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_col(CompanyBankAccountDbCol::Id, Op::Eq, bind)))) },
+                    ("company_bank_account", "bank_id") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "bank_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_col(CompanyBankAccountDbCol::BankId, Op::Eq, bind)))) },
+                    ("company_bank_account", "account_name") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "account_name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_col(CompanyBankAccountDbCol::AccountName, Op::Eq, bind)))) },
+                    ("company_bank_account", "account_number") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "account_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_col(CompanyBankAccountDbCol::AccountNumber, Op::Eq, bind)))) },
+                    ("company_bank_account", "status") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_col(CompanyBankAccountDbCol::Status, Op::Eq, bind)))) },
+                    ("company_bank_account", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_col(CompanyBankAccountDbCol::SortOrder, Op::Eq, bind)))) },
+                    ("company_bank_account", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_col(CompanyBankAccountDbCol::CreatedAt, Op::Eq, bind)))) },
+                    ("company_bank_account", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_col(CompanyBankAccountDbCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("company_bank_account__bank", "id") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_has(CompanyBankAccountRel::BANK, |rq| rq.where_col(BankDbCol::Id, Op::Eq, bind))))) },
+                    ("company_bank_account__bank", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_has(CompanyBankAccountRel::BANK, |rq| rq.where_col(BankDbCol::CountryIso2, Op::Eq, bind))))) },
+                    ("company_bank_account__bank", "name") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_has(CompanyBankAccountRel::BANK, |rq| rq.where_col(BankDbCol::Name, Op::Eq, bind))))) },
+                    ("company_bank_account__bank", "code") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "code", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_has(CompanyBankAccountRel::BANK, |rq| rq.where_col(BankDbCol::Code, Op::Eq, bind))))) },
+                    ("company_bank_account__bank", "status") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_has(CompanyBankAccountRel::BANK, |rq| rq.where_col(BankDbCol::Status, Op::Eq, bind))))) },
+                    ("company_bank_account__bank", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_has(CompanyBankAccountRel::BANK, |rq| rq.where_col(BankDbCol::SortOrder, Op::Eq, bind))))) },
+                    ("company_bank_account__bank", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_has(CompanyBankAccountRel::BANK, |rq| rq.where_col(BankDbCol::CreatedAt, Op::Eq, bind))))) },
+                    ("company_bank_account__bank", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("company_bank_account__bank", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_has(CompanyBankAccountRel::BANK, |rq| rq.where_col(BankDbCol::UpdatedAt, Op::Eq, bind))))) },
+                    ("company_crypto_account", "id") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_col(CompanyCryptoAccountDbCol::Id, Op::Eq, bind)))) },
+                    ("company_crypto_account", "crypto_network_id") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "crypto_network_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_col(CompanyCryptoAccountDbCol::CryptoNetworkId, Op::Eq, bind)))) },
+                    ("company_crypto_account", "wallet_address") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "wallet_address", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_col(CompanyCryptoAccountDbCol::WalletAddress, Op::Eq, bind)))) },
+                    ("company_crypto_account", "conversion_rate") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "conversion_rate", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_col(CompanyCryptoAccountDbCol::ConversionRate, Op::Eq, bind)))) },
+                    ("company_crypto_account", "status") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_col(CompanyCryptoAccountDbCol::Status, Op::Eq, bind)))) },
+                    ("company_crypto_account", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_col(CompanyCryptoAccountDbCol::SortOrder, Op::Eq, bind)))) },
+                    ("company_crypto_account", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_col(CompanyCryptoAccountDbCol::CreatedAt, Op::Eq, bind)))) },
+                    ("company_crypto_account", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_col(CompanyCryptoAccountDbCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("company_crypto_account__crypto_network", "id") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Id, Op::Eq, bind))))) },
+                    ("company_crypto_account__crypto_network", "name") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Name, Op::Eq, bind))))) },
+                    ("company_crypto_account__crypto_network", "symbol") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "symbol", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Symbol, Op::Eq, bind))))) },
+                    ("company_crypto_account__crypto_network", "status") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Status, Op::Eq, bind))))) },
+                    ("company_crypto_account__crypto_network", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::SortOrder, Op::Eq, bind))))) },
+                    ("company_crypto_account__crypto_network", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::CreatedAt, Op::Eq, bind))))) },
+                    ("company_crypto_account__crypto_network", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("company_crypto_account__crypto_network", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::UpdatedAt, Op::Eq, bind))))) },
                     _ => Ok(None),
                 }
             }
             ParsedFilter::HasLike { relation, column } => {
                 let pattern = format!("%{}%", trimmed);
                 match (relation.as_str(), column.as_str()) {
-                    ("admin", "username") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Username, Op::Like, pattern.clone())))),
-                    ("admin", "email") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Email, Op::Like, pattern.clone())))),
-                    ("admin", "locale") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Locale, Op::Like, pattern.clone())))),
-                    ("admin", "password") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Password, Op::Like, pattern.clone())))),
-                    ("admin", "name") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Name, Op::Like, pattern.clone())))),
-                    ("company_bank_account", "account_name") => Ok(Some(query.where_has_company_bank_account(|rq| rq.where_col(CompanyBankAccountCol::AccountName, Op::Like, pattern.clone())))),
-                    ("company_bank_account", "account_number") => Ok(Some(query.where_has_company_bank_account(|rq| rq.where_col(CompanyBankAccountCol::AccountNumber, Op::Like, pattern.clone())))),
-                    ("company_bank_account__bank", "country_iso2") => Ok(Some(query.where_has_company_bank_account(|rq| rq.where_has_bank(|rq| rq.where_col(BankCol::CountryIso2, Op::Like, pattern.clone()))))),
-                    ("company_bank_account__bank", "name") => Ok(Some(query.where_has_company_bank_account(|rq| rq.where_has_bank(|rq| rq.where_col(BankCol::Name, Op::Like, pattern.clone()))))),
-                    ("company_bank_account__bank", "code") => Ok(Some(query.where_has_company_bank_account(|rq| rq.where_has_bank(|rq| rq.where_col(BankCol::Code, Op::Like, pattern.clone()))))),
-                    ("company_crypto_account", "wallet_address") => Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_col(CompanyCryptoAccountCol::WalletAddress, Op::Like, pattern.clone())))),
-                    ("company_crypto_account__crypto_network", "name") => Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Name, Op::Like, pattern.clone()))))),
-                    ("company_crypto_account__crypto_network", "symbol") => Ok(Some(query.where_has_company_crypto_account(|rq| rq.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Symbol, Op::Like, pattern.clone()))))),
+                    ("admin", "username") => Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::Username, Op::Like, pattern.clone())))),
+                    ("admin", "email") => Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::Email, Op::Like, pattern.clone())))),
+                    ("admin", "locale") => Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::Locale, Op::Like, pattern.clone())))),
+                    ("admin", "password") => Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::Password, Op::Like, pattern.clone())))),
+                    ("admin", "name") => Ok(Some(query.where_has(DepositRel::ADMIN, |rq| rq.where_col(AdminDbCol::Name, Op::Like, pattern.clone())))),
+                    ("company_bank_account", "account_name") => Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_col(CompanyBankAccountDbCol::AccountName, Op::Like, pattern.clone())))),
+                    ("company_bank_account", "account_number") => Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_col(CompanyBankAccountDbCol::AccountNumber, Op::Like, pattern.clone())))),
+                    ("company_bank_account__bank", "country_iso2") => Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_has(CompanyBankAccountRel::BANK, |rq| rq.where_col(BankDbCol::CountryIso2, Op::Like, pattern.clone()))))),
+                    ("company_bank_account__bank", "name") => Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_has(CompanyBankAccountRel::BANK, |rq| rq.where_col(BankDbCol::Name, Op::Like, pattern.clone()))))),
+                    ("company_bank_account__bank", "code") => Ok(Some(query.where_has(DepositRel::COMPANY_BANK_ACCOUNT, |rq| rq.where_has(CompanyBankAccountRel::BANK, |rq| rq.where_col(BankDbCol::Code, Op::Like, pattern.clone()))))),
+                    ("company_crypto_account", "wallet_address") => Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_col(CompanyCryptoAccountDbCol::WalletAddress, Op::Like, pattern.clone())))),
+                    ("company_crypto_account__crypto_network", "name") => Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Name, Op::Like, pattern.clone()))))),
+                    ("company_crypto_account__crypto_network", "symbol") => Ok(Some(query.where_has(DepositRel::COMPANY_CRYPTO_ACCOUNT, |rq| rq.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Symbol, Op::Like, pattern.clone()))))),
                     _ => Ok(None),
                 }
             }
@@ -3161,40 +3082,40 @@ impl GeneratedTableAdapter for DepositTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: DepositQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<DepositQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, DepositModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, DepositModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(DepositCol::Id, dir),
-            "owner_type" => query.order_by(DepositCol::OwnerType, dir),
-            "owner_id" => query.order_by(DepositCol::OwnerId, dir),
-            "admin_id" => query.order_by(DepositCol::AdminId, dir),
-            "credit_type" => query.order_by(DepositCol::CreditType, dir),
-            "deposit_method" => query.order_by(DepositCol::DepositMethod, dir),
-            "company_bank_account_id" => query.order_by(DepositCol::CompanyBankAccountId, dir),
-            "company_crypto_account_id" => query.order_by(DepositCol::CompanyCryptoAccountId, dir),
-            "conversion_rate" => query.order_by(DepositCol::ConversionRate, dir),
-            "status" => query.order_by(DepositCol::Status, dir),
-            "amount" => query.order_by(DepositCol::Amount, dir),
-            "fee" => query.order_by(DepositCol::Fee, dir),
-            "net_amount" => query.order_by(DepositCol::NetAmount, dir),
-            "related_key" => query.order_by(DepositCol::RelatedKey, dir),
-            "params" => query.order_by(DepositCol::Params, dir),
-            "remark" => query.order_by(DepositCol::Remark, dir),
-            "admin_remark" => query.order_by(DepositCol::AdminRemark, dir),
-            "reviewed_at" => query.order_by(DepositCol::ReviewedAt, dir),
-            "created_at" => query.order_by(DepositCol::CreatedAt, dir),
-            "updated_at" => query.order_by(DepositCol::UpdatedAt, dir),
+            "id" => query.order_by(DepositDbCol::Id, dir),
+            "owner_type" => query.order_by(DepositDbCol::OwnerType, dir),
+            "owner_id" => query.order_by(DepositDbCol::OwnerId, dir),
+            "admin_id" => query.order_by(DepositDbCol::AdminId, dir),
+            "credit_type" => query.order_by(DepositDbCol::CreditType, dir),
+            "deposit_method" => query.order_by(DepositDbCol::DepositMethod, dir),
+            "company_bank_account_id" => query.order_by(DepositDbCol::CompanyBankAccountId, dir),
+            "company_crypto_account_id" => query.order_by(DepositDbCol::CompanyCryptoAccountId, dir),
+            "conversion_rate" => query.order_by(DepositDbCol::ConversionRate, dir),
+            "status" => query.order_by(DepositDbCol::Status, dir),
+            "amount" => query.order_by(DepositDbCol::Amount, dir),
+            "fee" => query.order_by(DepositDbCol::Fee, dir),
+            "net_amount" => query.order_by(DepositDbCol::NetAmount, dir),
+            "related_key" => query.order_by(DepositDbCol::RelatedKey, dir),
+            "params" => query.order_by(DepositDbCol::Params, dir),
+            "remark" => query.order_by(DepositDbCol::Remark, dir),
+            "admin_remark" => query.order_by(DepositDbCol::AdminRemark, dir),
+            "reviewed_at" => query.order_by(DepositDbCol::ReviewedAt, dir),
+            "created_at" => query.order_by(DepositDbCol::CreatedAt, dir),
+            "updated_at" => query.order_by(DepositDbCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: DepositQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<DepositQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, DepositModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, DepositModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &DepositWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &DepositRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "owner_id" => Some(row.owner_id.to_string()),
@@ -3214,10 +3135,10 @@ impl GeneratedTableAdapter for DepositTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: DepositQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, DepositModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: DepositQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<DepositWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, DepositModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<DepositRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -3243,13 +3164,13 @@ impl Default for DepositDataTableConfig {
     }
 }
 pub trait DepositDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: DepositQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> DepositQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, DepositModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, DepositModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: DepositQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<DepositQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: DepositQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<DepositQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut DepositWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: DepositWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, DepositModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, DepositModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, DepositModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, DepositModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut DepositRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: DepositRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         if let Some(id_value) = record.get("id").cloned() {
             let id_text = match id_value {
@@ -3261,10 +3182,10 @@ pub trait DepositDataTableHooks: Send + Sync + 'static {
         }
         Ok(record)
     }
-    fn row_to_record(&self, row: DepositWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: DepositRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: DepositQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, DepositModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct DepositDefaultDataTableHooks;
@@ -3302,15 +3223,15 @@ impl<H: DepositDataTableHooks> DepositDataTable<H> {
 impl<H: DepositDataTableHooks> AutoDataTable for DepositDataTable<H> {
     type Adapter = DepositTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> DepositQuery<'db> {
-        self.hooks.scope(Deposit::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, DepositModel> {
+        self.hooks.scope(DepositModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: DepositQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<DepositQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: DepositQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<DepositQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut DepositWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: DepositWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: DepositQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, DepositModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, DepositModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, DepositModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, DepositModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut DepositRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: DepositRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, DepositModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -3320,10 +3241,801 @@ impl<H: DepositDataTableHooks> AutoDataTable for DepositDataTable<H> {
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for DepositView {
+impl ActiveRecord for DepositRecord {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Deposit::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        DepositModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct DepositModel;
+impl DepositModel {
+    pub const TABLE: &'static str = "deposits";
+    pub const MODEL_KEY: &'static str = "deposit";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, DepositModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, DepositModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, DepositModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, DepositModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, DepositModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, DepositModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<DepositRecord>> {
+        DepositQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for DepositModel {
+    type Pk = i64;
+    type Record = DepositRecord;
+    type Create = DepositCreate;
+    type Changes = DepositChanges;
+    const TABLE: &'static str = DepositModel::TABLE;
+    const MODEL_KEY: &'static str = DepositModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for DepositModel {
+    type InnerQuery<'db> = DepositQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        DepositQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for DepositModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for DepositModel {
+    type InnerCreate<'db> = DepositCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        DepositCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            DepositQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("deposits: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<DepositModel> for DepositDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <DepositModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<DepositModel>>::Value) -> anyhow::Result<<DepositModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            DepositDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::OwnerType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::OwnerId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::AdminId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::CreditType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::DepositMethod => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::CompanyBankAccountId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::CompanyCryptoAccountId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::ConversionRate => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::Status => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::Amount => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::Fee => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::NetAmount => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::RelatedKey => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::Params => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::Remark => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::AdminRemark => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::ReviewedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<DepositModel> for Column<DepositModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <DepositModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<DepositModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            DepositDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::OwnerType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::OwnerId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::AdminId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::CreditType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::DepositMethod => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::CompanyBankAccountId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::CompanyCryptoAccountId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::ConversionRate => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::Status => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::Amount => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::Fee => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::NetAmount => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::RelatedKey => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::Params => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::Remark => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::AdminRemark => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::ReviewedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            DepositDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<DepositModel> for DepositDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <DepositModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <DepositModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <DepositModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <DepositModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<DepositModel> for Column<DepositModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <DepositModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <DepositModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<DepositDbCol> = fields.iter().map(|field| resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <DepositModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <DepositModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<DepositDbCol> = fields.iter().map(|field| resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for DepositModel {
+    type InnerQuery<'db> = DepositQueryInner<'db>;
+    type InnerPatch<'db> = DepositPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        DepositPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(DepositDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = DepositPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", DepositDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM deposits", DepositDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = DepositQueryInner::new(db, base_url);
+            query.where_in(DepositDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<DepositModel> for DepositDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<DepositModel>>::Value) -> anyhow::Result<<DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            DepositDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::OwnerType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::OwnerId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::AdminId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::CreditType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::DepositMethod => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::CompanyBankAccountId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::CompanyCryptoAccountId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::ConversionRate => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::Status => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::Amount => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::Fee => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::NetAmount => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::RelatedKey => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::Params => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::Remark => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::AdminRemark => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::ReviewedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<DepositModel> for Column<DepositModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            DepositDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::OwnerType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::OwnerId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::AdminId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::CreditType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::DepositMethod => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::CompanyBankAccountId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::CompanyCryptoAccountId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::ConversionRate => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::Status => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::Amount => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::Fee => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::NetAmount => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::RelatedKey => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::Params => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::Remark => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::AdminRemark => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::ReviewedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            DepositDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<DepositModel> for DepositDbCol {
+    fn increment<'db>(field: Self, mut builder: <DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<DepositModel>>::Value) -> anyhow::Result<<DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            DepositDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            DepositDbCol::OwnerId => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            DepositDbCol::Amount => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            DepositDbCol::Fee => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            DepositDbCol::NetAmount => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<DepositModel>>::Value) -> anyhow::Result<<DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            DepositDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            DepositDbCol::OwnerId => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            DepositDbCol::Amount => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            DepositDbCol::Fee => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            DepositDbCol::NetAmount => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<DepositModel> for Column<DepositModel, i64> {
+    fn increment<'db>(field: Self, mut builder: <DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<DepositModel>>::Value) -> anyhow::Result<<DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            DepositDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            DepositDbCol::OwnerId => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<DepositModel>>::Value) -> anyhow::Result<<DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            DepositDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            DepositDbCol::OwnerId => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<DepositModel> for Column<DepositModel, rust_decimal::Decimal> {
+    fn increment<'db>(field: Self, mut builder: <DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<DepositModel>>::Value) -> anyhow::Result<<DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            DepositDbCol::Amount => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            DepositDbCol::Fee => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            DepositDbCol::NetAmount => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<DepositModel>>::Value) -> anyhow::Result<<DepositModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            DepositDbCol::Amount => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            DepositDbCol::Fee => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            DepositDbCol::NetAmount => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<DepositModel> for DepositDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<DepositModel>>::Value) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<DepositModel>>::Value) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<DepositModel>>::Value]) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<DepositModel> for Column<DepositModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_deposit_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
+impl core_db::common::model_api::IncludeRelation<DepositModel> for OneRelation<DepositModel, AdminRow, 0> {
+    fn include<'db>(_relation: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query
+    }
+}
+
+impl core_db::common::model_api::WhereHasRelation<DepositModel> for OneRelation<DepositModel, AdminRow, 0> {
+    type Target = AdminModel;
+    fn where_has<'db, F>(_relation: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.where_has_admin(scope)
+    }
+    fn or_where_has<'db, F>(_relation: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.or_where_has_admin(scope)
+    }
+}
+
+impl core_db::common::model_api::RecordOneRelation<DepositModel> for OneRelation<DepositModel, AdminRow, 0> {
+    type Target = AdminRow;
+    fn get<'a>(_relation: Self, record: &'a DepositRecord) -> Option<&'a Self::Target> {
+        record.admin.as_ref()
+    }
+}
+
+impl core_db::common::model_api::IncludeRelation<DepositModel> for OneRelation<DepositModel, CompanyBankAccountRow, 1> {
+    fn include<'db>(_relation: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query
+    }
+}
+
+impl core_db::common::model_api::WhereHasRelation<DepositModel> for OneRelation<DepositModel, CompanyBankAccountRow, 1> {
+    type Target = CompanyBankAccountModel;
+    fn where_has<'db, F>(_relation: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.where_has_company_bank_account(scope)
+    }
+    fn or_where_has<'db, F>(_relation: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.or_where_has_company_bank_account(scope)
+    }
+}
+
+impl core_db::common::model_api::RecordOneRelation<DepositModel> for OneRelation<DepositModel, CompanyBankAccountRow, 1> {
+    type Target = CompanyBankAccountRow;
+    fn get<'a>(_relation: Self, record: &'a DepositRecord) -> Option<&'a Self::Target> {
+        record.company_bank_account.as_ref()
+    }
+}
+
+impl core_db::common::model_api::IncludeRelation<DepositModel> for OneRelation<DepositModel, CompanyCryptoAccountRow, 2> {
+    fn include<'db>(_relation: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query
+    }
+}
+
+impl core_db::common::model_api::WhereHasRelation<DepositModel> for OneRelation<DepositModel, CompanyCryptoAccountRow, 2> {
+    type Target = CompanyCryptoAccountModel;
+    fn where_has<'db, F>(_relation: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.where_has_company_crypto_account(scope)
+    }
+    fn or_where_has<'db, F>(_relation: Self, query: <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <DepositModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.or_where_has_company_crypto_account(scope)
+    }
+}
+
+impl core_db::common::model_api::RecordOneRelation<DepositModel> for OneRelation<DepositModel, CompanyCryptoAccountRow, 2> {
+    type Target = CompanyCryptoAccountRow;
+    fn get<'a>(_relation: Self, record: &'a DepositRecord) -> Option<&'a Self::Target> {
+        record.company_crypto_account.as_ref()
+    }
+}
+
 

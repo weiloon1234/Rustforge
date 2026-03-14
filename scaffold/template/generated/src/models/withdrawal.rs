@@ -6,15 +6,15 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
-use crate::generated::models::admin::{AdminCol, AdminQuery, AdminRow};
-use crate::generated::models::bank::{BankCol, BankQuery, BankRow};
-use crate::generated::models::crypto_network::{CryptoNetworkCol, CryptoNetworkQuery, CryptoNetworkRow};
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
+use crate::generated::models::admin::{AdminDbCol, AdminModel, AdminRow};
+use crate::generated::models::bank::{BankDbCol, BankModel, BankRow};
+use crate::generated::models::crypto_network::{CryptoNetworkDbCol, CryptoNetworkModel, CryptoNetworkRow};
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
@@ -22,7 +22,7 @@ const HAS_UPDATED_AT: bool = true;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct WithdrawalCreateInput {
+pub struct WithdrawalCreate {
     pub id: FieldInput<i64>,
     pub owner_type: FieldInput<OwnerType>,
     pub owner_id: FieldInput<i64>,
@@ -50,7 +50,7 @@ pub struct WithdrawalCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct WithdrawalUpdateChanges {
+pub struct WithdrawalChanges {
     pub id: Option<FieldChange<i64>>,
     pub owner_type: Option<FieldChange<OwnerType>>,
     pub owner_id: Option<FieldChange<i64>>,
@@ -111,7 +111,7 @@ pub struct WithdrawalRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct WithdrawalView {
+pub struct WithdrawalRecord {
     pub id: i64,
     pub owner_type: OwnerType,
     pub owner_id: i64,
@@ -142,99 +142,19 @@ pub struct WithdrawalView {
     pub credit_type_explained: String,
     pub withdrawal_method_explained: String,
     pub status_explained: String,
+    pub admin: Option<AdminRow>,
+    pub bank: Option<BankRow>,
+    pub crypto_network: Option<CryptoNetworkRow>,
 }
 
-impl WithdrawalView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> WithdrawalUpdate<'db> {
-        Withdrawal::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &Withdrawal<'db>) -> WithdrawalUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> WithdrawalJson {
-        WithdrawalJson {
-            id: self.id.clone(),
-            owner_type: self.owner_type.clone(),
-            owner_id: self.owner_id.clone(),
-            admin_id: self.admin_id.clone(),
-            credit_type: self.credit_type.clone(),
-            withdrawal_method: self.withdrawal_method.clone(),
-            bank_id: self.bank_id.clone(),
-            bank_account_name: self.bank_account_name.clone(),
-            bank_account_number: self.bank_account_number.clone(),
-            crypto_network_id: self.crypto_network_id.clone(),
-            crypto_wallet_address: self.crypto_wallet_address.clone(),
-            conversion_rate: self.conversion_rate.clone(),
-            status: self.status.clone(),
-            amount: self.amount.clone(),
-            fee: self.fee.clone(),
-            net_amount: self.net_amount.clone(),
-            related_key: self.related_key.clone(),
-            params: self.params.clone(),
-            remark: self.remark.clone(),
-            admin_remark: self.admin_remark.clone(),
-            reviewed_at: self.reviewed_at.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            owner_type_explained: self.owner_type_explained.clone(),
-            credit_type_explained: self.credit_type_explained.clone(),
-            withdrawal_method_explained: self.withdrawal_method_explained.clone(),
-            status_explained: self.status_explained.clone(),
-        }
+impl WithdrawalRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, WithdrawalModel> {
+        WithdrawalModel::query(db.into()).where_col(WithdrawalDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-pub trait WithdrawalViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&WithdrawalView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&WithdrawalView) -> K) -> std::collections::HashMap<K, WithdrawalView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&WithdrawalView) -> K) -> std::collections::HashMap<K, Vec<WithdrawalView>> where K: Eq + std::hash::Hash;
-}
-
-impl WithdrawalViewsExt for Vec<WithdrawalView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&WithdrawalView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&WithdrawalView) -> K) -> std::collections::HashMap<K, WithdrawalView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&WithdrawalView) -> K) -> std::collections::HashMap<K, Vec<WithdrawalView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct WithdrawalJson {
-    pub id: i64,
-    pub owner_type: OwnerType,
-    pub owner_id: i64,
-    pub admin_id: Option<i64>,
-    pub credit_type: CreditType,
-    pub withdrawal_method: WithdrawalMethod,
-    pub bank_id: Option<i64>,
-    pub bank_account_name: Option<String>,
-    pub bank_account_number: Option<String>,
-    pub crypto_network_id: Option<i64>,
-    pub crypto_wallet_address: Option<String>,
-    pub conversion_rate: Option<rust_decimal::Decimal>,
-    pub status: WithdrawalStatus,
-    pub amount: rust_decimal::Decimal,
-    pub fee: rust_decimal::Decimal,
-    pub net_amount: rust_decimal::Decimal,
-    pub related_key: Option<String>,
-    pub params: Option<serde_json::Value>,
-    pub remark: Option<String>,
-    pub admin_remark: Option<String>,
-    #[schemars(with = "String")]
-    pub reviewed_at: Option<time::OffsetDateTime>,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    pub owner_type_explained: String,
-    pub credit_type_explained: String,
-    pub withdrawal_method_explained: String,
-    pub status_explained: String,
-}
-
-fn hydrate_view(row: WithdrawalRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> WithdrawalView {
-    let view = WithdrawalView {
+fn hydrate_record(row: WithdrawalRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> WithdrawalRecord {
+    let mut record = WithdrawalRecord {
         id: row.id,
         owner_type: row.owner_type,
         owner_id: row.owner_id,
@@ -262,39 +182,91 @@ fn hydrate_view(row: WithdrawalRow, _loc: &LocalizedMap, _base_url: Option<&str>
         credit_type_explained: row.credit_type.explained_label(),
         withdrawal_method_explained: row.withdrawal_method.explained_label(),
         status_explained: row.status.explained_label(),
+        admin: None,
+        bank: None,
+        crypto_network: None,
     };
-    view
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct WithdrawalWithRelations {
-    #[serde(flatten)]
-    pub row: WithdrawalView,
-    pub admin: Option<AdminRow>,
-    pub bank: Option<BankRow>,
-    pub crypto_network: Option<CryptoNetworkRow>,
+impl WithdrawalRecord {
+    pub fn one<R>(&self, relation: R) -> Option<&R::Target>
+    where
+        R: core_db::common::model_api::RecordOneRelation<WithdrawalModel>,
+    {
+        R::get(relation, self)
+    }
+    pub fn many<R>(&self, relation: R) -> &[R::Target]
+    where
+        R: core_db::common::model_api::RecordManyRelation<WithdrawalModel>,
+    {
+        R::get(relation, self)
+    }
 }
 
-impl WithdrawalWithRelations {
-    pub fn into_row(self) -> WithdrawalView { self.row }
-}
-
-impl std::ops::Deref for WithdrawalWithRelations {
-    type Target = WithdrawalView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for WithdrawalWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
-}
-
-impl WithdrawalWithRelations {
+impl WithdrawalRecord {
     pub fn status_label (& self) -> String { self . status . explained_label () . to_string () }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WithdrawalCol;
+impl WithdrawalCol {
+    pub const ID: Column<WithdrawalModel, i64> = Column::new("id");
+    pub const OWNER_TYPE: Column<WithdrawalModel, OwnerType> = Column::new("owner_type");
+    pub const OWNER_ID: Column<WithdrawalModel, i64> = Column::new("owner_id");
+    pub const ADMIN_ID: Column<WithdrawalModel, Option<i64>> = Column::new("admin_id");
+    pub const CREDIT_TYPE: Column<WithdrawalModel, CreditType> = Column::new("credit_type");
+    pub const WITHDRAWAL_METHOD: Column<WithdrawalModel, WithdrawalMethod> = Column::new("withdrawal_method");
+    pub const BANK_ID: Column<WithdrawalModel, Option<i64>> = Column::new("bank_id");
+    pub const BANK_ACCOUNT_NAME: Column<WithdrawalModel, Option<String>> = Column::new("bank_account_name");
+    pub const BANK_ACCOUNT_NUMBER: Column<WithdrawalModel, Option<String>> = Column::new("bank_account_number");
+    pub const CRYPTO_NETWORK_ID: Column<WithdrawalModel, Option<i64>> = Column::new("crypto_network_id");
+    pub const CRYPTO_WALLET_ADDRESS: Column<WithdrawalModel, Option<String>> = Column::new("crypto_wallet_address");
+    pub const CONVERSION_RATE: Column<WithdrawalModel, Option<rust_decimal::Decimal>> = Column::new("conversion_rate");
+    pub const STATUS: Column<WithdrawalModel, WithdrawalStatus> = Column::new("status");
+    pub const AMOUNT: Column<WithdrawalModel, rust_decimal::Decimal> = Column::new("amount");
+    pub const FEE: Column<WithdrawalModel, rust_decimal::Decimal> = Column::new("fee");
+    pub const NET_AMOUNT: Column<WithdrawalModel, rust_decimal::Decimal> = Column::new("net_amount");
+    pub const RELATED_KEY: Column<WithdrawalModel, Option<String>> = Column::new("related_key");
+    pub const PARAMS: Column<WithdrawalModel, Option<serde_json::Value>> = Column::new("params");
+    pub const REMARK: Column<WithdrawalModel, Option<String>> = Column::new("remark");
+    pub const ADMIN_REMARK: Column<WithdrawalModel, Option<String>> = Column::new("admin_remark");
+    pub const REVIEWED_AT: Column<WithdrawalModel, Option<time::OffsetDateTime>> = Column::new("reviewed_at");
+    pub const CREATED_AT: Column<WithdrawalModel, time::OffsetDateTime> = Column::new("created_at");
+    pub const UPDATED_AT: Column<WithdrawalModel, time::OffsetDateTime> = Column::new("updated_at");
+}
+
+fn resolve_withdrawal_db_col(sql: &str) -> Option<WithdrawalDbCol> {
+    match sql {
+        "id" => Some(WithdrawalDbCol::Id),
+        "owner_type" => Some(WithdrawalDbCol::OwnerType),
+        "owner_id" => Some(WithdrawalDbCol::OwnerId),
+        "admin_id" => Some(WithdrawalDbCol::AdminId),
+        "credit_type" => Some(WithdrawalDbCol::CreditType),
+        "withdrawal_method" => Some(WithdrawalDbCol::WithdrawalMethod),
+        "bank_id" => Some(WithdrawalDbCol::BankId),
+        "bank_account_name" => Some(WithdrawalDbCol::BankAccountName),
+        "bank_account_number" => Some(WithdrawalDbCol::BankAccountNumber),
+        "crypto_network_id" => Some(WithdrawalDbCol::CryptoNetworkId),
+        "crypto_wallet_address" => Some(WithdrawalDbCol::CryptoWalletAddress),
+        "conversion_rate" => Some(WithdrawalDbCol::ConversionRate),
+        "status" => Some(WithdrawalDbCol::Status),
+        "amount" => Some(WithdrawalDbCol::Amount),
+        "fee" => Some(WithdrawalDbCol::Fee),
+        "net_amount" => Some(WithdrawalDbCol::NetAmount),
+        "related_key" => Some(WithdrawalDbCol::RelatedKey),
+        "params" => Some(WithdrawalDbCol::Params),
+        "remark" => Some(WithdrawalDbCol::Remark),
+        "admin_remark" => Some(WithdrawalDbCol::AdminRemark),
+        "reviewed_at" => Some(WithdrawalDbCol::ReviewedAt),
+        "created_at" => Some(WithdrawalDbCol::CreatedAt),
+        "updated_at" => Some(WithdrawalDbCol::UpdatedAt),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum WithdrawalCol {
+pub enum WithdrawalDbCol {
     Id,
     OwnerType,
     OwnerId,
@@ -320,59 +292,48 @@ pub enum WithdrawalCol {
     UpdatedAt,
 }
 
-impl WithdrawalCol {
-    pub const fn all() -> &'static [WithdrawalCol] {
-        &[WithdrawalCol::Id, WithdrawalCol::OwnerType, WithdrawalCol::OwnerId, WithdrawalCol::AdminId, WithdrawalCol::CreditType, WithdrawalCol::WithdrawalMethod, WithdrawalCol::BankId, WithdrawalCol::BankAccountName, WithdrawalCol::BankAccountNumber, WithdrawalCol::CryptoNetworkId, WithdrawalCol::CryptoWalletAddress, WithdrawalCol::ConversionRate, WithdrawalCol::Status, WithdrawalCol::Amount, WithdrawalCol::Fee, WithdrawalCol::NetAmount, WithdrawalCol::RelatedKey, WithdrawalCol::Params, WithdrawalCol::Remark, WithdrawalCol::AdminRemark, WithdrawalCol::ReviewedAt, WithdrawalCol::CreatedAt, WithdrawalCol::UpdatedAt]
+impl WithdrawalDbCol {
+    pub const fn all() -> &'static [WithdrawalDbCol] {
+        &[WithdrawalDbCol::Id, WithdrawalDbCol::OwnerType, WithdrawalDbCol::OwnerId, WithdrawalDbCol::AdminId, WithdrawalDbCol::CreditType, WithdrawalDbCol::WithdrawalMethod, WithdrawalDbCol::BankId, WithdrawalDbCol::BankAccountName, WithdrawalDbCol::BankAccountNumber, WithdrawalDbCol::CryptoNetworkId, WithdrawalDbCol::CryptoWalletAddress, WithdrawalDbCol::ConversionRate, WithdrawalDbCol::Status, WithdrawalDbCol::Amount, WithdrawalDbCol::Fee, WithdrawalDbCol::NetAmount, WithdrawalDbCol::RelatedKey, WithdrawalDbCol::Params, WithdrawalDbCol::Remark, WithdrawalDbCol::AdminRemark, WithdrawalDbCol::ReviewedAt, WithdrawalDbCol::CreatedAt, WithdrawalDbCol::UpdatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            WithdrawalCol::Id => "id",
-            WithdrawalCol::OwnerType => "owner_type",
-            WithdrawalCol::OwnerId => "owner_id",
-            WithdrawalCol::AdminId => "admin_id",
-            WithdrawalCol::CreditType => "credit_type",
-            WithdrawalCol::WithdrawalMethod => "withdrawal_method",
-            WithdrawalCol::BankId => "bank_id",
-            WithdrawalCol::BankAccountName => "bank_account_name",
-            WithdrawalCol::BankAccountNumber => "bank_account_number",
-            WithdrawalCol::CryptoNetworkId => "crypto_network_id",
-            WithdrawalCol::CryptoWalletAddress => "crypto_wallet_address",
-            WithdrawalCol::ConversionRate => "conversion_rate",
-            WithdrawalCol::Status => "status",
-            WithdrawalCol::Amount => "amount",
-            WithdrawalCol::Fee => "fee",
-            WithdrawalCol::NetAmount => "net_amount",
-            WithdrawalCol::RelatedKey => "related_key",
-            WithdrawalCol::Params => "params",
-            WithdrawalCol::Remark => "remark",
-            WithdrawalCol::AdminRemark => "admin_remark",
-            WithdrawalCol::ReviewedAt => "reviewed_at",
-            WithdrawalCol::CreatedAt => "created_at",
-            WithdrawalCol::UpdatedAt => "updated_at",
+            WithdrawalDbCol::Id => "id",
+            WithdrawalDbCol::OwnerType => "owner_type",
+            WithdrawalDbCol::OwnerId => "owner_id",
+            WithdrawalDbCol::AdminId => "admin_id",
+            WithdrawalDbCol::CreditType => "credit_type",
+            WithdrawalDbCol::WithdrawalMethod => "withdrawal_method",
+            WithdrawalDbCol::BankId => "bank_id",
+            WithdrawalDbCol::BankAccountName => "bank_account_name",
+            WithdrawalDbCol::BankAccountNumber => "bank_account_number",
+            WithdrawalDbCol::CryptoNetworkId => "crypto_network_id",
+            WithdrawalDbCol::CryptoWalletAddress => "crypto_wallet_address",
+            WithdrawalDbCol::ConversionRate => "conversion_rate",
+            WithdrawalDbCol::Status => "status",
+            WithdrawalDbCol::Amount => "amount",
+            WithdrawalDbCol::Fee => "fee",
+            WithdrawalDbCol::NetAmount => "net_amount",
+            WithdrawalDbCol::RelatedKey => "related_key",
+            WithdrawalDbCol::Params => "params",
+            WithdrawalDbCol::Remark => "remark",
+            WithdrawalDbCol::AdminRemark => "admin_remark",
+            WithdrawalDbCol::ReviewedAt => "reviewed_at",
+            WithdrawalDbCol::CreatedAt => "created_at",
+            WithdrawalDbCol::UpdatedAt => "updated_at",
         }
     }
 }
 
-pub struct Withdrawal<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WithdrawalRel;
+impl WithdrawalRel {
+    pub const ADMIN: OneRelation<WithdrawalModel, AdminRow, 0> = OneRelation::<WithdrawalModel, AdminRow, 0>::new("admin");
+    pub const BANK: OneRelation<WithdrawalModel, BankRow, 1> = OneRelation::<WithdrawalModel, BankRow, 1>::new("bank");
+    pub const CRYPTO_NETWORK: OneRelation<WithdrawalModel, CryptoNetworkRow, 2> = OneRelation::<WithdrawalModel, CryptoNetworkRow, 2>::new("crypto_network");
 }
 
-impl<'db> Withdrawal<'db> {
-    pub const TABLE: &'static str = "withdrawals";
-    pub const MODEL_KEY: &'static str = "withdrawal";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> WithdrawalQuery<'db> { WithdrawalQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> WithdrawalInsert<'db> { WithdrawalInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> WithdrawalUpdate<'db> { WithdrawalUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<WithdrawalWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-    pub async fn load_admin(&self, parents: &[WithdrawalRow]) -> Result<HashMap<i64, Option<AdminRow>>> {
+async fn load_admin<'db>(db: DbConn<'db>, parents: &[WithdrawalRow]) -> Result<HashMap<i64, Option<AdminRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -384,7 +345,7 @@ impl<'db> Withdrawal<'db> {
         let sql = format!("SELECT * FROM admin WHERE id IN ({})", placeholders.join(", "));
         let mut q = sqlx::query_as::<_, AdminRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
-        let rows = self.db.fetch_all(q).await?;
+        let rows = db.fetch_all(q).await?;
         let mut by_pk: HashMap<i64, AdminRow> = HashMap::new();
         for row in rows { by_pk.insert(row.id.clone(), row); }
         let mut out = HashMap::new();
@@ -393,7 +354,7 @@ impl<'db> Withdrawal<'db> {
         }
         Ok(out)
     }
-    pub async fn load_bank(&self, parents: &[WithdrawalRow]) -> Result<HashMap<i64, Option<BankRow>>> {
+async fn load_bank<'db>(db: DbConn<'db>, parents: &[WithdrawalRow]) -> Result<HashMap<i64, Option<BankRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -405,7 +366,7 @@ impl<'db> Withdrawal<'db> {
         let sql = format!("SELECT * FROM banks WHERE id IN ({})", placeholders.join(", "));
         let mut q = sqlx::query_as::<_, BankRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
-        let rows = self.db.fetch_all(q).await?;
+        let rows = db.fetch_all(q).await?;
         let mut by_pk: HashMap<i64, BankRow> = HashMap::new();
         for row in rows { by_pk.insert(row.id.clone(), row); }
         let mut out = HashMap::new();
@@ -414,7 +375,7 @@ impl<'db> Withdrawal<'db> {
         }
         Ok(out)
     }
-    pub async fn load_crypto_network(&self, parents: &[WithdrawalRow]) -> Result<HashMap<i64, Option<CryptoNetworkRow>>> {
+async fn load_crypto_network<'db>(db: DbConn<'db>, parents: &[WithdrawalRow]) -> Result<HashMap<i64, Option<CryptoNetworkRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -426,7 +387,7 @@ impl<'db> Withdrawal<'db> {
         let sql = format!("SELECT * FROM crypto_networks WHERE id IN ({})", placeholders.join(", "));
         let mut q = sqlx::query_as::<_, CryptoNetworkRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
-        let rows = self.db.fetch_all(q).await?;
+        let rows = db.fetch_all(q).await?;
         let mut by_pk: HashMap<i64, CryptoNetworkRow> = HashMap::new();
         for row in rows { by_pk.insert(row.id.clone(), row); }
         let mut out = HashMap::new();
@@ -435,10 +396,9 @@ impl<'db> Withdrawal<'db> {
         }
         Ok(out)
     }
-}
 
 #[derive(Clone)]
-pub struct WithdrawalQuery<'db> {
+pub struct WithdrawalQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -461,290 +421,289 @@ pub struct WithdrawalQuery<'db> {
 
 
 
-impl<'db> WithdrawalQuery<'db> {
+impl<'db> WithdrawalQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, owner_type, owner_id, admin_id, credit_type, withdrawal_method, bank_id, bank_account_name, bank_account_number, crypto_network_id, crypto_wallet_address, conversion_rate, status, amount, fee, net_amount, related_key, params, remark, admin_remark, reviewed_at, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> WithdrawalUnsafeQuery<'db> { WithdrawalUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_type(mut self, op: Op, val: OwnerType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_type(mut self, op: Op, val: CreditType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::CreditType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::CreditType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::CreditType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::CreditType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_withdrawal_method(mut self, op: Op, val: WithdrawalMethod) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::WithdrawalMethod.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::WithdrawalMethod.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_withdrawal_method_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::WithdrawalMethod.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::WithdrawalMethod.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_bank_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::BankId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::BankId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_bank_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::BankId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::BankId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_bank_account_name(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::BankAccountName.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::BankAccountName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_bank_account_name_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::BankAccountName.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::BankAccountName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_bank_account_number(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::BankAccountNumber.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::BankAccountNumber.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_bank_account_number_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::BankAccountNumber.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::BankAccountNumber.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_crypto_network_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::CryptoNetworkId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::CryptoNetworkId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_crypto_network_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::CryptoNetworkId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::CryptoNetworkId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_crypto_wallet_address(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::CryptoWalletAddress.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::CryptoWalletAddress.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_crypto_wallet_address_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::CryptoWalletAddress.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::CryptoWalletAddress.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_conversion_rate(mut self, op: Op, val: Option<rust_decimal::Decimal>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::ConversionRate.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::ConversionRate.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_conversion_rate_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::ConversionRate.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::ConversionRate.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status(mut self, op: Op, val: WithdrawalStatus) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_amount(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Amount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Amount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_amount_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Amount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Amount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_fee(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Fee.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Fee.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_fee_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Fee.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Fee.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_net_amount(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::NetAmount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::NetAmount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_net_amount_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::NetAmount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::NetAmount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_related_key(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::RelatedKey.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::RelatedKey.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_related_key_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::RelatedKey.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::RelatedKey.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_params(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Params.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Params.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_params_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Params.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Params.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_remark(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Remark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Remark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_remark_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Remark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Remark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_remark(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::AdminRemark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::AdminRemark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_remark_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::AdminRemark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::AdminRemark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_reviewed_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::ReviewedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::ReviewedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_reviewed_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::ReviewedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::ReviewedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(WithdrawalCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: WithdrawalCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(WithdrawalDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: WithdrawalDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -763,7 +722,7 @@ impl<'db> WithdrawalQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: WithdrawalCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: WithdrawalDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -778,7 +737,7 @@ impl<'db> WithdrawalQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: WithdrawalCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: WithdrawalDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -790,7 +749,7 @@ impl<'db> WithdrawalQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: WithdrawalCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: WithdrawalDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -798,15 +757,15 @@ impl<'db> WithdrawalQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: WithdrawalCol) -> Self {
+    pub fn where_null(mut self, col: WithdrawalDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: WithdrawalCol) -> Self {
+    pub fn where_not_null(mut self, col: WithdrawalDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: WithdrawalCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: WithdrawalDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -860,7 +819,7 @@ impl<'db> WithdrawalQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[WithdrawalCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[WithdrawalDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, owner_type, owner_id, admin_id, credit_type, withdrawal_method, bank_id, bank_account_name, bank_account_number, crypto_network_id, crypto_wallet_address, conversion_rate, status, amount, fee, net_amount, related_key, params, remark, admin_remark, reviewed_at, created_at, updated_at".to_string());
         } else {
@@ -872,7 +831,7 @@ impl<'db> WithdrawalQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[WithdrawalCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[WithdrawalDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -953,26 +912,26 @@ impl<'db> WithdrawalQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: WithdrawalCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: WithdrawalDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: WithdrawalCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: WithdrawalDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: WithdrawalCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: WithdrawalDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[WithdrawalCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[WithdrawalDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[WithdrawalCol]) -> Self {
+    pub fn select(mut self, cols: &[WithdrawalDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -1020,7 +979,7 @@ impl<'db> WithdrawalQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[WithdrawalCol]) -> Self {
+    pub fn group_by(mut self, cols: &[WithdrawalDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -1047,10 +1006,10 @@ impl<'db> WithdrawalQuery<'db> {
         self.offset = Some(n);
         self
     }
-    pub fn where_has_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+    pub fn where_has_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "admin.id = withdrawals.admin_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1060,10 +1019,10 @@ impl<'db> WithdrawalQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_has_bank(mut self, scope: impl FnOnce(BankQuery<'db>) -> BankQuery<'db>) -> Self {
+    pub fn where_has_bank(mut self, scope: impl FnOnce(Query<'db, BankModel>) -> Query<'db, BankModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(BankQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(BankModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "banks.id = withdrawals.bank_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM banks WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1073,10 +1032,10 @@ impl<'db> WithdrawalQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_has_crypto_network(mut self, scope: impl FnOnce(CryptoNetworkQuery<'db>) -> CryptoNetworkQuery<'db>) -> Self {
+    pub fn where_has_crypto_network(mut self, scope: impl FnOnce(Query<'db, CryptoNetworkModel>) -> Query<'db, CryptoNetworkModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(CryptoNetworkQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(CryptoNetworkModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "crypto_networks.id = withdrawals.crypto_network_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM crypto_networks WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1086,10 +1045,10 @@ impl<'db> WithdrawalQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_doesnt_have_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+    pub fn where_doesnt_have_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "admin.id = withdrawals.admin_id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM admin WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1099,10 +1058,10 @@ impl<'db> WithdrawalQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_doesnt_have_bank(mut self, scope: impl FnOnce(BankQuery<'db>) -> BankQuery<'db>) -> Self {
+    pub fn where_doesnt_have_bank(mut self, scope: impl FnOnce(Query<'db, BankModel>) -> Query<'db, BankModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(BankQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(BankModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "banks.id = withdrawals.bank_id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM banks WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1112,10 +1071,10 @@ impl<'db> WithdrawalQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_doesnt_have_crypto_network(mut self, scope: impl FnOnce(CryptoNetworkQuery<'db>) -> CryptoNetworkQuery<'db>) -> Self {
+    pub fn where_doesnt_have_crypto_network(mut self, scope: impl FnOnce(Query<'db, CryptoNetworkModel>) -> Query<'db, CryptoNetworkModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(CryptoNetworkQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(CryptoNetworkModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "crypto_networks.id = withdrawals.crypto_network_id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM crypto_networks WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1125,10 +1084,10 @@ impl<'db> WithdrawalQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn or_where_has_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+    pub fn or_where_has_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "admin.id = withdrawals.admin_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1142,10 +1101,10 @@ impl<'db> WithdrawalQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn or_where_has_bank(mut self, scope: impl FnOnce(BankQuery<'db>) -> BankQuery<'db>) -> Self {
+    pub fn or_where_has_bank(mut self, scope: impl FnOnce(Query<'db, BankModel>) -> Query<'db, BankModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(BankQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(BankModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "banks.id = withdrawals.bank_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM banks WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1159,10 +1118,10 @@ impl<'db> WithdrawalQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn or_where_has_crypto_network(mut self, scope: impl FnOnce(CryptoNetworkQuery<'db>) -> CryptoNetworkQuery<'db>) -> Self {
+    pub fn or_where_has_crypto_network(mut self, scope: impl FnOnce(Query<'db, CryptoNetworkModel>) -> Query<'db, CryptoNetworkModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(CryptoNetworkQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(CryptoNetworkModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "crypto_networks.id = withdrawals.crypto_network_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM crypto_networks WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -1224,7 +1183,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<WithdrawalWithRelations>> {
+    pub async fn get(self) -> Result<Vec<WithdrawalRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -1270,75 +1229,72 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("withdrawals", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = Withdrawal { db: db.clone(), base_url: base_url.clone() };
-        let admin = m.load_admin(&rows).await?;
-        let bank = m.load_bank(&rows).await?;
-        let crypto_network = m.load_crypto_network(&rows).await?;
+        let admin = load_admin(db.clone(), &rows).await?;
+        let bank = load_bank(db.clone(), &rows).await?;
+        let crypto_network = load_crypto_network(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
             let key = r.id.clone();
-            let view = hydrate_view(r.clone(), &LocalizedMap::default(), base_url.as_deref());
-            out_vec.push(WithdrawalWithRelations {
-                row: view,
-                admin: admin.get(&key).cloned().unwrap_or(None),
-                bank: bank.get(&key).cloned().unwrap_or(None),
-                crypto_network: crypto_network.get(&key).cloned().unwrap_or(None),
-            });
+            let mut record = hydrate_record(r.clone(), &LocalizedMap::default(), base_url.as_deref());
+            record.admin = admin.get(&key).cloned().unwrap_or(None);
+            record.bank = bank.get(&key).cloned().unwrap_or(None);
+            record.crypto_network = crypto_network.get(&key).cloned().unwrap_or(None);
+            out_vec.push(record);
         }
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<WithdrawalWithRelations>> {
+    pub async fn first(self) -> Result<Option<WithdrawalRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<WithdrawalWithRelations> {
+    pub async fn first_or_fail(self) -> Result<WithdrawalRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("withdrawals: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<WithdrawalWithRelations>> {
+    pub async fn find(self, id: i64) -> Result<Option<WithdrawalRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<WithdrawalWithRelations> {
+    pub async fn find_or_fail(self, id: i64) -> Result<WithdrawalRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("withdrawals: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(WithdrawalInsert<'db>) -> WithdrawalInsert<'db>) -> Result<WithdrawalWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(WithdrawalCreateInner<'db>) -> WithdrawalCreateInner<'db>) -> Result<WithdrawalRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(WithdrawalInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(WithdrawalCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Withdrawal::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        WithdrawalQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(WithdrawalUpdate<'db>) -> WithdrawalUpdate<'db>,
-        on_create: impl FnOnce(WithdrawalInsert<'db>) -> WithdrawalInsert<'db>,
-    ) -> Result<WithdrawalWithRelations> {
+        on_update: impl FnOnce(WithdrawalPatchInner<'db>) -> WithdrawalPatchInner<'db>,
+        on_create: impl FnOnce(WithdrawalCreateInner<'db>) -> WithdrawalCreateInner<'db>,
+    ) -> Result<WithdrawalRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = WithdrawalUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = WithdrawalPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Withdrawal::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return WithdrawalQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(WithdrawalInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(WithdrawalCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Withdrawal::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        WithdrawalQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: WithdrawalCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: WithdrawalDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -1353,7 +1309,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: WithdrawalCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: WithdrawalDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -1409,13 +1365,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<WithdrawalWithRelations>) -> Fut,
+        F: FnMut(Vec<WithdrawalRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = WithdrawalQuery::new(db.clone(), self.base_url.clone());
+            let mut query = WithdrawalQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -1429,11 +1385,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(WithdrawalCol::CreatedAt, OrderDir::Desc)
+        self.order_by(WithdrawalDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(WithdrawalCol::CreatedAt, OrderDir::Asc)
+        self.order_by(WithdrawalDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -1444,7 +1400,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<WithdrawalWithRelations> {
+    pub async fn sole(self) -> Result<WithdrawalRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -1463,7 +1419,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&WithdrawalWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&WithdrawalRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -1471,7 +1427,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: WithdrawalCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: WithdrawalDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "withdrawals".to_string());
@@ -1492,7 +1448,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: WithdrawalCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: WithdrawalDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "withdrawals".to_string());
@@ -1513,7 +1469,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: WithdrawalCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: WithdrawalDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "withdrawals".to_string());
@@ -1534,7 +1490,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: WithdrawalCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: WithdrawalDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "withdrawals".to_string());
@@ -1555,7 +1511,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<WithdrawalWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<WithdrawalRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1602,22 +1558,19 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("withdrawals", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = Withdrawal { db: db.clone(), base_url: base_url.clone() };
-        let admin = m.load_admin(&rows).await?;
-        let bank = m.load_bank(&rows).await?;
-        let crypto_network = m.load_crypto_network(&rows).await?;
+        let admin = load_admin(db.clone(), &rows).await?;
+        let bank = load_bank(db.clone(), &rows).await?;
+        let crypto_network = load_crypto_network(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for row in rows {
             let key = row.id.clone();
-            let view = hydrate_view(row.clone(), &LocalizedMap::default(), base_url.as_deref());
-            data.push(WithdrawalWithRelations {
-                row: view,
-                admin: admin.get(&key).cloned().unwrap_or(None),
-                bank: bank.get(&key).cloned().unwrap_or(None),
-                crypto_network: crypto_network.get(&key).cloned().unwrap_or(None),
-            });
+            let mut record = hydrate_record(row.clone(), &LocalizedMap::default(), base_url.as_deref());
+            record.admin = admin.get(&key).cloned().unwrap_or(None);
+            record.bank = bank.get(&key).cloned().unwrap_or(None);
+            record.crypto_network = crypto_network.get(&key).cloned().unwrap_or(None);
+            data.push(record);
         }
         Ok(Page { data, total, per_page, current_page, last_page })
     }
@@ -1738,38 +1691,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct WithdrawalUnsafeQuery<'db> {
-    inner: WithdrawalQuery<'db>,
-}
 
-impl<'db> WithdrawalUnsafeQuery<'db> {
-    fn new(inner: WithdrawalQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> WithdrawalQuery<'db> { self.inner }
-}
-
-
-pub struct WithdrawalInsert<'db> {
+pub struct WithdrawalCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<WithdrawalCol>,
+    cols: Vec<WithdrawalDbCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<WithdrawalCol>,
+    conflict_cols: Vec<WithdrawalDbCol>,
 }
 
-impl<'db> WithdrawalInsert<'db> {
+impl<'db> WithdrawalCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1783,142 +1715,142 @@ impl<'db> WithdrawalInsert<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(WithdrawalCol::Id);
+        self.cols.push(WithdrawalDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_owner_type(mut self, val: OwnerType) -> Self {
-        self.cols.push(WithdrawalCol::OwnerType);
+        self.cols.push(WithdrawalDbCol::OwnerType);
         self.binds.push(val.into());
         self
     }
     pub fn set_owner_id(mut self, val: i64) -> Self {
-        self.cols.push(WithdrawalCol::OwnerId);
+        self.cols.push(WithdrawalDbCol::OwnerId);
         self.binds.push(val.into());
         self
     }
     pub fn set_admin_id(mut self, val: Option<i64>) -> Self {
-        self.cols.push(WithdrawalCol::AdminId);
+        self.cols.push(WithdrawalDbCol::AdminId);
         self.binds.push(val.into());
         self
     }
     pub fn set_credit_type(mut self, val: CreditType) -> Self {
-        self.cols.push(WithdrawalCol::CreditType);
+        self.cols.push(WithdrawalDbCol::CreditType);
         self.binds.push(val.into());
         self
     }
     pub fn set_withdrawal_method(mut self, val: WithdrawalMethod) -> Self {
-        self.cols.push(WithdrawalCol::WithdrawalMethod);
+        self.cols.push(WithdrawalDbCol::WithdrawalMethod);
         self.binds.push(val.into());
         self
     }
     pub fn set_bank_id(mut self, val: Option<i64>) -> Self {
-        self.cols.push(WithdrawalCol::BankId);
+        self.cols.push(WithdrawalDbCol::BankId);
         self.binds.push(val.into());
         self
     }
     pub fn set_bank_account_name(mut self, val: Option<String>) -> Self {
-        self.cols.push(WithdrawalCol::BankAccountName);
+        self.cols.push(WithdrawalDbCol::BankAccountName);
         self.binds.push(val.into());
         self
     }
     pub fn set_bank_account_number(mut self, val: Option<String>) -> Self {
-        self.cols.push(WithdrawalCol::BankAccountNumber);
+        self.cols.push(WithdrawalDbCol::BankAccountNumber);
         self.binds.push(val.into());
         self
     }
     pub fn set_crypto_network_id(mut self, val: Option<i64>) -> Self {
-        self.cols.push(WithdrawalCol::CryptoNetworkId);
+        self.cols.push(WithdrawalDbCol::CryptoNetworkId);
         self.binds.push(val.into());
         self
     }
     pub fn set_crypto_wallet_address(mut self, val: Option<String>) -> Self {
-        self.cols.push(WithdrawalCol::CryptoWalletAddress);
+        self.cols.push(WithdrawalDbCol::CryptoWalletAddress);
         self.binds.push(val.into());
         self
     }
     pub fn set_conversion_rate(mut self, val: Option<rust_decimal::Decimal>) -> Self {
-        self.cols.push(WithdrawalCol::ConversionRate);
+        self.cols.push(WithdrawalDbCol::ConversionRate);
         self.binds.push(val.into());
         self
     }
     pub fn set_status(mut self, val: WithdrawalStatus) -> Self {
-        self.cols.push(WithdrawalCol::Status);
+        self.cols.push(WithdrawalDbCol::Status);
         self.binds.push(val.into());
         self
     }
     pub fn set_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.cols.push(WithdrawalCol::Amount);
+        self.cols.push(WithdrawalDbCol::Amount);
         self.binds.push(val.into());
         self
     }
     pub fn set_fee(mut self, val: rust_decimal::Decimal) -> Self {
-        self.cols.push(WithdrawalCol::Fee);
+        self.cols.push(WithdrawalDbCol::Fee);
         self.binds.push(val.into());
         self
     }
     pub fn set_net_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.cols.push(WithdrawalCol::NetAmount);
+        self.cols.push(WithdrawalDbCol::NetAmount);
         self.binds.push(val.into());
         self
     }
     pub fn set_related_key(mut self, val: Option<String>) -> Self {
-        self.cols.push(WithdrawalCol::RelatedKey);
+        self.cols.push(WithdrawalDbCol::RelatedKey);
         self.binds.push(val.into());
         self
     }
     pub fn set_params(mut self, val: Option<serde_json::Value>) -> Self {
-        self.cols.push(WithdrawalCol::Params);
+        self.cols.push(WithdrawalDbCol::Params);
         self.binds.push(val.into());
         self
     }
     pub fn set_remark(mut self, val: Option<String>) -> Self {
-        self.cols.push(WithdrawalCol::Remark);
+        self.cols.push(WithdrawalDbCol::Remark);
         self.binds.push(val.into());
         self
     }
     pub fn set_admin_remark(mut self, val: Option<String>) -> Self {
-        self.cols.push(WithdrawalCol::AdminRemark);
+        self.cols.push(WithdrawalDbCol::AdminRemark);
         self.binds.push(val.into());
         self
     }
     pub fn set_reviewed_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.cols.push(WithdrawalCol::ReviewedAt);
+        self.cols.push(WithdrawalDbCol::ReviewedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(WithdrawalCol::CreatedAt);
+        self.cols.push(WithdrawalDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(WithdrawalCol::UpdatedAt);
+        self.cols.push(WithdrawalDbCol::UpdatedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[WithdrawalCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[WithdrawalDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[WithdrawalCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[WithdrawalDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<WithdrawalCreateInput> {
-        let mut input = WithdrawalCreateInput::default();
+    fn to_create_input(&self) -> Result<WithdrawalCreate> {
+        let mut input = WithdrawalCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                WithdrawalCol::Id => {
+                WithdrawalDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                WithdrawalCol::OwnerType => {
+                WithdrawalDbCol::OwnerType => {
                     let value = match bind {
                 BindValue::String(value) => OwnerType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'OwnerType'", value))?,
@@ -1931,21 +1863,21 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.owner_type = FieldInput::Set(value);
                 }
-                WithdrawalCol::OwnerId => {
+                WithdrawalDbCol::OwnerId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.owner_id = FieldInput::Set(value);
                 }
-                WithdrawalCol::AdminId => {
+                WithdrawalDbCol::AdminId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
             };
                     input.admin_id = FieldInput::Set(value);
                 }
-                WithdrawalCol::CreditType => {
+                WithdrawalDbCol::CreditType => {
                     let value = match bind {
                 BindValue::String(value) => CreditType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'CreditType'", value))?,
@@ -1958,7 +1890,7 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.credit_type = FieldInput::Set(value);
                 }
-                WithdrawalCol::WithdrawalMethod => {
+                WithdrawalDbCol::WithdrawalMethod => {
                     let value = match bind {
                 BindValue::String(value) => WithdrawalMethod::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'WithdrawalMethod'", value))?,
@@ -1971,49 +1903,49 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.withdrawal_method = FieldInput::Set(value);
                 }
-                WithdrawalCol::BankId => {
+                WithdrawalDbCol::BankId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
             };
                     input.bank_id = FieldInput::Set(value);
                 }
-                WithdrawalCol::BankAccountName => {
+                WithdrawalDbCol::BankAccountName => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.bank_account_name = FieldInput::Set(value);
                 }
-                WithdrawalCol::BankAccountNumber => {
+                WithdrawalDbCol::BankAccountNumber => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.bank_account_number = FieldInput::Set(value);
                 }
-                WithdrawalCol::CryptoNetworkId => {
+                WithdrawalDbCol::CryptoNetworkId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
             };
                     input.crypto_network_id = FieldInput::Set(value);
                 }
-                WithdrawalCol::CryptoWalletAddress => {
+                WithdrawalDbCol::CryptoWalletAddress => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.crypto_wallet_address = FieldInput::Set(value);
                 }
-                WithdrawalCol::ConversionRate => {
+                WithdrawalDbCol::ConversionRate => {
                     let value = match bind {
                 BindValue::DecimalOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<rust_decimal::Decimal>'", other),
             };
                     input.conversion_rate = FieldInput::Set(value);
                 }
-                WithdrawalCol::Status => {
+                WithdrawalDbCol::Status => {
                     let value = match bind {
                 BindValue::String(value) => WithdrawalStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'WithdrawalStatus'", value))?,
@@ -2026,70 +1958,70 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.status = FieldInput::Set(value);
                 }
-                WithdrawalCol::Amount => {
+                WithdrawalDbCol::Amount => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
         };
                     input.amount = FieldInput::Set(value);
                 }
-                WithdrawalCol::Fee => {
+                WithdrawalDbCol::Fee => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
         };
                     input.fee = FieldInput::Set(value);
                 }
-                WithdrawalCol::NetAmount => {
+                WithdrawalDbCol::NetAmount => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
         };
                     input.net_amount = FieldInput::Set(value);
                 }
-                WithdrawalCol::RelatedKey => {
+                WithdrawalDbCol::RelatedKey => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.related_key = FieldInput::Set(value);
                 }
-                WithdrawalCol::Params => {
+                WithdrawalDbCol::Params => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
             };
                     input.params = FieldInput::Set(value);
                 }
-                WithdrawalCol::Remark => {
+                WithdrawalDbCol::Remark => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.remark = FieldInput::Set(value);
                 }
-                WithdrawalCol::AdminRemark => {
+                WithdrawalDbCol::AdminRemark => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.admin_remark = FieldInput::Set(value);
                 }
-                WithdrawalCol::ReviewedAt => {
+                WithdrawalDbCol::ReviewedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
             };
                     input.reviewed_at = FieldInput::Set(value);
                 }
-                WithdrawalCol::CreatedAt => {
+                WithdrawalDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                WithdrawalCol::UpdatedAt => {
+                WithdrawalDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2102,7 +2034,7 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
 
 
-pub async fn save(self) -> Result<WithdrawalView> {
+pub async fn save(self) -> Result<WithdrawalRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -2120,7 +2052,7 @@ pub async fn save(self) -> Result<WithdrawalView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -2139,10 +2071,10 @@ pub async fn save(self) -> Result<WithdrawalView> {
                         Err(err) => log_observer_error("created", "withdrawal", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "withdrawal", table: "withdrawals", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -2154,26 +2086,26 @@ pub async fn save(self) -> Result<WithdrawalView> {
                         Err(err) => log_observer_error("created", "withdrawal", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(WithdrawalView, WithdrawalRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(WithdrawalRecord, WithdrawalRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, WithdrawalCol::Id)) {
-            cols.push(WithdrawalCol::Id);
+        if !cols.iter().any(|c| matches!(c, WithdrawalDbCol::Id)) {
+            cols.push(WithdrawalDbCol::Id);
             binds.push(generate_snowflake_i64().into());
         }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, WithdrawalCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, WithdrawalDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(WithdrawalCol::CreatedAt);
+            cols.push(WithdrawalDbCol::CreatedAt);
             binds.push(now.into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, WithdrawalCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, WithdrawalDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(WithdrawalCol::UpdatedAt);
+            cols.push(WithdrawalDbCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -2207,20 +2139,20 @@ pub async fn save(self) -> Result<WithdrawalView> {
         let row = db.fetch_one(q).await?;
         record_profiled_query("withdrawals", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
-        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct WithdrawalUpdate<'db> {
+pub struct WithdrawalPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(WithdrawalCol, BindValue, SetMode)>,
+    sets: Vec<(WithdrawalDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> WithdrawalUpdate<'db> {
+impl<'db> WithdrawalPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -2230,280 +2162,279 @@ impl<'db> WithdrawalUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> WithdrawalUnsafeUpdate<'db> { WithdrawalUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((WithdrawalCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((WithdrawalCol::Id, val.into(), SetMode::Increment));
+        self.sets.push((WithdrawalDbCol::Id, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((WithdrawalCol::Id, val.into(), SetMode::Decrement));
+        self.sets.push((WithdrawalDbCol::Id, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_owner_type(mut self, val: OwnerType) -> Self {
-        self.sets.push((WithdrawalCol::OwnerType, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::OwnerType, val.into(), SetMode::Assign));
         self
     }
     pub fn set_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((WithdrawalCol::OwnerId, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::OwnerId, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((WithdrawalCol::OwnerId, val.into(), SetMode::Increment));
+        self.sets.push((WithdrawalDbCol::OwnerId, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((WithdrawalCol::OwnerId, val.into(), SetMode::Decrement));
+        self.sets.push((WithdrawalDbCol::OwnerId, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_admin_id(mut self, val: Option<i64>) -> Self {
-        self.sets.push((WithdrawalCol::AdminId, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::AdminId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_credit_type(mut self, val: CreditType) -> Self {
-        self.sets.push((WithdrawalCol::CreditType, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::CreditType, val.into(), SetMode::Assign));
         self
     }
     pub fn set_withdrawal_method(mut self, val: WithdrawalMethod) -> Self {
-        self.sets.push((WithdrawalCol::WithdrawalMethod, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::WithdrawalMethod, val.into(), SetMode::Assign));
         self
     }
     pub fn set_bank_id(mut self, val: Option<i64>) -> Self {
-        self.sets.push((WithdrawalCol::BankId, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::BankId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_bank_account_name(mut self, val: Option<String>) -> Self {
-        self.sets.push((WithdrawalCol::BankAccountName, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::BankAccountName, val.into(), SetMode::Assign));
         self
     }
     pub fn set_bank_account_number(mut self, val: Option<String>) -> Self {
-        self.sets.push((WithdrawalCol::BankAccountNumber, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::BankAccountNumber, val.into(), SetMode::Assign));
         self
     }
     pub fn set_crypto_network_id(mut self, val: Option<i64>) -> Self {
-        self.sets.push((WithdrawalCol::CryptoNetworkId, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::CryptoNetworkId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_crypto_wallet_address(mut self, val: Option<String>) -> Self {
-        self.sets.push((WithdrawalCol::CryptoWalletAddress, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::CryptoWalletAddress, val.into(), SetMode::Assign));
         self
     }
     pub fn set_conversion_rate(mut self, val: Option<rust_decimal::Decimal>) -> Self {
-        self.sets.push((WithdrawalCol::ConversionRate, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::ConversionRate, val.into(), SetMode::Assign));
         self
     }
     pub fn set_status(mut self, val: WithdrawalStatus) -> Self {
-        self.sets.push((WithdrawalCol::Status, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::Status, val.into(), SetMode::Assign));
         self
     }
     pub fn set_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((WithdrawalCol::Amount, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::Amount, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((WithdrawalCol::Amount, val.into(), SetMode::Increment));
+        self.sets.push((WithdrawalDbCol::Amount, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((WithdrawalCol::Amount, val.into(), SetMode::Decrement));
+        self.sets.push((WithdrawalDbCol::Amount, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_fee(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((WithdrawalCol::Fee, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::Fee, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_fee(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((WithdrawalCol::Fee, val.into(), SetMode::Increment));
+        self.sets.push((WithdrawalDbCol::Fee, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_fee(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((WithdrawalCol::Fee, val.into(), SetMode::Decrement));
+        self.sets.push((WithdrawalDbCol::Fee, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_net_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((WithdrawalCol::NetAmount, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::NetAmount, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_net_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((WithdrawalCol::NetAmount, val.into(), SetMode::Increment));
+        self.sets.push((WithdrawalDbCol::NetAmount, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_net_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((WithdrawalCol::NetAmount, val.into(), SetMode::Decrement));
+        self.sets.push((WithdrawalDbCol::NetAmount, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_related_key(mut self, val: Option<String>) -> Self {
-        self.sets.push((WithdrawalCol::RelatedKey, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::RelatedKey, val.into(), SetMode::Assign));
         self
     }
     pub fn set_params(mut self, val: Option<serde_json::Value>) -> Self {
-        self.sets.push((WithdrawalCol::Params, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::Params, val.into(), SetMode::Assign));
         self
     }
     pub fn set_remark(mut self, val: Option<String>) -> Self {
-        self.sets.push((WithdrawalCol::Remark, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::Remark, val.into(), SetMode::Assign));
         self
     }
     pub fn set_admin_remark(mut self, val: Option<String>) -> Self {
-        self.sets.push((WithdrawalCol::AdminRemark, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::AdminRemark, val.into(), SetMode::Assign));
         self
     }
     pub fn set_reviewed_at(mut self, val: Option<time::OffsetDateTime>) -> Self {
-        self.sets.push((WithdrawalCol::ReviewedAt, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::ReviewedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((WithdrawalCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((WithdrawalCol::UpdatedAt, val.into(), SetMode::Assign));
+        self.sets.push((WithdrawalDbCol::UpdatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_type(mut self, op: Op, val: OwnerType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_type(mut self, op: Op, val: CreditType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::CreditType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::CreditType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_withdrawal_method(mut self, op: Op, val: WithdrawalMethod) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::WithdrawalMethod.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::WithdrawalMethod.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_bank_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::BankId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::BankId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_bank_account_name(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::BankAccountName.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::BankAccountName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_bank_account_number(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::BankAccountNumber.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::BankAccountNumber.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_crypto_network_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::CryptoNetworkId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::CryptoNetworkId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_crypto_wallet_address(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::CryptoWalletAddress.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::CryptoWalletAddress.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_conversion_rate(mut self, op: Op, val: Option<rust_decimal::Decimal>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::ConversionRate.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::ConversionRate.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status(mut self, op: Op, val: WithdrawalStatus) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_amount(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Amount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Amount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_fee(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Fee.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Fee.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_net_amount(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::NetAmount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::NetAmount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_related_key(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::RelatedKey.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::RelatedKey.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_params(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Params.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Params.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_remark(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::Remark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::Remark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_remark(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::AdminRemark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::AdminRemark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_reviewed_at(mut self, op: Op, val: Option<time::OffsetDateTime>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::ReviewedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::ReviewedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WithdrawalCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WithdrawalDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: WithdrawalCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: WithdrawalDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -2522,11 +2453,11 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<WithdrawalUpdateChanges> {
-        let mut changes = WithdrawalUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<WithdrawalChanges> {
+        let mut changes = WithdrawalChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                WithdrawalCol::Id => {
+                WithdrawalDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -2537,7 +2468,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::OwnerType => {
+                WithdrawalDbCol::OwnerType => {
                     let value = match bind {
                 BindValue::String(value) => OwnerType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'OwnerType'", value))?,
@@ -2554,7 +2485,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::OwnerId => {
+                WithdrawalDbCol::OwnerId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -2565,7 +2496,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::AdminId => {
+                WithdrawalDbCol::AdminId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
@@ -2576,7 +2507,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::CreditType => {
+                WithdrawalDbCol::CreditType => {
                     let value = match bind {
                 BindValue::String(value) => CreditType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'CreditType'", value))?,
@@ -2593,7 +2524,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::WithdrawalMethod => {
+                WithdrawalDbCol::WithdrawalMethod => {
                     let value = match bind {
                 BindValue::String(value) => WithdrawalMethod::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'WithdrawalMethod'", value))?,
@@ -2610,7 +2541,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::BankId => {
+                WithdrawalDbCol::BankId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
@@ -2621,7 +2552,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::BankAccountName => {
+                WithdrawalDbCol::BankAccountName => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2632,7 +2563,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::BankAccountNumber => {
+                WithdrawalDbCol::BankAccountNumber => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2643,7 +2574,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::CryptoNetworkId => {
+                WithdrawalDbCol::CryptoNetworkId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
@@ -2654,7 +2585,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::CryptoWalletAddress => {
+                WithdrawalDbCol::CryptoWalletAddress => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2665,7 +2596,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::ConversionRate => {
+                WithdrawalDbCol::ConversionRate => {
                     let value = match bind {
                 BindValue::DecimalOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<rust_decimal::Decimal>'", other),
@@ -2676,7 +2607,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::Status => {
+                WithdrawalDbCol::Status => {
                     let value = match bind {
                 BindValue::String(value) => WithdrawalStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'WithdrawalStatus'", value))?,
@@ -2693,7 +2624,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::Amount => {
+                WithdrawalDbCol::Amount => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
@@ -2704,7 +2635,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::Fee => {
+                WithdrawalDbCol::Fee => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
@@ -2715,7 +2646,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::NetAmount => {
+                WithdrawalDbCol::NetAmount => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
@@ -2726,7 +2657,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::RelatedKey => {
+                WithdrawalDbCol::RelatedKey => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2737,7 +2668,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::Params => {
+                WithdrawalDbCol::Params => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
@@ -2748,7 +2679,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::Remark => {
+                WithdrawalDbCol::Remark => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2759,7 +2690,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::AdminRemark => {
+                WithdrawalDbCol::AdminRemark => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2770,7 +2701,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::ReviewedAt => {
+                WithdrawalDbCol::ReviewedAt => {
                     let value = match bind {
                 BindValue::TimeOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<time::OffsetDateTime>'", other),
@@ -2781,7 +2712,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::CreatedAt => {
+                WithdrawalDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2792,7 +2723,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WithdrawalCol::UpdatedAt => {
+                WithdrawalDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2836,14 +2767,14 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<WithdrawalUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<WithdrawalChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, WithdrawalCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, WithdrawalDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(WithdrawalCol::UpdatedAt);
+            cols.push(WithdrawalDbCol::UpdatedAt);
             set_binds.push(now.into());
             set_modes.push(SetMode::Assign);
         }
@@ -2933,44 +2864,34 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct WithdrawalUnsafeUpdate<'db> {
-    inner: WithdrawalUpdate<'db>,
-}
-
-impl<'db> WithdrawalUnsafeUpdate<'db> {
-    fn new(inner: WithdrawalUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> WithdrawalUpdate<'db> { self.inner }
-}
 
 pub struct WithdrawalTableAdapter;
 impl WithdrawalTableAdapter {
-    fn parse_col(name: &str) -> Option<WithdrawalCol> {
+    fn parse_col(name: &str) -> Option<WithdrawalDbCol> {
         match name {
-            "id" => Some(WithdrawalCol::Id),
-            "owner_type" => Some(WithdrawalCol::OwnerType),
-            "owner_id" => Some(WithdrawalCol::OwnerId),
-            "admin_id" => Some(WithdrawalCol::AdminId),
-            "credit_type" => Some(WithdrawalCol::CreditType),
-            "withdrawal_method" => Some(WithdrawalCol::WithdrawalMethod),
-            "bank_id" => Some(WithdrawalCol::BankId),
-            "bank_account_name" => Some(WithdrawalCol::BankAccountName),
-            "bank_account_number" => Some(WithdrawalCol::BankAccountNumber),
-            "crypto_network_id" => Some(WithdrawalCol::CryptoNetworkId),
-            "crypto_wallet_address" => Some(WithdrawalCol::CryptoWalletAddress),
-            "conversion_rate" => Some(WithdrawalCol::ConversionRate),
-            "status" => Some(WithdrawalCol::Status),
-            "amount" => Some(WithdrawalCol::Amount),
-            "fee" => Some(WithdrawalCol::Fee),
-            "net_amount" => Some(WithdrawalCol::NetAmount),
-            "related_key" => Some(WithdrawalCol::RelatedKey),
-            "params" => Some(WithdrawalCol::Params),
-            "remark" => Some(WithdrawalCol::Remark),
-            "admin_remark" => Some(WithdrawalCol::AdminRemark),
-            "reviewed_at" => Some(WithdrawalCol::ReviewedAt),
-            "created_at" => Some(WithdrawalCol::CreatedAt),
-            "updated_at" => Some(WithdrawalCol::UpdatedAt),
+            "id" => Some(WithdrawalDbCol::Id),
+            "owner_type" => Some(WithdrawalDbCol::OwnerType),
+            "owner_id" => Some(WithdrawalDbCol::OwnerId),
+            "admin_id" => Some(WithdrawalDbCol::AdminId),
+            "credit_type" => Some(WithdrawalDbCol::CreditType),
+            "withdrawal_method" => Some(WithdrawalDbCol::WithdrawalMethod),
+            "bank_id" => Some(WithdrawalDbCol::BankId),
+            "bank_account_name" => Some(WithdrawalDbCol::BankAccountName),
+            "bank_account_number" => Some(WithdrawalDbCol::BankAccountNumber),
+            "crypto_network_id" => Some(WithdrawalDbCol::CryptoNetworkId),
+            "crypto_wallet_address" => Some(WithdrawalDbCol::CryptoWalletAddress),
+            "conversion_rate" => Some(WithdrawalDbCol::ConversionRate),
+            "status" => Some(WithdrawalDbCol::Status),
+            "amount" => Some(WithdrawalDbCol::Amount),
+            "fee" => Some(WithdrawalDbCol::Fee),
+            "net_amount" => Some(WithdrawalDbCol::NetAmount),
+            "related_key" => Some(WithdrawalDbCol::RelatedKey),
+            "params" => Some(WithdrawalDbCol::Params),
+            "remark" => Some(WithdrawalDbCol::Remark),
+            "admin_remark" => Some(WithdrawalDbCol::AdminRemark),
+            "reviewed_at" => Some(WithdrawalDbCol::ReviewedAt),
+            "created_at" => Some(WithdrawalDbCol::CreatedAt),
+            "updated_at" => Some(WithdrawalDbCol::UpdatedAt),
             _ => None,
         }
     }
@@ -2984,14 +2905,14 @@ impl WithdrawalTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<WithdrawalCol> {
+    fn parse_like_col(name: &str) -> Option<WithdrawalDbCol> {
         match name {
-            "bank_account_name" => Some(WithdrawalCol::BankAccountName),
-            "bank_account_number" => Some(WithdrawalCol::BankAccountNumber),
-            "crypto_wallet_address" => Some(WithdrawalCol::CryptoWalletAddress),
-            "related_key" => Some(WithdrawalCol::RelatedKey),
-            "remark" => Some(WithdrawalCol::Remark),
-            "admin_remark" => Some(WithdrawalCol::AdminRemark),
+            "bank_account_name" => Some(WithdrawalDbCol::BankAccountName),
+            "bank_account_number" => Some(WithdrawalDbCol::BankAccountNumber),
+            "crypto_wallet_address" => Some(WithdrawalDbCol::CryptoWalletAddress),
+            "related_key" => Some(WithdrawalDbCol::RelatedKey),
+            "remark" => Some(WithdrawalDbCol::Remark),
+            "admin_remark" => Some(WithdrawalDbCol::AdminRemark),
             _ => None,
         }
     }
@@ -3076,8 +2997,8 @@ impl WithdrawalTableAdapter {
     }
 }
 impl GeneratedTableAdapter for WithdrawalTableAdapter {
-    type Query<'db> = WithdrawalQuery<'db>;
-    type Row = WithdrawalWithRelations;
+    type Query<'db> = Query<'db, WithdrawalModel>;
+    type Row = WithdrawalRecord;
     fn model_key(&self) -> &'static str { "Withdrawal" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "owner_type", "owner_id", "admin_id", "credit_type", "withdrawal_method", "bank_id", "bank_account_name", "bank_account_number", "crypto_network_id", "crypto_wallet_address", "conversion_rate", "status", "amount", "fee", "net_amount", "related_key", "remark", "admin_remark", "reviewed_at", "created_at", "updated_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["reviewed_at", "created_at", "updated_at"] }
@@ -3152,7 +3073,7 @@ impl GeneratedTableAdapter for WithdrawalTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: WithdrawalQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<WithdrawalQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, WithdrawalModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, WithdrawalModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -3220,48 +3141,48 @@ impl GeneratedTableAdapter for WithdrawalTableAdapter {
             }
             ParsedFilter::Has { relation, column } => {
                 match (relation.as_str(), column.as_str()) {
-                    ("admin", "id") => { let Some(bind) = Self::parse_bind_for_relation("admin", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Id, Op::Eq, bind)))) },
-                    ("admin", "username") => { let Some(bind) = Self::parse_bind_for_relation("admin", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Username, Op::Eq, bind)))) },
-                    ("admin", "email") => { let Some(bind) = Self::parse_bind_for_relation("admin", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Email, Op::Eq, bind)))) },
-                    ("admin", "locale") => { let Some(bind) = Self::parse_bind_for_relation("admin", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Locale, Op::Eq, bind)))) },
-                    ("admin", "password") => { let Some(bind) = Self::parse_bind_for_relation("admin", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Password, Op::Eq, bind)))) },
-                    ("admin", "name") => { let Some(bind) = Self::parse_bind_for_relation("admin", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Name, Op::Eq, bind)))) },
-                    ("admin", "admin_type") => { let Some(bind) = Self::parse_bind_for_relation("admin", "admin_type", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::AdminType, Op::Eq, bind)))) },
-                    ("admin", "abilities") => { let Some(bind) = Self::parse_bind_for_relation("admin", "abilities", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Abilities, Op::Eq, bind)))) },
-                    ("admin", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::CreatedAt, Op::Eq, bind)))) },
-                    ("admin", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::UpdatedAt, Op::Eq, bind)))) },
-                    ("admin", "deleted_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "deleted_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::DeletedAt, Op::Eq, bind)))) },
-                    ("bank", "id") => { let Some(bind) = Self::parse_bind_for_relation("bank", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_bank(|rq| rq.where_col(BankCol::Id, Op::Eq, bind)))) },
-                    ("bank", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("bank", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_bank(|rq| rq.where_col(BankCol::CountryIso2, Op::Eq, bind)))) },
-                    ("bank", "name") => { let Some(bind) = Self::parse_bind_for_relation("bank", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_bank(|rq| rq.where_col(BankCol::Name, Op::Eq, bind)))) },
-                    ("bank", "code") => { let Some(bind) = Self::parse_bind_for_relation("bank", "code", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_bank(|rq| rq.where_col(BankCol::Code, Op::Eq, bind)))) },
-                    ("bank", "status") => { let Some(bind) = Self::parse_bind_for_relation("bank", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_bank(|rq| rq.where_col(BankCol::Status, Op::Eq, bind)))) },
-                    ("bank", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("bank", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_bank(|rq| rq.where_col(BankCol::SortOrder, Op::Eq, bind)))) },
-                    ("bank", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("bank", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_bank(|rq| rq.where_col(BankCol::CreatedAt, Op::Eq, bind)))) },
-                    ("bank", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("bank", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_bank(|rq| rq.where_col(BankCol::UpdatedAt, Op::Eq, bind)))) },
-                    ("crypto_network", "id") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Id, Op::Eq, bind)))) },
-                    ("crypto_network", "name") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Name, Op::Eq, bind)))) },
-                    ("crypto_network", "symbol") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "symbol", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Symbol, Op::Eq, bind)))) },
-                    ("crypto_network", "status") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Status, Op::Eq, bind)))) },
-                    ("crypto_network", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::SortOrder, Op::Eq, bind)))) },
-                    ("crypto_network", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::CreatedAt, Op::Eq, bind)))) },
-                    ("crypto_network", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("admin", "id") => { let Some(bind) = Self::parse_bind_for_relation("admin", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::Id, Op::Eq, bind)))) },
+                    ("admin", "username") => { let Some(bind) = Self::parse_bind_for_relation("admin", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::Username, Op::Eq, bind)))) },
+                    ("admin", "email") => { let Some(bind) = Self::parse_bind_for_relation("admin", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::Email, Op::Eq, bind)))) },
+                    ("admin", "locale") => { let Some(bind) = Self::parse_bind_for_relation("admin", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::Locale, Op::Eq, bind)))) },
+                    ("admin", "password") => { let Some(bind) = Self::parse_bind_for_relation("admin", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::Password, Op::Eq, bind)))) },
+                    ("admin", "name") => { let Some(bind) = Self::parse_bind_for_relation("admin", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::Name, Op::Eq, bind)))) },
+                    ("admin", "admin_type") => { let Some(bind) = Self::parse_bind_for_relation("admin", "admin_type", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::AdminType, Op::Eq, bind)))) },
+                    ("admin", "abilities") => { let Some(bind) = Self::parse_bind_for_relation("admin", "abilities", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::Abilities, Op::Eq, bind)))) },
+                    ("admin", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::CreatedAt, Op::Eq, bind)))) },
+                    ("admin", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("admin", "deleted_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "deleted_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::DeletedAt, Op::Eq, bind)))) },
+                    ("bank", "id") => { let Some(bind) = Self::parse_bind_for_relation("bank", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::BANK, |rq| rq.where_col(BankDbCol::Id, Op::Eq, bind)))) },
+                    ("bank", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("bank", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::BANK, |rq| rq.where_col(BankDbCol::CountryIso2, Op::Eq, bind)))) },
+                    ("bank", "name") => { let Some(bind) = Self::parse_bind_for_relation("bank", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::BANK, |rq| rq.where_col(BankDbCol::Name, Op::Eq, bind)))) },
+                    ("bank", "code") => { let Some(bind) = Self::parse_bind_for_relation("bank", "code", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::BANK, |rq| rq.where_col(BankDbCol::Code, Op::Eq, bind)))) },
+                    ("bank", "status") => { let Some(bind) = Self::parse_bind_for_relation("bank", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::BANK, |rq| rq.where_col(BankDbCol::Status, Op::Eq, bind)))) },
+                    ("bank", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("bank", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::BANK, |rq| rq.where_col(BankDbCol::SortOrder, Op::Eq, bind)))) },
+                    ("bank", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("bank", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::BANK, |rq| rq.where_col(BankDbCol::CreatedAt, Op::Eq, bind)))) },
+                    ("bank", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("bank", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::BANK, |rq| rq.where_col(BankDbCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("crypto_network", "id") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Id, Op::Eq, bind)))) },
+                    ("crypto_network", "name") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Name, Op::Eq, bind)))) },
+                    ("crypto_network", "symbol") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "symbol", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Symbol, Op::Eq, bind)))) },
+                    ("crypto_network", "status") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Status, Op::Eq, bind)))) },
+                    ("crypto_network", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::SortOrder, Op::Eq, bind)))) },
+                    ("crypto_network", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::CreatedAt, Op::Eq, bind)))) },
+                    ("crypto_network", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(WithdrawalRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::UpdatedAt, Op::Eq, bind)))) },
                     _ => Ok(None),
                 }
             }
             ParsedFilter::HasLike { relation, column } => {
                 let pattern = format!("%{}%", trimmed);
                 match (relation.as_str(), column.as_str()) {
-                    ("admin", "username") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Username, Op::Like, pattern.clone())))),
-                    ("admin", "email") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Email, Op::Like, pattern.clone())))),
-                    ("admin", "locale") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Locale, Op::Like, pattern.clone())))),
-                    ("admin", "password") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Password, Op::Like, pattern.clone())))),
-                    ("admin", "name") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Name, Op::Like, pattern.clone())))),
-                    ("bank", "country_iso2") => Ok(Some(query.where_has_bank(|rq| rq.where_col(BankCol::CountryIso2, Op::Like, pattern.clone())))),
-                    ("bank", "name") => Ok(Some(query.where_has_bank(|rq| rq.where_col(BankCol::Name, Op::Like, pattern.clone())))),
-                    ("bank", "code") => Ok(Some(query.where_has_bank(|rq| rq.where_col(BankCol::Code, Op::Like, pattern.clone())))),
-                    ("crypto_network", "name") => Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Name, Op::Like, pattern.clone())))),
-                    ("crypto_network", "symbol") => Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Symbol, Op::Like, pattern.clone())))),
+                    ("admin", "username") => Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::Username, Op::Like, pattern.clone())))),
+                    ("admin", "email") => Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::Email, Op::Like, pattern.clone())))),
+                    ("admin", "locale") => Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::Locale, Op::Like, pattern.clone())))),
+                    ("admin", "password") => Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::Password, Op::Like, pattern.clone())))),
+                    ("admin", "name") => Ok(Some(query.where_has(WithdrawalRel::ADMIN, |rq| rq.where_col(AdminDbCol::Name, Op::Like, pattern.clone())))),
+                    ("bank", "country_iso2") => Ok(Some(query.where_has(WithdrawalRel::BANK, |rq| rq.where_col(BankDbCol::CountryIso2, Op::Like, pattern.clone())))),
+                    ("bank", "name") => Ok(Some(query.where_has(WithdrawalRel::BANK, |rq| rq.where_col(BankDbCol::Name, Op::Like, pattern.clone())))),
+                    ("bank", "code") => Ok(Some(query.where_has(WithdrawalRel::BANK, |rq| rq.where_col(BankDbCol::Code, Op::Like, pattern.clone())))),
+                    ("crypto_network", "name") => Ok(Some(query.where_has(WithdrawalRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Name, Op::Like, pattern.clone())))),
+                    ("crypto_network", "symbol") => Ok(Some(query.where_has(WithdrawalRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Symbol, Op::Like, pattern.clone())))),
                     _ => Ok(None),
                 }
             }
@@ -3282,43 +3203,43 @@ impl GeneratedTableAdapter for WithdrawalTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: WithdrawalQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<WithdrawalQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, WithdrawalModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, WithdrawalModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(WithdrawalCol::Id, dir),
-            "owner_type" => query.order_by(WithdrawalCol::OwnerType, dir),
-            "owner_id" => query.order_by(WithdrawalCol::OwnerId, dir),
-            "admin_id" => query.order_by(WithdrawalCol::AdminId, dir),
-            "credit_type" => query.order_by(WithdrawalCol::CreditType, dir),
-            "withdrawal_method" => query.order_by(WithdrawalCol::WithdrawalMethod, dir),
-            "bank_id" => query.order_by(WithdrawalCol::BankId, dir),
-            "bank_account_name" => query.order_by(WithdrawalCol::BankAccountName, dir),
-            "bank_account_number" => query.order_by(WithdrawalCol::BankAccountNumber, dir),
-            "crypto_network_id" => query.order_by(WithdrawalCol::CryptoNetworkId, dir),
-            "crypto_wallet_address" => query.order_by(WithdrawalCol::CryptoWalletAddress, dir),
-            "conversion_rate" => query.order_by(WithdrawalCol::ConversionRate, dir),
-            "status" => query.order_by(WithdrawalCol::Status, dir),
-            "amount" => query.order_by(WithdrawalCol::Amount, dir),
-            "fee" => query.order_by(WithdrawalCol::Fee, dir),
-            "net_amount" => query.order_by(WithdrawalCol::NetAmount, dir),
-            "related_key" => query.order_by(WithdrawalCol::RelatedKey, dir),
-            "params" => query.order_by(WithdrawalCol::Params, dir),
-            "remark" => query.order_by(WithdrawalCol::Remark, dir),
-            "admin_remark" => query.order_by(WithdrawalCol::AdminRemark, dir),
-            "reviewed_at" => query.order_by(WithdrawalCol::ReviewedAt, dir),
-            "created_at" => query.order_by(WithdrawalCol::CreatedAt, dir),
-            "updated_at" => query.order_by(WithdrawalCol::UpdatedAt, dir),
+            "id" => query.order_by(WithdrawalDbCol::Id, dir),
+            "owner_type" => query.order_by(WithdrawalDbCol::OwnerType, dir),
+            "owner_id" => query.order_by(WithdrawalDbCol::OwnerId, dir),
+            "admin_id" => query.order_by(WithdrawalDbCol::AdminId, dir),
+            "credit_type" => query.order_by(WithdrawalDbCol::CreditType, dir),
+            "withdrawal_method" => query.order_by(WithdrawalDbCol::WithdrawalMethod, dir),
+            "bank_id" => query.order_by(WithdrawalDbCol::BankId, dir),
+            "bank_account_name" => query.order_by(WithdrawalDbCol::BankAccountName, dir),
+            "bank_account_number" => query.order_by(WithdrawalDbCol::BankAccountNumber, dir),
+            "crypto_network_id" => query.order_by(WithdrawalDbCol::CryptoNetworkId, dir),
+            "crypto_wallet_address" => query.order_by(WithdrawalDbCol::CryptoWalletAddress, dir),
+            "conversion_rate" => query.order_by(WithdrawalDbCol::ConversionRate, dir),
+            "status" => query.order_by(WithdrawalDbCol::Status, dir),
+            "amount" => query.order_by(WithdrawalDbCol::Amount, dir),
+            "fee" => query.order_by(WithdrawalDbCol::Fee, dir),
+            "net_amount" => query.order_by(WithdrawalDbCol::NetAmount, dir),
+            "related_key" => query.order_by(WithdrawalDbCol::RelatedKey, dir),
+            "params" => query.order_by(WithdrawalDbCol::Params, dir),
+            "remark" => query.order_by(WithdrawalDbCol::Remark, dir),
+            "admin_remark" => query.order_by(WithdrawalDbCol::AdminRemark, dir),
+            "reviewed_at" => query.order_by(WithdrawalDbCol::ReviewedAt, dir),
+            "created_at" => query.order_by(WithdrawalDbCol::CreatedAt, dir),
+            "updated_at" => query.order_by(WithdrawalDbCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: WithdrawalQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<WithdrawalQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, WithdrawalModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, WithdrawalModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &WithdrawalWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &WithdrawalRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "owner_id" => Some(row.owner_id.to_string()),
@@ -3341,10 +3262,10 @@ impl GeneratedTableAdapter for WithdrawalTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: WithdrawalQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, WithdrawalModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: WithdrawalQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<WithdrawalWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, WithdrawalModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<WithdrawalRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -3370,13 +3291,13 @@ impl Default for WithdrawalDataTableConfig {
     }
 }
 pub trait WithdrawalDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: WithdrawalQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> WithdrawalQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, WithdrawalModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, WithdrawalModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: WithdrawalQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<WithdrawalQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: WithdrawalQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<WithdrawalQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut WithdrawalWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: WithdrawalWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, WithdrawalModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, WithdrawalModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, WithdrawalModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, WithdrawalModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut WithdrawalRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: WithdrawalRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         if let Some(id_value) = record.get("id").cloned() {
             let id_text = match id_value {
@@ -3388,10 +3309,10 @@ pub trait WithdrawalDataTableHooks: Send + Sync + 'static {
         }
         Ok(record)
     }
-    fn row_to_record(&self, row: WithdrawalWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: WithdrawalRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: WithdrawalQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, WithdrawalModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct WithdrawalDefaultDataTableHooks;
@@ -3429,15 +3350,15 @@ impl<H: WithdrawalDataTableHooks> WithdrawalDataTable<H> {
 impl<H: WithdrawalDataTableHooks> AutoDataTable for WithdrawalDataTable<H> {
     type Adapter = WithdrawalTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> WithdrawalQuery<'db> {
-        self.hooks.scope(Withdrawal::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, WithdrawalModel> {
+        self.hooks.scope(WithdrawalModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: WithdrawalQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<WithdrawalQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: WithdrawalQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<WithdrawalQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut WithdrawalWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: WithdrawalWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: WithdrawalQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, WithdrawalModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, WithdrawalModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, WithdrawalModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, WithdrawalModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut WithdrawalRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: WithdrawalRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, WithdrawalModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -3447,10 +3368,855 @@ impl<H: WithdrawalDataTableHooks> AutoDataTable for WithdrawalDataTable<H> {
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for WithdrawalView {
+impl ActiveRecord for WithdrawalRecord {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Withdrawal::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        WithdrawalModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct WithdrawalModel;
+impl WithdrawalModel {
+    pub const TABLE: &'static str = "withdrawals";
+    pub const MODEL_KEY: &'static str = "withdrawal";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, WithdrawalModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, WithdrawalModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, WithdrawalModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, WithdrawalModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, WithdrawalModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, WithdrawalModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<WithdrawalRecord>> {
+        WithdrawalQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for WithdrawalModel {
+    type Pk = i64;
+    type Record = WithdrawalRecord;
+    type Create = WithdrawalCreate;
+    type Changes = WithdrawalChanges;
+    const TABLE: &'static str = WithdrawalModel::TABLE;
+    const MODEL_KEY: &'static str = WithdrawalModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for WithdrawalModel {
+    type InnerQuery<'db> = WithdrawalQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        WithdrawalQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for WithdrawalModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for WithdrawalModel {
+    type InnerCreate<'db> = WithdrawalCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        WithdrawalCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            WithdrawalQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("withdrawals: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<WithdrawalModel> for WithdrawalDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <WithdrawalModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<WithdrawalModel>>::Value) -> anyhow::Result<<WithdrawalModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            WithdrawalDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::OwnerType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::OwnerId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::AdminId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::CreditType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::WithdrawalMethod => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::BankId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::BankAccountName => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::BankAccountNumber => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::CryptoNetworkId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::CryptoWalletAddress => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::ConversionRate => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::Status => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::Amount => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::Fee => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::NetAmount => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::RelatedKey => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::Params => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::Remark => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::AdminRemark => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::ReviewedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<WithdrawalModel> for Column<WithdrawalModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <WithdrawalModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<WithdrawalModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            WithdrawalDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::OwnerType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::OwnerId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::AdminId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::CreditType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::WithdrawalMethod => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::BankId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::BankAccountName => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::BankAccountNumber => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::CryptoNetworkId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::CryptoWalletAddress => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::ConversionRate => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::Status => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::Amount => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::Fee => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::NetAmount => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::RelatedKey => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::Params => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::Remark => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::AdminRemark => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::ReviewedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WithdrawalDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<WithdrawalModel> for WithdrawalDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <WithdrawalModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <WithdrawalModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <WithdrawalModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <WithdrawalModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<WithdrawalModel> for Column<WithdrawalModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <WithdrawalModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <WithdrawalModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<WithdrawalDbCol> = fields.iter().map(|field| resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <WithdrawalModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <WithdrawalModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<WithdrawalDbCol> = fields.iter().map(|field| resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for WithdrawalModel {
+    type InnerQuery<'db> = WithdrawalQueryInner<'db>;
+    type InnerPatch<'db> = WithdrawalPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        WithdrawalPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(WithdrawalDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = WithdrawalPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", WithdrawalDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM withdrawals", WithdrawalDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = WithdrawalQueryInner::new(db, base_url);
+            query.where_in(WithdrawalDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<WithdrawalModel> for WithdrawalDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<WithdrawalModel>>::Value) -> anyhow::Result<<WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            WithdrawalDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::OwnerType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::OwnerId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::AdminId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::CreditType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::WithdrawalMethod => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::BankId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::BankAccountName => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::BankAccountNumber => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::CryptoNetworkId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::CryptoWalletAddress => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::ConversionRate => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::Status => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::Amount => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::Fee => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::NetAmount => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::RelatedKey => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::Params => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::Remark => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::AdminRemark => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::ReviewedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<WithdrawalModel> for Column<WithdrawalModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            WithdrawalDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::OwnerType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::OwnerId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::AdminId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::CreditType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::WithdrawalMethod => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::BankId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::BankAccountName => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::BankAccountNumber => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::CryptoNetworkId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::CryptoWalletAddress => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::ConversionRate => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::Status => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::Amount => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::Fee => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::NetAmount => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::RelatedKey => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::Params => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::Remark => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::AdminRemark => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::ReviewedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WithdrawalDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<WithdrawalModel> for WithdrawalDbCol {
+    fn increment<'db>(field: Self, mut builder: <WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<WithdrawalModel>>::Value) -> anyhow::Result<<WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            WithdrawalDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            WithdrawalDbCol::OwnerId => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            WithdrawalDbCol::Amount => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            WithdrawalDbCol::Fee => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            WithdrawalDbCol::NetAmount => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<WithdrawalModel>>::Value) -> anyhow::Result<<WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            WithdrawalDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            WithdrawalDbCol::OwnerId => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            WithdrawalDbCol::Amount => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            WithdrawalDbCol::Fee => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            WithdrawalDbCol::NetAmount => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<WithdrawalModel> for Column<WithdrawalModel, i64> {
+    fn increment<'db>(field: Self, mut builder: <WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<WithdrawalModel>>::Value) -> anyhow::Result<<WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            WithdrawalDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            WithdrawalDbCol::OwnerId => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<WithdrawalModel>>::Value) -> anyhow::Result<<WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            WithdrawalDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            WithdrawalDbCol::OwnerId => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<WithdrawalModel> for Column<WithdrawalModel, rust_decimal::Decimal> {
+    fn increment<'db>(field: Self, mut builder: <WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<WithdrawalModel>>::Value) -> anyhow::Result<<WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            WithdrawalDbCol::Amount => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            WithdrawalDbCol::Fee => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            WithdrawalDbCol::NetAmount => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<WithdrawalModel>>::Value) -> anyhow::Result<<WithdrawalModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            WithdrawalDbCol::Amount => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            WithdrawalDbCol::Fee => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            WithdrawalDbCol::NetAmount => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<WithdrawalModel> for WithdrawalDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<WithdrawalModel>>::Value) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<WithdrawalModel>>::Value) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<WithdrawalModel>>::Value]) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<WithdrawalModel> for Column<WithdrawalModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_withdrawal_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
+impl core_db::common::model_api::IncludeRelation<WithdrawalModel> for OneRelation<WithdrawalModel, AdminRow, 0> {
+    fn include<'db>(_relation: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query
+    }
+}
+
+impl core_db::common::model_api::WhereHasRelation<WithdrawalModel> for OneRelation<WithdrawalModel, AdminRow, 0> {
+    type Target = AdminModel;
+    fn where_has<'db, F>(_relation: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.where_has_admin(scope)
+    }
+    fn or_where_has<'db, F>(_relation: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.or_where_has_admin(scope)
+    }
+}
+
+impl core_db::common::model_api::RecordOneRelation<WithdrawalModel> for OneRelation<WithdrawalModel, AdminRow, 0> {
+    type Target = AdminRow;
+    fn get<'a>(_relation: Self, record: &'a WithdrawalRecord) -> Option<&'a Self::Target> {
+        record.admin.as_ref()
+    }
+}
+
+impl core_db::common::model_api::IncludeRelation<WithdrawalModel> for OneRelation<WithdrawalModel, BankRow, 1> {
+    fn include<'db>(_relation: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query
+    }
+}
+
+impl core_db::common::model_api::WhereHasRelation<WithdrawalModel> for OneRelation<WithdrawalModel, BankRow, 1> {
+    type Target = BankModel;
+    fn where_has<'db, F>(_relation: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.where_has_bank(scope)
+    }
+    fn or_where_has<'db, F>(_relation: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.or_where_has_bank(scope)
+    }
+}
+
+impl core_db::common::model_api::RecordOneRelation<WithdrawalModel> for OneRelation<WithdrawalModel, BankRow, 1> {
+    type Target = BankRow;
+    fn get<'a>(_relation: Self, record: &'a WithdrawalRecord) -> Option<&'a Self::Target> {
+        record.bank.as_ref()
+    }
+}
+
+impl core_db::common::model_api::IncludeRelation<WithdrawalModel> for OneRelation<WithdrawalModel, CryptoNetworkRow, 2> {
+    fn include<'db>(_relation: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query
+    }
+}
+
+impl core_db::common::model_api::WhereHasRelation<WithdrawalModel> for OneRelation<WithdrawalModel, CryptoNetworkRow, 2> {
+    type Target = CryptoNetworkModel;
+    fn where_has<'db, F>(_relation: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.where_has_crypto_network(scope)
+    }
+    fn or_where_has<'db, F>(_relation: Self, query: <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <WithdrawalModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.or_where_has_crypto_network(scope)
+    }
+}
+
+impl core_db::common::model_api::RecordOneRelation<WithdrawalModel> for OneRelation<WithdrawalModel, CryptoNetworkRow, 2> {
+    type Target = CryptoNetworkRow;
+    fn get<'a>(_relation: Self, record: &'a WithdrawalRecord) -> Option<&'a Self::Target> {
+        record.crypto_network.as_ref()
+    }
+}
+
 

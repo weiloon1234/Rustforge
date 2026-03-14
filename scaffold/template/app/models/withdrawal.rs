@@ -52,8 +52,8 @@ pub struct Withdrawal {
     pub crypto_network: BelongsTo<CryptoNetwork>,
 }
 
-#[rf_with_relations_impl]
-impl WithdrawalWithRelations {
+#[rf_record_impl]
+impl WithdrawalRecord {
     pub fn status_label(&self) -> String {
         self.status.explained_label().to_string()
     }

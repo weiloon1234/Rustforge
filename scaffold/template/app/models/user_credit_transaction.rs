@@ -44,8 +44,8 @@ pub struct UserCreditTransaction {
     pub admin: BelongsTo<Admin>,
 }
 
-#[rf_view_impl]
-impl UserCreditTransactionView {
+#[rf_record_impl]
+impl UserCreditTransactionRecord {
     pub fn enrich_transaction_type_explained(&mut self) {
         if self.custom_description {
             if let Some(ref text) = self.custom_description_text {

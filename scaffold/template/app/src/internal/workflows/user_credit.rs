@@ -2,8 +2,8 @@ use core_db::common::sql::{DbConn, Op};
 use core_i18n::t;
 use core_web::error::AppError;
 use generated::models::{
-    CreditTransactionType, CreditType, User, UserCreditTransaction, UserCreditTransactionView,
-    UserQuery,
+    CreditTransactionType, CreditType, UserCol, UserCreditTransactionCol,
+    UserCreditTransactionModel, UserCreditTransactionRecord, UserModel,
 };
 use rust_decimal::Decimal;
 
@@ -16,7 +16,7 @@ pub async fn adjust_credit(
     state: &AppApiState,
     admin_id: i64,
     req: AdminCreditAdjustInput,
-) -> Result<UserCreditTransactionView, AppError> {
+) -> Result<UserCreditTransactionRecord, AppError> {
     let username = req.username.to_ascii_lowercase();
     let amount = req.amount;
 
@@ -29,8 +29,8 @@ pub async fn adjust_credit(
         .ok_or_else(|| AppError::BadRequest(t("Invalid credit type")))?;
 
     // Resolve user by username
-    let user = UserQuery::new(DbConn::pool(&state.db), None)
-        .where_username(Op::Eq, username)
+    let user = UserModel::query(DbConn::pool(&state.db))
+        .where_col(UserCol::USERNAME, Op::Eq, username)
         .first()
         .await
         .map_err(AppError::from)?
@@ -47,28 +47,46 @@ pub async fn adjust_credit(
     let conn = scope.conn();
 
     // Insert transaction record
-    let txn = UserCreditTransaction::new(conn.clone(), None)
-        .insert()
-        .set_user_id(user.id)
-        .set_admin_id(Some(admin_id))
-        .set_credit_type(credit_type)
-        .set_amount(amount)
-        .set_transaction_type(transaction_type)
-        .set_related_key(None)
-        .set_remark(req.remark)
-        .set_custom_description(req.custom_description)
-        .set_custom_description_text_input(req.custom_description_text)
+    let txn = UserCreditTransactionModel::create(conn.clone())
+        .set(UserCreditTransactionCol::USER_ID, user.id)?
+        .set(UserCreditTransactionCol::ADMIN_ID, Some(admin_id))?
+        .set(UserCreditTransactionCol::CREDIT_TYPE, credit_type)?
+        .set(UserCreditTransactionCol::AMOUNT, amount)?
+        .set(UserCreditTransactionCol::TRANSACTION_TYPE, transaction_type)?
+        .set(UserCreditTransactionCol::RELATED_KEY, None::<String>)?
+        .set(UserCreditTransactionCol::REMARK, req.remark)?
+        .set(UserCreditTransactionCol::CUSTOM_DESCRIPTION, req.custom_description)?
         .save()
         .await
         .map_err(AppError::from)?;
 
+    if let Some(custom_description_text) = req.custom_description_text {
+        txn.upsert_custom_description_text(conn.clone(), Some(custom_description_text))
+            .await
+            .map_err(AppError::from)?;
+    }
+
     // Atomic relative balance update
-    let mut update = User::new(conn, None).update().where_id(Op::Eq, user.id);
-    update = match credit_type {
-        CreditType::Credit1 => update.increment_credit_1(amount),
-        CreditType::Credit2 => update.increment_credit_2(amount),
+    let update = match credit_type {
+        CreditType::Credit1 => UserModel::query(conn.clone())
+            .where_col(UserCol::ID, Op::Eq, user.id)
+            .patch()
+            .increment(UserCol::CREDIT_1, amount),
+        CreditType::Credit2 => UserModel::query(conn.clone())
+            .where_col(UserCol::ID, Op::Eq, user.id)
+            .patch()
+            .increment(UserCol::CREDIT_2, amount),
     };
-    update.save().await.map_err(AppError::from)?;
+    update
+        .map_err(AppError::from)?
+        .save()
+        .await
+        .map_err(AppError::from)?;
+
+    let txn = UserCreditTransactionModel::find(conn, txn.id)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::BadRequest(t("Failed to create credit transaction")))?;
 
     scope.commit().await.map_err(AppError::from)?;
 

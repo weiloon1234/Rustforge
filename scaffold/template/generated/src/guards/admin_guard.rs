@@ -2,8 +2,8 @@
 use async_trait::async_trait;
 use core_db::common::sql::{DbConn, Op};
 use core_web::auth::Guard;
-use crate::generated::models::admin::{ AdminView, AdminQuery };
-use crate::generated::models::personal_access_token::{PersonalAccessToken, PersonalAccessTokenView};
+use crate::generated::models::admin::{ AdminModel, AdminRecord };
+use crate::generated::models::personal_access_token::{PersonalAccessTokenCol, PersonalAccessTokenModel, PersonalAccessTokenRecord};
 
 /// AdminGuard Guard
 #[derive(Clone, Copy)]
@@ -11,7 +11,7 @@ pub struct AdminGuard;
 
 #[async_trait]
 impl Guard for AdminGuard {
-    type User = AdminView;
+    type User = AdminRecord;
 
     fn name() -> &'static str {
         "admin"
@@ -23,28 +23,27 @@ impl Guard for AdminGuard {
 
     async fn fetch_user<'a>(db: DbConn<'a>, id: &str) -> anyhow::Result<Option<Self::User>> {
         let parsed = match id.trim().parse::<i64>() { Ok(v) => v, Err(_) => return Ok(None), };
-        AdminQuery::new(db, None).find(parsed).await.map(|opt| opt.map(|r| r.into_row()))
+        AdminModel::query(db).find(parsed).await
     }
 }
 
-pub async fn list_tokens<'a>(db: DbConn<'a>, subject_id: &str) -> anyhow::Result<Vec<PersonalAccessTokenView>> {
+pub async fn list_tokens<'a>(db: DbConn<'a>, subject_id: &str) -> anyhow::Result<Vec<PersonalAccessTokenRecord>> {
     let tokenable_type = <AdminGuard as Guard>::tokenable_type().unwrap_or(<AdminGuard as Guard>::name());
-    let rows = PersonalAccessToken::new(db, None)
-        .query()
-        .where_tokenable_type(Op::Eq, tokenable_type.to_string())
-        .where_tokenable_id(Op::Eq, subject_id.to_string())
-        .get()
+    let rows = PersonalAccessTokenModel::query(db)
+        .where_col(PersonalAccessTokenCol::TOKENABLE_TYPE, Op::Eq, tokenable_type.to_string())
+        .where_col(PersonalAccessTokenCol::TOKENABLE_ID, Op::Eq, subject_id.to_string())
+        .all()
         .await?;
-    Ok(rows.into_iter().map(|r| r.into_row()).collect())
+    Ok(rows)
 }
 
 pub async fn revoke_tokens<'a>(db: DbConn<'a>, subject_id: &str) -> anyhow::Result<u64> {
     let tokenable_type = <AdminGuard as Guard>::tokenable_type().unwrap_or(<AdminGuard as Guard>::name());
-    PersonalAccessToken::new(db, None)
-        .update()
-        .where_tokenable_type(Op::Eq, tokenable_type.to_string())
-        .where_tokenable_id(Op::Eq, subject_id.to_string())
-        .set_revoked_at(Some(time::OffsetDateTime::now_utc()))
+    PersonalAccessTokenModel::query(db)
+        .where_col(PersonalAccessTokenCol::TOKENABLE_TYPE, Op::Eq, tokenable_type.to_string())
+        .where_col(PersonalAccessTokenCol::TOKENABLE_ID, Op::Eq, subject_id.to_string())
+        .patch()
+        .assign(PersonalAccessTokenCol::REVOKED_AT, Some(time::OffsetDateTime::now_utc()))?
         .save()
         .await
 }

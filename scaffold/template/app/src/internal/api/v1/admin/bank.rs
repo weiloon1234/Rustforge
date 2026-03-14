@@ -156,7 +156,7 @@ async fn parse_bank_multipart(
     Ok(ParsedBankMultipart { input, logo })
 }
 
-fn bank_output(bank: &generated::models::BankWithRelations) -> BankOutput {
+fn bank_output(bank: &generated::models::BankRecord) -> BankOutput {
     BankOutput {
         id: bank.id.into(),
         country_iso2: bank.country_iso2.clone(),

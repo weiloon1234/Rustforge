@@ -1,9 +1,12 @@
-use core_db::common::sql::{generate_snowflake_i64, DbConn, Op};
+use core_db::common::{
+    auth::hash::hash_password,
+    sql::{generate_snowflake_i64, DbConn, Op},
+};
 use core_i18n::t;
 use core_web::{auth::AuthUser, error::AppError, Patch};
 use generated::{
     guards::AdminGuard,
-    models::{Admin, AdminType, AdminView},
+    models::{AdminCol, AdminModel, AdminRecord, AdminType},
     permissions::Permission,
 };
 
@@ -12,12 +15,10 @@ use crate::{
     internal::api::state::AppApiState,
 };
 
-pub async fn detail(state: &AppApiState, id: i64) -> Result<AdminView, AppError> {
-    Admin::new(DbConn::pool(&state.db), None)
-        .find(id)
+pub async fn detail(state: &AppApiState, id: i64) -> Result<AdminRecord, AppError> {
+    AdminModel::find(DbConn::pool(&state.db), id)
         .await
         .map_err(AppError::from)?
-        .map(|r| r.into_row())
         .ok_or_else(|| AppError::NotFound(t("Admin not found")))
 }
 
@@ -25,26 +26,34 @@ pub async fn create(
     state: &AppApiState,
     auth: &AuthUser<AdminGuard>,
     req: CreateAdminInput,
-) -> Result<AdminView, AppError> {
+) -> Result<AdminRecord, AppError> {
     let username = req.username.trim().to_ascii_lowercase();
+    let password_hash = hash_password(&req.password).map_err(AppError::from)?;
 
     let abilities = ensure_assignable_permissions(auth, &req.abilities)?;
 
-    let mut insert = Admin::new(DbConn::pool(&state.db), None)
-        .insert()
-        .set_id(generate_snowflake_i64())
-        .set_username(username)
-        .set_name(req.name.trim().to_string())
-        .set_admin_type(AdminType::Admin)
-        .set_abilities(permissions_to_json(&abilities));
+    let mut insert = AdminModel::create(DbConn::pool(&state.db))
+        .set(AdminCol::ID, generate_snowflake_i64())
+        .map_err(AppError::from)?
+        .set(AdminCol::USERNAME, username)
+        .map_err(AppError::from)?
+        .set(AdminCol::NAME, req.name.trim().to_string())
+        .map_err(AppError::from)?
+        .set(AdminCol::ADMIN_TYPE, AdminType::Admin)
+        .map_err(AppError::from)?
+        .set(AdminCol::ABILITIES, permissions_to_json(&abilities))
+        .map_err(AppError::from)?
+        .set(AdminCol::PASSWORD, password_hash)
+        .map_err(AppError::from)?;
 
     if let Some(email) = req.email.as_deref().and_then(normalize_email_value) {
-        insert = insert.set_email(Some(email));
+        insert = insert
+            .set(AdminCol::EMAIL, Some(email))
+            .map_err(AppError::from)?;
     }
 
-    let insert = insert.set_password(&req.password).map_err(AppError::from)?;
-    let view = insert.save().await.map_err(AppError::from)?;
-    Ok(view)
+    let created = insert.save().await.map_err(AppError::from)?;
+    Ok(created)
 }
 
 pub async fn update(
@@ -52,7 +61,7 @@ pub async fn update(
     auth: &AuthUser<AdminGuard>,
     id: i64,
     req: UpdateAdminInput,
-) -> Result<AdminView, AppError> {
+) -> Result<AdminRecord, AppError> {
     if auth.user.id == id {
         return Err(AppError::Forbidden(t(
             "You cannot update your own admin account here",
@@ -60,26 +69,29 @@ pub async fn update(
     }
 
     let existing = detail(state, id).await?;
-    let mut update = Admin::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_id(Op::Eq, id);
+    let mut update = Ok(
+        AdminModel::query(DbConn::pool(&state.db))
+            .where_col(AdminCol::ID, Op::Eq, id)
+            .patch(),
+    );
     let mut touched = false;
 
     if let Some(username) = req.username {
         let username = username.trim().to_ascii_lowercase();
         if username != existing.username {
-            update = update.set_username(username);
+            update = update.and_then(|patch| patch.assign(AdminCol::USERNAME, username));
             touched = true;
         }
     }
 
     if let Some(name) = req.name {
-        update = update.set_name(name.trim().to_string());
+        update = update.and_then(|patch| patch.assign(AdminCol::NAME, name.trim().to_string()));
         touched = true;
     }
 
     if let Some(password) = req.password {
-        update = update.set_password(&password).map_err(AppError::from)?;
+        let password_hash = hash_password(&password).map_err(AppError::from)?;
+        update = update.and_then(|patch| patch.assign(AdminCol::PASSWORD, password_hash));
         touched = true;
     }
 
@@ -87,14 +99,14 @@ pub async fn update(
         Patch::Missing => {}
         Patch::Null => {
             if existing.email.is_some() {
-                update = update.set_email(None);
+                update = update.and_then(|patch| patch.assign(AdminCol::EMAIL, None::<String>));
                 touched = true;
             }
         }
         Patch::Value(email) => {
             let normalized = normalize_email_value(&email);
             if existing.email != normalized {
-                update = update.set_email(normalized);
+                update = update.and_then(|patch| patch.assign(AdminCol::EMAIL, normalized));
                 touched = true;
             }
         }
@@ -102,7 +114,7 @@ pub async fn update(
 
     if let Some(abilities) = req.abilities {
         let abilities = ensure_assignable_permissions(auth, &abilities)?;
-        update = update.set_abilities(permissions_to_json(&abilities));
+        update = update.and_then(|patch| patch.assign(AdminCol::ABILITIES, permissions_to_json(&abilities)));
         touched = true;
     }
 
@@ -110,7 +122,11 @@ pub async fn update(
         return Ok(existing);
     }
 
-    let affected = update.save().await.map_err(AppError::from)?;
+    let affected = update
+        .map_err(AppError::from)?
+        .save()
+        .await
+        .map_err(AppError::from)?;
     if affected == 0 {
         return Err(AppError::NotFound(t("Admin not found")));
     }
@@ -140,8 +156,9 @@ pub async fn remove(
         )));
     }
 
-    let affected = Admin::new(DbConn::pool(&state.db), None)
-        .delete(id)
+    let affected = AdminModel::query(DbConn::pool(&state.db))
+        .where_col(generated::models::AdminCol::ID, Op::Eq, id)
+        .delete()
         .await
         .map_err(AppError::from)?;
     if affected == 0 {

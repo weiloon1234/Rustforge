@@ -5,19 +5,19 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = false;
 const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct FailedJobCreateInput {
+pub struct FailedJobCreate {
     pub id: FieldInput<uuid::Uuid>,
     pub job_name: FieldInput<String>,
     pub queue: FieldInput<String>,
@@ -30,7 +30,7 @@ pub struct FailedJobCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct FailedJobUpdateChanges {
+pub struct FailedJobChanges {
     pub id: Option<FieldChange<uuid::Uuid>>,
     pub job_name: Option<FieldChange<String>>,
     pub queue: Option<FieldChange<String>>,
@@ -57,7 +57,7 @@ pub struct FailedJobRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct FailedJobView {
+pub struct FailedJobRecord {
     pub id: uuid::Uuid,
     pub job_name: String,
     pub queue: String,
@@ -69,57 +69,14 @@ pub struct FailedJobView {
     pub failed_at: time::OffsetDateTime,
 }
 
-impl FailedJobView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> FailedJobUpdate<'db> {
-        FailedJob::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &FailedJob<'db>) -> FailedJobUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> FailedJobJson {
-        FailedJobJson {
-            id: self.id.clone(),
-            job_name: self.job_name.clone(),
-            queue: self.queue.clone(),
-            payload: self.payload.clone(),
-            error: self.error.clone(),
-            attempts: self.attempts.clone(),
-            group_id: self.group_id.clone(),
-            failed_at: self.failed_at.clone(),
-        }
+impl FailedJobRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, FailedJobModel> {
+        FailedJobModel::query(db.into()).where_col(FailedJobDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-pub trait FailedJobViewsExt {
-    fn ids(&self) -> Vec<uuid::Uuid>;
-    fn pluck<R>(&self, f: impl Fn(&FailedJobView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&FailedJobView) -> K) -> std::collections::HashMap<K, FailedJobView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&FailedJobView) -> K) -> std::collections::HashMap<K, Vec<FailedJobView>> where K: Eq + std::hash::Hash;
-}
-
-impl FailedJobViewsExt for Vec<FailedJobView> {
-    fn ids(&self) -> Vec<uuid::Uuid> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&FailedJobView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&FailedJobView) -> K) -> std::collections::HashMap<K, FailedJobView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&FailedJobView) -> K) -> std::collections::HashMap<K, Vec<FailedJobView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct FailedJobJson {
-    pub id: uuid::Uuid,
-    pub job_name: String,
-    pub queue: String,
-    pub payload: serde_json::Value,
-    pub error: String,
-    pub attempts: i32,
-    pub group_id: Option<String>,
-    #[schemars(with = "String")]
-    pub failed_at: time::OffsetDateTime,
-}
-
-fn hydrate_view(row: FailedJobRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> FailedJobView {
-    let view = FailedJobView {
+fn hydrate_record(row: FailedJobRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> FailedJobRecord {
+    let mut record = FailedJobRecord {
         id: row.id,
         job_name: row.job_name,
         queue: row.queue,
@@ -129,31 +86,38 @@ fn hydrate_view(row: FailedJobRow, _loc: &LocalizedMap, _base_url: Option<&str>)
         group_id: row.group_id,
         failed_at: row.failed_at,
     };
-    view
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct FailedJobWithRelations {
-    #[serde(flatten)]
-    pub row: FailedJobView,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FailedJobCol;
+impl FailedJobCol {
+    pub const ID: Column<FailedJobModel, uuid::Uuid> = Column::new("id");
+    pub const JOB_NAME: Column<FailedJobModel, String> = Column::new("job_name");
+    pub const QUEUE: Column<FailedJobModel, String> = Column::new("queue");
+    pub const PAYLOAD: Column<FailedJobModel, serde_json::Value> = Column::new("payload");
+    pub const ERROR: Column<FailedJobModel, String> = Column::new("error");
+    pub const ATTEMPTS: Column<FailedJobModel, i32> = Column::new("attempts");
+    pub const GROUP_ID: Column<FailedJobModel, Option<String>> = Column::new("group_id");
+    pub const FAILED_AT: Column<FailedJobModel, time::OffsetDateTime> = Column::new("failed_at");
 }
 
-impl FailedJobWithRelations {
-    pub fn into_row(self) -> FailedJobView { self.row }
-}
-
-impl std::ops::Deref for FailedJobWithRelations {
-    type Target = FailedJobView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for FailedJobWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_failed_job_db_col(sql: &str) -> Option<FailedJobDbCol> {
+    match sql {
+        "id" => Some(FailedJobDbCol::Id),
+        "job_name" => Some(FailedJobDbCol::JobName),
+        "queue" => Some(FailedJobDbCol::Queue),
+        "payload" => Some(FailedJobDbCol::Payload),
+        "error" => Some(FailedJobDbCol::Error),
+        "attempts" => Some(FailedJobDbCol::Attempts),
+        "group_id" => Some(FailedJobDbCol::GroupId),
+        "failed_at" => Some(FailedJobDbCol::FailedAt),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum FailedJobCol {
+pub enum FailedJobDbCol {
     Id,
     JobName,
     Queue,
@@ -164,47 +128,27 @@ pub enum FailedJobCol {
     FailedAt,
 }
 
-impl FailedJobCol {
-    pub const fn all() -> &'static [FailedJobCol] {
-        &[FailedJobCol::Id, FailedJobCol::JobName, FailedJobCol::Queue, FailedJobCol::Payload, FailedJobCol::Error, FailedJobCol::Attempts, FailedJobCol::GroupId, FailedJobCol::FailedAt]
+impl FailedJobDbCol {
+    pub const fn all() -> &'static [FailedJobDbCol] {
+        &[FailedJobDbCol::Id, FailedJobDbCol::JobName, FailedJobDbCol::Queue, FailedJobDbCol::Payload, FailedJobDbCol::Error, FailedJobDbCol::Attempts, FailedJobDbCol::GroupId, FailedJobDbCol::FailedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            FailedJobCol::Id => "id",
-            FailedJobCol::JobName => "job_name",
-            FailedJobCol::Queue => "queue",
-            FailedJobCol::Payload => "payload",
-            FailedJobCol::Error => "error",
-            FailedJobCol::Attempts => "attempts",
-            FailedJobCol::GroupId => "group_id",
-            FailedJobCol::FailedAt => "failed_at",
+            FailedJobDbCol::Id => "id",
+            FailedJobDbCol::JobName => "job_name",
+            FailedJobDbCol::Queue => "queue",
+            FailedJobDbCol::Payload => "payload",
+            FailedJobDbCol::Error => "error",
+            FailedJobDbCol::Attempts => "attempts",
+            FailedJobDbCol::GroupId => "group_id",
+            FailedJobDbCol::FailedAt => "failed_at",
         }
     }
 }
 
-pub struct FailedJob<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-}
-
-impl<'db> FailedJob<'db> {
-    pub const TABLE: &'static str = "failed_jobs";
-    pub const MODEL_KEY: &'static str = "failed_job";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> FailedJobQuery<'db> { FailedJobQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> FailedJobInsert<'db> { FailedJobInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> FailedJobUpdate<'db> { FailedJobUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: uuid::Uuid) -> Result<Option<FailedJobWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: uuid::Uuid) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-}
 
 #[derive(Clone)]
-pub struct FailedJobQuery<'db> {
+pub struct FailedJobQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -227,110 +171,109 @@ pub struct FailedJobQuery<'db> {
 
 
 
-impl<'db> FailedJobQuery<'db> {
+impl<'db> FailedJobQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, job_name, queue, payload, error, attempts, group_id, failed_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> FailedJobUnsafeQuery<'db> { FailedJobUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_job_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::JobName.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::JobName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_job_name_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::JobName.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::JobName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_queue(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Queue.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Queue.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_queue_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Queue.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Queue.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_payload(mut self, op: Op, val: serde_json::Value) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Payload.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Payload.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_payload_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Payload.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Payload.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_error(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Error.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Error.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_error_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Error.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Error.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_attempts(mut self, op: Op, val: i32) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Attempts.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Attempts.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_attempts_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Attempts.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Attempts.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_group_id(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::GroupId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::GroupId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_group_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::GroupId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::GroupId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_failed_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::FailedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::FailedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_failed_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::FailedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::FailedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: uuid::Uuid) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(FailedJobCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: FailedJobCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(FailedJobDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: FailedJobDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -349,7 +292,7 @@ impl<'db> FailedJobQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: FailedJobCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: FailedJobDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -364,7 +307,7 @@ impl<'db> FailedJobQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: FailedJobCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: FailedJobDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -376,7 +319,7 @@ impl<'db> FailedJobQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: FailedJobCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: FailedJobDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -384,15 +327,15 @@ impl<'db> FailedJobQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: FailedJobCol) -> Self {
+    pub fn where_null(mut self, col: FailedJobDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: FailedJobCol) -> Self {
+    pub fn where_not_null(mut self, col: FailedJobDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: FailedJobCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: FailedJobDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -446,7 +389,7 @@ impl<'db> FailedJobQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[FailedJobCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[FailedJobDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, job_name, queue, payload, error, attempts, group_id, failed_at".to_string());
         } else {
@@ -458,7 +401,7 @@ impl<'db> FailedJobQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[FailedJobCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[FailedJobDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -539,26 +482,26 @@ impl<'db> FailedJobQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: FailedJobCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: FailedJobDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: FailedJobCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: FailedJobDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: FailedJobCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: FailedJobDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[FailedJobCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[FailedJobDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[FailedJobCol]) -> Self {
+    pub fn select(mut self, cols: &[FailedJobDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -606,7 +549,7 @@ impl<'db> FailedJobQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[FailedJobCol]) -> Self {
+    pub fn group_by(mut self, cols: &[FailedJobDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -681,7 +624,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<FailedJobWithRelations>> {
+    pub async fn get(self) -> Result<Vec<FailedJobRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -731,61 +674,61 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
-            out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            out_vec.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let out_vec: Vec<FailedJobWithRelations> = out_vec.into_iter().map(|v| FailedJobWithRelations { row: v }).collect();
+        let out_vec: Vec<FailedJobRecord> = out_vec;
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<FailedJobWithRelations>> {
+    pub async fn first(self) -> Result<Option<FailedJobRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<FailedJobWithRelations> {
+    pub async fn first_or_fail(self) -> Result<FailedJobRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("failed_jobs: record not found"))
     }
 
-    pub async fn find(self, id: uuid::Uuid) -> Result<Option<FailedJobWithRelations>> {
+    pub async fn find(self, id: uuid::Uuid) -> Result<Option<FailedJobRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<FailedJobWithRelations> {
+    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<FailedJobRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("failed_jobs: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(FailedJobInsert<'db>) -> FailedJobInsert<'db>) -> Result<FailedJobWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(FailedJobCreateInner<'db>) -> FailedJobCreateInner<'db>) -> Result<FailedJobRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(FailedJobInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(FailedJobCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        FailedJob::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        FailedJobQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(FailedJobUpdate<'db>) -> FailedJobUpdate<'db>,
-        on_create: impl FnOnce(FailedJobInsert<'db>) -> FailedJobInsert<'db>,
-    ) -> Result<FailedJobWithRelations> {
+        on_update: impl FnOnce(FailedJobPatchInner<'db>) -> FailedJobPatchInner<'db>,
+        on_create: impl FnOnce(FailedJobCreateInner<'db>) -> FailedJobCreateInner<'db>,
+    ) -> Result<FailedJobRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = FailedJobUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = FailedJobPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return FailedJob::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return FailedJobQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(FailedJobInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(FailedJobCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        FailedJob::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        FailedJobQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: FailedJobCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: FailedJobDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -800,7 +743,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: FailedJobCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: FailedJobDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -856,13 +799,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<FailedJobWithRelations>) -> Fut,
+        F: FnMut(Vec<FailedJobRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = FailedJobQuery::new(db.clone(), self.base_url.clone());
+            let mut query = FailedJobQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -876,11 +819,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(FailedJobCol::Id, OrderDir::Desc)
+        self.order_by(FailedJobDbCol::Id, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(FailedJobCol::Id, OrderDir::Asc)
+        self.order_by(FailedJobDbCol::Id, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -891,7 +834,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<FailedJobWithRelations> {
+    pub async fn sole(self) -> Result<FailedJobRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -910,7 +853,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&FailedJobWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&FailedJobRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -918,7 +861,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: FailedJobCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: FailedJobDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "failed_jobs".to_string());
@@ -939,7 +882,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: FailedJobCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: FailedJobDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "failed_jobs".to_string());
@@ -960,7 +903,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: FailedJobCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: FailedJobDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "failed_jobs".to_string());
@@ -981,7 +924,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: FailedJobCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: FailedJobDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "failed_jobs".to_string());
@@ -1002,7 +945,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<FailedJobWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<FailedJobRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1053,9 +996,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
-            data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            data.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let data: Vec<FailedJobWithRelations> = data.into_iter().map(|v| FailedJobWithRelations { row: v }).collect();
+        let data: Vec<FailedJobRecord> = data;
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn to_sql(&self) -> (String, Vec<BindValue>) {
@@ -1175,38 +1118,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct FailedJobUnsafeQuery<'db> {
-    inner: FailedJobQuery<'db>,
-}
 
-impl<'db> FailedJobUnsafeQuery<'db> {
-    fn new(inner: FailedJobQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> FailedJobQuery<'db> { self.inner }
-}
-
-
-pub struct FailedJobInsert<'db> {
+pub struct FailedJobCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<FailedJobCol>,
+    cols: Vec<FailedJobDbCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<FailedJobCol>,
+    conflict_cols: Vec<FailedJobDbCol>,
 }
 
-impl<'db> FailedJobInsert<'db> {
+impl<'db> FailedJobCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1220,109 +1142,109 @@ impl<'db> FailedJobInsert<'db> {
 
 
 pub fn set_id(mut self, val: uuid::Uuid) -> Self {
-        self.cols.push(FailedJobCol::Id);
+        self.cols.push(FailedJobDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_job_name(mut self, val: String) -> Self {
-        self.cols.push(FailedJobCol::JobName);
+        self.cols.push(FailedJobDbCol::JobName);
         self.binds.push(val.into());
         self
     }
     pub fn set_queue(mut self, val: String) -> Self {
-        self.cols.push(FailedJobCol::Queue);
+        self.cols.push(FailedJobDbCol::Queue);
         self.binds.push(val.into());
         self
     }
     pub fn set_payload(mut self, val: serde_json::Value) -> Self {
-        self.cols.push(FailedJobCol::Payload);
+        self.cols.push(FailedJobDbCol::Payload);
         self.binds.push(val.into());
         self
     }
     pub fn set_error(mut self, val: String) -> Self {
-        self.cols.push(FailedJobCol::Error);
+        self.cols.push(FailedJobDbCol::Error);
         self.binds.push(val.into());
         self
     }
     pub fn set_attempts(mut self, val: i32) -> Self {
-        self.cols.push(FailedJobCol::Attempts);
+        self.cols.push(FailedJobDbCol::Attempts);
         self.binds.push(val.into());
         self
     }
     pub fn set_group_id(mut self, val: Option<String>) -> Self {
-        self.cols.push(FailedJobCol::GroupId);
+        self.cols.push(FailedJobDbCol::GroupId);
         self.binds.push(val.into());
         self
     }
     pub fn set_failed_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(FailedJobCol::FailedAt);
+        self.cols.push(FailedJobDbCol::FailedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[FailedJobCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[FailedJobDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[FailedJobCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[FailedJobDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<FailedJobCreateInput> {
-        let mut input = FailedJobCreateInput::default();
+    fn to_create_input(&self) -> Result<FailedJobCreate> {
+        let mut input = FailedJobCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                FailedJobCol::Id => {
+                FailedJobDbCol::Id => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                FailedJobCol::JobName => {
+                FailedJobDbCol::JobName => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.job_name = FieldInput::Set(value);
                 }
-                FailedJobCol::Queue => {
+                FailedJobDbCol::Queue => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.queue = FieldInput::Set(value);
                 }
-                FailedJobCol::Payload => {
+                FailedJobDbCol::Payload => {
                     let value = match bind {
             BindValue::Json(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'serde_json::Value'", other),
         };
                     input.payload = FieldInput::Set(value);
                 }
-                FailedJobCol::Error => {
+                FailedJobDbCol::Error => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.error = FieldInput::Set(value);
                 }
-                FailedJobCol::Attempts => {
+                FailedJobDbCol::Attempts => {
                     let value = match bind {
             BindValue::I32(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i32'", other),
         };
                     input.attempts = FieldInput::Set(value);
                 }
-                FailedJobCol::GroupId => {
+                FailedJobDbCol::GroupId => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.group_id = FieldInput::Set(value);
                 }
-                FailedJobCol::FailedAt => {
+                FailedJobDbCol::FailedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1335,7 +1257,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
     }
 
 
-pub async fn save(self) -> Result<FailedJobView> {
+pub async fn save(self) -> Result<FailedJobRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -1353,7 +1275,7 @@ pub async fn save(self) -> Result<FailedJobView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1372,10 +1294,10 @@ pub async fn save(self) -> Result<FailedJobView> {
                         Err(err) => log_observer_error("created", "failed_job", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "failed_job", table: "failed_jobs", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -1387,12 +1309,12 @@ pub async fn save(self) -> Result<FailedJobView> {
                         Err(err) => log_observer_error("created", "failed_job", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(FailedJobView, FailedJobRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(FailedJobRecord, FailedJobRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
         if cols.is_empty() {
@@ -1426,20 +1348,20 @@ pub async fn save(self) -> Result<FailedJobView> {
         let row = db.fetch_one(q).await?;
         record_profiled_query("failed_jobs", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
-        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct FailedJobUpdate<'db> {
+pub struct FailedJobPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(FailedJobCol, BindValue, SetMode)>,
+    sets: Vec<(FailedJobDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> FailedJobUpdate<'db> {
+impl<'db> FailedJobPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1449,98 +1371,97 @@ impl<'db> FailedJobUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> FailedJobUnsafeUpdate<'db> { FailedJobUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: uuid::Uuid) -> Self {
-        self.sets.push((FailedJobCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((FailedJobDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn set_job_name(mut self, val: String) -> Self {
-        self.sets.push((FailedJobCol::JobName, val.into(), SetMode::Assign));
+        self.sets.push((FailedJobDbCol::JobName, val.into(), SetMode::Assign));
         self
     }
     pub fn set_queue(mut self, val: String) -> Self {
-        self.sets.push((FailedJobCol::Queue, val.into(), SetMode::Assign));
+        self.sets.push((FailedJobDbCol::Queue, val.into(), SetMode::Assign));
         self
     }
     pub fn set_payload(mut self, val: serde_json::Value) -> Self {
-        self.sets.push((FailedJobCol::Payload, val.into(), SetMode::Assign));
+        self.sets.push((FailedJobDbCol::Payload, val.into(), SetMode::Assign));
         self
     }
     pub fn set_error(mut self, val: String) -> Self {
-        self.sets.push((FailedJobCol::Error, val.into(), SetMode::Assign));
+        self.sets.push((FailedJobDbCol::Error, val.into(), SetMode::Assign));
         self
     }
     pub fn set_attempts(mut self, val: i32) -> Self {
-        self.sets.push((FailedJobCol::Attempts, val.into(), SetMode::Assign));
+        self.sets.push((FailedJobDbCol::Attempts, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_attempts(mut self, val: i32) -> Self {
-        self.sets.push((FailedJobCol::Attempts, val.into(), SetMode::Increment));
+        self.sets.push((FailedJobDbCol::Attempts, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_attempts(mut self, val: i32) -> Self {
-        self.sets.push((FailedJobCol::Attempts, val.into(), SetMode::Decrement));
+        self.sets.push((FailedJobDbCol::Attempts, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_group_id(mut self, val: Option<String>) -> Self {
-        self.sets.push((FailedJobCol::GroupId, val.into(), SetMode::Assign));
+        self.sets.push((FailedJobDbCol::GroupId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_failed_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((FailedJobCol::FailedAt, val.into(), SetMode::Assign));
+        self.sets.push((FailedJobDbCol::FailedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_job_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::JobName.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::JobName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_queue(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Queue.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Queue.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_payload(mut self, op: Op, val: serde_json::Value) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Payload.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Payload.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_error(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Error.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Error.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_attempts(mut self, op: Op, val: i32) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::Attempts.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::Attempts.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_group_id(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::GroupId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::GroupId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_failed_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", FailedJobCol::FailedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", FailedJobDbCol::FailedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: FailedJobCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: FailedJobDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1559,11 +1480,11 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<FailedJobUpdateChanges> {
-        let mut changes = FailedJobUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<FailedJobChanges> {
+        let mut changes = FailedJobChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                FailedJobCol::Id => {
+                FailedJobDbCol::Id => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
@@ -1574,7 +1495,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                FailedJobCol::JobName => {
+                FailedJobDbCol::JobName => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1585,7 +1506,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                FailedJobCol::Queue => {
+                FailedJobDbCol::Queue => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1596,7 +1517,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                FailedJobCol::Payload => {
+                FailedJobDbCol::Payload => {
                     let value = match bind {
             BindValue::Json(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'serde_json::Value'", other),
@@ -1607,7 +1528,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                FailedJobCol::Error => {
+                FailedJobDbCol::Error => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1618,7 +1539,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                FailedJobCol::Attempts => {
+                FailedJobDbCol::Attempts => {
                     let value = match bind {
             BindValue::I32(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i32'", other),
@@ -1629,7 +1550,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                FailedJobCol::GroupId => {
+                FailedJobDbCol::GroupId => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -1640,7 +1561,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                FailedJobCol::FailedAt => {
+                FailedJobDbCol::FailedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1684,7 +1605,7 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<FailedJobUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<FailedJobChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
@@ -1775,29 +1696,19 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct FailedJobUnsafeUpdate<'db> {
-    inner: FailedJobUpdate<'db>,
-}
-
-impl<'db> FailedJobUnsafeUpdate<'db> {
-    fn new(inner: FailedJobUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> FailedJobUpdate<'db> { self.inner }
-}
 
 pub struct FailedJobTableAdapter;
 impl FailedJobTableAdapter {
-    fn parse_col(name: &str) -> Option<FailedJobCol> {
+    fn parse_col(name: &str) -> Option<FailedJobDbCol> {
         match name {
-            "id" => Some(FailedJobCol::Id),
-            "job_name" => Some(FailedJobCol::JobName),
-            "queue" => Some(FailedJobCol::Queue),
-            "payload" => Some(FailedJobCol::Payload),
-            "error" => Some(FailedJobCol::Error),
-            "attempts" => Some(FailedJobCol::Attempts),
-            "group_id" => Some(FailedJobCol::GroupId),
-            "failed_at" => Some(FailedJobCol::FailedAt),
+            "id" => Some(FailedJobDbCol::Id),
+            "job_name" => Some(FailedJobDbCol::JobName),
+            "queue" => Some(FailedJobDbCol::Queue),
+            "payload" => Some(FailedJobDbCol::Payload),
+            "error" => Some(FailedJobDbCol::Error),
+            "attempts" => Some(FailedJobDbCol::Attempts),
+            "group_id" => Some(FailedJobDbCol::GroupId),
+            "failed_at" => Some(FailedJobDbCol::FailedAt),
             _ => None,
         }
     }
@@ -1811,12 +1722,12 @@ impl FailedJobTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<FailedJobCol> {
+    fn parse_like_col(name: &str) -> Option<FailedJobDbCol> {
         match name {
-            "job_name" => Some(FailedJobCol::JobName),
-            "queue" => Some(FailedJobCol::Queue),
-            "error" => Some(FailedJobCol::Error),
-            "group_id" => Some(FailedJobCol::GroupId),
+            "job_name" => Some(FailedJobDbCol::JobName),
+            "queue" => Some(FailedJobDbCol::Queue),
+            "error" => Some(FailedJobDbCol::Error),
+            "group_id" => Some(FailedJobDbCol::GroupId),
             _ => None,
         }
     }
@@ -1860,8 +1771,8 @@ impl FailedJobTableAdapter {
     }
 }
 impl GeneratedTableAdapter for FailedJobTableAdapter {
-    type Query<'db> = FailedJobQuery<'db>;
-    type Row = FailedJobWithRelations;
+    type Query<'db> = Query<'db, FailedJobModel>;
+    type Row = FailedJobRecord;
     fn model_key(&self) -> &'static str { "FailedJob" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "job_name", "queue", "error", "attempts", "group_id", "failed_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["failed_at"] }
@@ -1895,7 +1806,7 @@ impl GeneratedTableAdapter for FailedJobTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: FailedJobQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<FailedJobQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, FailedJobModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, FailedJobModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -1989,28 +1900,28 @@ impl GeneratedTableAdapter for FailedJobTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: FailedJobQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<FailedJobQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, FailedJobModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, FailedJobModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(FailedJobCol::Id, dir),
-            "job_name" => query.order_by(FailedJobCol::JobName, dir),
-            "queue" => query.order_by(FailedJobCol::Queue, dir),
-            "payload" => query.order_by(FailedJobCol::Payload, dir),
-            "error" => query.order_by(FailedJobCol::Error, dir),
-            "attempts" => query.order_by(FailedJobCol::Attempts, dir),
-            "group_id" => query.order_by(FailedJobCol::GroupId, dir),
-            "failed_at" => query.order_by(FailedJobCol::FailedAt, dir),
+            "id" => query.order_by(FailedJobDbCol::Id, dir),
+            "job_name" => query.order_by(FailedJobDbCol::JobName, dir),
+            "queue" => query.order_by(FailedJobDbCol::Queue, dir),
+            "payload" => query.order_by(FailedJobDbCol::Payload, dir),
+            "error" => query.order_by(FailedJobDbCol::Error, dir),
+            "attempts" => query.order_by(FailedJobDbCol::Attempts, dir),
+            "group_id" => query.order_by(FailedJobDbCol::GroupId, dir),
+            "failed_at" => query.order_by(FailedJobDbCol::FailedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: FailedJobQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<FailedJobQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, FailedJobModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, FailedJobModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &FailedJobWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &FailedJobRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "job_name" => Some(row.job_name.clone()),
@@ -2022,10 +1933,10 @@ impl GeneratedTableAdapter for FailedJobTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: FailedJobQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, FailedJobModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: FailedJobQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<FailedJobWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, FailedJobModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<FailedJobRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -2051,20 +1962,20 @@ impl Default for FailedJobDataTableConfig {
     }
 }
 pub trait FailedJobDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: FailedJobQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> FailedJobQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, FailedJobModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, FailedJobModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: FailedJobQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<FailedJobQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: FailedJobQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<FailedJobQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut FailedJobWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: FailedJobWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, FailedJobModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, FailedJobModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, FailedJobModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, FailedJobModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut FailedJobRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: FailedJobRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         Ok(record)
     }
-    fn row_to_record(&self, row: FailedJobWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: FailedJobRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: FailedJobQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, FailedJobModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct FailedJobDefaultDataTableHooks;
@@ -2102,15 +2013,15 @@ impl<H: FailedJobDataTableHooks> FailedJobDataTable<H> {
 impl<H: FailedJobDataTableHooks> AutoDataTable for FailedJobDataTable<H> {
     type Adapter = FailedJobTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> FailedJobQuery<'db> {
-        self.hooks.scope(FailedJob::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, FailedJobModel> {
+        self.hooks.scope(FailedJobModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: FailedJobQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<FailedJobQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: FailedJobQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<FailedJobQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut FailedJobWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: FailedJobWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: FailedJobQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, FailedJobModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, FailedJobModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, FailedJobModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, FailedJobModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut FailedJobRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: FailedJobRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, FailedJobModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -2120,10 +2031,467 @@ impl<H: FailedJobDataTableHooks> AutoDataTable for FailedJobDataTable<H> {
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for FailedJobView {
+impl ActiveRecord for FailedJobRecord {
     type Id = uuid::Uuid;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        FailedJob::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        FailedJobModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct FailedJobModel;
+impl FailedJobModel {
+    pub const TABLE: &'static str = "failed_jobs";
+    pub const MODEL_KEY: &'static str = "failed_job";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, FailedJobModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, FailedJobModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, FailedJobModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, FailedJobModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, FailedJobModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, FailedJobModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: uuid::Uuid) -> Result<Option<FailedJobRecord>> {
+        FailedJobQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for FailedJobModel {
+    type Pk = uuid::Uuid;
+    type Record = FailedJobRecord;
+    type Create = FailedJobCreate;
+    type Changes = FailedJobChanges;
+    const TABLE: &'static str = FailedJobModel::TABLE;
+    const MODEL_KEY: &'static str = FailedJobModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for FailedJobModel {
+    type InnerQuery<'db> = FailedJobQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        FailedJobQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for FailedJobModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for FailedJobModel {
+    type InnerCreate<'db> = FailedJobCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        FailedJobCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            FailedJobQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("failed_jobs: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<FailedJobModel> for FailedJobDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <FailedJobModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<FailedJobModel>>::Value) -> anyhow::Result<<FailedJobModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            FailedJobDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::JobName => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::Queue => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::Payload => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::Error => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::Attempts => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::GroupId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::FailedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<FailedJobModel> for Column<FailedJobModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <FailedJobModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<FailedJobModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_failed_job_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            FailedJobDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::JobName => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::Queue => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::Payload => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::Error => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::Attempts => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::GroupId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            FailedJobDbCol::FailedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<FailedJobModel> for FailedJobDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <FailedJobModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <FailedJobModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <FailedJobModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <FailedJobModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<FailedJobModel> for Column<FailedJobModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <FailedJobModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <FailedJobModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<FailedJobDbCol> = fields.iter().map(|field| resolve_failed_job_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <FailedJobModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <FailedJobModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<FailedJobDbCol> = fields.iter().map(|field| resolve_failed_job_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for FailedJobModel {
+    type InnerQuery<'db> = FailedJobQueryInner<'db>;
+    type InnerPatch<'db> = FailedJobPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        FailedJobPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(FailedJobDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = FailedJobPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", FailedJobDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM failed_jobs", FailedJobDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, uuid::Uuid>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = FailedJobQueryInner::new(db, base_url);
+            query.where_in(FailedJobDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<FailedJobModel> for FailedJobDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <FailedJobModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<FailedJobModel>>::Value) -> anyhow::Result<<FailedJobModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            FailedJobDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::JobName => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::Queue => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::Payload => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::Error => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::Attempts => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::GroupId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::FailedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<FailedJobModel> for Column<FailedJobModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <FailedJobModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<FailedJobModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_failed_job_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            FailedJobDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::JobName => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::Queue => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::Payload => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::Error => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::Attempts => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::GroupId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            FailedJobDbCol::FailedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<FailedJobModel> for FailedJobDbCol {
+    fn increment<'db>(field: Self, mut builder: <FailedJobModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<FailedJobModel>>::Value) -> anyhow::Result<<FailedJobModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            FailedJobDbCol::Attempts => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <FailedJobModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<FailedJobModel>>::Value) -> anyhow::Result<<FailedJobModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            FailedJobDbCol::Attempts => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<FailedJobModel> for Column<FailedJobModel, i32> {
+    fn increment<'db>(field: Self, mut builder: <FailedJobModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<FailedJobModel>>::Value) -> anyhow::Result<<FailedJobModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_failed_job_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            FailedJobDbCol::Attempts => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <FailedJobModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<FailedJobModel>>::Value) -> anyhow::Result<<FailedJobModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_failed_job_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            FailedJobDbCol::Attempts => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<FailedJobModel> for FailedJobDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<FailedJobModel>>::Value) -> <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<FailedJobModel>>::Value) -> <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<FailedJobModel>>::Value]) -> <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<FailedJobModel> for Column<FailedJobModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_failed_job_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_failed_job_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_failed_job_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_failed_job_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_failed_job_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <FailedJobModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_failed_job_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
 

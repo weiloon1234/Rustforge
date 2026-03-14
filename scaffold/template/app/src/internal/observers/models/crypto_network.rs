@@ -1,37 +1,37 @@
 use core_db::common::model_observer::ModelEvent;
-use generated::models::{CryptoNetworkCreateInput, CryptoNetworkRow, CryptoNetworkUpdateChanges};
+use generated::models::{CryptoNetworkCreate, CryptoNetworkRecord, CryptoNetworkChanges};
 
 pub async fn creating(
     _event: &ModelEvent,
-    _new_data: &CryptoNetworkCreateInput,
+    _new_data: &CryptoNetworkCreate,
 ) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn created(_event: &ModelEvent, _row: &CryptoNetworkRow) -> anyhow::Result<()> {
+pub async fn created(_event: &ModelEvent, _row: &CryptoNetworkRecord) -> anyhow::Result<()> {
     Ok(())
 }
 
 pub async fn updating(
     _event: &ModelEvent,
-    _old_row: &CryptoNetworkRow,
-    _changes: &CryptoNetworkUpdateChanges,
+    _old_row: &CryptoNetworkRecord,
+    _changes: &CryptoNetworkChanges,
 ) -> anyhow::Result<()> {
     Ok(())
 }
 
 pub async fn updated(
     _event: &ModelEvent,
-    _old_row: &CryptoNetworkRow,
-    _new_row: &CryptoNetworkRow,
+    _old_row: &CryptoNetworkRecord,
+    _new_row: &CryptoNetworkRecord,
 ) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn deleting(_event: &ModelEvent, _row: &CryptoNetworkRow) -> anyhow::Result<()> {
+pub async fn deleting(_event: &ModelEvent, _row: &CryptoNetworkRecord) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn deleted(_event: &ModelEvent, _row: &CryptoNetworkRow) -> anyhow::Result<()> {
+pub async fn deleted(_event: &ModelEvent, _row: &CryptoNetworkRecord) -> anyhow::Result<()> {
     Ok(())
 }

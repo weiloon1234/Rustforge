@@ -12,9 +12,9 @@ export function ModelApiView() {
 
             <div className="prose prose-orange max-w-none">
                 <p>
-                    <code>XxxView</code> is the stable app-facing model. It already includes hydrated framework
+                    <code>XxxRecord</code> is the stable app-facing model. It already includes hydrated framework
                     features such as localized values, meta bags, attachments, and generated helper methods.
-                    App-specific computed values should be added on <code>XxxView</code>, not the raw DB row type.
+                    App-specific computed values should be added on <code>XxxRecord</code>, not the raw DB row type.
                 </p>
 
                 <MethodTable
@@ -47,14 +47,14 @@ export function ModelApiView() {
                     ]}
                 />
 
-                <h2>Use `XxxView` as the extension surface</h2>
+                <h2>Use `XxxRecord` as the extension surface</h2>
                 <p>
-                    Put app-specific helpers in <code>app/models/&lt;model&gt;.rs</code> inside <code>#[rf_view_impl]</code> or <code>#[rf_with_relations_impl]</code>. This keeps DB row shapes,
+                    Put app-specific helpers in <code>app/models/&lt;model&gt;.rs</code> inside <code>#[rf_record_impl]</code>. This keeps DB row shapes,
                     generated code, and manual app semantics in one source of truth.
                 </p>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`#[rf_view_impl]
-impl AdminView {
+                    <code className="language-rust">{`#[rf_record_impl]
+impl AdminRecord {
     fn identity(&self) -> String {
         admin_identity(
             Some(self.username.as_str()),
@@ -72,7 +72,7 @@ impl AdminView {
                         <code>XxxRow</code>: raw DB/internal shape, not the stable app model.
                     </li>
                     <li>
-                        <code>XxxJson</code>: output projection, not the primary place for business helpers.
+                        generated export helpers: output projection, not the primary place for business helpers.
                     </li>
                     <li>
                         Handler-local mapping code for every request: move reusable logic into view methods instead.
@@ -87,7 +87,7 @@ impl AdminView {
 
                 <h2>Example</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`let admin = Admin::new(db, None).query().find_or_fail(1001).await?;
+                    <code className="language-rust">{`let admin = AdminModel::query(db).find(1001).await?.unwrap();
 
 let display_name = admin.identity();
 let featured = admin.meta_is_featured().unwrap_or(false);

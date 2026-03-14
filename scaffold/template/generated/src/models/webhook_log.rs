@@ -5,19 +5,19 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
 const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct WebhookLogCreateInput {
+pub struct WebhookLogCreate {
     pub id: FieldInput<uuid::Uuid>,
     pub request_url: FieldInput<String>,
     pub request_method: FieldInput<String>,
@@ -31,7 +31,7 @@ pub struct WebhookLogCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct WebhookLogUpdateChanges {
+pub struct WebhookLogChanges {
     pub id: Option<FieldChange<uuid::Uuid>>,
     pub request_url: Option<FieldChange<String>>,
     pub request_method: Option<FieldChange<String>>,
@@ -60,7 +60,7 @@ pub struct WebhookLogRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct WebhookLogView {
+pub struct WebhookLogRecord {
     pub id: uuid::Uuid,
     pub request_url: String,
     pub request_method: String,
@@ -73,59 +73,14 @@ pub struct WebhookLogView {
     pub created_at: time::OffsetDateTime,
 }
 
-impl WebhookLogView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> WebhookLogUpdate<'db> {
-        WebhookLog::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &WebhookLog<'db>) -> WebhookLogUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> WebhookLogJson {
-        WebhookLogJson {
-            id: self.id.clone(),
-            request_url: self.request_url.clone(),
-            request_method: self.request_method.clone(),
-            request_headers: self.request_headers.clone(),
-            request_body: self.request_body.clone(),
-            response_status: self.response_status.clone(),
-            response_body: self.response_body.clone(),
-            duration_ms: self.duration_ms.clone(),
-            created_at: self.created_at.clone(),
-        }
+impl WebhookLogRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, WebhookLogModel> {
+        WebhookLogModel::query(db.into()).where_col(WebhookLogDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-pub trait WebhookLogViewsExt {
-    fn ids(&self) -> Vec<uuid::Uuid>;
-    fn pluck<R>(&self, f: impl Fn(&WebhookLogView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&WebhookLogView) -> K) -> std::collections::HashMap<K, WebhookLogView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&WebhookLogView) -> K) -> std::collections::HashMap<K, Vec<WebhookLogView>> where K: Eq + std::hash::Hash;
-}
-
-impl WebhookLogViewsExt for Vec<WebhookLogView> {
-    fn ids(&self) -> Vec<uuid::Uuid> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&WebhookLogView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&WebhookLogView) -> K) -> std::collections::HashMap<K, WebhookLogView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&WebhookLogView) -> K) -> std::collections::HashMap<K, Vec<WebhookLogView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct WebhookLogJson {
-    pub id: uuid::Uuid,
-    pub request_url: String,
-    pub request_method: String,
-    pub request_headers: Option<serde_json::Value>,
-    pub request_body: Option<String>,
-    pub response_status: Option<i32>,
-    pub response_body: Option<String>,
-    pub duration_ms: Option<i32>,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-}
-
-fn hydrate_view(row: WebhookLogRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> WebhookLogView {
-    let view = WebhookLogView {
+fn hydrate_record(row: WebhookLogRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> WebhookLogRecord {
+    let mut record = WebhookLogRecord {
         id: row.id,
         request_url: row.request_url,
         request_method: row.request_method,
@@ -136,31 +91,40 @@ fn hydrate_view(row: WebhookLogRow, _loc: &LocalizedMap, _base_url: Option<&str>
         duration_ms: row.duration_ms,
         created_at: row.created_at,
     };
-    view
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct WebhookLogWithRelations {
-    #[serde(flatten)]
-    pub row: WebhookLogView,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WebhookLogCol;
+impl WebhookLogCol {
+    pub const ID: Column<WebhookLogModel, uuid::Uuid> = Column::new("id");
+    pub const REQUEST_URL: Column<WebhookLogModel, String> = Column::new("request_url");
+    pub const REQUEST_METHOD: Column<WebhookLogModel, String> = Column::new("request_method");
+    pub const REQUEST_HEADERS: Column<WebhookLogModel, Option<serde_json::Value>> = Column::new("request_headers");
+    pub const REQUEST_BODY: Column<WebhookLogModel, Option<String>> = Column::new("request_body");
+    pub const RESPONSE_STATUS: Column<WebhookLogModel, Option<i32>> = Column::new("response_status");
+    pub const RESPONSE_BODY: Column<WebhookLogModel, Option<String>> = Column::new("response_body");
+    pub const DURATION_MS: Column<WebhookLogModel, Option<i32>> = Column::new("duration_ms");
+    pub const CREATED_AT: Column<WebhookLogModel, time::OffsetDateTime> = Column::new("created_at");
 }
 
-impl WebhookLogWithRelations {
-    pub fn into_row(self) -> WebhookLogView { self.row }
-}
-
-impl std::ops::Deref for WebhookLogWithRelations {
-    type Target = WebhookLogView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for WebhookLogWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_webhook_log_db_col(sql: &str) -> Option<WebhookLogDbCol> {
+    match sql {
+        "id" => Some(WebhookLogDbCol::Id),
+        "request_url" => Some(WebhookLogDbCol::RequestUrl),
+        "request_method" => Some(WebhookLogDbCol::RequestMethod),
+        "request_headers" => Some(WebhookLogDbCol::RequestHeaders),
+        "request_body" => Some(WebhookLogDbCol::RequestBody),
+        "response_status" => Some(WebhookLogDbCol::ResponseStatus),
+        "response_body" => Some(WebhookLogDbCol::ResponseBody),
+        "duration_ms" => Some(WebhookLogDbCol::DurationMs),
+        "created_at" => Some(WebhookLogDbCol::CreatedAt),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum WebhookLogCol {
+pub enum WebhookLogDbCol {
     Id,
     RequestUrl,
     RequestMethod,
@@ -172,48 +136,28 @@ pub enum WebhookLogCol {
     CreatedAt,
 }
 
-impl WebhookLogCol {
-    pub const fn all() -> &'static [WebhookLogCol] {
-        &[WebhookLogCol::Id, WebhookLogCol::RequestUrl, WebhookLogCol::RequestMethod, WebhookLogCol::RequestHeaders, WebhookLogCol::RequestBody, WebhookLogCol::ResponseStatus, WebhookLogCol::ResponseBody, WebhookLogCol::DurationMs, WebhookLogCol::CreatedAt]
+impl WebhookLogDbCol {
+    pub const fn all() -> &'static [WebhookLogDbCol] {
+        &[WebhookLogDbCol::Id, WebhookLogDbCol::RequestUrl, WebhookLogDbCol::RequestMethod, WebhookLogDbCol::RequestHeaders, WebhookLogDbCol::RequestBody, WebhookLogDbCol::ResponseStatus, WebhookLogDbCol::ResponseBody, WebhookLogDbCol::DurationMs, WebhookLogDbCol::CreatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            WebhookLogCol::Id => "id",
-            WebhookLogCol::RequestUrl => "request_url",
-            WebhookLogCol::RequestMethod => "request_method",
-            WebhookLogCol::RequestHeaders => "request_headers",
-            WebhookLogCol::RequestBody => "request_body",
-            WebhookLogCol::ResponseStatus => "response_status",
-            WebhookLogCol::ResponseBody => "response_body",
-            WebhookLogCol::DurationMs => "duration_ms",
-            WebhookLogCol::CreatedAt => "created_at",
+            WebhookLogDbCol::Id => "id",
+            WebhookLogDbCol::RequestUrl => "request_url",
+            WebhookLogDbCol::RequestMethod => "request_method",
+            WebhookLogDbCol::RequestHeaders => "request_headers",
+            WebhookLogDbCol::RequestBody => "request_body",
+            WebhookLogDbCol::ResponseStatus => "response_status",
+            WebhookLogDbCol::ResponseBody => "response_body",
+            WebhookLogDbCol::DurationMs => "duration_ms",
+            WebhookLogDbCol::CreatedAt => "created_at",
         }
     }
 }
 
-pub struct WebhookLog<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-}
-
-impl<'db> WebhookLog<'db> {
-    pub const TABLE: &'static str = "webhook_logs";
-    pub const MODEL_KEY: &'static str = "webhook_log";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> WebhookLogQuery<'db> { WebhookLogQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> WebhookLogInsert<'db> { WebhookLogInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> WebhookLogUpdate<'db> { WebhookLogUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: uuid::Uuid) -> Result<Option<WebhookLogWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: uuid::Uuid) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-}
 
 #[derive(Clone)]
-pub struct WebhookLogQuery<'db> {
+pub struct WebhookLogQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -236,122 +180,121 @@ pub struct WebhookLogQuery<'db> {
 
 
 
-impl<'db> WebhookLogQuery<'db> {
+impl<'db> WebhookLogQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, request_url, request_method, request_headers, request_body, response_status, response_body, duration_ms, created_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> WebhookLogUnsafeQuery<'db> { WebhookLogUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_url(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::RequestUrl.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::RequestUrl.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_url_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::RequestUrl.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::RequestUrl.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_method(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::RequestMethod.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::RequestMethod.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_method_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::RequestMethod.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::RequestMethod.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_headers(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::RequestHeaders.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::RequestHeaders.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_headers_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::RequestHeaders.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::RequestHeaders.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_body(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::RequestBody.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::RequestBody.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_body_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::RequestBody.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::RequestBody.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_status(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::ResponseStatus.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::ResponseStatus.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_status_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::ResponseStatus.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::ResponseStatus.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_body(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::ResponseBody.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::ResponseBody.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_body_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::ResponseBody.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::ResponseBody.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_duration_ms(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::DurationMs.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::DurationMs.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_duration_ms_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::DurationMs.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::DurationMs.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: uuid::Uuid) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(WebhookLogCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: WebhookLogCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(WebhookLogDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: WebhookLogDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -370,7 +313,7 @@ impl<'db> WebhookLogQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: WebhookLogCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: WebhookLogDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -385,7 +328,7 @@ impl<'db> WebhookLogQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: WebhookLogCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: WebhookLogDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -397,7 +340,7 @@ impl<'db> WebhookLogQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: WebhookLogCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: WebhookLogDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -405,15 +348,15 @@ impl<'db> WebhookLogQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: WebhookLogCol) -> Self {
+    pub fn where_null(mut self, col: WebhookLogDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: WebhookLogCol) -> Self {
+    pub fn where_not_null(mut self, col: WebhookLogDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: WebhookLogCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: WebhookLogDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -467,7 +410,7 @@ impl<'db> WebhookLogQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[WebhookLogCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[WebhookLogDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, request_url, request_method, request_headers, request_body, response_status, response_body, duration_ms, created_at".to_string());
         } else {
@@ -479,7 +422,7 @@ impl<'db> WebhookLogQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[WebhookLogCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[WebhookLogDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -560,26 +503,26 @@ impl<'db> WebhookLogQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: WebhookLogCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: WebhookLogDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: WebhookLogCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: WebhookLogDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: WebhookLogCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: WebhookLogDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[WebhookLogCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[WebhookLogDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[WebhookLogCol]) -> Self {
+    pub fn select(mut self, cols: &[WebhookLogDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -627,7 +570,7 @@ impl<'db> WebhookLogQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[WebhookLogCol]) -> Self {
+    pub fn group_by(mut self, cols: &[WebhookLogDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -702,7 +645,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<WebhookLogWithRelations>> {
+    pub async fn get(self) -> Result<Vec<WebhookLogRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -752,61 +695,61 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
-            out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            out_vec.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let out_vec: Vec<WebhookLogWithRelations> = out_vec.into_iter().map(|v| WebhookLogWithRelations { row: v }).collect();
+        let out_vec: Vec<WebhookLogRecord> = out_vec;
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<WebhookLogWithRelations>> {
+    pub async fn first(self) -> Result<Option<WebhookLogRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<WebhookLogWithRelations> {
+    pub async fn first_or_fail(self) -> Result<WebhookLogRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("webhook_logs: record not found"))
     }
 
-    pub async fn find(self, id: uuid::Uuid) -> Result<Option<WebhookLogWithRelations>> {
+    pub async fn find(self, id: uuid::Uuid) -> Result<Option<WebhookLogRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<WebhookLogWithRelations> {
+    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<WebhookLogRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("webhook_logs: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(WebhookLogInsert<'db>) -> WebhookLogInsert<'db>) -> Result<WebhookLogWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(WebhookLogCreateInner<'db>) -> WebhookLogCreateInner<'db>) -> Result<WebhookLogRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(WebhookLogInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(WebhookLogCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        WebhookLog::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        WebhookLogQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(WebhookLogUpdate<'db>) -> WebhookLogUpdate<'db>,
-        on_create: impl FnOnce(WebhookLogInsert<'db>) -> WebhookLogInsert<'db>,
-    ) -> Result<WebhookLogWithRelations> {
+        on_update: impl FnOnce(WebhookLogPatchInner<'db>) -> WebhookLogPatchInner<'db>,
+        on_create: impl FnOnce(WebhookLogCreateInner<'db>) -> WebhookLogCreateInner<'db>,
+    ) -> Result<WebhookLogRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = WebhookLogUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = WebhookLogPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return WebhookLog::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return WebhookLogQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(WebhookLogInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(WebhookLogCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        WebhookLog::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        WebhookLogQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: WebhookLogCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: WebhookLogDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -821,7 +764,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: WebhookLogCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: WebhookLogDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -877,13 +820,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<WebhookLogWithRelations>) -> Fut,
+        F: FnMut(Vec<WebhookLogRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = WebhookLogQuery::new(db.clone(), self.base_url.clone());
+            let mut query = WebhookLogQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -897,11 +840,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(WebhookLogCol::CreatedAt, OrderDir::Desc)
+        self.order_by(WebhookLogDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(WebhookLogCol::CreatedAt, OrderDir::Asc)
+        self.order_by(WebhookLogDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -912,7 +855,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<WebhookLogWithRelations> {
+    pub async fn sole(self) -> Result<WebhookLogRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -931,7 +874,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&WebhookLogWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&WebhookLogRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -939,7 +882,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: WebhookLogCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: WebhookLogDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "webhook_logs".to_string());
@@ -960,7 +903,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: WebhookLogCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: WebhookLogDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "webhook_logs".to_string());
@@ -981,7 +924,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: WebhookLogCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: WebhookLogDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "webhook_logs".to_string());
@@ -1002,7 +945,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: WebhookLogCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: WebhookLogDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "webhook_logs".to_string());
@@ -1023,7 +966,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<WebhookLogWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<WebhookLogRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1074,9 +1017,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
-            data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            data.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let data: Vec<WebhookLogWithRelations> = data.into_iter().map(|v| WebhookLogWithRelations { row: v }).collect();
+        let data: Vec<WebhookLogRecord> = data;
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn to_sql(&self) -> (String, Vec<BindValue>) {
@@ -1196,38 +1139,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct WebhookLogUnsafeQuery<'db> {
-    inner: WebhookLogQuery<'db>,
-}
 
-impl<'db> WebhookLogUnsafeQuery<'db> {
-    fn new(inner: WebhookLogQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> WebhookLogQuery<'db> { self.inner }
-}
-
-
-pub struct WebhookLogInsert<'db> {
+pub struct WebhookLogCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<WebhookLogCol>,
+    cols: Vec<WebhookLogDbCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<WebhookLogCol>,
+    conflict_cols: Vec<WebhookLogDbCol>,
 }
 
-impl<'db> WebhookLogInsert<'db> {
+impl<'db> WebhookLogCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1241,121 +1163,121 @@ impl<'db> WebhookLogInsert<'db> {
 
 
 pub fn set_id(mut self, val: uuid::Uuid) -> Self {
-        self.cols.push(WebhookLogCol::Id);
+        self.cols.push(WebhookLogDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_request_url(mut self, val: String) -> Self {
-        self.cols.push(WebhookLogCol::RequestUrl);
+        self.cols.push(WebhookLogDbCol::RequestUrl);
         self.binds.push(val.into());
         self
     }
     pub fn set_request_method(mut self, val: String) -> Self {
-        self.cols.push(WebhookLogCol::RequestMethod);
+        self.cols.push(WebhookLogDbCol::RequestMethod);
         self.binds.push(val.into());
         self
     }
     pub fn set_request_headers(mut self, val: Option<serde_json::Value>) -> Self {
-        self.cols.push(WebhookLogCol::RequestHeaders);
+        self.cols.push(WebhookLogDbCol::RequestHeaders);
         self.binds.push(val.into());
         self
     }
     pub fn set_request_body(mut self, val: Option<String>) -> Self {
-        self.cols.push(WebhookLogCol::RequestBody);
+        self.cols.push(WebhookLogDbCol::RequestBody);
         self.binds.push(val.into());
         self
     }
     pub fn set_response_status(mut self, val: Option<i32>) -> Self {
-        self.cols.push(WebhookLogCol::ResponseStatus);
+        self.cols.push(WebhookLogDbCol::ResponseStatus);
         self.binds.push(val.into());
         self
     }
     pub fn set_response_body(mut self, val: Option<String>) -> Self {
-        self.cols.push(WebhookLogCol::ResponseBody);
+        self.cols.push(WebhookLogDbCol::ResponseBody);
         self.binds.push(val.into());
         self
     }
     pub fn set_duration_ms(mut self, val: Option<i32>) -> Self {
-        self.cols.push(WebhookLogCol::DurationMs);
+        self.cols.push(WebhookLogDbCol::DurationMs);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(WebhookLogCol::CreatedAt);
+        self.cols.push(WebhookLogDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[WebhookLogCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[WebhookLogDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[WebhookLogCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[WebhookLogDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<WebhookLogCreateInput> {
-        let mut input = WebhookLogCreateInput::default();
+    fn to_create_input(&self) -> Result<WebhookLogCreate> {
+        let mut input = WebhookLogCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                WebhookLogCol::Id => {
+                WebhookLogDbCol::Id => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                WebhookLogCol::RequestUrl => {
+                WebhookLogDbCol::RequestUrl => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.request_url = FieldInput::Set(value);
                 }
-                WebhookLogCol::RequestMethod => {
+                WebhookLogDbCol::RequestMethod => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.request_method = FieldInput::Set(value);
                 }
-                WebhookLogCol::RequestHeaders => {
+                WebhookLogDbCol::RequestHeaders => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
             };
                     input.request_headers = FieldInput::Set(value);
                 }
-                WebhookLogCol::RequestBody => {
+                WebhookLogDbCol::RequestBody => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.request_body = FieldInput::Set(value);
                 }
-                WebhookLogCol::ResponseStatus => {
+                WebhookLogDbCol::ResponseStatus => {
                     let value = match bind {
                 BindValue::I32Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i32>'", other),
             };
                     input.response_status = FieldInput::Set(value);
                 }
-                WebhookLogCol::ResponseBody => {
+                WebhookLogDbCol::ResponseBody => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.response_body = FieldInput::Set(value);
                 }
-                WebhookLogCol::DurationMs => {
+                WebhookLogDbCol::DurationMs => {
                     let value = match bind {
                 BindValue::I32Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i32>'", other),
             };
                     input.duration_ms = FieldInput::Set(value);
                 }
-                WebhookLogCol::CreatedAt => {
+                WebhookLogDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1368,7 +1290,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
     }
 
 
-pub async fn save(self) -> Result<WebhookLogView> {
+pub async fn save(self) -> Result<WebhookLogRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -1386,7 +1308,7 @@ pub async fn save(self) -> Result<WebhookLogView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1405,10 +1327,10 @@ pub async fn save(self) -> Result<WebhookLogView> {
                         Err(err) => log_observer_error("created", "webhook_log", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "webhook_log", table: "webhook_logs", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -1420,17 +1342,17 @@ pub async fn save(self) -> Result<WebhookLogView> {
                         Err(err) => log_observer_error("created", "webhook_log", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(WebhookLogView, WebhookLogRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(WebhookLogRecord, WebhookLogRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, WebhookLogCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, WebhookLogDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(WebhookLogCol::CreatedAt);
+            cols.push(WebhookLogDbCol::CreatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1464,20 +1386,20 @@ pub async fn save(self) -> Result<WebhookLogView> {
         let row = db.fetch_one(q).await?;
         record_profiled_query("webhook_logs", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
-        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct WebhookLogUpdate<'db> {
+pub struct WebhookLogPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(WebhookLogCol, BindValue, SetMode)>,
+    sets: Vec<(WebhookLogDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> WebhookLogUpdate<'db> {
+impl<'db> WebhookLogPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1487,100 +1409,99 @@ impl<'db> WebhookLogUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> WebhookLogUnsafeUpdate<'db> { WebhookLogUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: uuid::Uuid) -> Self {
-        self.sets.push((WebhookLogCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((WebhookLogDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn set_request_url(mut self, val: String) -> Self {
-        self.sets.push((WebhookLogCol::RequestUrl, val.into(), SetMode::Assign));
+        self.sets.push((WebhookLogDbCol::RequestUrl, val.into(), SetMode::Assign));
         self
     }
     pub fn set_request_method(mut self, val: String) -> Self {
-        self.sets.push((WebhookLogCol::RequestMethod, val.into(), SetMode::Assign));
+        self.sets.push((WebhookLogDbCol::RequestMethod, val.into(), SetMode::Assign));
         self
     }
     pub fn set_request_headers(mut self, val: Option<serde_json::Value>) -> Self {
-        self.sets.push((WebhookLogCol::RequestHeaders, val.into(), SetMode::Assign));
+        self.sets.push((WebhookLogDbCol::RequestHeaders, val.into(), SetMode::Assign));
         self
     }
     pub fn set_request_body(mut self, val: Option<String>) -> Self {
-        self.sets.push((WebhookLogCol::RequestBody, val.into(), SetMode::Assign));
+        self.sets.push((WebhookLogDbCol::RequestBody, val.into(), SetMode::Assign));
         self
     }
     pub fn set_response_status(mut self, val: Option<i32>) -> Self {
-        self.sets.push((WebhookLogCol::ResponseStatus, val.into(), SetMode::Assign));
+        self.sets.push((WebhookLogDbCol::ResponseStatus, val.into(), SetMode::Assign));
         self
     }
     pub fn set_response_body(mut self, val: Option<String>) -> Self {
-        self.sets.push((WebhookLogCol::ResponseBody, val.into(), SetMode::Assign));
+        self.sets.push((WebhookLogDbCol::ResponseBody, val.into(), SetMode::Assign));
         self
     }
     pub fn set_duration_ms(mut self, val: Option<i32>) -> Self {
-        self.sets.push((WebhookLogCol::DurationMs, val.into(), SetMode::Assign));
+        self.sets.push((WebhookLogDbCol::DurationMs, val.into(), SetMode::Assign));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((WebhookLogCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((WebhookLogDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_url(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::RequestUrl.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::RequestUrl.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_method(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::RequestMethod.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::RequestMethod.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_headers(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::RequestHeaders.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::RequestHeaders.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_body(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::RequestBody.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::RequestBody.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_status(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::ResponseStatus.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::ResponseStatus.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_body(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::ResponseBody.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::ResponseBody.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_duration_ms(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::DurationMs.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::DurationMs.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", WebhookLogCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", WebhookLogDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: WebhookLogCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: WebhookLogDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1599,11 +1520,11 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<WebhookLogUpdateChanges> {
-        let mut changes = WebhookLogUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<WebhookLogChanges> {
+        let mut changes = WebhookLogChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                WebhookLogCol::Id => {
+                WebhookLogDbCol::Id => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
@@ -1614,7 +1535,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WebhookLogCol::RequestUrl => {
+                WebhookLogDbCol::RequestUrl => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1625,7 +1546,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WebhookLogCol::RequestMethod => {
+                WebhookLogDbCol::RequestMethod => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1636,7 +1557,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WebhookLogCol::RequestHeaders => {
+                WebhookLogDbCol::RequestHeaders => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
@@ -1647,7 +1568,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WebhookLogCol::RequestBody => {
+                WebhookLogDbCol::RequestBody => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -1658,7 +1579,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WebhookLogCol::ResponseStatus => {
+                WebhookLogDbCol::ResponseStatus => {
                     let value = match bind {
                 BindValue::I32Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i32>'", other),
@@ -1669,7 +1590,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WebhookLogCol::ResponseBody => {
+                WebhookLogDbCol::ResponseBody => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -1680,7 +1601,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WebhookLogCol::DurationMs => {
+                WebhookLogDbCol::DurationMs => {
                     let value = match bind {
                 BindValue::I32Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i32>'", other),
@@ -1691,7 +1612,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                WebhookLogCol::CreatedAt => {
+                WebhookLogDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1735,7 +1656,7 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<WebhookLogUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<WebhookLogChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
@@ -1826,30 +1747,20 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct WebhookLogUnsafeUpdate<'db> {
-    inner: WebhookLogUpdate<'db>,
-}
-
-impl<'db> WebhookLogUnsafeUpdate<'db> {
-    fn new(inner: WebhookLogUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> WebhookLogUpdate<'db> { self.inner }
-}
 
 pub struct WebhookLogTableAdapter;
 impl WebhookLogTableAdapter {
-    fn parse_col(name: &str) -> Option<WebhookLogCol> {
+    fn parse_col(name: &str) -> Option<WebhookLogDbCol> {
         match name {
-            "id" => Some(WebhookLogCol::Id),
-            "request_url" => Some(WebhookLogCol::RequestUrl),
-            "request_method" => Some(WebhookLogCol::RequestMethod),
-            "request_headers" => Some(WebhookLogCol::RequestHeaders),
-            "request_body" => Some(WebhookLogCol::RequestBody),
-            "response_status" => Some(WebhookLogCol::ResponseStatus),
-            "response_body" => Some(WebhookLogCol::ResponseBody),
-            "duration_ms" => Some(WebhookLogCol::DurationMs),
-            "created_at" => Some(WebhookLogCol::CreatedAt),
+            "id" => Some(WebhookLogDbCol::Id),
+            "request_url" => Some(WebhookLogDbCol::RequestUrl),
+            "request_method" => Some(WebhookLogDbCol::RequestMethod),
+            "request_headers" => Some(WebhookLogDbCol::RequestHeaders),
+            "request_body" => Some(WebhookLogDbCol::RequestBody),
+            "response_status" => Some(WebhookLogDbCol::ResponseStatus),
+            "response_body" => Some(WebhookLogDbCol::ResponseBody),
+            "duration_ms" => Some(WebhookLogDbCol::DurationMs),
+            "created_at" => Some(WebhookLogDbCol::CreatedAt),
             _ => None,
         }
     }
@@ -1863,12 +1774,12 @@ impl WebhookLogTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<WebhookLogCol> {
+    fn parse_like_col(name: &str) -> Option<WebhookLogDbCol> {
         match name {
-            "request_url" => Some(WebhookLogCol::RequestUrl),
-            "request_method" => Some(WebhookLogCol::RequestMethod),
-            "request_body" => Some(WebhookLogCol::RequestBody),
-            "response_body" => Some(WebhookLogCol::ResponseBody),
+            "request_url" => Some(WebhookLogDbCol::RequestUrl),
+            "request_method" => Some(WebhookLogDbCol::RequestMethod),
+            "request_body" => Some(WebhookLogDbCol::RequestBody),
+            "response_body" => Some(WebhookLogDbCol::ResponseBody),
             _ => None,
         }
     }
@@ -1913,8 +1824,8 @@ impl WebhookLogTableAdapter {
     }
 }
 impl GeneratedTableAdapter for WebhookLogTableAdapter {
-    type Query<'db> = WebhookLogQuery<'db>;
-    type Row = WebhookLogWithRelations;
+    type Query<'db> = Query<'db, WebhookLogModel>;
+    type Row = WebhookLogRecord;
     fn model_key(&self) -> &'static str { "WebhookLog" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "request_url", "request_method", "request_body", "response_status", "response_body", "duration_ms", "created_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at"] }
@@ -1949,7 +1860,7 @@ impl GeneratedTableAdapter for WebhookLogTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: WebhookLogQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<WebhookLogQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, WebhookLogModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, WebhookLogModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -2043,29 +1954,29 @@ impl GeneratedTableAdapter for WebhookLogTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: WebhookLogQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<WebhookLogQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, WebhookLogModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, WebhookLogModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(WebhookLogCol::Id, dir),
-            "request_url" => query.order_by(WebhookLogCol::RequestUrl, dir),
-            "request_method" => query.order_by(WebhookLogCol::RequestMethod, dir),
-            "request_headers" => query.order_by(WebhookLogCol::RequestHeaders, dir),
-            "request_body" => query.order_by(WebhookLogCol::RequestBody, dir),
-            "response_status" => query.order_by(WebhookLogCol::ResponseStatus, dir),
-            "response_body" => query.order_by(WebhookLogCol::ResponseBody, dir),
-            "duration_ms" => query.order_by(WebhookLogCol::DurationMs, dir),
-            "created_at" => query.order_by(WebhookLogCol::CreatedAt, dir),
+            "id" => query.order_by(WebhookLogDbCol::Id, dir),
+            "request_url" => query.order_by(WebhookLogDbCol::RequestUrl, dir),
+            "request_method" => query.order_by(WebhookLogDbCol::RequestMethod, dir),
+            "request_headers" => query.order_by(WebhookLogDbCol::RequestHeaders, dir),
+            "request_body" => query.order_by(WebhookLogDbCol::RequestBody, dir),
+            "response_status" => query.order_by(WebhookLogDbCol::ResponseStatus, dir),
+            "response_body" => query.order_by(WebhookLogDbCol::ResponseBody, dir),
+            "duration_ms" => query.order_by(WebhookLogDbCol::DurationMs, dir),
+            "created_at" => query.order_by(WebhookLogDbCol::CreatedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: WebhookLogQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<WebhookLogQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, WebhookLogModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, WebhookLogModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &WebhookLogWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &WebhookLogRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "request_url" => Some(row.request_url.clone()),
@@ -2078,10 +1989,10 @@ impl GeneratedTableAdapter for WebhookLogTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: WebhookLogQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, WebhookLogModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: WebhookLogQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<WebhookLogWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, WebhookLogModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<WebhookLogRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -2107,20 +2018,20 @@ impl Default for WebhookLogDataTableConfig {
     }
 }
 pub trait WebhookLogDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: WebhookLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> WebhookLogQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, WebhookLogModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, WebhookLogModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: WebhookLogQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<WebhookLogQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: WebhookLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<WebhookLogQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut WebhookLogWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: WebhookLogWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, WebhookLogModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, WebhookLogModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, WebhookLogModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, WebhookLogModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut WebhookLogRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: WebhookLogRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         Ok(record)
     }
-    fn row_to_record(&self, row: WebhookLogWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: WebhookLogRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: WebhookLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, WebhookLogModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct WebhookLogDefaultDataTableHooks;
@@ -2158,15 +2069,15 @@ impl<H: WebhookLogDataTableHooks> WebhookLogDataTable<H> {
 impl<H: WebhookLogDataTableHooks> AutoDataTable for WebhookLogDataTable<H> {
     type Adapter = WebhookLogTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> WebhookLogQuery<'db> {
-        self.hooks.scope(WebhookLog::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, WebhookLogModel> {
+        self.hooks.scope(WebhookLogModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: WebhookLogQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<WebhookLogQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: WebhookLogQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<WebhookLogQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut WebhookLogWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: WebhookLogWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: WebhookLogQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, WebhookLogModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, WebhookLogModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, WebhookLogModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, WebhookLogModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut WebhookLogRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: WebhookLogRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, WebhookLogModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -2176,10 +2087,453 @@ impl<H: WebhookLogDataTableHooks> AutoDataTable for WebhookLogDataTable<H> {
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for WebhookLogView {
+impl ActiveRecord for WebhookLogRecord {
     type Id = uuid::Uuid;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        WebhookLog::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        WebhookLogModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct WebhookLogModel;
+impl WebhookLogModel {
+    pub const TABLE: &'static str = "webhook_logs";
+    pub const MODEL_KEY: &'static str = "webhook_log";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, WebhookLogModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, WebhookLogModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, WebhookLogModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, WebhookLogModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, WebhookLogModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, WebhookLogModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: uuid::Uuid) -> Result<Option<WebhookLogRecord>> {
+        WebhookLogQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for WebhookLogModel {
+    type Pk = uuid::Uuid;
+    type Record = WebhookLogRecord;
+    type Create = WebhookLogCreate;
+    type Changes = WebhookLogChanges;
+    const TABLE: &'static str = WebhookLogModel::TABLE;
+    const MODEL_KEY: &'static str = WebhookLogModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for WebhookLogModel {
+    type InnerQuery<'db> = WebhookLogQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        WebhookLogQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for WebhookLogModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for WebhookLogModel {
+    type InnerCreate<'db> = WebhookLogCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        WebhookLogCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            WebhookLogQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("webhook_logs: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<WebhookLogModel> for WebhookLogDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <WebhookLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<WebhookLogModel>>::Value) -> anyhow::Result<<WebhookLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            WebhookLogDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestUrl => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestMethod => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestHeaders => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestBody => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::ResponseStatus => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::ResponseBody => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::DurationMs => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<WebhookLogModel> for Column<WebhookLogModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <WebhookLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<WebhookLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_webhook_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            WebhookLogDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestUrl => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestMethod => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestHeaders => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestBody => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::ResponseStatus => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::ResponseBody => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::DurationMs => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            WebhookLogDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<WebhookLogModel> for WebhookLogDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <WebhookLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <WebhookLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <WebhookLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <WebhookLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<WebhookLogModel> for Column<WebhookLogModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <WebhookLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <WebhookLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<WebhookLogDbCol> = fields.iter().map(|field| resolve_webhook_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <WebhookLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <WebhookLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<WebhookLogDbCol> = fields.iter().map(|field| resolve_webhook_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for WebhookLogModel {
+    type InnerQuery<'db> = WebhookLogQueryInner<'db>;
+    type InnerPatch<'db> = WebhookLogPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        WebhookLogPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(WebhookLogDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = WebhookLogPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", WebhookLogDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM webhook_logs", WebhookLogDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, uuid::Uuid>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = WebhookLogQueryInner::new(db, base_url);
+            query.where_in(WebhookLogDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<WebhookLogModel> for WebhookLogDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <WebhookLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<WebhookLogModel>>::Value) -> anyhow::Result<<WebhookLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            WebhookLogDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestUrl => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestMethod => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestHeaders => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestBody => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::ResponseStatus => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::ResponseBody => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::DurationMs => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<WebhookLogModel> for Column<WebhookLogModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <WebhookLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<WebhookLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_webhook_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            WebhookLogDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestUrl => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestMethod => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestHeaders => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::RequestBody => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::ResponseStatus => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::ResponseBody => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::DurationMs => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            WebhookLogDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<WebhookLogModel> for WebhookLogDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<WebhookLogModel>>::Value) -> <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<WebhookLogModel>>::Value) -> <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<WebhookLogModel>>::Value]) -> <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<WebhookLogModel> for Column<WebhookLogModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_webhook_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_webhook_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_webhook_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_webhook_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_webhook_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <WebhookLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_webhook_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
 

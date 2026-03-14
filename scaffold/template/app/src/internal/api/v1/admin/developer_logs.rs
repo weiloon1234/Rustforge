@@ -9,7 +9,7 @@ use core_web::{
     response::ApiResponse,
 };
 use generated::guards::AdminGuard;
-use generated::models::enums::AdminType;
+use generated::models::AdminType;
 
 use crate::{
     contracts::api::v1::admin::developer_logs::{

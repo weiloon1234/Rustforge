@@ -69,7 +69,7 @@ export function CookbookOverview() {
                         <code>app/src/contracts/datatable/*</code>
                     </li>
                     <li>
-                        Generated view method surface: <code>app/models/*.rs</code> via <code>#[rf_view_impl]</code>
+                        Generated record method surface: <code>app/models/*.rs</code> via <code>#[rf_record_impl]</code>
                     </li>
                     <li>
                         Starter-only operational guides: <code>scaffold/template/docs/*</code>

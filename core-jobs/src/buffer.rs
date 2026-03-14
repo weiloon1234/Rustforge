@@ -1,7 +1,7 @@
 use crate::{queue::RedisQueue, Job, JobPayload};
 use core_db::{
     common::sql::{DbConn, Op, OrderDir},
-    generated::models::{OutboxJob, OutboxJobCol},
+    generated::models::{OutboxJobCol, OutboxJobModel},
 };
 
 /// Transactional Job Buffer (Outbox Pattern).
@@ -25,10 +25,9 @@ impl<'a> JobBuffer<'a> {
         };
         let payload_json = serde_json::to_value(payload)?;
 
-        OutboxJob::new(self.db.clone(), None)
-            .insert()
-            .set_queue(J::QUEUE.to_string())
-            .set_payload(payload_json)
+        OutboxJobModel::create(self.db.clone())
+            .set(OutboxJobCol::QUEUE, J::QUEUE.to_string())?
+            .set(OutboxJobCol::PAYLOAD, payload_json)?
             .save()
             .await?;
 
@@ -47,12 +46,11 @@ impl OutboxFlusher {
 
         let count = {
             let conn = scope.conn();
-            let rows = OutboxJob::new(conn.clone(), None)
-                .query()
-                .order_by(OutboxJobCol::CreatedAt, OrderDir::Asc)
+            let rows = OutboxJobModel::query(conn.clone())
+                .order_by(OutboxJobCol::CREATED_AT, OrderDir::Asc)
                 .for_update_skip_locked()
                 .limit(100)
-                .get()
+                .all()
                 .await?;
 
             if rows.is_empty() {
@@ -74,9 +72,8 @@ impl OutboxFlusher {
                 let _: () = pipe.query_async(&mut redis_conn).await?;
 
                 for id in ids {
-                    OutboxJob::new(conn.clone(), None)
-                        .query()
-                        .where_id(Op::Eq, id)
+                    OutboxJobModel::query(conn.clone())
+                        .where_col(OutboxJobCol::ID, Op::Eq, id)
                         .delete()
                         .await?;
                 }

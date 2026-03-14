@@ -18,7 +18,7 @@ Add new guard config:
 `[auth.guards.{portal}]` with `provider`, `ttl_min`, `refresh_ttl_days`.
 
 2. `app/models/{portal}.rs`
-Define the auth model, related enums, and any generated `View` helpers with `#[rf_model]`, `#[rf_db_enum]`, and `#[rf_view_impl]`.
+Define the auth model, related enums, and any generated record helpers with `#[rf_model]`, `#[rf_db_enum]`, and `#[rf_record_impl]`.
 
 3. `app/permissions.toml`
 Add permission catalog entries scoped to the new guard.

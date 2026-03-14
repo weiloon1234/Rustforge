@@ -1,22 +1,22 @@
 # Computed Model Values Guide
 
-Use this when you need derived/read-only fields or custom methods on generated `View` types without changing the DB schema.
+Use this when you need derived/read-only fields or custom methods on generated `Record` types without changing the DB schema.
 
 ## Where to implement
 
 File: `app/models/{model_name}.rs`
 
-- Put methods directly inside `#[rf_view_impl] impl XxxView` or `#[rf_with_relations_impl] impl XxxWithRelations`.
+- Put methods directly inside `#[rf_record_impl] impl XxxRecord`.
 - Plain methods stay callable as normal generated methods.
 - `#[rf_computed]` is only for methods that should also be exported into generated JSON shapes.
 
-## Example: `UserCreditTransactionView`
+## Example: `UserCreditTransactionRecord`
 
 File: `app/models/user_credit_transaction.rs`
 
 ```rust
-#[rf_view_impl]
-impl UserCreditTransactionView {
+#[rf_record_impl]
+impl UserCreditTransactionRecord {
     pub fn enrich_transaction_type_explained(&mut self) {
         // custom_description -> params interpolation -> keep default
     }
@@ -25,10 +25,10 @@ impl UserCreditTransactionView {
 
 ## Consume in datatables
 
-Call the generated method directly on the `WithRelations` row (which `DerefMut`s to `View`):
+Call the generated method directly on the generated record:
 
 ```rust
-fn map_row(&self, row: &mut UserCreditTransactionWithRelations, ..) -> anyhow::Result<()> {
+fn map_row(&self, row: &mut UserCreditTransactionRecord, ..) -> anyhow::Result<()> {
     row.enrich_transaction_type_explained();
     Ok(())
 }
@@ -36,7 +36,7 @@ fn map_row(&self, row: &mut UserCreditTransactionWithRelations, ..) -> anyhow::R
 
 ## Consume in API handlers / workflows
 
-Same pattern: call on the generated View directly.
+Same pattern: call on the generated record directly.
 
 ```rust
 let identity = admin_view.identity();
@@ -44,7 +44,7 @@ let identity = admin_view.identity();
 
 ## Expose to API DTOs
 
-Add computed field on output contracts and map from the View, or mark the method `#[rf_computed]` if it should also be emitted by generated `to_json()` output.
+Add computed field on output contracts and map from the record, or mark the method `#[rf_computed]` if it should also be emitted by generated export output.
 
 ```rust
 identity: admin.identity(),

@@ -6,20 +6,20 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
-use crate::generated::models::admin::{AdminCol, AdminQuery, AdminRow};
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
+use crate::generated::models::admin::{AdminDbCol, AdminModel, AdminRow};
 use super::enums::*;
 const HAS_CREATED_AT: bool = true;
 const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct AuditLogCreateInput {
+pub struct AuditLogCreate {
     pub id: FieldInput<i64>,
     pub admin_id: FieldInput<i64>,
     pub action: FieldInput<AuditAction>,
@@ -32,7 +32,7 @@ pub struct AuditLogCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct AuditLogUpdateChanges {
+pub struct AuditLogChanges {
     pub id: Option<FieldChange<i64>>,
     pub admin_id: Option<FieldChange<i64>>,
     pub action: Option<FieldChange<AuditAction>>,
@@ -59,7 +59,7 @@ pub struct AuditLogRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AuditLogView {
+pub struct AuditLogRecord {
     pub id: i64,
     pub admin_id: i64,
     pub action: AuditAction,
@@ -70,61 +70,17 @@ pub struct AuditLogView {
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
     pub action_explained: String,
+    pub admin: Option<AdminRow>,
 }
 
-impl AuditLogView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> AuditLogUpdate<'db> {
-        AuditLog::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &AuditLog<'db>) -> AuditLogUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> AuditLogJson {
-        AuditLogJson {
-            id: self.id.clone(),
-            admin_id: self.admin_id.clone(),
-            action: self.action.clone(),
-            table_name: self.table_name.clone(),
-            record_key: self.record_key.clone(),
-            old_data: self.old_data.clone(),
-            new_data: self.new_data.clone(),
-            created_at: self.created_at.clone(),
-            action_explained: self.action_explained.clone(),
-        }
+impl AuditLogRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, AuditLogModel> {
+        AuditLogModel::query(db.into()).where_col(AuditLogDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-pub trait AuditLogViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&AuditLogView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&AuditLogView) -> K) -> std::collections::HashMap<K, AuditLogView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&AuditLogView) -> K) -> std::collections::HashMap<K, Vec<AuditLogView>> where K: Eq + std::hash::Hash;
-}
-
-impl AuditLogViewsExt for Vec<AuditLogView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&AuditLogView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&AuditLogView) -> K) -> std::collections::HashMap<K, AuditLogView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&AuditLogView) -> K) -> std::collections::HashMap<K, Vec<AuditLogView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct AuditLogJson {
-    pub id: i64,
-    pub admin_id: i64,
-    pub action: AuditAction,
-    pub table_name: String,
-    pub record_key: String,
-    pub old_data: Option<serde_json::Value>,
-    pub new_data: Option<serde_json::Value>,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    pub action_explained: String,
-}
-
-fn hydrate_view(row: AuditLogRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> AuditLogView {
-    let view = AuditLogView {
+fn hydrate_record(row: AuditLogRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> AuditLogRecord {
+    let mut record = AuditLogRecord {
         id: row.id,
         admin_id: row.admin_id,
         action: row.action,
@@ -134,33 +90,55 @@ fn hydrate_view(row: AuditLogRow, _loc: &LocalizedMap, _base_url: Option<&str>) 
         new_data: row.new_data,
         created_at: row.created_at,
         action_explained: row.action.explained_label(),
+        admin: None,
     };
-    view
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct AuditLogWithRelations {
-    #[serde(flatten)]
-    pub row: AuditLogView,
-    pub admin: Option<AdminRow>,
+impl AuditLogRecord {
+    pub fn one<R>(&self, relation: R) -> Option<&R::Target>
+    where
+        R: core_db::common::model_api::RecordOneRelation<AuditLogModel>,
+    {
+        R::get(relation, self)
+    }
+    pub fn many<R>(&self, relation: R) -> &[R::Target]
+    where
+        R: core_db::common::model_api::RecordManyRelation<AuditLogModel>,
+    {
+        R::get(relation, self)
+    }
 }
 
-impl AuditLogWithRelations {
-    pub fn into_row(self) -> AuditLogView { self.row }
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AuditLogCol;
+impl AuditLogCol {
+    pub const ID: Column<AuditLogModel, i64> = Column::new("id");
+    pub const ADMIN_ID: Column<AuditLogModel, i64> = Column::new("admin_id");
+    pub const ACTION: Column<AuditLogModel, AuditAction> = Column::new("action");
+    pub const TABLE_NAME: Column<AuditLogModel, String> = Column::new("table_name");
+    pub const RECORD_KEY: Column<AuditLogModel, String> = Column::new("record_key");
+    pub const OLD_DATA: Column<AuditLogModel, Option<serde_json::Value>> = Column::new("old_data");
+    pub const NEW_DATA: Column<AuditLogModel, Option<serde_json::Value>> = Column::new("new_data");
+    pub const CREATED_AT: Column<AuditLogModel, time::OffsetDateTime> = Column::new("created_at");
 }
 
-impl std::ops::Deref for AuditLogWithRelations {
-    type Target = AuditLogView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for AuditLogWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_audit_log_db_col(sql: &str) -> Option<AuditLogDbCol> {
+    match sql {
+        "id" => Some(AuditLogDbCol::Id),
+        "admin_id" => Some(AuditLogDbCol::AdminId),
+        "action" => Some(AuditLogDbCol::Action),
+        "table_name" => Some(AuditLogDbCol::TableName),
+        "record_key" => Some(AuditLogDbCol::RecordKey),
+        "old_data" => Some(AuditLogDbCol::OldData),
+        "new_data" => Some(AuditLogDbCol::NewData),
+        "created_at" => Some(AuditLogDbCol::CreatedAt),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum AuditLogCol {
+pub enum AuditLogDbCol {
     Id,
     AdminId,
     Action,
@@ -171,44 +149,31 @@ pub enum AuditLogCol {
     CreatedAt,
 }
 
-impl AuditLogCol {
-    pub const fn all() -> &'static [AuditLogCol] {
-        &[AuditLogCol::Id, AuditLogCol::AdminId, AuditLogCol::Action, AuditLogCol::TableName, AuditLogCol::RecordKey, AuditLogCol::OldData, AuditLogCol::NewData, AuditLogCol::CreatedAt]
+impl AuditLogDbCol {
+    pub const fn all() -> &'static [AuditLogDbCol] {
+        &[AuditLogDbCol::Id, AuditLogDbCol::AdminId, AuditLogDbCol::Action, AuditLogDbCol::TableName, AuditLogDbCol::RecordKey, AuditLogDbCol::OldData, AuditLogDbCol::NewData, AuditLogDbCol::CreatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            AuditLogCol::Id => "id",
-            AuditLogCol::AdminId => "admin_id",
-            AuditLogCol::Action => "action",
-            AuditLogCol::TableName => "table_name",
-            AuditLogCol::RecordKey => "record_key",
-            AuditLogCol::OldData => "old_data",
-            AuditLogCol::NewData => "new_data",
-            AuditLogCol::CreatedAt => "created_at",
+            AuditLogDbCol::Id => "id",
+            AuditLogDbCol::AdminId => "admin_id",
+            AuditLogDbCol::Action => "action",
+            AuditLogDbCol::TableName => "table_name",
+            AuditLogDbCol::RecordKey => "record_key",
+            AuditLogDbCol::OldData => "old_data",
+            AuditLogDbCol::NewData => "new_data",
+            AuditLogDbCol::CreatedAt => "created_at",
         }
     }
 }
 
-pub struct AuditLog<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AuditLogRel;
+impl AuditLogRel {
+    pub const ADMIN: OneRelation<AuditLogModel, AdminRow, 0> = OneRelation::<AuditLogModel, AdminRow, 0>::new("admin");
 }
 
-impl<'db> AuditLog<'db> {
-    pub const TABLE: &'static str = "audit_logs";
-    pub const MODEL_KEY: &'static str = "audit_log";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> AuditLogQuery<'db> { AuditLogQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> AuditLogInsert<'db> { AuditLogInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> AuditLogUpdate<'db> { AuditLogUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<AuditLogWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-    pub async fn load_admin(&self, parents: &[AuditLogRow]) -> Result<HashMap<i64, Option<AdminRow>>> {
+async fn load_admin<'db>(db: DbConn<'db>, parents: &[AuditLogRow]) -> Result<HashMap<i64, Option<AdminRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -221,7 +186,7 @@ impl<'db> AuditLog<'db> {
         let sql = format!("SELECT * FROM admin WHERE id IN ({})", placeholders.join(", "));
         let mut q = sqlx::query_as::<_, AdminRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
-        let rows = self.db.fetch_all(q).await?;
+        let rows = db.fetch_all(q).await?;
         let mut by_pk: HashMap<i64, AdminRow> = HashMap::new();
         for row in rows { by_pk.insert(row.id.clone(), row); }
         let mut out = HashMap::new();
@@ -230,10 +195,9 @@ impl<'db> AuditLog<'db> {
         }
         Ok(out)
     }
-}
 
 #[derive(Clone)]
-pub struct AuditLogQuery<'db> {
+pub struct AuditLogQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -256,110 +220,109 @@ pub struct AuditLogQuery<'db> {
 
 
 
-impl<'db> AuditLogQuery<'db> {
+impl<'db> AuditLogQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, admin_id, action, table_name, record_key, old_data, new_data, created_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> AuditLogUnsafeQuery<'db> { AuditLogUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_action(mut self, op: Op, val: AuditAction) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::Action.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::Action.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_action_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::Action.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::Action.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_table_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::TableName.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::TableName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_table_name_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::TableName.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::TableName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_record_key(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::RecordKey.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::RecordKey.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_record_key_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::RecordKey.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::RecordKey.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_old_data(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::OldData.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::OldData.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_old_data_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::OldData.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::OldData.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_new_data(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::NewData.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::NewData.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_new_data_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::NewData.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::NewData.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(AuditLogCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AuditLogCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(AuditLogDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: AuditLogDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -378,7 +341,7 @@ impl<'db> AuditLogQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: AuditLogCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: AuditLogDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -393,7 +356,7 @@ impl<'db> AuditLogQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: AuditLogCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: AuditLogDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -405,7 +368,7 @@ impl<'db> AuditLogQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: AuditLogCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: AuditLogDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -413,15 +376,15 @@ impl<'db> AuditLogQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: AuditLogCol) -> Self {
+    pub fn where_null(mut self, col: AuditLogDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: AuditLogCol) -> Self {
+    pub fn where_not_null(mut self, col: AuditLogDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: AuditLogCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: AuditLogDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -475,7 +438,7 @@ impl<'db> AuditLogQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[AuditLogCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[AuditLogDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, admin_id, action, table_name, record_key, old_data, new_data, created_at".to_string());
         } else {
@@ -487,7 +450,7 @@ impl<'db> AuditLogQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[AuditLogCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[AuditLogDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -568,26 +531,26 @@ impl<'db> AuditLogQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: AuditLogCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: AuditLogDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: AuditLogCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: AuditLogDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: AuditLogCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: AuditLogDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[AuditLogCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[AuditLogDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[AuditLogCol]) -> Self {
+    pub fn select(mut self, cols: &[AuditLogDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -635,7 +598,7 @@ impl<'db> AuditLogQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[AuditLogCol]) -> Self {
+    pub fn group_by(mut self, cols: &[AuditLogDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -662,10 +625,10 @@ impl<'db> AuditLogQuery<'db> {
         self.offset = Some(n);
         self
     }
-    pub fn where_has_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+    pub fn where_has_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "admin.id = audit_logs.admin_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -675,10 +638,10 @@ impl<'db> AuditLogQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_doesnt_have_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+    pub fn where_doesnt_have_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "admin.id = audit_logs.admin_id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM admin WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -688,10 +651,10 @@ impl<'db> AuditLogQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn or_where_has_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+    pub fn or_where_has_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "admin.id = audit_logs.admin_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -753,7 +716,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<AuditLogWithRelations>> {
+    pub async fn get(self) -> Result<Vec<AuditLogRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -799,71 +762,68 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("audit_logs", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = AuditLog { db: db.clone(), base_url: base_url.clone() };
-        let admin = m.load_admin(&rows).await?;
+        let admin = load_admin(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
             let key = r.id.clone();
-            let view = hydrate_view(r.clone(), &LocalizedMap::default(), base_url.as_deref());
-            out_vec.push(AuditLogWithRelations {
-                row: view,
-                admin: admin.get(&key).cloned().unwrap_or(None),
-            });
+            let mut record = hydrate_record(r.clone(), &LocalizedMap::default(), base_url.as_deref());
+            record.admin = admin.get(&key).cloned().unwrap_or(None);
+            out_vec.push(record);
         }
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<AuditLogWithRelations>> {
+    pub async fn first(self) -> Result<Option<AuditLogRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<AuditLogWithRelations> {
+    pub async fn first_or_fail(self) -> Result<AuditLogRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("audit_logs: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<AuditLogWithRelations>> {
+    pub async fn find(self, id: i64) -> Result<Option<AuditLogRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<AuditLogWithRelations> {
+    pub async fn find_or_fail(self, id: i64) -> Result<AuditLogRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("audit_logs: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(AuditLogInsert<'db>) -> AuditLogInsert<'db>) -> Result<AuditLogWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(AuditLogCreateInner<'db>) -> AuditLogCreateInner<'db>) -> Result<AuditLogRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(AuditLogInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(AuditLogCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        AuditLog::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        AuditLogQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(AuditLogUpdate<'db>) -> AuditLogUpdate<'db>,
-        on_create: impl FnOnce(AuditLogInsert<'db>) -> AuditLogInsert<'db>,
-    ) -> Result<AuditLogWithRelations> {
+        on_update: impl FnOnce(AuditLogPatchInner<'db>) -> AuditLogPatchInner<'db>,
+        on_create: impl FnOnce(AuditLogCreateInner<'db>) -> AuditLogCreateInner<'db>,
+    ) -> Result<AuditLogRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = AuditLogUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = AuditLogPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return AuditLog::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return AuditLogQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(AuditLogInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(AuditLogCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        AuditLog::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        AuditLogQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: AuditLogCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: AuditLogDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -878,7 +838,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: AuditLogCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: AuditLogDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -934,13 +894,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<AuditLogWithRelations>) -> Fut,
+        F: FnMut(Vec<AuditLogRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = AuditLogQuery::new(db.clone(), self.base_url.clone());
+            let mut query = AuditLogQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -954,11 +914,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(AuditLogCol::CreatedAt, OrderDir::Desc)
+        self.order_by(AuditLogDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(AuditLogCol::CreatedAt, OrderDir::Asc)
+        self.order_by(AuditLogDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -969,7 +929,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<AuditLogWithRelations> {
+    pub async fn sole(self) -> Result<AuditLogRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -988,7 +948,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&AuditLogWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&AuditLogRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -996,7 +956,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: AuditLogCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: AuditLogDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "audit_logs".to_string());
@@ -1017,7 +977,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: AuditLogCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: AuditLogDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "audit_logs".to_string());
@@ -1038,7 +998,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: AuditLogCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: AuditLogDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "audit_logs".to_string());
@@ -1059,7 +1019,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: AuditLogCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: AuditLogDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "audit_logs".to_string());
@@ -1080,7 +1040,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<AuditLogWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<AuditLogRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1127,18 +1087,15 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("audit_logs", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = AuditLog { db: db.clone(), base_url: base_url.clone() };
-        let admin = m.load_admin(&rows).await?;
+        let admin = load_admin(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for row in rows {
             let key = row.id.clone();
-            let view = hydrate_view(row.clone(), &LocalizedMap::default(), base_url.as_deref());
-            data.push(AuditLogWithRelations {
-                row: view,
-                admin: admin.get(&key).cloned().unwrap_or(None),
-            });
+            let mut record = hydrate_record(row.clone(), &LocalizedMap::default(), base_url.as_deref());
+            record.admin = admin.get(&key).cloned().unwrap_or(None);
+            data.push(record);
         }
         Ok(Page { data, total, per_page, current_page, last_page })
     }
@@ -1225,38 +1182,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct AuditLogUnsafeQuery<'db> {
-    inner: AuditLogQuery<'db>,
-}
 
-impl<'db> AuditLogUnsafeQuery<'db> {
-    fn new(inner: AuditLogQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> AuditLogQuery<'db> { self.inner }
-}
-
-
-pub struct AuditLogInsert<'db> {
+pub struct AuditLogCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<AuditLogCol>,
+    cols: Vec<AuditLogDbCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<AuditLogCol>,
+    conflict_cols: Vec<AuditLogDbCol>,
 }
 
-impl<'db> AuditLogInsert<'db> {
+impl<'db> AuditLogCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1270,74 +1206,74 @@ impl<'db> AuditLogInsert<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(AuditLogCol::Id);
+        self.cols.push(AuditLogDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_admin_id(mut self, val: i64) -> Self {
-        self.cols.push(AuditLogCol::AdminId);
+        self.cols.push(AuditLogDbCol::AdminId);
         self.binds.push(val.into());
         self
     }
     pub fn set_action(mut self, val: AuditAction) -> Self {
-        self.cols.push(AuditLogCol::Action);
+        self.cols.push(AuditLogDbCol::Action);
         self.binds.push(val.into());
         self
     }
     pub fn set_table_name(mut self, val: String) -> Self {
-        self.cols.push(AuditLogCol::TableName);
+        self.cols.push(AuditLogDbCol::TableName);
         self.binds.push(val.into());
         self
     }
     pub fn set_record_key(mut self, val: String) -> Self {
-        self.cols.push(AuditLogCol::RecordKey);
+        self.cols.push(AuditLogDbCol::RecordKey);
         self.binds.push(val.into());
         self
     }
     pub fn set_old_data(mut self, val: Option<serde_json::Value>) -> Self {
-        self.cols.push(AuditLogCol::OldData);
+        self.cols.push(AuditLogDbCol::OldData);
         self.binds.push(val.into());
         self
     }
     pub fn set_new_data(mut self, val: Option<serde_json::Value>) -> Self {
-        self.cols.push(AuditLogCol::NewData);
+        self.cols.push(AuditLogDbCol::NewData);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(AuditLogCol::CreatedAt);
+        self.cols.push(AuditLogDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[AuditLogCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[AuditLogDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[AuditLogCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[AuditLogDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<AuditLogCreateInput> {
-        let mut input = AuditLogCreateInput::default();
+    fn to_create_input(&self) -> Result<AuditLogCreate> {
+        let mut input = AuditLogCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                AuditLogCol::Id => {
+                AuditLogDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                AuditLogCol::AdminId => {
+                AuditLogDbCol::AdminId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.admin_id = FieldInput::Set(value);
                 }
-                AuditLogCol::Action => {
+                AuditLogDbCol::Action => {
                     let value = match bind {
                 BindValue::String(value) => AuditAction::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'AuditAction'", value))?,
@@ -1350,35 +1286,35 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.action = FieldInput::Set(value);
                 }
-                AuditLogCol::TableName => {
+                AuditLogDbCol::TableName => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.table_name = FieldInput::Set(value);
                 }
-                AuditLogCol::RecordKey => {
+                AuditLogDbCol::RecordKey => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.record_key = FieldInput::Set(value);
                 }
-                AuditLogCol::OldData => {
+                AuditLogDbCol::OldData => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
             };
                     input.old_data = FieldInput::Set(value);
                 }
-                AuditLogCol::NewData => {
+                AuditLogDbCol::NewData => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
             };
                     input.new_data = FieldInput::Set(value);
                 }
-                AuditLogCol::CreatedAt => {
+                AuditLogDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1391,13 +1327,13 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
 
 
-pub async fn save(self) -> Result<AuditLogView> {
+pub async fn save(self) -> Result<AuditLogRecord> {
         let db_conn = self.db.clone();
         match db_conn {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1405,25 +1341,25 @@ pub async fn save(self) -> Result<AuditLogView> {
                     .map_err(|_| anyhow::anyhow!("transaction scope still has active handles"))?
                     .into_inner();
                 tx.commit().await?;
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
-                Ok(view)
+                let (record, row) = self.save_with_db(db_conn).await?;
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(AuditLogView, AuditLogRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(AuditLogRecord, AuditLogRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, AuditLogCol::Id)) {
-            cols.push(AuditLogCol::Id);
+        if !cols.iter().any(|c| matches!(c, AuditLogDbCol::Id)) {
+            cols.push(AuditLogDbCol::Id);
             binds.push(generate_snowflake_i64().into());
         }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, AuditLogCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, AuditLogDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(AuditLogCol::CreatedAt);
+            cols.push(AuditLogDbCol::CreatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1457,20 +1393,20 @@ pub async fn save(self) -> Result<AuditLogView> {
         let row = db.fetch_one(q).await?;
         record_profiled_query("audit_logs", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
-        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct AuditLogUpdate<'db> {
+pub struct AuditLogPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(AuditLogCol, BindValue, SetMode)>,
+    sets: Vec<(AuditLogDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> AuditLogUpdate<'db> {
+impl<'db> AuditLogPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1480,106 +1416,105 @@ impl<'db> AuditLogUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> AuditLogUnsafeUpdate<'db> { AuditLogUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((AuditLogCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((AuditLogDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((AuditLogCol::Id, val.into(), SetMode::Increment));
+        self.sets.push((AuditLogDbCol::Id, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((AuditLogCol::Id, val.into(), SetMode::Decrement));
+        self.sets.push((AuditLogDbCol::Id, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_admin_id(mut self, val: i64) -> Self {
-        self.sets.push((AuditLogCol::AdminId, val.into(), SetMode::Assign));
+        self.sets.push((AuditLogDbCol::AdminId, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_admin_id(mut self, val: i64) -> Self {
-        self.sets.push((AuditLogCol::AdminId, val.into(), SetMode::Increment));
+        self.sets.push((AuditLogDbCol::AdminId, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_admin_id(mut self, val: i64) -> Self {
-        self.sets.push((AuditLogCol::AdminId, val.into(), SetMode::Decrement));
+        self.sets.push((AuditLogDbCol::AdminId, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_action(mut self, val: AuditAction) -> Self {
-        self.sets.push((AuditLogCol::Action, val.into(), SetMode::Assign));
+        self.sets.push((AuditLogDbCol::Action, val.into(), SetMode::Assign));
         self
     }
     pub fn set_table_name(mut self, val: String) -> Self {
-        self.sets.push((AuditLogCol::TableName, val.into(), SetMode::Assign));
+        self.sets.push((AuditLogDbCol::TableName, val.into(), SetMode::Assign));
         self
     }
     pub fn set_record_key(mut self, val: String) -> Self {
-        self.sets.push((AuditLogCol::RecordKey, val.into(), SetMode::Assign));
+        self.sets.push((AuditLogDbCol::RecordKey, val.into(), SetMode::Assign));
         self
     }
     pub fn set_old_data(mut self, val: Option<serde_json::Value>) -> Self {
-        self.sets.push((AuditLogCol::OldData, val.into(), SetMode::Assign));
+        self.sets.push((AuditLogDbCol::OldData, val.into(), SetMode::Assign));
         self
     }
     pub fn set_new_data(mut self, val: Option<serde_json::Value>) -> Self {
-        self.sets.push((AuditLogCol::NewData, val.into(), SetMode::Assign));
+        self.sets.push((AuditLogDbCol::NewData, val.into(), SetMode::Assign));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((AuditLogCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((AuditLogDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_action(mut self, op: Op, val: AuditAction) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::Action.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::Action.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_table_name(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::TableName.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::TableName.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_record_key(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::RecordKey.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::RecordKey.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_old_data(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::OldData.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::OldData.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_new_data(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::NewData.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::NewData.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", AuditLogCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", AuditLogDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: AuditLogCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: AuditLogDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1598,11 +1533,11 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<AuditLogUpdateChanges> {
-        let mut changes = AuditLogUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<AuditLogChanges> {
+        let mut changes = AuditLogChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                AuditLogCol::Id => {
+                AuditLogDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1613,7 +1548,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AuditLogCol::AdminId => {
+                AuditLogDbCol::AdminId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1624,7 +1559,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AuditLogCol::Action => {
+                AuditLogDbCol::Action => {
                     let value = match bind {
                 BindValue::String(value) => AuditAction::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'AuditAction'", value))?,
@@ -1641,7 +1576,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AuditLogCol::TableName => {
+                AuditLogDbCol::TableName => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1652,7 +1587,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AuditLogCol::RecordKey => {
+                AuditLogDbCol::RecordKey => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1663,7 +1598,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AuditLogCol::OldData => {
+                AuditLogDbCol::OldData => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
@@ -1674,7 +1609,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AuditLogCol::NewData => {
+                AuditLogDbCol::NewData => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
@@ -1685,7 +1620,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                AuditLogCol::CreatedAt => {
+                AuditLogDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1724,7 +1659,7 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<AuditLogUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<AuditLogChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
@@ -1770,29 +1705,19 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct AuditLogUnsafeUpdate<'db> {
-    inner: AuditLogUpdate<'db>,
-}
-
-impl<'db> AuditLogUnsafeUpdate<'db> {
-    fn new(inner: AuditLogUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> AuditLogUpdate<'db> { self.inner }
-}
 
 pub struct AuditLogTableAdapter;
 impl AuditLogTableAdapter {
-    fn parse_col(name: &str) -> Option<AuditLogCol> {
+    fn parse_col(name: &str) -> Option<AuditLogDbCol> {
         match name {
-            "id" => Some(AuditLogCol::Id),
-            "admin_id" => Some(AuditLogCol::AdminId),
-            "action" => Some(AuditLogCol::Action),
-            "table_name" => Some(AuditLogCol::TableName),
-            "record_key" => Some(AuditLogCol::RecordKey),
-            "old_data" => Some(AuditLogCol::OldData),
-            "new_data" => Some(AuditLogCol::NewData),
-            "created_at" => Some(AuditLogCol::CreatedAt),
+            "id" => Some(AuditLogDbCol::Id),
+            "admin_id" => Some(AuditLogDbCol::AdminId),
+            "action" => Some(AuditLogDbCol::Action),
+            "table_name" => Some(AuditLogDbCol::TableName),
+            "record_key" => Some(AuditLogDbCol::RecordKey),
+            "old_data" => Some(AuditLogDbCol::OldData),
+            "new_data" => Some(AuditLogDbCol::NewData),
+            "created_at" => Some(AuditLogDbCol::CreatedAt),
             _ => None,
         }
     }
@@ -1806,10 +1731,10 @@ impl AuditLogTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<AuditLogCol> {
+    fn parse_like_col(name: &str) -> Option<AuditLogDbCol> {
         match name {
-            "table_name" => Some(AuditLogCol::TableName),
-            "record_key" => Some(AuditLogCol::RecordKey),
+            "table_name" => Some(AuditLogDbCol::TableName),
+            "record_key" => Some(AuditLogDbCol::RecordKey),
             _ => None,
         }
     }
@@ -1864,8 +1789,8 @@ impl AuditLogTableAdapter {
     }
 }
 impl GeneratedTableAdapter for AuditLogTableAdapter {
-    type Query<'db> = AuditLogQuery<'db>;
-    type Row = AuditLogWithRelations;
+    type Query<'db> = Query<'db, AuditLogModel>;
+    type Row = AuditLogRecord;
     fn model_key(&self) -> &'static str { "AuditLog" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "admin_id", "action", "table_name", "record_key", "created_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at"] }
@@ -1910,7 +1835,7 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: AuditLogQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<AuditLogQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, AuditLogModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, AuditLogModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -1978,28 +1903,28 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
             }
             ParsedFilter::Has { relation, column } => {
                 match (relation.as_str(), column.as_str()) {
-                    ("admin", "id") => { let Some(bind) = Self::parse_bind_for_relation("admin", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Id, Op::Eq, bind)))) },
-                    ("admin", "username") => { let Some(bind) = Self::parse_bind_for_relation("admin", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Username, Op::Eq, bind)))) },
-                    ("admin", "email") => { let Some(bind) = Self::parse_bind_for_relation("admin", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Email, Op::Eq, bind)))) },
-                    ("admin", "locale") => { let Some(bind) = Self::parse_bind_for_relation("admin", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Locale, Op::Eq, bind)))) },
-                    ("admin", "password") => { let Some(bind) = Self::parse_bind_for_relation("admin", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Password, Op::Eq, bind)))) },
-                    ("admin", "name") => { let Some(bind) = Self::parse_bind_for_relation("admin", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Name, Op::Eq, bind)))) },
-                    ("admin", "admin_type") => { let Some(bind) = Self::parse_bind_for_relation("admin", "admin_type", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::AdminType, Op::Eq, bind)))) },
-                    ("admin", "abilities") => { let Some(bind) = Self::parse_bind_for_relation("admin", "abilities", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Abilities, Op::Eq, bind)))) },
-                    ("admin", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::CreatedAt, Op::Eq, bind)))) },
-                    ("admin", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::UpdatedAt, Op::Eq, bind)))) },
-                    ("admin", "deleted_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "deleted_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::DeletedAt, Op::Eq, bind)))) },
+                    ("admin", "id") => { let Some(bind) = Self::parse_bind_for_relation("admin", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::Id, Op::Eq, bind)))) },
+                    ("admin", "username") => { let Some(bind) = Self::parse_bind_for_relation("admin", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::Username, Op::Eq, bind)))) },
+                    ("admin", "email") => { let Some(bind) = Self::parse_bind_for_relation("admin", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::Email, Op::Eq, bind)))) },
+                    ("admin", "locale") => { let Some(bind) = Self::parse_bind_for_relation("admin", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::Locale, Op::Eq, bind)))) },
+                    ("admin", "password") => { let Some(bind) = Self::parse_bind_for_relation("admin", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::Password, Op::Eq, bind)))) },
+                    ("admin", "name") => { let Some(bind) = Self::parse_bind_for_relation("admin", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::Name, Op::Eq, bind)))) },
+                    ("admin", "admin_type") => { let Some(bind) = Self::parse_bind_for_relation("admin", "admin_type", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::AdminType, Op::Eq, bind)))) },
+                    ("admin", "abilities") => { let Some(bind) = Self::parse_bind_for_relation("admin", "abilities", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::Abilities, Op::Eq, bind)))) },
+                    ("admin", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::CreatedAt, Op::Eq, bind)))) },
+                    ("admin", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("admin", "deleted_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "deleted_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::DeletedAt, Op::Eq, bind)))) },
                     _ => Ok(None),
                 }
             }
             ParsedFilter::HasLike { relation, column } => {
                 let pattern = format!("%{}%", trimmed);
                 match (relation.as_str(), column.as_str()) {
-                    ("admin", "username") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Username, Op::Like, pattern.clone())))),
-                    ("admin", "email") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Email, Op::Like, pattern.clone())))),
-                    ("admin", "locale") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Locale, Op::Like, pattern.clone())))),
-                    ("admin", "password") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Password, Op::Like, pattern.clone())))),
-                    ("admin", "name") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Name, Op::Like, pattern.clone())))),
+                    ("admin", "username") => Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::Username, Op::Like, pattern.clone())))),
+                    ("admin", "email") => Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::Email, Op::Like, pattern.clone())))),
+                    ("admin", "locale") => Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::Locale, Op::Like, pattern.clone())))),
+                    ("admin", "password") => Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::Password, Op::Like, pattern.clone())))),
+                    ("admin", "name") => Ok(Some(query.where_has(AuditLogRel::ADMIN, |rq| rq.where_col(AdminDbCol::Name, Op::Like, pattern.clone())))),
                     _ => Ok(None),
                 }
             }
@@ -2020,28 +1945,28 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: AuditLogQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<AuditLogQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, AuditLogModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, AuditLogModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(AuditLogCol::Id, dir),
-            "admin_id" => query.order_by(AuditLogCol::AdminId, dir),
-            "action" => query.order_by(AuditLogCol::Action, dir),
-            "table_name" => query.order_by(AuditLogCol::TableName, dir),
-            "record_key" => query.order_by(AuditLogCol::RecordKey, dir),
-            "old_data" => query.order_by(AuditLogCol::OldData, dir),
-            "new_data" => query.order_by(AuditLogCol::NewData, dir),
-            "created_at" => query.order_by(AuditLogCol::CreatedAt, dir),
+            "id" => query.order_by(AuditLogDbCol::Id, dir),
+            "admin_id" => query.order_by(AuditLogDbCol::AdminId, dir),
+            "action" => query.order_by(AuditLogDbCol::Action, dir),
+            "table_name" => query.order_by(AuditLogDbCol::TableName, dir),
+            "record_key" => query.order_by(AuditLogDbCol::RecordKey, dir),
+            "old_data" => query.order_by(AuditLogDbCol::OldData, dir),
+            "new_data" => query.order_by(AuditLogDbCol::NewData, dir),
+            "created_at" => query.order_by(AuditLogDbCol::CreatedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: AuditLogQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<AuditLogQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, AuditLogModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, AuditLogModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &AuditLogWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &AuditLogRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "admin_id" => Some(row.admin_id.to_string()),
@@ -2051,10 +1976,10 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: AuditLogQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, AuditLogModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: AuditLogQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<AuditLogWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, AuditLogModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<AuditLogRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -2080,13 +2005,13 @@ impl Default for AuditLogDataTableConfig {
     }
 }
 pub trait AuditLogDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: AuditLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> AuditLogQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, AuditLogModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, AuditLogModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: AuditLogQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<AuditLogQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: AuditLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<AuditLogQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut AuditLogWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: AuditLogWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, AuditLogModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, AuditLogModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, AuditLogModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, AuditLogModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut AuditLogRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: AuditLogRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         if let Some(id_value) = record.get("id").cloned() {
             let id_text = match id_value {
@@ -2098,10 +2023,10 @@ pub trait AuditLogDataTableHooks: Send + Sync + 'static {
         }
         Ok(record)
     }
-    fn row_to_record(&self, row: AuditLogWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: AuditLogRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: AuditLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, AuditLogModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct AuditLogDefaultDataTableHooks;
@@ -2139,15 +2064,15 @@ impl<H: AuditLogDataTableHooks> AuditLogDataTable<H> {
 impl<H: AuditLogDataTableHooks> AutoDataTable for AuditLogDataTable<H> {
     type Adapter = AuditLogTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> AuditLogQuery<'db> {
-        self.hooks.scope(AuditLog::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, AuditLogModel> {
+        self.hooks.scope(AuditLogModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: AuditLogQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<AuditLogQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: AuditLogQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<AuditLogQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut AuditLogWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: AuditLogWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: AuditLogQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, AuditLogModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, AuditLogModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, AuditLogModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, AuditLogModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut AuditLogRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: AuditLogRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, AuditLogModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -2157,10 +2082,500 @@ impl<H: AuditLogDataTableHooks> AutoDataTable for AuditLogDataTable<H> {
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for AuditLogView {
+impl ActiveRecord for AuditLogRecord {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        AuditLog::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        AuditLogModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct AuditLogModel;
+impl AuditLogModel {
+    pub const TABLE: &'static str = "audit_logs";
+    pub const MODEL_KEY: &'static str = "audit_log";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, AuditLogModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, AuditLogModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, AuditLogModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, AuditLogModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, AuditLogModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, AuditLogModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<AuditLogRecord>> {
+        AuditLogQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for AuditLogModel {
+    type Pk = i64;
+    type Record = AuditLogRecord;
+    type Create = AuditLogCreate;
+    type Changes = AuditLogChanges;
+    const TABLE: &'static str = AuditLogModel::TABLE;
+    const MODEL_KEY: &'static str = AuditLogModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for AuditLogModel {
+    type InnerQuery<'db> = AuditLogQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        AuditLogQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for AuditLogModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for AuditLogModel {
+    type InnerCreate<'db> = AuditLogCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        AuditLogCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            AuditLogQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("audit_logs: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<AuditLogModel> for AuditLogDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <AuditLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<AuditLogModel>>::Value) -> anyhow::Result<<AuditLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            AuditLogDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::AdminId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::Action => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::TableName => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::RecordKey => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::OldData => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::NewData => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<AuditLogModel> for Column<AuditLogModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <AuditLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<AuditLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_audit_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            AuditLogDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::AdminId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::Action => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::TableName => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::RecordKey => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::OldData => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::NewData => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            AuditLogDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<AuditLogModel> for AuditLogDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <AuditLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <AuditLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <AuditLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <AuditLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<AuditLogModel> for Column<AuditLogModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <AuditLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <AuditLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<AuditLogDbCol> = fields.iter().map(|field| resolve_audit_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <AuditLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <AuditLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<AuditLogDbCol> = fields.iter().map(|field| resolve_audit_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for AuditLogModel {
+    type InnerQuery<'db> = AuditLogQueryInner<'db>;
+    type InnerPatch<'db> = AuditLogPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        AuditLogPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(AuditLogDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = AuditLogPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", AuditLogDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM audit_logs", AuditLogDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = AuditLogQueryInner::new(db, base_url);
+            query.where_in(AuditLogDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<AuditLogModel> for AuditLogDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <AuditLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AuditLogModel>>::Value) -> anyhow::Result<<AuditLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            AuditLogDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::AdminId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::Action => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::TableName => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::RecordKey => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::OldData => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::NewData => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<AuditLogModel> for Column<AuditLogModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <AuditLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<AuditLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_audit_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            AuditLogDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::AdminId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::Action => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::TableName => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::RecordKey => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::OldData => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::NewData => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            AuditLogDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<AuditLogModel> for AuditLogDbCol {
+    fn increment<'db>(field: Self, mut builder: <AuditLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AuditLogModel>>::Value) -> anyhow::Result<<AuditLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            AuditLogDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            AuditLogDbCol::AdminId => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <AuditLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AuditLogModel>>::Value) -> anyhow::Result<<AuditLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            AuditLogDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            AuditLogDbCol::AdminId => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<AuditLogModel> for Column<AuditLogModel, i64> {
+    fn increment<'db>(field: Self, mut builder: <AuditLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AuditLogModel>>::Value) -> anyhow::Result<<AuditLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_audit_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            AuditLogDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            AuditLogDbCol::AdminId => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <AuditLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<AuditLogModel>>::Value) -> anyhow::Result<<AuditLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_audit_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            AuditLogDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            AuditLogDbCol::AdminId => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<AuditLogModel> for AuditLogDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<AuditLogModel>>::Value) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<AuditLogModel>>::Value) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<AuditLogModel>>::Value]) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<AuditLogModel> for Column<AuditLogModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_audit_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_audit_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_audit_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_audit_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_audit_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_audit_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
+impl core_db::common::model_api::IncludeRelation<AuditLogModel> for OneRelation<AuditLogModel, AdminRow, 0> {
+    fn include<'db>(_relation: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query
+    }
+}
+
+impl core_db::common::model_api::WhereHasRelation<AuditLogModel> for OneRelation<AuditLogModel, AdminRow, 0> {
+    type Target = AdminModel;
+    fn where_has<'db, F>(_relation: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.where_has_admin(scope)
+    }
+    fn or_where_has<'db, F>(_relation: Self, query: <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <AuditLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.or_where_has_admin(scope)
+    }
+}
+
+impl core_db::common::model_api::RecordOneRelation<AuditLogModel> for OneRelation<AuditLogModel, AdminRow, 0> {
+    type Target = AdminRow;
+    fn get<'a>(_relation: Self, record: &'a AuditLogRecord) -> Option<&'a Self::Target> {
+        record.admin.as_ref()
+    }
+}
+
 

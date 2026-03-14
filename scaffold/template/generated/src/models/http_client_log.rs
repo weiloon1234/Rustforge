@@ -5,19 +5,19 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
 const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct HttpClientLogCreateInput {
+pub struct HttpClientLogCreate {
     pub id: FieldInput<uuid::Uuid>,
     pub request_url: FieldInput<String>,
     pub request_method: FieldInput<String>,
@@ -32,7 +32,7 @@ pub struct HttpClientLogCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct HttpClientLogUpdateChanges {
+pub struct HttpClientLogChanges {
     pub id: Option<FieldChange<uuid::Uuid>>,
     pub request_url: Option<FieldChange<String>>,
     pub request_method: Option<FieldChange<String>>,
@@ -63,7 +63,7 @@ pub struct HttpClientLogRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct HttpClientLogView {
+pub struct HttpClientLogRecord {
     pub id: uuid::Uuid,
     pub request_url: String,
     pub request_method: String,
@@ -77,61 +77,14 @@ pub struct HttpClientLogView {
     pub created_at: time::OffsetDateTime,
 }
 
-impl HttpClientLogView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> HttpClientLogUpdate<'db> {
-        HttpClientLog::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &HttpClientLog<'db>) -> HttpClientLogUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> HttpClientLogJson {
-        HttpClientLogJson {
-            id: self.id.clone(),
-            request_url: self.request_url.clone(),
-            request_method: self.request_method.clone(),
-            request_headers: self.request_headers.clone(),
-            request_body: self.request_body.clone(),
-            response_status: self.response_status.clone(),
-            response_headers: self.response_headers.clone(),
-            response_body: self.response_body.clone(),
-            duration_ms: self.duration_ms.clone(),
-            created_at: self.created_at.clone(),
-        }
+impl HttpClientLogRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, HttpClientLogModel> {
+        HttpClientLogModel::query(db.into()).where_col(HttpClientLogDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-pub trait HttpClientLogViewsExt {
-    fn ids(&self) -> Vec<uuid::Uuid>;
-    fn pluck<R>(&self, f: impl Fn(&HttpClientLogView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&HttpClientLogView) -> K) -> std::collections::HashMap<K, HttpClientLogView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&HttpClientLogView) -> K) -> std::collections::HashMap<K, Vec<HttpClientLogView>> where K: Eq + std::hash::Hash;
-}
-
-impl HttpClientLogViewsExt for Vec<HttpClientLogView> {
-    fn ids(&self) -> Vec<uuid::Uuid> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&HttpClientLogView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&HttpClientLogView) -> K) -> std::collections::HashMap<K, HttpClientLogView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&HttpClientLogView) -> K) -> std::collections::HashMap<K, Vec<HttpClientLogView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct HttpClientLogJson {
-    pub id: uuid::Uuid,
-    pub request_url: String,
-    pub request_method: String,
-    pub request_headers: Option<serde_json::Value>,
-    pub request_body: Option<String>,
-    pub response_status: Option<i32>,
-    pub response_headers: Option<serde_json::Value>,
-    pub response_body: Option<String>,
-    pub duration_ms: Option<i32>,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-}
-
-fn hydrate_view(row: HttpClientLogRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> HttpClientLogView {
-    let view = HttpClientLogView {
+fn hydrate_record(row: HttpClientLogRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> HttpClientLogRecord {
+    let mut record = HttpClientLogRecord {
         id: row.id,
         request_url: row.request_url,
         request_method: row.request_method,
@@ -143,31 +96,42 @@ fn hydrate_view(row: HttpClientLogRow, _loc: &LocalizedMap, _base_url: Option<&s
         duration_ms: row.duration_ms,
         created_at: row.created_at,
     };
-    view
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct HttpClientLogWithRelations {
-    #[serde(flatten)]
-    pub row: HttpClientLogView,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HttpClientLogCol;
+impl HttpClientLogCol {
+    pub const ID: Column<HttpClientLogModel, uuid::Uuid> = Column::new("id");
+    pub const REQUEST_URL: Column<HttpClientLogModel, String> = Column::new("request_url");
+    pub const REQUEST_METHOD: Column<HttpClientLogModel, String> = Column::new("request_method");
+    pub const REQUEST_HEADERS: Column<HttpClientLogModel, Option<serde_json::Value>> = Column::new("request_headers");
+    pub const REQUEST_BODY: Column<HttpClientLogModel, Option<String>> = Column::new("request_body");
+    pub const RESPONSE_STATUS: Column<HttpClientLogModel, Option<i32>> = Column::new("response_status");
+    pub const RESPONSE_HEADERS: Column<HttpClientLogModel, Option<serde_json::Value>> = Column::new("response_headers");
+    pub const RESPONSE_BODY: Column<HttpClientLogModel, Option<String>> = Column::new("response_body");
+    pub const DURATION_MS: Column<HttpClientLogModel, Option<i32>> = Column::new("duration_ms");
+    pub const CREATED_AT: Column<HttpClientLogModel, time::OffsetDateTime> = Column::new("created_at");
 }
 
-impl HttpClientLogWithRelations {
-    pub fn into_row(self) -> HttpClientLogView { self.row }
-}
-
-impl std::ops::Deref for HttpClientLogWithRelations {
-    type Target = HttpClientLogView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for HttpClientLogWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_http_client_log_db_col(sql: &str) -> Option<HttpClientLogDbCol> {
+    match sql {
+        "id" => Some(HttpClientLogDbCol::Id),
+        "request_url" => Some(HttpClientLogDbCol::RequestUrl),
+        "request_method" => Some(HttpClientLogDbCol::RequestMethod),
+        "request_headers" => Some(HttpClientLogDbCol::RequestHeaders),
+        "request_body" => Some(HttpClientLogDbCol::RequestBody),
+        "response_status" => Some(HttpClientLogDbCol::ResponseStatus),
+        "response_headers" => Some(HttpClientLogDbCol::ResponseHeaders),
+        "response_body" => Some(HttpClientLogDbCol::ResponseBody),
+        "duration_ms" => Some(HttpClientLogDbCol::DurationMs),
+        "created_at" => Some(HttpClientLogDbCol::CreatedAt),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum HttpClientLogCol {
+pub enum HttpClientLogDbCol {
     Id,
     RequestUrl,
     RequestMethod,
@@ -180,49 +144,29 @@ pub enum HttpClientLogCol {
     CreatedAt,
 }
 
-impl HttpClientLogCol {
-    pub const fn all() -> &'static [HttpClientLogCol] {
-        &[HttpClientLogCol::Id, HttpClientLogCol::RequestUrl, HttpClientLogCol::RequestMethod, HttpClientLogCol::RequestHeaders, HttpClientLogCol::RequestBody, HttpClientLogCol::ResponseStatus, HttpClientLogCol::ResponseHeaders, HttpClientLogCol::ResponseBody, HttpClientLogCol::DurationMs, HttpClientLogCol::CreatedAt]
+impl HttpClientLogDbCol {
+    pub const fn all() -> &'static [HttpClientLogDbCol] {
+        &[HttpClientLogDbCol::Id, HttpClientLogDbCol::RequestUrl, HttpClientLogDbCol::RequestMethod, HttpClientLogDbCol::RequestHeaders, HttpClientLogDbCol::RequestBody, HttpClientLogDbCol::ResponseStatus, HttpClientLogDbCol::ResponseHeaders, HttpClientLogDbCol::ResponseBody, HttpClientLogDbCol::DurationMs, HttpClientLogDbCol::CreatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            HttpClientLogCol::Id => "id",
-            HttpClientLogCol::RequestUrl => "request_url",
-            HttpClientLogCol::RequestMethod => "request_method",
-            HttpClientLogCol::RequestHeaders => "request_headers",
-            HttpClientLogCol::RequestBody => "request_body",
-            HttpClientLogCol::ResponseStatus => "response_status",
-            HttpClientLogCol::ResponseHeaders => "response_headers",
-            HttpClientLogCol::ResponseBody => "response_body",
-            HttpClientLogCol::DurationMs => "duration_ms",
-            HttpClientLogCol::CreatedAt => "created_at",
+            HttpClientLogDbCol::Id => "id",
+            HttpClientLogDbCol::RequestUrl => "request_url",
+            HttpClientLogDbCol::RequestMethod => "request_method",
+            HttpClientLogDbCol::RequestHeaders => "request_headers",
+            HttpClientLogDbCol::RequestBody => "request_body",
+            HttpClientLogDbCol::ResponseStatus => "response_status",
+            HttpClientLogDbCol::ResponseHeaders => "response_headers",
+            HttpClientLogDbCol::ResponseBody => "response_body",
+            HttpClientLogDbCol::DurationMs => "duration_ms",
+            HttpClientLogDbCol::CreatedAt => "created_at",
         }
     }
 }
 
-pub struct HttpClientLog<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-}
-
-impl<'db> HttpClientLog<'db> {
-    pub const TABLE: &'static str = "http_client_logs";
-    pub const MODEL_KEY: &'static str = "http_client_log";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> HttpClientLogQuery<'db> { HttpClientLogQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> HttpClientLogInsert<'db> { HttpClientLogInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> HttpClientLogUpdate<'db> { HttpClientLogUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: uuid::Uuid) -> Result<Option<HttpClientLogWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: uuid::Uuid) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-}
 
 #[derive(Clone)]
-pub struct HttpClientLogQuery<'db> {
+pub struct HttpClientLogQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -245,134 +189,133 @@ pub struct HttpClientLogQuery<'db> {
 
 
 
-impl<'db> HttpClientLogQuery<'db> {
+impl<'db> HttpClientLogQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> HttpClientLogUnsafeQuery<'db> { HttpClientLogUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_url(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::RequestUrl.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::RequestUrl.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_url_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::RequestUrl.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::RequestUrl.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_method(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::RequestMethod.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::RequestMethod.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_method_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::RequestMethod.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::RequestMethod.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_headers(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::RequestHeaders.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::RequestHeaders.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_headers_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::RequestHeaders.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::RequestHeaders.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_body(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::RequestBody.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::RequestBody.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_body_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::RequestBody.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::RequestBody.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_status(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::ResponseStatus.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::ResponseStatus.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_status_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::ResponseStatus.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::ResponseStatus.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_headers(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::ResponseHeaders.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::ResponseHeaders.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_headers_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::ResponseHeaders.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::ResponseHeaders.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_body(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::ResponseBody.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::ResponseBody.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_body_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::ResponseBody.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::ResponseBody.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_duration_ms(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::DurationMs.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::DurationMs.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_duration_ms_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::DurationMs.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::DurationMs.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: uuid::Uuid) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(HttpClientLogCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: HttpClientLogCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(HttpClientLogDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: HttpClientLogDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -391,7 +334,7 @@ impl<'db> HttpClientLogQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: HttpClientLogCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: HttpClientLogDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -406,7 +349,7 @@ impl<'db> HttpClientLogQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: HttpClientLogCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: HttpClientLogDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -418,7 +361,7 @@ impl<'db> HttpClientLogQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: HttpClientLogCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: HttpClientLogDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -426,15 +369,15 @@ impl<'db> HttpClientLogQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: HttpClientLogCol) -> Self {
+    pub fn where_null(mut self, col: HttpClientLogDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: HttpClientLogCol) -> Self {
+    pub fn where_not_null(mut self, col: HttpClientLogDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: HttpClientLogCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: HttpClientLogDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -488,7 +431,7 @@ impl<'db> HttpClientLogQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[HttpClientLogCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[HttpClientLogDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, request_url, request_method, request_headers, request_body, response_status, response_headers, response_body, duration_ms, created_at".to_string());
         } else {
@@ -500,7 +443,7 @@ impl<'db> HttpClientLogQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[HttpClientLogCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[HttpClientLogDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -581,26 +524,26 @@ impl<'db> HttpClientLogQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: HttpClientLogCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: HttpClientLogDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: HttpClientLogCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: HttpClientLogDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: HttpClientLogCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: HttpClientLogDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[HttpClientLogCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[HttpClientLogDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[HttpClientLogCol]) -> Self {
+    pub fn select(mut self, cols: &[HttpClientLogDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -648,7 +591,7 @@ impl<'db> HttpClientLogQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[HttpClientLogCol]) -> Self {
+    pub fn group_by(mut self, cols: &[HttpClientLogDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -723,7 +666,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<HttpClientLogWithRelations>> {
+    pub async fn get(self) -> Result<Vec<HttpClientLogRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -773,61 +716,61 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
-            out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            out_vec.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let out_vec: Vec<HttpClientLogWithRelations> = out_vec.into_iter().map(|v| HttpClientLogWithRelations { row: v }).collect();
+        let out_vec: Vec<HttpClientLogRecord> = out_vec;
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<HttpClientLogWithRelations>> {
+    pub async fn first(self) -> Result<Option<HttpClientLogRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<HttpClientLogWithRelations> {
+    pub async fn first_or_fail(self) -> Result<HttpClientLogRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("http_client_logs: record not found"))
     }
 
-    pub async fn find(self, id: uuid::Uuid) -> Result<Option<HttpClientLogWithRelations>> {
+    pub async fn find(self, id: uuid::Uuid) -> Result<Option<HttpClientLogRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<HttpClientLogWithRelations> {
+    pub async fn find_or_fail(self, id: uuid::Uuid) -> Result<HttpClientLogRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("http_client_logs: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(HttpClientLogInsert<'db>) -> HttpClientLogInsert<'db>) -> Result<HttpClientLogWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(HttpClientLogCreateInner<'db>) -> HttpClientLogCreateInner<'db>) -> Result<HttpClientLogRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(HttpClientLogInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(HttpClientLogCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        HttpClientLog::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        HttpClientLogQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(HttpClientLogUpdate<'db>) -> HttpClientLogUpdate<'db>,
-        on_create: impl FnOnce(HttpClientLogInsert<'db>) -> HttpClientLogInsert<'db>,
-    ) -> Result<HttpClientLogWithRelations> {
+        on_update: impl FnOnce(HttpClientLogPatchInner<'db>) -> HttpClientLogPatchInner<'db>,
+        on_create: impl FnOnce(HttpClientLogCreateInner<'db>) -> HttpClientLogCreateInner<'db>,
+    ) -> Result<HttpClientLogRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = HttpClientLogUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = HttpClientLogPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return HttpClientLog::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return HttpClientLogQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(HttpClientLogInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(HttpClientLogCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        HttpClientLog::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        HttpClientLogQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: HttpClientLogCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: HttpClientLogDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -842,7 +785,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: HttpClientLogCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: HttpClientLogDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -898,13 +841,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<HttpClientLogWithRelations>) -> Fut,
+        F: FnMut(Vec<HttpClientLogRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = HttpClientLogQuery::new(db.clone(), self.base_url.clone());
+            let mut query = HttpClientLogQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -918,11 +861,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(HttpClientLogCol::CreatedAt, OrderDir::Desc)
+        self.order_by(HttpClientLogDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(HttpClientLogCol::CreatedAt, OrderDir::Asc)
+        self.order_by(HttpClientLogDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -933,7 +876,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<HttpClientLogWithRelations> {
+    pub async fn sole(self) -> Result<HttpClientLogRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -952,7 +895,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&HttpClientLogWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&HttpClientLogRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -960,7 +903,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: HttpClientLogCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: HttpClientLogDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "http_client_logs".to_string());
@@ -981,7 +924,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: HttpClientLogCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: HttpClientLogDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "http_client_logs".to_string());
@@ -1002,7 +945,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: HttpClientLogCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: HttpClientLogDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "http_client_logs".to_string());
@@ -1023,7 +966,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: HttpClientLogCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: HttpClientLogDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "http_client_logs".to_string());
@@ -1044,7 +987,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<HttpClientLogWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<HttpClientLogRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1095,9 +1038,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
-            data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            data.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let data: Vec<HttpClientLogWithRelations> = data.into_iter().map(|v| HttpClientLogWithRelations { row: v }).collect();
+        let data: Vec<HttpClientLogRecord> = data;
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn to_sql(&self) -> (String, Vec<BindValue>) {
@@ -1217,38 +1160,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct HttpClientLogUnsafeQuery<'db> {
-    inner: HttpClientLogQuery<'db>,
-}
 
-impl<'db> HttpClientLogUnsafeQuery<'db> {
-    fn new(inner: HttpClientLogQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> HttpClientLogQuery<'db> { self.inner }
-}
-
-
-pub struct HttpClientLogInsert<'db> {
+pub struct HttpClientLogCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<HttpClientLogCol>,
+    cols: Vec<HttpClientLogDbCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<HttpClientLogCol>,
+    conflict_cols: Vec<HttpClientLogDbCol>,
 }
 
-impl<'db> HttpClientLogInsert<'db> {
+impl<'db> HttpClientLogCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1262,133 +1184,133 @@ impl<'db> HttpClientLogInsert<'db> {
 
 
 pub fn set_id(mut self, val: uuid::Uuid) -> Self {
-        self.cols.push(HttpClientLogCol::Id);
+        self.cols.push(HttpClientLogDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_request_url(mut self, val: String) -> Self {
-        self.cols.push(HttpClientLogCol::RequestUrl);
+        self.cols.push(HttpClientLogDbCol::RequestUrl);
         self.binds.push(val.into());
         self
     }
     pub fn set_request_method(mut self, val: String) -> Self {
-        self.cols.push(HttpClientLogCol::RequestMethod);
+        self.cols.push(HttpClientLogDbCol::RequestMethod);
         self.binds.push(val.into());
         self
     }
     pub fn set_request_headers(mut self, val: Option<serde_json::Value>) -> Self {
-        self.cols.push(HttpClientLogCol::RequestHeaders);
+        self.cols.push(HttpClientLogDbCol::RequestHeaders);
         self.binds.push(val.into());
         self
     }
     pub fn set_request_body(mut self, val: Option<String>) -> Self {
-        self.cols.push(HttpClientLogCol::RequestBody);
+        self.cols.push(HttpClientLogDbCol::RequestBody);
         self.binds.push(val.into());
         self
     }
     pub fn set_response_status(mut self, val: Option<i32>) -> Self {
-        self.cols.push(HttpClientLogCol::ResponseStatus);
+        self.cols.push(HttpClientLogDbCol::ResponseStatus);
         self.binds.push(val.into());
         self
     }
     pub fn set_response_headers(mut self, val: Option<serde_json::Value>) -> Self {
-        self.cols.push(HttpClientLogCol::ResponseHeaders);
+        self.cols.push(HttpClientLogDbCol::ResponseHeaders);
         self.binds.push(val.into());
         self
     }
     pub fn set_response_body(mut self, val: Option<String>) -> Self {
-        self.cols.push(HttpClientLogCol::ResponseBody);
+        self.cols.push(HttpClientLogDbCol::ResponseBody);
         self.binds.push(val.into());
         self
     }
     pub fn set_duration_ms(mut self, val: Option<i32>) -> Self {
-        self.cols.push(HttpClientLogCol::DurationMs);
+        self.cols.push(HttpClientLogDbCol::DurationMs);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(HttpClientLogCol::CreatedAt);
+        self.cols.push(HttpClientLogDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[HttpClientLogCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[HttpClientLogDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[HttpClientLogCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[HttpClientLogDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<HttpClientLogCreateInput> {
-        let mut input = HttpClientLogCreateInput::default();
+    fn to_create_input(&self) -> Result<HttpClientLogCreate> {
+        let mut input = HttpClientLogCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                HttpClientLogCol::Id => {
+                HttpClientLogDbCol::Id => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                HttpClientLogCol::RequestUrl => {
+                HttpClientLogDbCol::RequestUrl => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.request_url = FieldInput::Set(value);
                 }
-                HttpClientLogCol::RequestMethod => {
+                HttpClientLogDbCol::RequestMethod => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.request_method = FieldInput::Set(value);
                 }
-                HttpClientLogCol::RequestHeaders => {
+                HttpClientLogDbCol::RequestHeaders => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
             };
                     input.request_headers = FieldInput::Set(value);
                 }
-                HttpClientLogCol::RequestBody => {
+                HttpClientLogDbCol::RequestBody => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.request_body = FieldInput::Set(value);
                 }
-                HttpClientLogCol::ResponseStatus => {
+                HttpClientLogDbCol::ResponseStatus => {
                     let value = match bind {
                 BindValue::I32Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i32>'", other),
             };
                     input.response_status = FieldInput::Set(value);
                 }
-                HttpClientLogCol::ResponseHeaders => {
+                HttpClientLogDbCol::ResponseHeaders => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
             };
                     input.response_headers = FieldInput::Set(value);
                 }
-                HttpClientLogCol::ResponseBody => {
+                HttpClientLogDbCol::ResponseBody => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.response_body = FieldInput::Set(value);
                 }
-                HttpClientLogCol::DurationMs => {
+                HttpClientLogDbCol::DurationMs => {
                     let value = match bind {
                 BindValue::I32Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i32>'", other),
             };
                     input.duration_ms = FieldInput::Set(value);
                 }
-                HttpClientLogCol::CreatedAt => {
+                HttpClientLogDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1401,7 +1323,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
     }
 
 
-pub async fn save(self) -> Result<HttpClientLogView> {
+pub async fn save(self) -> Result<HttpClientLogRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -1419,7 +1341,7 @@ pub async fn save(self) -> Result<HttpClientLogView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1438,10 +1360,10 @@ pub async fn save(self) -> Result<HttpClientLogView> {
                         Err(err) => log_observer_error("created", "http_client_log", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "http_client_log", table: "http_client_logs", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -1453,17 +1375,17 @@ pub async fn save(self) -> Result<HttpClientLogView> {
                         Err(err) => log_observer_error("created", "http_client_log", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(HttpClientLogView, HttpClientLogRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(HttpClientLogRecord, HttpClientLogRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, HttpClientLogCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, HttpClientLogDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(HttpClientLogCol::CreatedAt);
+            cols.push(HttpClientLogDbCol::CreatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1497,20 +1419,20 @@ pub async fn save(self) -> Result<HttpClientLogView> {
         let row = db.fetch_one(q).await?;
         record_profiled_query("http_client_logs", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
-        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct HttpClientLogUpdate<'db> {
+pub struct HttpClientLogPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(HttpClientLogCol, BindValue, SetMode)>,
+    sets: Vec<(HttpClientLogDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> HttpClientLogUpdate<'db> {
+impl<'db> HttpClientLogPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1520,110 +1442,109 @@ impl<'db> HttpClientLogUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> HttpClientLogUnsafeUpdate<'db> { HttpClientLogUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: uuid::Uuid) -> Self {
-        self.sets.push((HttpClientLogCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((HttpClientLogDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn set_request_url(mut self, val: String) -> Self {
-        self.sets.push((HttpClientLogCol::RequestUrl, val.into(), SetMode::Assign));
+        self.sets.push((HttpClientLogDbCol::RequestUrl, val.into(), SetMode::Assign));
         self
     }
     pub fn set_request_method(mut self, val: String) -> Self {
-        self.sets.push((HttpClientLogCol::RequestMethod, val.into(), SetMode::Assign));
+        self.sets.push((HttpClientLogDbCol::RequestMethod, val.into(), SetMode::Assign));
         self
     }
     pub fn set_request_headers(mut self, val: Option<serde_json::Value>) -> Self {
-        self.sets.push((HttpClientLogCol::RequestHeaders, val.into(), SetMode::Assign));
+        self.sets.push((HttpClientLogDbCol::RequestHeaders, val.into(), SetMode::Assign));
         self
     }
     pub fn set_request_body(mut self, val: Option<String>) -> Self {
-        self.sets.push((HttpClientLogCol::RequestBody, val.into(), SetMode::Assign));
+        self.sets.push((HttpClientLogDbCol::RequestBody, val.into(), SetMode::Assign));
         self
     }
     pub fn set_response_status(mut self, val: Option<i32>) -> Self {
-        self.sets.push((HttpClientLogCol::ResponseStatus, val.into(), SetMode::Assign));
+        self.sets.push((HttpClientLogDbCol::ResponseStatus, val.into(), SetMode::Assign));
         self
     }
     pub fn set_response_headers(mut self, val: Option<serde_json::Value>) -> Self {
-        self.sets.push((HttpClientLogCol::ResponseHeaders, val.into(), SetMode::Assign));
+        self.sets.push((HttpClientLogDbCol::ResponseHeaders, val.into(), SetMode::Assign));
         self
     }
     pub fn set_response_body(mut self, val: Option<String>) -> Self {
-        self.sets.push((HttpClientLogCol::ResponseBody, val.into(), SetMode::Assign));
+        self.sets.push((HttpClientLogDbCol::ResponseBody, val.into(), SetMode::Assign));
         self
     }
     pub fn set_duration_ms(mut self, val: Option<i32>) -> Self {
-        self.sets.push((HttpClientLogCol::DurationMs, val.into(), SetMode::Assign));
+        self.sets.push((HttpClientLogDbCol::DurationMs, val.into(), SetMode::Assign));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((HttpClientLogCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((HttpClientLogDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: uuid::Uuid) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_url(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::RequestUrl.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::RequestUrl.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_method(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::RequestMethod.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::RequestMethod.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_headers(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::RequestHeaders.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::RequestHeaders.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_request_body(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::RequestBody.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::RequestBody.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_status(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::ResponseStatus.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::ResponseStatus.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_headers(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::ResponseHeaders.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::ResponseHeaders.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_response_body(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::ResponseBody.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::ResponseBody.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_duration_ms(mut self, op: Op, val: Option<i32>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::DurationMs.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::DurationMs.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", HttpClientLogCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", HttpClientLogDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: HttpClientLogCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: HttpClientLogDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1642,11 +1563,11 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<HttpClientLogUpdateChanges> {
-        let mut changes = HttpClientLogUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<HttpClientLogChanges> {
+        let mut changes = HttpClientLogChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                HttpClientLogCol::Id => {
+                HttpClientLogDbCol::Id => {
                     let value = match bind {
             BindValue::Uuid(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'uuid::Uuid'", other),
@@ -1657,7 +1578,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                HttpClientLogCol::RequestUrl => {
+                HttpClientLogDbCol::RequestUrl => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1668,7 +1589,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                HttpClientLogCol::RequestMethod => {
+                HttpClientLogDbCol::RequestMethod => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1679,7 +1600,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                HttpClientLogCol::RequestHeaders => {
+                HttpClientLogDbCol::RequestHeaders => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
@@ -1690,7 +1611,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                HttpClientLogCol::RequestBody => {
+                HttpClientLogDbCol::RequestBody => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -1701,7 +1622,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                HttpClientLogCol::ResponseStatus => {
+                HttpClientLogDbCol::ResponseStatus => {
                     let value = match bind {
                 BindValue::I32Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i32>'", other),
@@ -1712,7 +1633,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                HttpClientLogCol::ResponseHeaders => {
+                HttpClientLogDbCol::ResponseHeaders => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
@@ -1723,7 +1644,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                HttpClientLogCol::ResponseBody => {
+                HttpClientLogDbCol::ResponseBody => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -1734,7 +1655,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                HttpClientLogCol::DurationMs => {
+                HttpClientLogDbCol::DurationMs => {
                     let value = match bind {
                 BindValue::I32Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i32>'", other),
@@ -1745,7 +1666,7 @@ pub fn set_id(mut self, val: uuid::Uuid) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                HttpClientLogCol::CreatedAt => {
+                HttpClientLogDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1789,7 +1710,7 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<HttpClientLogUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<HttpClientLogChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
@@ -1880,31 +1801,21 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct HttpClientLogUnsafeUpdate<'db> {
-    inner: HttpClientLogUpdate<'db>,
-}
-
-impl<'db> HttpClientLogUnsafeUpdate<'db> {
-    fn new(inner: HttpClientLogUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> HttpClientLogUpdate<'db> { self.inner }
-}
 
 pub struct HttpClientLogTableAdapter;
 impl HttpClientLogTableAdapter {
-    fn parse_col(name: &str) -> Option<HttpClientLogCol> {
+    fn parse_col(name: &str) -> Option<HttpClientLogDbCol> {
         match name {
-            "id" => Some(HttpClientLogCol::Id),
-            "request_url" => Some(HttpClientLogCol::RequestUrl),
-            "request_method" => Some(HttpClientLogCol::RequestMethod),
-            "request_headers" => Some(HttpClientLogCol::RequestHeaders),
-            "request_body" => Some(HttpClientLogCol::RequestBody),
-            "response_status" => Some(HttpClientLogCol::ResponseStatus),
-            "response_headers" => Some(HttpClientLogCol::ResponseHeaders),
-            "response_body" => Some(HttpClientLogCol::ResponseBody),
-            "duration_ms" => Some(HttpClientLogCol::DurationMs),
-            "created_at" => Some(HttpClientLogCol::CreatedAt),
+            "id" => Some(HttpClientLogDbCol::Id),
+            "request_url" => Some(HttpClientLogDbCol::RequestUrl),
+            "request_method" => Some(HttpClientLogDbCol::RequestMethod),
+            "request_headers" => Some(HttpClientLogDbCol::RequestHeaders),
+            "request_body" => Some(HttpClientLogDbCol::RequestBody),
+            "response_status" => Some(HttpClientLogDbCol::ResponseStatus),
+            "response_headers" => Some(HttpClientLogDbCol::ResponseHeaders),
+            "response_body" => Some(HttpClientLogDbCol::ResponseBody),
+            "duration_ms" => Some(HttpClientLogDbCol::DurationMs),
+            "created_at" => Some(HttpClientLogDbCol::CreatedAt),
             _ => None,
         }
     }
@@ -1918,12 +1829,12 @@ impl HttpClientLogTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<HttpClientLogCol> {
+    fn parse_like_col(name: &str) -> Option<HttpClientLogDbCol> {
         match name {
-            "request_url" => Some(HttpClientLogCol::RequestUrl),
-            "request_method" => Some(HttpClientLogCol::RequestMethod),
-            "request_body" => Some(HttpClientLogCol::RequestBody),
-            "response_body" => Some(HttpClientLogCol::ResponseBody),
+            "request_url" => Some(HttpClientLogDbCol::RequestUrl),
+            "request_method" => Some(HttpClientLogDbCol::RequestMethod),
+            "request_body" => Some(HttpClientLogDbCol::RequestBody),
+            "response_body" => Some(HttpClientLogDbCol::ResponseBody),
             _ => None,
         }
     }
@@ -1969,8 +1880,8 @@ impl HttpClientLogTableAdapter {
     }
 }
 impl GeneratedTableAdapter for HttpClientLogTableAdapter {
-    type Query<'db> = HttpClientLogQuery<'db>;
-    type Row = HttpClientLogWithRelations;
+    type Query<'db> = Query<'db, HttpClientLogModel>;
+    type Row = HttpClientLogRecord;
     fn model_key(&self) -> &'static str { "HttpClientLog" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "request_url", "request_method", "request_body", "response_status", "response_body", "duration_ms", "created_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at"] }
@@ -2006,7 +1917,7 @@ impl GeneratedTableAdapter for HttpClientLogTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: HttpClientLogQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<HttpClientLogQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, HttpClientLogModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, HttpClientLogModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -2100,30 +2011,30 @@ impl GeneratedTableAdapter for HttpClientLogTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: HttpClientLogQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<HttpClientLogQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, HttpClientLogModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, HttpClientLogModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(HttpClientLogCol::Id, dir),
-            "request_url" => query.order_by(HttpClientLogCol::RequestUrl, dir),
-            "request_method" => query.order_by(HttpClientLogCol::RequestMethod, dir),
-            "request_headers" => query.order_by(HttpClientLogCol::RequestHeaders, dir),
-            "request_body" => query.order_by(HttpClientLogCol::RequestBody, dir),
-            "response_status" => query.order_by(HttpClientLogCol::ResponseStatus, dir),
-            "response_headers" => query.order_by(HttpClientLogCol::ResponseHeaders, dir),
-            "response_body" => query.order_by(HttpClientLogCol::ResponseBody, dir),
-            "duration_ms" => query.order_by(HttpClientLogCol::DurationMs, dir),
-            "created_at" => query.order_by(HttpClientLogCol::CreatedAt, dir),
+            "id" => query.order_by(HttpClientLogDbCol::Id, dir),
+            "request_url" => query.order_by(HttpClientLogDbCol::RequestUrl, dir),
+            "request_method" => query.order_by(HttpClientLogDbCol::RequestMethod, dir),
+            "request_headers" => query.order_by(HttpClientLogDbCol::RequestHeaders, dir),
+            "request_body" => query.order_by(HttpClientLogDbCol::RequestBody, dir),
+            "response_status" => query.order_by(HttpClientLogDbCol::ResponseStatus, dir),
+            "response_headers" => query.order_by(HttpClientLogDbCol::ResponseHeaders, dir),
+            "response_body" => query.order_by(HttpClientLogDbCol::ResponseBody, dir),
+            "duration_ms" => query.order_by(HttpClientLogDbCol::DurationMs, dir),
+            "created_at" => query.order_by(HttpClientLogDbCol::CreatedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: HttpClientLogQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<HttpClientLogQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, HttpClientLogModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, HttpClientLogModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &HttpClientLogWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &HttpClientLogRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "request_url" => Some(row.request_url.clone()),
@@ -2136,10 +2047,10 @@ impl GeneratedTableAdapter for HttpClientLogTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: HttpClientLogQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, HttpClientLogModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: HttpClientLogQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<HttpClientLogWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, HttpClientLogModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<HttpClientLogRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -2165,20 +2076,20 @@ impl Default for HttpClientLogDataTableConfig {
     }
 }
 pub trait HttpClientLogDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: HttpClientLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> HttpClientLogQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, HttpClientLogModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, HttpClientLogModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: HttpClientLogQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<HttpClientLogQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: HttpClientLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<HttpClientLogQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut HttpClientLogWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: HttpClientLogWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, HttpClientLogModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, HttpClientLogModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, HttpClientLogModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, HttpClientLogModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut HttpClientLogRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: HttpClientLogRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         Ok(record)
     }
-    fn row_to_record(&self, row: HttpClientLogWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: HttpClientLogRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: HttpClientLogQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, HttpClientLogModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct HttpClientLogDefaultDataTableHooks;
@@ -2216,15 +2127,15 @@ impl<H: HttpClientLogDataTableHooks> HttpClientLogDataTable<H> {
 impl<H: HttpClientLogDataTableHooks> AutoDataTable for HttpClientLogDataTable<H> {
     type Adapter = HttpClientLogTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> HttpClientLogQuery<'db> {
-        self.hooks.scope(HttpClientLog::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, HttpClientLogModel> {
+        self.hooks.scope(HttpClientLogModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: HttpClientLogQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<HttpClientLogQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: HttpClientLogQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<HttpClientLogQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut HttpClientLogWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: HttpClientLogWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: HttpClientLogQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, HttpClientLogModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, HttpClientLogModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, HttpClientLogModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, HttpClientLogModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut HttpClientLogRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: HttpClientLogRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, HttpClientLogModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -2234,10 +2145,471 @@ impl<H: HttpClientLogDataTableHooks> AutoDataTable for HttpClientLogDataTable<H>
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for HttpClientLogView {
+impl ActiveRecord for HttpClientLogRecord {
     type Id = uuid::Uuid;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        HttpClientLog::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        HttpClientLogModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct HttpClientLogModel;
+impl HttpClientLogModel {
+    pub const TABLE: &'static str = "http_client_logs";
+    pub const MODEL_KEY: &'static str = "http_client_log";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, HttpClientLogModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, HttpClientLogModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, HttpClientLogModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, HttpClientLogModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, HttpClientLogModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, HttpClientLogModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: uuid::Uuid) -> Result<Option<HttpClientLogRecord>> {
+        HttpClientLogQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for HttpClientLogModel {
+    type Pk = uuid::Uuid;
+    type Record = HttpClientLogRecord;
+    type Create = HttpClientLogCreate;
+    type Changes = HttpClientLogChanges;
+    const TABLE: &'static str = HttpClientLogModel::TABLE;
+    const MODEL_KEY: &'static str = HttpClientLogModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for HttpClientLogModel {
+    type InnerQuery<'db> = HttpClientLogQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        HttpClientLogQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for HttpClientLogModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for HttpClientLogModel {
+    type InnerCreate<'db> = HttpClientLogCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        HttpClientLogCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            HttpClientLogQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("http_client_logs: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<HttpClientLogModel> for HttpClientLogDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <HttpClientLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<HttpClientLogModel>>::Value) -> anyhow::Result<<HttpClientLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            HttpClientLogDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestUrl => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestMethod => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestHeaders => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestBody => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::ResponseStatus => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::ResponseHeaders => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::ResponseBody => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::DurationMs => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<HttpClientLogModel> for Column<HttpClientLogModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <HttpClientLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<HttpClientLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_http_client_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            HttpClientLogDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestUrl => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestMethod => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestHeaders => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestBody => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::ResponseStatus => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::ResponseHeaders => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::ResponseBody => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::DurationMs => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            HttpClientLogDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<HttpClientLogModel> for HttpClientLogDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <HttpClientLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <HttpClientLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <HttpClientLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <HttpClientLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<HttpClientLogModel> for Column<HttpClientLogModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <HttpClientLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <HttpClientLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<HttpClientLogDbCol> = fields.iter().map(|field| resolve_http_client_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <HttpClientLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <HttpClientLogModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<HttpClientLogDbCol> = fields.iter().map(|field| resolve_http_client_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for HttpClientLogModel {
+    type InnerQuery<'db> = HttpClientLogQueryInner<'db>;
+    type InnerPatch<'db> = HttpClientLogPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        HttpClientLogPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(HttpClientLogDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = HttpClientLogPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", HttpClientLogDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM http_client_logs", HttpClientLogDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, uuid::Uuid>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = HttpClientLogQueryInner::new(db, base_url);
+            query.where_in(HttpClientLogDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<HttpClientLogModel> for HttpClientLogDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <HttpClientLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<HttpClientLogModel>>::Value) -> anyhow::Result<<HttpClientLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            HttpClientLogDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestUrl => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestMethod => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestHeaders => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestBody => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::ResponseStatus => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::ResponseHeaders => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::ResponseBody => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::DurationMs => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<HttpClientLogModel> for Column<HttpClientLogModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <HttpClientLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<HttpClientLogModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_http_client_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            HttpClientLogDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestUrl => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestMethod => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestHeaders => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::RequestBody => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::ResponseStatus => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::ResponseHeaders => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::ResponseBody => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::DurationMs => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            HttpClientLogDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<HttpClientLogModel> for HttpClientLogDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<HttpClientLogModel>>::Value) -> <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<HttpClientLogModel>>::Value) -> <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<HttpClientLogModel>>::Value]) -> <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<HttpClientLogModel> for Column<HttpClientLogModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_http_client_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_http_client_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_http_client_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_http_client_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_http_client_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <HttpClientLogModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_http_client_log_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
 

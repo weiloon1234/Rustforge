@@ -6,16 +6,16 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
 use crate::generated::localized;
 use core_i18n::current_locale;
-use crate::generated::models::user::{UserCol, UserQuery, UserRow};
-use crate::generated::models::admin::{AdminCol, AdminQuery, AdminRow};
+use crate::generated::models::user::{UserDbCol, UserModel, UserRow, UserRel};
+use crate::generated::models::admin::{AdminDbCol, AdminModel, AdminRow};
 use crate::generated::localized::LocalizedMapHelper;
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
@@ -26,7 +26,7 @@ use core_i18n :: t_args ;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct UserCreditTransactionCreateInput {
+pub struct UserCreditTransactionCreate {
     pub id: FieldInput<i64>,
     pub user_id: FieldInput<i64>,
     pub admin_id: FieldInput<Option<i64>>,
@@ -43,7 +43,7 @@ pub struct UserCreditTransactionCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct UserCreditTransactionUpdateChanges {
+pub struct UserCreditTransactionChanges {
     pub id: Option<FieldChange<i64>>,
     pub user_id: Option<FieldChange<i64>>,
     pub admin_id: Option<FieldChange<Option<i64>>>,
@@ -80,7 +80,7 @@ pub struct UserCreditTransactionRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct UserCreditTransactionView {
+pub struct UserCreditTransactionRecord {
     pub id: i64,
     pub user_id: i64,
     pub admin_id: Option<i64>,
@@ -99,34 +99,13 @@ pub struct UserCreditTransactionView {
     pub transaction_type_explained: String,
     pub custom_description_text: Option<String>,
     pub custom_description_text_translations: Option<localized::LocalizedText>,
+    pub user: Option<UserRow>,
+    pub admin: Option<AdminRow>,
 }
 
-impl UserCreditTransactionView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> UserCreditTransactionUpdate<'db> {
-        UserCreditTransaction::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &UserCreditTransaction<'db>) -> UserCreditTransactionUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> UserCreditTransactionJson {
-        UserCreditTransactionJson {
-            id: self.id.clone(),
-            user_id: self.user_id.clone(),
-            admin_id: self.admin_id.clone(),
-            credit_type: self.credit_type.clone(),
-            amount: self.amount.clone(),
-            transaction_type: self.transaction_type.clone(),
-            related_key: self.related_key.clone(),
-            params: self.params.clone(),
-            remark: self.remark.clone(),
-            custom_description: self.custom_description.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            credit_type_explained: self.credit_type_explained.clone(),
-            transaction_type_explained: self.transaction_type_explained.clone(),
-            custom_description_text: self.custom_description_text.clone(),
-            custom_description_text_translations: self.custom_description_text_translations.clone(),
-        }
+impl UserCreditTransactionRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, UserCreditTransactionModel> {
+        UserCreditTransactionModel::query(db.into()).where_col(UserCreditTransactionDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
     pub async fn upsert_custom_description_text<'a>(&self, db: DbConn<'a>, input: Option<localized::LocalizedInput>) -> Result<()> {
         let Some(input) = input else { return Ok(()); };
@@ -139,50 +118,9 @@ impl UserCreditTransactionView {
     }
 }
 
-impl UserCreditTransactionView {
-    pub fn enrich_transaction_type_explained (& mut self) { if self . custom_description { if let Some (ref text) = self . custom_description_text { let trimmed = text . trim () ; if ! trimmed . is_empty () { self . transaction_type_explained = trimmed . to_string () ; return ; } } } if let Some (serde_json :: Value :: Object (ref map)) = self . params { if ! map . is_empty () { let args : Vec < (& str , String) > = map . iter () . map (| (k , v) | { let s = match v { serde_json :: Value :: String (s) => s . clone () , other => other . to_string () , } ; (k . as_str () , s) }) . collect () ; let refs : Vec < (& str , & str) > = args . iter () . map (| (k , v) | (* k , v . as_str ())) . collect () ; self . transaction_type_explained = t_args (self . transaction_type . i18n_key () , & refs) ; } } }
-}
-
-pub trait UserCreditTransactionViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&UserCreditTransactionView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&UserCreditTransactionView) -> K) -> std::collections::HashMap<K, UserCreditTransactionView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&UserCreditTransactionView) -> K) -> std::collections::HashMap<K, Vec<UserCreditTransactionView>> where K: Eq + std::hash::Hash;
-}
-
-impl UserCreditTransactionViewsExt for Vec<UserCreditTransactionView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&UserCreditTransactionView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&UserCreditTransactionView) -> K) -> std::collections::HashMap<K, UserCreditTransactionView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&UserCreditTransactionView) -> K) -> std::collections::HashMap<K, Vec<UserCreditTransactionView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct UserCreditTransactionJson {
-    pub id: i64,
-    pub user_id: i64,
-    pub admin_id: Option<i64>,
-    pub credit_type: CreditType,
-    pub amount: rust_decimal::Decimal,
-    pub transaction_type: CreditTransactionType,
-    pub related_key: Option<String>,
-    pub params: Option<serde_json::Value>,
-    pub remark: Option<String>,
-    pub custom_description: bool,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    pub credit_type_explained: String,
-    pub transaction_type_explained: String,
-    pub custom_description_text: Option<String>,
-    pub custom_description_text_translations: Option<localized::LocalizedText>,
-}
-
-fn hydrate_view(row: UserCreditTransactionRow, loc: &LocalizedMap, _base_url: Option<&str>) -> UserCreditTransactionView {
+fn hydrate_record(row: UserCreditTransactionRow, loc: &LocalizedMap, _base_url: Option<&str>) -> UserCreditTransactionRecord {
     let locale = current_locale();
-    let mut view = UserCreditTransactionView {
+    let mut record = UserCreditTransactionRecord {
         id: row.id,
         user_id: row.user_id,
         admin_id: row.admin_id,
@@ -199,39 +137,73 @@ fn hydrate_view(row: UserCreditTransactionRow, loc: &LocalizedMap, _base_url: Op
         transaction_type_explained: row.transaction_type.explained_label(),
         custom_description_text: None,
         custom_description_text_translations: None,
+        user: None,
+        admin: None,
     };
-    let ml_custom_description_text = loc.get_localized_text("custom_description_text", view.id);
+    let ml_custom_description_text = loc.get_localized_text("custom_description_text", record.id);
     if let Some(ref ml) = ml_custom_description_text {
-        view.custom_description_text = Some(ml.get(locale).to_string());
+        record.custom_description_text = Some(ml.get(locale).to_string());
     }
-    view.custom_description_text_translations = ml_custom_description_text;
-    view
+    record.custom_description_text_translations = ml_custom_description_text;
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct UserCreditTransactionWithRelations {
-    #[serde(flatten)]
-    pub row: UserCreditTransactionView,
-    pub user: Option<UserRow>,
-    pub admin: Option<AdminRow>,
+impl UserCreditTransactionRecord {
+    pub fn one<R>(&self, relation: R) -> Option<&R::Target>
+    where
+        R: core_db::common::model_api::RecordOneRelation<UserCreditTransactionModel>,
+    {
+        R::get(relation, self)
+    }
+    pub fn many<R>(&self, relation: R) -> &[R::Target]
+    where
+        R: core_db::common::model_api::RecordManyRelation<UserCreditTransactionModel>,
+    {
+        R::get(relation, self)
+    }
 }
 
-impl UserCreditTransactionWithRelations {
-    pub fn into_row(self) -> UserCreditTransactionView { self.row }
+impl UserCreditTransactionRecord {
+    pub fn enrich_transaction_type_explained (& mut self) { if self . custom_description { if let Some (ref text) = self . custom_description_text { let trimmed = text . trim () ; if ! trimmed . is_empty () { self . transaction_type_explained = trimmed . to_string () ; return ; } } } if let Some (serde_json :: Value :: Object (ref map)) = self . params { if ! map . is_empty () { let args : Vec < (& str , String) > = map . iter () . map (| (k , v) | { let s = match v { serde_json :: Value :: String (s) => s . clone () , other => other . to_string () , } ; (k . as_str () , s) }) . collect () ; let refs : Vec < (& str , & str) > = args . iter () . map (| (k , v) | (* k , v . as_str ())) . collect () ; self . transaction_type_explained = t_args (self . transaction_type . i18n_key () , & refs) ; } } }
 }
 
-impl std::ops::Deref for UserCreditTransactionWithRelations {
-    type Target = UserCreditTransactionView;
-    fn deref(&self) -> &Self::Target { &self.row }
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UserCreditTransactionCol;
+impl UserCreditTransactionCol {
+    pub const ID: Column<UserCreditTransactionModel, i64> = Column::new("id");
+    pub const USER_ID: Column<UserCreditTransactionModel, i64> = Column::new("user_id");
+    pub const ADMIN_ID: Column<UserCreditTransactionModel, Option<i64>> = Column::new("admin_id");
+    pub const CREDIT_TYPE: Column<UserCreditTransactionModel, CreditType> = Column::new("credit_type");
+    pub const AMOUNT: Column<UserCreditTransactionModel, rust_decimal::Decimal> = Column::new("amount");
+    pub const TRANSACTION_TYPE: Column<UserCreditTransactionModel, CreditTransactionType> = Column::new("transaction_type");
+    pub const RELATED_KEY: Column<UserCreditTransactionModel, Option<String>> = Column::new("related_key");
+    pub const PARAMS: Column<UserCreditTransactionModel, Option<serde_json::Value>> = Column::new("params");
+    pub const REMARK: Column<UserCreditTransactionModel, Option<String>> = Column::new("remark");
+    pub const CUSTOM_DESCRIPTION: Column<UserCreditTransactionModel, bool> = Column::new("custom_description");
+    pub const CREATED_AT: Column<UserCreditTransactionModel, time::OffsetDateTime> = Column::new("created_at");
+    pub const UPDATED_AT: Column<UserCreditTransactionModel, time::OffsetDateTime> = Column::new("updated_at");
 }
 
-impl std::ops::DerefMut for UserCreditTransactionWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_user_credit_transaction_db_col(sql: &str) -> Option<UserCreditTransactionDbCol> {
+    match sql {
+        "id" => Some(UserCreditTransactionDbCol::Id),
+        "user_id" => Some(UserCreditTransactionDbCol::UserId),
+        "admin_id" => Some(UserCreditTransactionDbCol::AdminId),
+        "credit_type" => Some(UserCreditTransactionDbCol::CreditType),
+        "amount" => Some(UserCreditTransactionDbCol::Amount),
+        "transaction_type" => Some(UserCreditTransactionDbCol::TransactionType),
+        "related_key" => Some(UserCreditTransactionDbCol::RelatedKey),
+        "params" => Some(UserCreditTransactionDbCol::Params),
+        "remark" => Some(UserCreditTransactionDbCol::Remark),
+        "custom_description" => Some(UserCreditTransactionDbCol::CustomDescription),
+        "created_at" => Some(UserCreditTransactionDbCol::CreatedAt),
+        "updated_at" => Some(UserCreditTransactionDbCol::UpdatedAt),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum UserCreditTransactionCol {
+pub enum UserCreditTransactionDbCol {
     Id,
     UserId,
     AdminId,
@@ -246,48 +218,36 @@ pub enum UserCreditTransactionCol {
     UpdatedAt,
 }
 
-impl UserCreditTransactionCol {
-    pub const fn all() -> &'static [UserCreditTransactionCol] {
-        &[UserCreditTransactionCol::Id, UserCreditTransactionCol::UserId, UserCreditTransactionCol::AdminId, UserCreditTransactionCol::CreditType, UserCreditTransactionCol::Amount, UserCreditTransactionCol::TransactionType, UserCreditTransactionCol::RelatedKey, UserCreditTransactionCol::Params, UserCreditTransactionCol::Remark, UserCreditTransactionCol::CustomDescription, UserCreditTransactionCol::CreatedAt, UserCreditTransactionCol::UpdatedAt]
+impl UserCreditTransactionDbCol {
+    pub const fn all() -> &'static [UserCreditTransactionDbCol] {
+        &[UserCreditTransactionDbCol::Id, UserCreditTransactionDbCol::UserId, UserCreditTransactionDbCol::AdminId, UserCreditTransactionDbCol::CreditType, UserCreditTransactionDbCol::Amount, UserCreditTransactionDbCol::TransactionType, UserCreditTransactionDbCol::RelatedKey, UserCreditTransactionDbCol::Params, UserCreditTransactionDbCol::Remark, UserCreditTransactionDbCol::CustomDescription, UserCreditTransactionDbCol::CreatedAt, UserCreditTransactionDbCol::UpdatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            UserCreditTransactionCol::Id => "id",
-            UserCreditTransactionCol::UserId => "user_id",
-            UserCreditTransactionCol::AdminId => "admin_id",
-            UserCreditTransactionCol::CreditType => "credit_type",
-            UserCreditTransactionCol::Amount => "amount",
-            UserCreditTransactionCol::TransactionType => "transaction_type",
-            UserCreditTransactionCol::RelatedKey => "related_key",
-            UserCreditTransactionCol::Params => "params",
-            UserCreditTransactionCol::Remark => "remark",
-            UserCreditTransactionCol::CustomDescription => "custom_description",
-            UserCreditTransactionCol::CreatedAt => "created_at",
-            UserCreditTransactionCol::UpdatedAt => "updated_at",
+            UserCreditTransactionDbCol::Id => "id",
+            UserCreditTransactionDbCol::UserId => "user_id",
+            UserCreditTransactionDbCol::AdminId => "admin_id",
+            UserCreditTransactionDbCol::CreditType => "credit_type",
+            UserCreditTransactionDbCol::Amount => "amount",
+            UserCreditTransactionDbCol::TransactionType => "transaction_type",
+            UserCreditTransactionDbCol::RelatedKey => "related_key",
+            UserCreditTransactionDbCol::Params => "params",
+            UserCreditTransactionDbCol::Remark => "remark",
+            UserCreditTransactionDbCol::CustomDescription => "custom_description",
+            UserCreditTransactionDbCol::CreatedAt => "created_at",
+            UserCreditTransactionDbCol::UpdatedAt => "updated_at",
         }
     }
 }
 
-pub struct UserCreditTransaction<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UserCreditTransactionRel;
+impl UserCreditTransactionRel {
+    pub const USER: OneRelation<UserCreditTransactionModel, UserRow, 0> = OneRelation::<UserCreditTransactionModel, UserRow, 0>::new("user");
+    pub const ADMIN: OneRelation<UserCreditTransactionModel, AdminRow, 1> = OneRelation::<UserCreditTransactionModel, AdminRow, 1>::new("admin");
 }
 
-impl<'db> UserCreditTransaction<'db> {
-    pub const TABLE: &'static str = "user_credit_transactions";
-    pub const MODEL_KEY: &'static str = "user_credit_transaction";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> UserCreditTransactionQuery<'db> { UserCreditTransactionQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> UserCreditTransactionInsert<'db> { UserCreditTransactionInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> UserCreditTransactionUpdate<'db> { UserCreditTransactionUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<UserCreditTransactionWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-    pub async fn load_user(&self, parents: &[UserCreditTransactionRow]) -> Result<HashMap<i64, Option<UserRow>>> {
+async fn load_user<'db>(db: DbConn<'db>, parents: &[UserCreditTransactionRow]) -> Result<HashMap<i64, Option<UserRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -300,7 +260,7 @@ impl<'db> UserCreditTransaction<'db> {
         let sql = format!("SELECT * FROM users WHERE id IN ({})", placeholders.join(", "));
         let mut q = sqlx::query_as::<_, UserRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
-        let rows = self.db.fetch_all(q).await?;
+        let rows = db.fetch_all(q).await?;
         let mut by_pk: HashMap<i64, UserRow> = HashMap::new();
         for row in rows { by_pk.insert(row.id.clone(), row); }
         let mut out = HashMap::new();
@@ -309,7 +269,7 @@ impl<'db> UserCreditTransaction<'db> {
         }
         Ok(out)
     }
-    pub async fn load_admin(&self, parents: &[UserCreditTransactionRow]) -> Result<HashMap<i64, Option<AdminRow>>> {
+async fn load_admin<'db>(db: DbConn<'db>, parents: &[UserCreditTransactionRow]) -> Result<HashMap<i64, Option<AdminRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -321,7 +281,7 @@ impl<'db> UserCreditTransaction<'db> {
         let sql = format!("SELECT * FROM admin WHERE id IN ({})", placeholders.join(", "));
         let mut q = sqlx::query_as::<_, AdminRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
-        let rows = self.db.fetch_all(q).await?;
+        let rows = db.fetch_all(q).await?;
         let mut by_pk: HashMap<i64, AdminRow> = HashMap::new();
         for row in rows { by_pk.insert(row.id.clone(), row); }
         let mut out = HashMap::new();
@@ -330,10 +290,9 @@ impl<'db> UserCreditTransaction<'db> {
         }
         Ok(out)
     }
-}
 
 #[derive(Clone)]
-pub struct UserCreditTransactionQuery<'db> {
+pub struct UserCreditTransactionQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -356,158 +315,157 @@ pub struct UserCreditTransactionQuery<'db> {
 
 
 
-impl<'db> UserCreditTransactionQuery<'db> {
+impl<'db> UserCreditTransactionQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, user_id, admin_id, credit_type, amount, transaction_type, related_key, params, remark, custom_description, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> UserCreditTransactionUnsafeQuery<'db> { UserCreditTransactionUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_user_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::UserId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::UserId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_user_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::UserId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::UserId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_type(mut self, op: Op, val: CreditType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::CreditType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::CreditType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::CreditType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::CreditType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_amount(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Amount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::Amount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_amount_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Amount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::Amount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_transaction_type(mut self, op: Op, val: CreditTransactionType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::TransactionType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::TransactionType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_transaction_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::TransactionType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::TransactionType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_related_key(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::RelatedKey.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::RelatedKey.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_related_key_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::RelatedKey.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::RelatedKey.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_params(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Params.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::Params.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_params_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Params.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::Params.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_remark(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Remark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::Remark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_remark_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Remark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::Remark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_custom_description(mut self, op: Op, val: bool) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::CustomDescription.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::CustomDescription.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_custom_description_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::CustomDescription.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::CustomDescription.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(UserCreditTransactionCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: UserCreditTransactionCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(UserCreditTransactionDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: UserCreditTransactionDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -526,7 +484,7 @@ impl<'db> UserCreditTransactionQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: UserCreditTransactionCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: UserCreditTransactionDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -541,7 +499,7 @@ impl<'db> UserCreditTransactionQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: UserCreditTransactionCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: UserCreditTransactionDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -553,7 +511,7 @@ impl<'db> UserCreditTransactionQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: UserCreditTransactionCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: UserCreditTransactionDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -561,15 +519,15 @@ impl<'db> UserCreditTransactionQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: UserCreditTransactionCol) -> Self {
+    pub fn where_null(mut self, col: UserCreditTransactionDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: UserCreditTransactionCol) -> Self {
+    pub fn where_not_null(mut self, col: UserCreditTransactionDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: UserCreditTransactionCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: UserCreditTransactionDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -623,7 +581,7 @@ impl<'db> UserCreditTransactionQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[UserCreditTransactionCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[UserCreditTransactionDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, user_id, admin_id, credit_type, amount, transaction_type, related_key, params, remark, custom_description, created_at, updated_at".to_string());
         } else {
@@ -635,7 +593,7 @@ impl<'db> UserCreditTransactionQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[UserCreditTransactionCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[UserCreditTransactionDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -716,26 +674,26 @@ impl<'db> UserCreditTransactionQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: UserCreditTransactionCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: UserCreditTransactionDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: UserCreditTransactionCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: UserCreditTransactionDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: UserCreditTransactionCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: UserCreditTransactionDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[UserCreditTransactionCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[UserCreditTransactionDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[UserCreditTransactionCol]) -> Self {
+    pub fn select(mut self, cols: &[UserCreditTransactionDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -783,7 +741,7 @@ impl<'db> UserCreditTransactionQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[UserCreditTransactionCol]) -> Self {
+    pub fn group_by(mut self, cols: &[UserCreditTransactionDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -810,10 +768,10 @@ impl<'db> UserCreditTransactionQuery<'db> {
         self.offset = Some(n);
         self
     }
-    pub fn where_has_user(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
+    pub fn where_has_user(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.id = user_credit_transactions.user_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -823,10 +781,10 @@ impl<'db> UserCreditTransactionQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_has_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+    pub fn where_has_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "admin.id = user_credit_transactions.admin_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -836,10 +794,10 @@ impl<'db> UserCreditTransactionQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_doesnt_have_user(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
+    pub fn where_doesnt_have_user(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.id = user_credit_transactions.user_id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM users WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -849,10 +807,10 @@ impl<'db> UserCreditTransactionQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_doesnt_have_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+    pub fn where_doesnt_have_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "admin.id = user_credit_transactions.admin_id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM admin WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -862,10 +820,10 @@ impl<'db> UserCreditTransactionQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn or_where_has_user(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
+    pub fn or_where_has_user(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.id = user_credit_transactions.user_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -879,10 +837,10 @@ impl<'db> UserCreditTransactionQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn or_where_has_admin(mut self, scope: impl FnOnce(AdminQuery<'db>) -> AdminQuery<'db>) -> Self {
+    pub fn or_where_has_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "admin.id = user_credit_transactions.admin_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -944,7 +902,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<UserCreditTransactionWithRelations>> {
+    pub async fn get(self) -> Result<Vec<UserCreditTransactionRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -990,73 +948,70 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("user_credit_transactions", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = UserCreditTransaction { db: db.clone(), base_url: base_url.clone() };
-        let user = m.load_user(&rows).await?;
-        let admin = m.load_admin(&rows).await?;
+        let user = load_user(db.clone(), &rows).await?;
+        let admin = load_admin(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = localized::load_user_credit_transaction_localized(db.clone(), &ids).await?;
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
             let key = r.id.clone();
-            let view = hydrate_view(r.clone(), &localized, base_url.as_deref());
-            out_vec.push(UserCreditTransactionWithRelations {
-                row: view,
-                user: user.get(&key).cloned().unwrap_or(None),
-                admin: admin.get(&key).cloned().unwrap_or(None),
-            });
+            let mut record = hydrate_record(r.clone(), &localized, base_url.as_deref());
+            record.user = user.get(&key).cloned().unwrap_or(None);
+            record.admin = admin.get(&key).cloned().unwrap_or(None);
+            out_vec.push(record);
         }
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<UserCreditTransactionWithRelations>> {
+    pub async fn first(self) -> Result<Option<UserCreditTransactionRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<UserCreditTransactionWithRelations> {
+    pub async fn first_or_fail(self) -> Result<UserCreditTransactionRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("user_credit_transactions: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<UserCreditTransactionWithRelations>> {
+    pub async fn find(self, id: i64) -> Result<Option<UserCreditTransactionRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<UserCreditTransactionWithRelations> {
+    pub async fn find_or_fail(self, id: i64) -> Result<UserCreditTransactionRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("user_credit_transactions: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(UserCreditTransactionInsert<'db>) -> UserCreditTransactionInsert<'db>) -> Result<UserCreditTransactionWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(UserCreditTransactionCreateInner<'db>) -> UserCreditTransactionCreateInner<'db>) -> Result<UserCreditTransactionRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(UserCreditTransactionInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(UserCreditTransactionCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        UserCreditTransaction::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        UserCreditTransactionQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(UserCreditTransactionUpdate<'db>) -> UserCreditTransactionUpdate<'db>,
-        on_create: impl FnOnce(UserCreditTransactionInsert<'db>) -> UserCreditTransactionInsert<'db>,
-    ) -> Result<UserCreditTransactionWithRelations> {
+        on_update: impl FnOnce(UserCreditTransactionPatchInner<'db>) -> UserCreditTransactionPatchInner<'db>,
+        on_create: impl FnOnce(UserCreditTransactionCreateInner<'db>) -> UserCreditTransactionCreateInner<'db>,
+    ) -> Result<UserCreditTransactionRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = UserCreditTransactionUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = UserCreditTransactionPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return UserCreditTransaction::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return UserCreditTransactionQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(UserCreditTransactionInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(UserCreditTransactionCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        UserCreditTransaction::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        UserCreditTransactionQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: UserCreditTransactionCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: UserCreditTransactionDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -1071,7 +1026,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: UserCreditTransactionCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: UserCreditTransactionDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -1127,13 +1082,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<UserCreditTransactionWithRelations>) -> Fut,
+        F: FnMut(Vec<UserCreditTransactionRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = UserCreditTransactionQuery::new(db.clone(), self.base_url.clone());
+            let mut query = UserCreditTransactionQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -1147,11 +1102,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(UserCreditTransactionCol::CreatedAt, OrderDir::Desc)
+        self.order_by(UserCreditTransactionDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(UserCreditTransactionCol::CreatedAt, OrderDir::Asc)
+        self.order_by(UserCreditTransactionDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -1162,7 +1117,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<UserCreditTransactionWithRelations> {
+    pub async fn sole(self) -> Result<UserCreditTransactionRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -1181,7 +1136,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&UserCreditTransactionWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&UserCreditTransactionRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -1189,7 +1144,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: UserCreditTransactionCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: UserCreditTransactionDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "user_credit_transactions".to_string());
@@ -1210,7 +1165,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: UserCreditTransactionCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: UserCreditTransactionDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "user_credit_transactions".to_string());
@@ -1231,7 +1186,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: UserCreditTransactionCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: UserCreditTransactionDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "user_credit_transactions".to_string());
@@ -1252,7 +1207,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: UserCreditTransactionCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: UserCreditTransactionDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "user_credit_transactions".to_string());
@@ -1273,7 +1228,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<UserCreditTransactionWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<UserCreditTransactionRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1320,20 +1275,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("user_credit_transactions", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = UserCreditTransaction { db: db.clone(), base_url: base_url.clone() };
-        let user = m.load_user(&rows).await?;
-        let admin = m.load_admin(&rows).await?;
+        let user = load_user(db.clone(), &rows).await?;
+        let admin = load_admin(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = localized::load_user_credit_transaction_localized(db, &ids).await?;
         let mut data = Vec::with_capacity(rows.len());
         for row in rows {
             let key = row.id.clone();
-            let view = hydrate_view(row.clone(), &localized, base_url.as_deref());
-            data.push(UserCreditTransactionWithRelations {
-                row: view,
-                user: user.get(&key).cloned().unwrap_or(None),
-                admin: admin.get(&key).cloned().unwrap_or(None),
-            });
+            let mut record = hydrate_record(row.clone(), &localized, base_url.as_deref());
+            record.user = user.get(&key).cloned().unwrap_or(None);
+            record.admin = admin.get(&key).cloned().unwrap_or(None);
+            data.push(record);
         }
         Ok(Page { data, total, per_page, current_page, last_page })
     }
@@ -1454,39 +1406,18 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct UserCreditTransactionUnsafeQuery<'db> {
-    inner: UserCreditTransactionQuery<'db>,
-}
 
-impl<'db> UserCreditTransactionUnsafeQuery<'db> {
-    fn new(inner: UserCreditTransactionQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> UserCreditTransactionQuery<'db> { self.inner }
-}
-
-
-pub struct UserCreditTransactionInsert<'db> {
+pub struct UserCreditTransactionCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<UserCreditTransactionCol>,
+    cols: Vec<UserCreditTransactionDbCol>,
     binds: Vec<BindValue>,
     translations: HashMap<&'static str, HashMap<String, String>>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<UserCreditTransactionCol>,
+    conflict_cols: Vec<UserCreditTransactionDbCol>,
 }
 
-impl<'db> UserCreditTransactionInsert<'db> {
+impl<'db> UserCreditTransactionCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1501,62 +1432,62 @@ impl<'db> UserCreditTransactionInsert<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(UserCreditTransactionCol::Id);
+        self.cols.push(UserCreditTransactionDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_user_id(mut self, val: i64) -> Self {
-        self.cols.push(UserCreditTransactionCol::UserId);
+        self.cols.push(UserCreditTransactionDbCol::UserId);
         self.binds.push(val.into());
         self
     }
     pub fn set_admin_id(mut self, val: Option<i64>) -> Self {
-        self.cols.push(UserCreditTransactionCol::AdminId);
+        self.cols.push(UserCreditTransactionDbCol::AdminId);
         self.binds.push(val.into());
         self
     }
     pub fn set_credit_type(mut self, val: CreditType) -> Self {
-        self.cols.push(UserCreditTransactionCol::CreditType);
+        self.cols.push(UserCreditTransactionDbCol::CreditType);
         self.binds.push(val.into());
         self
     }
     pub fn set_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.cols.push(UserCreditTransactionCol::Amount);
+        self.cols.push(UserCreditTransactionDbCol::Amount);
         self.binds.push(val.into());
         self
     }
     pub fn set_transaction_type(mut self, val: CreditTransactionType) -> Self {
-        self.cols.push(UserCreditTransactionCol::TransactionType);
+        self.cols.push(UserCreditTransactionDbCol::TransactionType);
         self.binds.push(val.into());
         self
     }
     pub fn set_related_key(mut self, val: Option<String>) -> Self {
-        self.cols.push(UserCreditTransactionCol::RelatedKey);
+        self.cols.push(UserCreditTransactionDbCol::RelatedKey);
         self.binds.push(val.into());
         self
     }
     pub fn set_params(mut self, val: Option<serde_json::Value>) -> Self {
-        self.cols.push(UserCreditTransactionCol::Params);
+        self.cols.push(UserCreditTransactionDbCol::Params);
         self.binds.push(val.into());
         self
     }
     pub fn set_remark(mut self, val: Option<String>) -> Self {
-        self.cols.push(UserCreditTransactionCol::Remark);
+        self.cols.push(UserCreditTransactionDbCol::Remark);
         self.binds.push(val.into());
         self
     }
     pub fn set_custom_description(mut self, val: bool) -> Self {
-        self.cols.push(UserCreditTransactionCol::CustomDescription);
+        self.cols.push(UserCreditTransactionDbCol::CustomDescription);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(UserCreditTransactionCol::CreatedAt);
+        self.cols.push(UserCreditTransactionDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(UserCreditTransactionCol::UpdatedAt);
+        self.cols.push(UserCreditTransactionDbCol::UpdatedAt);
         self.binds.push(val.into());
         self
     }
@@ -1578,42 +1509,42 @@ pub fn set_id(mut self, val: i64) -> Self {
         }
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[UserCreditTransactionCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[UserCreditTransactionDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[UserCreditTransactionCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[UserCreditTransactionDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<UserCreditTransactionCreateInput> {
-        let mut input = UserCreditTransactionCreateInput::default();
+    fn to_create_input(&self) -> Result<UserCreditTransactionCreate> {
+        let mut input = UserCreditTransactionCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                UserCreditTransactionCol::Id => {
+                UserCreditTransactionDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                UserCreditTransactionCol::UserId => {
+                UserCreditTransactionDbCol::UserId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.user_id = FieldInput::Set(value);
                 }
-                UserCreditTransactionCol::AdminId => {
+                UserCreditTransactionDbCol::AdminId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
             };
                     input.admin_id = FieldInput::Set(value);
                 }
-                UserCreditTransactionCol::CreditType => {
+                UserCreditTransactionDbCol::CreditType => {
                     let value = match bind {
                 BindValue::String(value) => CreditType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'CreditType'", value))?,
@@ -1626,14 +1557,14 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.credit_type = FieldInput::Set(value);
                 }
-                UserCreditTransactionCol::Amount => {
+                UserCreditTransactionDbCol::Amount => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
         };
                     input.amount = FieldInput::Set(value);
                 }
-                UserCreditTransactionCol::TransactionType => {
+                UserCreditTransactionDbCol::TransactionType => {
                     let value = match bind {
                 BindValue::String(value) => CreditTransactionType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'CreditTransactionType'", value))?,
@@ -1646,42 +1577,42 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.transaction_type = FieldInput::Set(value);
                 }
-                UserCreditTransactionCol::RelatedKey => {
+                UserCreditTransactionDbCol::RelatedKey => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.related_key = FieldInput::Set(value);
                 }
-                UserCreditTransactionCol::Params => {
+                UserCreditTransactionDbCol::Params => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
             };
                     input.params = FieldInput::Set(value);
                 }
-                UserCreditTransactionCol::Remark => {
+                UserCreditTransactionDbCol::Remark => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.remark = FieldInput::Set(value);
                 }
-                UserCreditTransactionCol::CustomDescription => {
+                UserCreditTransactionDbCol::CustomDescription => {
                     let value = match bind {
             BindValue::Bool(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'bool'", other),
         };
                     input.custom_description = FieldInput::Set(value);
                 }
-                UserCreditTransactionCol::CreatedAt => {
+                UserCreditTransactionDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                UserCreditTransactionCol::UpdatedAt => {
+                UserCreditTransactionDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1694,7 +1625,7 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
 
 
-pub async fn save(self) -> Result<UserCreditTransactionView> {
+pub async fn save(self) -> Result<UserCreditTransactionRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -1712,7 +1643,7 @@ pub async fn save(self) -> Result<UserCreditTransactionView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1731,10 +1662,10 @@ pub async fn save(self) -> Result<UserCreditTransactionView> {
                         Err(err) => log_observer_error("created", "user_credit_transaction", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "user_credit_transaction", table: "user_credit_transactions", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -1746,26 +1677,26 @@ pub async fn save(self) -> Result<UserCreditTransactionView> {
                         Err(err) => log_observer_error("created", "user_credit_transaction", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(UserCreditTransactionView, UserCreditTransactionRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(UserCreditTransactionRecord, UserCreditTransactionRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, UserCreditTransactionCol::Id)) {
-            cols.push(UserCreditTransactionCol::Id);
+        if !cols.iter().any(|c| matches!(c, UserCreditTransactionDbCol::Id)) {
+            cols.push(UserCreditTransactionDbCol::Id);
             binds.push(generate_snowflake_i64().into());
         }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, UserCreditTransactionCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, UserCreditTransactionDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(UserCreditTransactionCol::CreatedAt);
+            cols.push(UserCreditTransactionDbCol::CreatedAt);
             binds.push(now.into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, UserCreditTransactionCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, UserCreditTransactionDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(UserCreditTransactionCol::UpdatedAt);
+            cols.push(UserCreditTransactionDbCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1811,21 +1742,21 @@ pub async fn save(self) -> Result<UserCreditTransactionView> {
             }
         }
         let localized = localized::load_user_credit_transaction_localized(db, &[row.id]).await?;
-        let view = hydrate_view(row.clone(), &localized, self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &localized, self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct UserCreditTransactionUpdate<'db> {
+pub struct UserCreditTransactionPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(UserCreditTransactionCol, BindValue, SetMode)>,
+    sets: Vec<(UserCreditTransactionDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
     translations: HashMap<&'static str, HashMap<String, String>>,
 }
 
-impl<'db> UserCreditTransactionUpdate<'db> {
+impl<'db> UserCreditTransactionPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1836,79 +1767,78 @@ impl<'db> UserCreditTransactionUpdate<'db> {
             translations: HashMap::new(),
         }
     }
-    pub fn unsafe_sql(self) -> UserCreditTransactionUnsafeUpdate<'db> { UserCreditTransactionUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((UserCreditTransactionCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((UserCreditTransactionDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((UserCreditTransactionCol::Id, val.into(), SetMode::Increment));
+        self.sets.push((UserCreditTransactionDbCol::Id, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((UserCreditTransactionCol::Id, val.into(), SetMode::Decrement));
+        self.sets.push((UserCreditTransactionDbCol::Id, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_user_id(mut self, val: i64) -> Self {
-        self.sets.push((UserCreditTransactionCol::UserId, val.into(), SetMode::Assign));
+        self.sets.push((UserCreditTransactionDbCol::UserId, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_user_id(mut self, val: i64) -> Self {
-        self.sets.push((UserCreditTransactionCol::UserId, val.into(), SetMode::Increment));
+        self.sets.push((UserCreditTransactionDbCol::UserId, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_user_id(mut self, val: i64) -> Self {
-        self.sets.push((UserCreditTransactionCol::UserId, val.into(), SetMode::Decrement));
+        self.sets.push((UserCreditTransactionDbCol::UserId, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_admin_id(mut self, val: Option<i64>) -> Self {
-        self.sets.push((UserCreditTransactionCol::AdminId, val.into(), SetMode::Assign));
+        self.sets.push((UserCreditTransactionDbCol::AdminId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_credit_type(mut self, val: CreditType) -> Self {
-        self.sets.push((UserCreditTransactionCol::CreditType, val.into(), SetMode::Assign));
+        self.sets.push((UserCreditTransactionDbCol::CreditType, val.into(), SetMode::Assign));
         self
     }
     pub fn set_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((UserCreditTransactionCol::Amount, val.into(), SetMode::Assign));
+        self.sets.push((UserCreditTransactionDbCol::Amount, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((UserCreditTransactionCol::Amount, val.into(), SetMode::Increment));
+        self.sets.push((UserCreditTransactionDbCol::Amount, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_amount(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((UserCreditTransactionCol::Amount, val.into(), SetMode::Decrement));
+        self.sets.push((UserCreditTransactionDbCol::Amount, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_transaction_type(mut self, val: CreditTransactionType) -> Self {
-        self.sets.push((UserCreditTransactionCol::TransactionType, val.into(), SetMode::Assign));
+        self.sets.push((UserCreditTransactionDbCol::TransactionType, val.into(), SetMode::Assign));
         self
     }
     pub fn set_related_key(mut self, val: Option<String>) -> Self {
-        self.sets.push((UserCreditTransactionCol::RelatedKey, val.into(), SetMode::Assign));
+        self.sets.push((UserCreditTransactionDbCol::RelatedKey, val.into(), SetMode::Assign));
         self
     }
     pub fn set_params(mut self, val: Option<serde_json::Value>) -> Self {
-        self.sets.push((UserCreditTransactionCol::Params, val.into(), SetMode::Assign));
+        self.sets.push((UserCreditTransactionDbCol::Params, val.into(), SetMode::Assign));
         self
     }
     pub fn set_remark(mut self, val: Option<String>) -> Self {
-        self.sets.push((UserCreditTransactionCol::Remark, val.into(), SetMode::Assign));
+        self.sets.push((UserCreditTransactionDbCol::Remark, val.into(), SetMode::Assign));
         self
     }
     pub fn set_custom_description(mut self, val: bool) -> Self {
-        self.sets.push((UserCreditTransactionCol::CustomDescription, val.into(), SetMode::Assign));
+        self.sets.push((UserCreditTransactionDbCol::CustomDescription, val.into(), SetMode::Assign));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((UserCreditTransactionCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((UserCreditTransactionDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((UserCreditTransactionCol::UpdatedAt, val.into(), SetMode::Assign));
+        self.sets.push((UserCreditTransactionDbCol::UpdatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_custom_description_text_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
@@ -1931,77 +1861,77 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_user_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::UserId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::UserId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_admin_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::AdminId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_type(mut self, op: Op, val: CreditType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::CreditType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::CreditType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_amount(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Amount.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::Amount.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_transaction_type(mut self, op: Op, val: CreditTransactionType) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::TransactionType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::TransactionType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_related_key(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::RelatedKey.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::RelatedKey.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_params(mut self, op: Op, val: Option<serde_json::Value>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Params.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::Params.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_remark(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::Remark.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::Remark.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_custom_description(mut self, op: Op, val: bool) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::CustomDescription.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::CustomDescription.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserCreditTransactionDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: UserCreditTransactionCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: UserCreditTransactionDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -2020,11 +1950,11 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<UserCreditTransactionUpdateChanges> {
-        let mut changes = UserCreditTransactionUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<UserCreditTransactionChanges> {
+        let mut changes = UserCreditTransactionChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                UserCreditTransactionCol::Id => {
+                UserCreditTransactionDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -2035,7 +1965,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCreditTransactionCol::UserId => {
+                UserCreditTransactionDbCol::UserId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -2046,7 +1976,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCreditTransactionCol::AdminId => {
+                UserCreditTransactionDbCol::AdminId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
@@ -2057,7 +1987,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCreditTransactionCol::CreditType => {
+                UserCreditTransactionDbCol::CreditType => {
                     let value = match bind {
                 BindValue::String(value) => CreditType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'CreditType'", value))?,
@@ -2074,7 +2004,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCreditTransactionCol::Amount => {
+                UserCreditTransactionDbCol::Amount => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
@@ -2085,7 +2015,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCreditTransactionCol::TransactionType => {
+                UserCreditTransactionDbCol::TransactionType => {
                     let value = match bind {
                 BindValue::String(value) => CreditTransactionType::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'CreditTransactionType'", value))?,
@@ -2102,7 +2032,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCreditTransactionCol::RelatedKey => {
+                UserCreditTransactionDbCol::RelatedKey => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2113,7 +2043,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCreditTransactionCol::Params => {
+                UserCreditTransactionDbCol::Params => {
                     let value = match bind {
                 BindValue::JsonOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<serde_json::Value>'", other),
@@ -2124,7 +2054,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCreditTransactionCol::Remark => {
+                UserCreditTransactionDbCol::Remark => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2135,7 +2065,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCreditTransactionCol::CustomDescription => {
+                UserCreditTransactionDbCol::CustomDescription => {
                     let value = match bind {
             BindValue::Bool(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'bool'", other),
@@ -2146,7 +2076,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCreditTransactionCol::CreatedAt => {
+                UserCreditTransactionDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2157,7 +2087,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCreditTransactionCol::UpdatedAt => {
+                UserCreditTransactionDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2201,14 +2131,14 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<UserCreditTransactionUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<UserCreditTransactionChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, UserCreditTransactionCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, UserCreditTransactionDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(UserCreditTransactionCol::UpdatedAt);
+            cols.push(UserCreditTransactionDbCol::UpdatedAt);
             set_binds.push(now.into());
             set_modes.push(SetMode::Assign);
         }
@@ -2312,33 +2242,23 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct UserCreditTransactionUnsafeUpdate<'db> {
-    inner: UserCreditTransactionUpdate<'db>,
-}
-
-impl<'db> UserCreditTransactionUnsafeUpdate<'db> {
-    fn new(inner: UserCreditTransactionUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> UserCreditTransactionUpdate<'db> { self.inner }
-}
 
 pub struct UserCreditTransactionTableAdapter;
 impl UserCreditTransactionTableAdapter {
-    fn parse_col(name: &str) -> Option<UserCreditTransactionCol> {
+    fn parse_col(name: &str) -> Option<UserCreditTransactionDbCol> {
         match name {
-            "id" => Some(UserCreditTransactionCol::Id),
-            "user_id" => Some(UserCreditTransactionCol::UserId),
-            "admin_id" => Some(UserCreditTransactionCol::AdminId),
-            "credit_type" => Some(UserCreditTransactionCol::CreditType),
-            "amount" => Some(UserCreditTransactionCol::Amount),
-            "transaction_type" => Some(UserCreditTransactionCol::TransactionType),
-            "related_key" => Some(UserCreditTransactionCol::RelatedKey),
-            "params" => Some(UserCreditTransactionCol::Params),
-            "remark" => Some(UserCreditTransactionCol::Remark),
-            "custom_description" => Some(UserCreditTransactionCol::CustomDescription),
-            "created_at" => Some(UserCreditTransactionCol::CreatedAt),
-            "updated_at" => Some(UserCreditTransactionCol::UpdatedAt),
+            "id" => Some(UserCreditTransactionDbCol::Id),
+            "user_id" => Some(UserCreditTransactionDbCol::UserId),
+            "admin_id" => Some(UserCreditTransactionDbCol::AdminId),
+            "credit_type" => Some(UserCreditTransactionDbCol::CreditType),
+            "amount" => Some(UserCreditTransactionDbCol::Amount),
+            "transaction_type" => Some(UserCreditTransactionDbCol::TransactionType),
+            "related_key" => Some(UserCreditTransactionDbCol::RelatedKey),
+            "params" => Some(UserCreditTransactionDbCol::Params),
+            "remark" => Some(UserCreditTransactionDbCol::Remark),
+            "custom_description" => Some(UserCreditTransactionDbCol::CustomDescription),
+            "created_at" => Some(UserCreditTransactionDbCol::CreatedAt),
+            "updated_at" => Some(UserCreditTransactionDbCol::UpdatedAt),
             _ => None,
         }
     }
@@ -2353,10 +2273,10 @@ impl UserCreditTransactionTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<UserCreditTransactionCol> {
+    fn parse_like_col(name: &str) -> Option<UserCreditTransactionDbCol> {
         match name {
-            "related_key" => Some(UserCreditTransactionCol::RelatedKey),
-            "remark" => Some(UserCreditTransactionCol::Remark),
+            "related_key" => Some(UserCreditTransactionDbCol::RelatedKey),
+            "remark" => Some(UserCreditTransactionDbCol::Remark),
             _ => None,
         }
     }
@@ -2520,8 +2440,8 @@ impl UserCreditTransactionTableAdapter {
     }
 }
 impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
-    type Query<'db> = UserCreditTransactionQuery<'db>;
-    type Row = UserCreditTransactionWithRelations;
+    type Query<'db> = Query<'db, UserCreditTransactionModel>;
+    type Row = UserCreditTransactionRecord;
     fn model_key(&self) -> &'static str { "UserCreditTransaction" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "user_id", "admin_id", "credit_type", "amount", "transaction_type", "related_key", "remark", "custom_description", "created_at", "updated_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at"] }
@@ -2678,7 +2598,7 @@ impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
             "f-locale-like-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: UserCreditTransactionQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<UserCreditTransactionQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, UserCreditTransactionModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, UserCreditTransactionModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -2715,14 +2635,14 @@ impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
                 let Some(field) = Self::parse_locale_field(column.as_str()) else { return Ok(None); };
                 let locale = core_i18n::current_locale().to_string();
                 let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = user_credit_transactions.id AND l.field = ? AND l.locale = ? AND l.value = ?)".to_string();
-                Ok(Some(query.where_exists(clause, vec![localized::USER_CREDIT_TRANSACTION_OWNER_TYPE.to_string(), field.to_string(), locale, trimmed.to_string()])))
+                Ok(Some(query.where_exists_raw(clause, vec![localized::USER_CREDIT_TRANSACTION_OWNER_TYPE.to_string(), field.to_string(), locale, trimmed.to_string()])))
             }
             ParsedFilter::LocaleLike { column } => {
                 let Some(field) = Self::parse_locale_field(column.as_str()) else { return Ok(None); };
                 let locale = core_i18n::current_locale().to_string();
                 let pattern = format!("%{}%", trimmed);
                 let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = user_credit_transactions.id AND l.field = ? AND l.locale = ? AND l.value LIKE ?)".to_string();
-                Ok(Some(query.where_exists(clause, vec![localized::USER_CREDIT_TRANSACTION_OWNER_TYPE.to_string(), field.to_string(), locale, pattern])))
+                Ok(Some(query.where_exists_raw(clause, vec![localized::USER_CREDIT_TRANSACTION_OWNER_TYPE.to_string(), field.to_string(), locale, pattern])))
             }
             ParsedFilter::LikeAny { columns } => {
                 let mut applied = false;
@@ -2753,189 +2673,189 @@ impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
             }
             ParsedFilter::Has { relation, column } => {
                 match (relation.as_str(), column.as_str()) {
-                    ("user", "id") => { let Some(bind) = Self::parse_bind_for_relation("user", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))) },
-                    ("user", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))) },
-                    ("user", "username") => { let Some(bind) = Self::parse_bind_for_relation("user", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))) },
-                    ("user", "name") => { let Some(bind) = Self::parse_bind_for_relation("user", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))) },
-                    ("user", "email") => { let Some(bind) = Self::parse_bind_for_relation("user", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))) },
-                    ("user", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))) },
-                    ("user", "password") => { let Some(bind) = Self::parse_bind_for_relation("user", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))) },
-                    ("user", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))) },
-                    ("user", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))) },
-                    ("user", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))) },
-                    ("user", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))) },
-                    ("user", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))) },
-                    ("user", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))) },
-                    ("user", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))) },
-                    ("user", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))) },
-                    ("user__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Id, Op::Eq, bind))))) },
-                    ("user__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind))))) },
-                    ("user__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Eq, bind))))) },
-                    ("user__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Eq, bind))))) },
-                    ("user__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Eq, bind))))) },
-                    ("user__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind))))) },
-                    ("user__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Eq, bind))))) },
-                    ("user__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind))))) },
-                    ("user__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind))))) },
-                    ("user__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind))))) },
-                    ("user__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind))))) },
-                    ("user__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind))))) },
-                    ("user__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind))))) },
-                    ("user__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind))))) },
-                    ("user__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind))))) },
-                    ("user__introducer__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))))) },
-                    ("user__introducer__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))))) },
-                    ("user__introducer__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))))) },
-                    ("user__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Id, Op::Eq, bind))))) },
-                    ("user__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind))))) },
-                    ("user__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Eq, bind))))) },
-                    ("user__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Eq, bind))))) },
-                    ("user__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Eq, bind))))) },
-                    ("user__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind))))) },
-                    ("user__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Eq, bind))))) },
-                    ("user__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind))))) },
-                    ("user__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind))))) },
-                    ("user__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind))))) },
-                    ("user__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind))))) },
-                    ("user__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind))))) },
-                    ("user__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind))))) },
-                    ("user__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind))))) },
-                    ("user__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind))))) },
-                    ("user__downlines__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))))) },
-                    ("user__downlines__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))))) },
-                    ("user__downlines__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))))) },
-                    ("admin", "id") => { let Some(bind) = Self::parse_bind_for_relation("admin", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Id, Op::Eq, bind)))) },
-                    ("admin", "username") => { let Some(bind) = Self::parse_bind_for_relation("admin", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Username, Op::Eq, bind)))) },
-                    ("admin", "email") => { let Some(bind) = Self::parse_bind_for_relation("admin", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Email, Op::Eq, bind)))) },
-                    ("admin", "locale") => { let Some(bind) = Self::parse_bind_for_relation("admin", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Locale, Op::Eq, bind)))) },
-                    ("admin", "password") => { let Some(bind) = Self::parse_bind_for_relation("admin", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Password, Op::Eq, bind)))) },
-                    ("admin", "name") => { let Some(bind) = Self::parse_bind_for_relation("admin", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Name, Op::Eq, bind)))) },
-                    ("admin", "admin_type") => { let Some(bind) = Self::parse_bind_for_relation("admin", "admin_type", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::AdminType, Op::Eq, bind)))) },
-                    ("admin", "abilities") => { let Some(bind) = Self::parse_bind_for_relation("admin", "abilities", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Abilities, Op::Eq, bind)))) },
-                    ("admin", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::CreatedAt, Op::Eq, bind)))) },
-                    ("admin", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::UpdatedAt, Op::Eq, bind)))) },
-                    ("admin", "deleted_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "deleted_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::DeletedAt, Op::Eq, bind)))) },
+                    ("user", "id") => { let Some(bind) = Self::parse_bind_for_relation("user", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))) },
+                    ("user", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))) },
+                    ("user", "username") => { let Some(bind) = Self::parse_bind_for_relation("user", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))) },
+                    ("user", "name") => { let Some(bind) = Self::parse_bind_for_relation("user", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))) },
+                    ("user", "email") => { let Some(bind) = Self::parse_bind_for_relation("user", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))) },
+                    ("user", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))) },
+                    ("user", "password") => { let Some(bind) = Self::parse_bind_for_relation("user", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))) },
+                    ("user", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))) },
+                    ("user", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))) },
+                    ("user", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))) },
+                    ("user", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))) },
+                    ("user", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))) },
+                    ("user", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))) },
+                    ("user", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))) },
+                    ("user", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("user__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind))))) },
+                    ("user__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind))))) },
+                    ("user__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind))))) },
+                    ("user__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind))))) },
+                    ("user__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind))))) },
+                    ("user__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind))))) },
+                    ("user__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind))))) },
+                    ("user__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind))))) },
+                    ("user__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind))))) },
+                    ("user__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind))))) },
+                    ("user__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind))))) },
+                    ("user__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind))))) },
+                    ("user__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind))))) },
+                    ("user__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind))))) },
+                    ("user__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind))))) },
+                    ("user__introducer__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))))) },
+                    ("user__introducer__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))))) },
+                    ("user__introducer__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user__introducer__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))))) },
+                    ("user__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind))))) },
+                    ("user__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind))))) },
+                    ("user__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind))))) },
+                    ("user__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind))))) },
+                    ("user__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind))))) },
+                    ("user__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind))))) },
+                    ("user__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind))))) },
+                    ("user__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind))))) },
+                    ("user__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind))))) },
+                    ("user__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind))))) },
+                    ("user__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind))))) },
+                    ("user__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind))))) },
+                    ("user__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind))))) },
+                    ("user__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind))))) },
+                    ("user__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind))))) },
+                    ("user__downlines__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))))) },
+                    ("user__downlines__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))))) },
+                    ("user__downlines__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("user__downlines__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))))) },
+                    ("admin", "id") => { let Some(bind) = Self::parse_bind_for_relation("admin", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::Id, Op::Eq, bind)))) },
+                    ("admin", "username") => { let Some(bind) = Self::parse_bind_for_relation("admin", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::Username, Op::Eq, bind)))) },
+                    ("admin", "email") => { let Some(bind) = Self::parse_bind_for_relation("admin", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::Email, Op::Eq, bind)))) },
+                    ("admin", "locale") => { let Some(bind) = Self::parse_bind_for_relation("admin", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::Locale, Op::Eq, bind)))) },
+                    ("admin", "password") => { let Some(bind) = Self::parse_bind_for_relation("admin", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::Password, Op::Eq, bind)))) },
+                    ("admin", "name") => { let Some(bind) = Self::parse_bind_for_relation("admin", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::Name, Op::Eq, bind)))) },
+                    ("admin", "admin_type") => { let Some(bind) = Self::parse_bind_for_relation("admin", "admin_type", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::AdminType, Op::Eq, bind)))) },
+                    ("admin", "abilities") => { let Some(bind) = Self::parse_bind_for_relation("admin", "abilities", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::Abilities, Op::Eq, bind)))) },
+                    ("admin", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::CreatedAt, Op::Eq, bind)))) },
+                    ("admin", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("admin", "deleted_at") => { let Some(bind) = Self::parse_bind_for_relation("admin", "deleted_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::DeletedAt, Op::Eq, bind)))) },
                     _ => Ok(None),
                 }
             }
             ParsedFilter::HasLike { relation, column } => {
                 let pattern = format!("%{}%", trimmed);
                 match (relation.as_str(), column.as_str()) {
-                    ("user", "uuid") => Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))),
-                    ("user", "username") => Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))),
-                    ("user", "name") => Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))),
-                    ("user", "email") => Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))),
-                    ("user", "locale") => Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))),
-                    ("user", "password") => Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))),
-                    ("user", "country_iso2") => Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))),
-                    ("user", "contact_number") => Ok(Some(query.where_has_user(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))),
-                    ("user__introducer", "uuid") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone()))))),
-                    ("user__introducer", "username") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone()))))),
-                    ("user__introducer", "name") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone()))))),
-                    ("user__introducer", "email") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone()))))),
-                    ("user__introducer", "locale") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone()))))),
-                    ("user__introducer", "password") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone()))))),
-                    ("user__introducer", "country_iso2") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone()))))),
-                    ("user__introducer", "contact_number") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone()))))),
-                    ("user__introducer__introducer", "uuid") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))))),
-                    ("user__introducer__introducer", "username") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))))),
-                    ("user__introducer__introducer", "name") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))))),
-                    ("user__introducer__introducer", "email") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))))),
-                    ("user__introducer__introducer", "locale") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))))),
-                    ("user__introducer__introducer", "password") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))))),
-                    ("user__introducer__introducer", "country_iso2") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))))),
-                    ("user__introducer__introducer", "contact_number") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))))),
-                    ("user__introducer__downlines", "uuid") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))))),
-                    ("user__introducer__downlines", "username") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))))),
-                    ("user__introducer__downlines", "name") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))))),
-                    ("user__introducer__downlines", "email") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))))),
-                    ("user__introducer__downlines", "locale") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))))),
-                    ("user__introducer__downlines", "password") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))))),
-                    ("user__introducer__downlines", "country_iso2") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))))),
-                    ("user__introducer__downlines", "contact_number") => Ok(Some(query.where_has_user(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))))),
-                    ("user__downlines", "uuid") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone()))))),
-                    ("user__downlines", "username") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone()))))),
-                    ("user__downlines", "name") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone()))))),
-                    ("user__downlines", "email") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone()))))),
-                    ("user__downlines", "locale") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone()))))),
-                    ("user__downlines", "password") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone()))))),
-                    ("user__downlines", "country_iso2") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone()))))),
-                    ("user__downlines", "contact_number") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone()))))),
-                    ("user__downlines__introducer", "uuid") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))))),
-                    ("user__downlines__introducer", "username") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))))),
-                    ("user__downlines__introducer", "name") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))))),
-                    ("user__downlines__introducer", "email") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))))),
-                    ("user__downlines__introducer", "locale") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))))),
-                    ("user__downlines__introducer", "password") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))))),
-                    ("user__downlines__introducer", "country_iso2") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))))),
-                    ("user__downlines__introducer", "contact_number") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))))),
-                    ("user__downlines__downlines", "uuid") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))))),
-                    ("user__downlines__downlines", "username") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))))),
-                    ("user__downlines__downlines", "name") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))))),
-                    ("user__downlines__downlines", "email") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))))),
-                    ("user__downlines__downlines", "locale") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))))),
-                    ("user__downlines__downlines", "password") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))))),
-                    ("user__downlines__downlines", "country_iso2") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))))),
-                    ("user__downlines__downlines", "contact_number") => Ok(Some(query.where_has_user(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))))),
-                    ("admin", "username") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Username, Op::Like, pattern.clone())))),
-                    ("admin", "email") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Email, Op::Like, pattern.clone())))),
-                    ("admin", "locale") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Locale, Op::Like, pattern.clone())))),
-                    ("admin", "password") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Password, Op::Like, pattern.clone())))),
-                    ("admin", "name") => Ok(Some(query.where_has_admin(|rq| rq.where_col(AdminCol::Name, Op::Like, pattern.clone())))),
+                    ("user", "uuid") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))),
+                    ("user", "username") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))),
+                    ("user", "name") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))),
+                    ("user", "email") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))),
+                    ("user", "locale") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))),
+                    ("user", "password") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))),
+                    ("user", "country_iso2") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))),
+                    ("user", "contact_number") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))),
+                    ("user__introducer", "uuid") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone()))))),
+                    ("user__introducer", "username") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone()))))),
+                    ("user__introducer", "name") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone()))))),
+                    ("user__introducer", "email") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone()))))),
+                    ("user__introducer", "locale") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone()))))),
+                    ("user__introducer", "password") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone()))))),
+                    ("user__introducer", "country_iso2") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone()))))),
+                    ("user__introducer", "contact_number") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone()))))),
+                    ("user__introducer__introducer", "uuid") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))))),
+                    ("user__introducer__introducer", "username") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))))),
+                    ("user__introducer__introducer", "name") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))))),
+                    ("user__introducer__introducer", "email") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))))),
+                    ("user__introducer__introducer", "locale") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))))),
+                    ("user__introducer__introducer", "password") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))))),
+                    ("user__introducer__introducer", "country_iso2") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))))),
+                    ("user__introducer__introducer", "contact_number") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))))),
+                    ("user__introducer__downlines", "uuid") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))))),
+                    ("user__introducer__downlines", "username") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))))),
+                    ("user__introducer__downlines", "name") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))))),
+                    ("user__introducer__downlines", "email") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))))),
+                    ("user__introducer__downlines", "locale") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))))),
+                    ("user__introducer__downlines", "password") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))))),
+                    ("user__introducer__downlines", "country_iso2") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))))),
+                    ("user__introducer__downlines", "contact_number") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))))),
+                    ("user__downlines", "uuid") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone()))))),
+                    ("user__downlines", "username") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone()))))),
+                    ("user__downlines", "name") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone()))))),
+                    ("user__downlines", "email") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone()))))),
+                    ("user__downlines", "locale") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone()))))),
+                    ("user__downlines", "password") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone()))))),
+                    ("user__downlines", "country_iso2") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone()))))),
+                    ("user__downlines", "contact_number") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone()))))),
+                    ("user__downlines__introducer", "uuid") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))))),
+                    ("user__downlines__introducer", "username") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))))),
+                    ("user__downlines__introducer", "name") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))))),
+                    ("user__downlines__introducer", "email") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))))),
+                    ("user__downlines__introducer", "locale") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))))),
+                    ("user__downlines__introducer", "password") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))))),
+                    ("user__downlines__introducer", "country_iso2") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))))),
+                    ("user__downlines__introducer", "contact_number") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))))),
+                    ("user__downlines__downlines", "uuid") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))))),
+                    ("user__downlines__downlines", "username") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))))),
+                    ("user__downlines__downlines", "name") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))))),
+                    ("user__downlines__downlines", "email") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))))),
+                    ("user__downlines__downlines", "locale") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))))),
+                    ("user__downlines__downlines", "password") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))))),
+                    ("user__downlines__downlines", "country_iso2") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))))),
+                    ("user__downlines__downlines", "contact_number") => Ok(Some(query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))))),
+                    ("admin", "username") => Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::Username, Op::Like, pattern.clone())))),
+                    ("admin", "email") => Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::Email, Op::Like, pattern.clone())))),
+                    ("admin", "locale") => Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::Locale, Op::Like, pattern.clone())))),
+                    ("admin", "password") => Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::Password, Op::Like, pattern.clone())))),
+                    ("admin", "name") => Ok(Some(query.where_has(UserCreditTransactionRel::ADMIN, |rq| rq.where_col(AdminDbCol::Name, Op::Like, pattern.clone())))),
                     _ => Ok(None),
                 }
             }
@@ -2956,32 +2876,32 @@ impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: UserCreditTransactionQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<UserCreditTransactionQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, UserCreditTransactionModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, UserCreditTransactionModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(UserCreditTransactionCol::Id, dir),
-            "user_id" => query.order_by(UserCreditTransactionCol::UserId, dir),
-            "admin_id" => query.order_by(UserCreditTransactionCol::AdminId, dir),
-            "credit_type" => query.order_by(UserCreditTransactionCol::CreditType, dir),
-            "amount" => query.order_by(UserCreditTransactionCol::Amount, dir),
-            "transaction_type" => query.order_by(UserCreditTransactionCol::TransactionType, dir),
-            "related_key" => query.order_by(UserCreditTransactionCol::RelatedKey, dir),
-            "params" => query.order_by(UserCreditTransactionCol::Params, dir),
-            "remark" => query.order_by(UserCreditTransactionCol::Remark, dir),
-            "custom_description" => query.order_by(UserCreditTransactionCol::CustomDescription, dir),
-            "created_at" => query.order_by(UserCreditTransactionCol::CreatedAt, dir),
-            "updated_at" => query.order_by(UserCreditTransactionCol::UpdatedAt, dir),
+            "id" => query.order_by(UserCreditTransactionDbCol::Id, dir),
+            "user_id" => query.order_by(UserCreditTransactionDbCol::UserId, dir),
+            "admin_id" => query.order_by(UserCreditTransactionDbCol::AdminId, dir),
+            "credit_type" => query.order_by(UserCreditTransactionDbCol::CreditType, dir),
+            "amount" => query.order_by(UserCreditTransactionDbCol::Amount, dir),
+            "transaction_type" => query.order_by(UserCreditTransactionDbCol::TransactionType, dir),
+            "related_key" => query.order_by(UserCreditTransactionDbCol::RelatedKey, dir),
+            "params" => query.order_by(UserCreditTransactionDbCol::Params, dir),
+            "remark" => query.order_by(UserCreditTransactionDbCol::Remark, dir),
+            "custom_description" => query.order_by(UserCreditTransactionDbCol::CustomDescription, dir),
+            "created_at" => query.order_by(UserCreditTransactionDbCol::CreatedAt, dir),
+            "updated_at" => query.order_by(UserCreditTransactionDbCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: UserCreditTransactionQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<UserCreditTransactionQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, UserCreditTransactionModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, UserCreditTransactionModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &UserCreditTransactionWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &UserCreditTransactionRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "user_id" => Some(row.user_id.to_string()),
@@ -2995,10 +2915,10 @@ impl GeneratedTableAdapter for UserCreditTransactionTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: UserCreditTransactionQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, UserCreditTransactionModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: UserCreditTransactionQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<UserCreditTransactionWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, UserCreditTransactionModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<UserCreditTransactionRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -3024,13 +2944,13 @@ impl Default for UserCreditTransactionDataTableConfig {
     }
 }
 pub trait UserCreditTransactionDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: UserCreditTransactionQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> UserCreditTransactionQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, UserCreditTransactionModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, UserCreditTransactionModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: UserCreditTransactionQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<UserCreditTransactionQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: UserCreditTransactionQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<UserCreditTransactionQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut UserCreditTransactionWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: UserCreditTransactionWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, UserCreditTransactionModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, UserCreditTransactionModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, UserCreditTransactionModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, UserCreditTransactionModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut UserCreditTransactionRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: UserCreditTransactionRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         if let Some(id_value) = record.get("id").cloned() {
             let id_text = match id_value {
@@ -3042,10 +2962,10 @@ pub trait UserCreditTransactionDataTableHooks: Send + Sync + 'static {
         }
         Ok(record)
     }
-    fn row_to_record(&self, row: UserCreditTransactionWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: UserCreditTransactionRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: UserCreditTransactionQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, UserCreditTransactionModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct UserCreditTransactionDefaultDataTableHooks;
@@ -3083,15 +3003,15 @@ impl<H: UserCreditTransactionDataTableHooks> UserCreditTransactionDataTable<H> {
 impl<H: UserCreditTransactionDataTableHooks> AutoDataTable for UserCreditTransactionDataTable<H> {
     type Adapter = UserCreditTransactionTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> UserCreditTransactionQuery<'db> {
-        self.hooks.scope(UserCreditTransaction::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, UserCreditTransactionModel> {
+        self.hooks.scope(UserCreditTransactionModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: UserCreditTransactionQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<UserCreditTransactionQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: UserCreditTransactionQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<UserCreditTransactionQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut UserCreditTransactionWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: UserCreditTransactionWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: UserCreditTransactionQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, UserCreditTransactionModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, UserCreditTransactionModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, UserCreditTransactionModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, UserCreditTransactionModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut UserCreditTransactionRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: UserCreditTransactionRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, UserCreditTransactionModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -3101,10 +3021,620 @@ impl<H: UserCreditTransactionDataTableHooks> AutoDataTable for UserCreditTransac
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for UserCreditTransactionView {
+impl ActiveRecord for UserCreditTransactionRecord {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        UserCreditTransaction::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        UserCreditTransactionModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct UserCreditTransactionModel;
+impl UserCreditTransactionModel {
+    pub const TABLE: &'static str = "user_credit_transactions";
+    pub const MODEL_KEY: &'static str = "user_credit_transaction";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, UserCreditTransactionModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, UserCreditTransactionModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, UserCreditTransactionModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, UserCreditTransactionModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, UserCreditTransactionModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, UserCreditTransactionModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<UserCreditTransactionRecord>> {
+        UserCreditTransactionQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for UserCreditTransactionModel {
+    type Pk = i64;
+    type Record = UserCreditTransactionRecord;
+    type Create = UserCreditTransactionCreate;
+    type Changes = UserCreditTransactionChanges;
+    const TABLE: &'static str = UserCreditTransactionModel::TABLE;
+    const MODEL_KEY: &'static str = UserCreditTransactionModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for UserCreditTransactionModel {
+    type InnerQuery<'db> = UserCreditTransactionQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        UserCreditTransactionQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for UserCreditTransactionModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for UserCreditTransactionModel {
+    type InnerCreate<'db> = UserCreditTransactionCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        UserCreditTransactionCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            UserCreditTransactionQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("user_credit_transactions: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<UserCreditTransactionModel> for UserCreditTransactionDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <UserCreditTransactionModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<UserCreditTransactionModel>>::Value) -> anyhow::Result<<UserCreditTransactionModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            UserCreditTransactionDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::UserId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::AdminId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::CreditType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::Amount => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::TransactionType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::RelatedKey => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::Params => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::Remark => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::CustomDescription => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<UserCreditTransactionModel> for Column<UserCreditTransactionModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <UserCreditTransactionModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<UserCreditTransactionModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            UserCreditTransactionDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::UserId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::AdminId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::CreditType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::Amount => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::TransactionType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::RelatedKey => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::Params => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::Remark => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::CustomDescription => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<UserCreditTransactionModel> for UserCreditTransactionDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <UserCreditTransactionModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <UserCreditTransactionModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <UserCreditTransactionModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <UserCreditTransactionModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<UserCreditTransactionModel> for Column<UserCreditTransactionModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <UserCreditTransactionModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <UserCreditTransactionModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<UserCreditTransactionDbCol> = fields.iter().map(|field| resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <UserCreditTransactionModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <UserCreditTransactionModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<UserCreditTransactionDbCol> = fields.iter().map(|field| resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for UserCreditTransactionModel {
+    type InnerQuery<'db> = UserCreditTransactionQueryInner<'db>;
+    type InnerPatch<'db> = UserCreditTransactionPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        UserCreditTransactionPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(UserCreditTransactionDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = UserCreditTransactionPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", UserCreditTransactionDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM user_credit_transactions", UserCreditTransactionDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = UserCreditTransactionQueryInner::new(db, base_url);
+            query.where_in(UserCreditTransactionDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<UserCreditTransactionModel> for UserCreditTransactionDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserCreditTransactionModel>>::Value) -> anyhow::Result<<UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            UserCreditTransactionDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::UserId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::AdminId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::CreditType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::Amount => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::TransactionType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::RelatedKey => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::Params => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::Remark => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::CustomDescription => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<UserCreditTransactionModel> for Column<UserCreditTransactionModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            UserCreditTransactionDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::UserId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::AdminId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::CreditType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::Amount => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::TransactionType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::RelatedKey => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::Params => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::Remark => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::CustomDescription => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserCreditTransactionDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<UserCreditTransactionModel> for UserCreditTransactionDbCol {
+    fn increment<'db>(field: Self, mut builder: <UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserCreditTransactionModel>>::Value) -> anyhow::Result<<UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            UserCreditTransactionDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            UserCreditTransactionDbCol::UserId => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            UserCreditTransactionDbCol::Amount => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserCreditTransactionModel>>::Value) -> anyhow::Result<<UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            UserCreditTransactionDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            UserCreditTransactionDbCol::UserId => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            UserCreditTransactionDbCol::Amount => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<UserCreditTransactionModel> for Column<UserCreditTransactionModel, i64> {
+    fn increment<'db>(field: Self, mut builder: <UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserCreditTransactionModel>>::Value) -> anyhow::Result<<UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            UserCreditTransactionDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            UserCreditTransactionDbCol::UserId => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserCreditTransactionModel>>::Value) -> anyhow::Result<<UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            UserCreditTransactionDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            UserCreditTransactionDbCol::UserId => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<UserCreditTransactionModel> for Column<UserCreditTransactionModel, rust_decimal::Decimal> {
+    fn increment<'db>(field: Self, mut builder: <UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserCreditTransactionModel>>::Value) -> anyhow::Result<<UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            UserCreditTransactionDbCol::Amount => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserCreditTransactionModel>>::Value) -> anyhow::Result<<UserCreditTransactionModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            UserCreditTransactionDbCol::Amount => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<UserCreditTransactionModel> for UserCreditTransactionDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<UserCreditTransactionModel>>::Value) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<UserCreditTransactionModel>>::Value) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<UserCreditTransactionModel>>::Value]) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<UserCreditTransactionModel> for Column<UserCreditTransactionModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_user_credit_transaction_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
+impl core_db::common::model_api::IncludeRelation<UserCreditTransactionModel> for OneRelation<UserCreditTransactionModel, UserRow, 0> {
+    fn include<'db>(_relation: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query
+    }
+}
+
+impl core_db::common::model_api::WhereHasRelation<UserCreditTransactionModel> for OneRelation<UserCreditTransactionModel, UserRow, 0> {
+    type Target = UserModel;
+    fn where_has<'db, F>(_relation: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.where_has_user(scope)
+    }
+    fn or_where_has<'db, F>(_relation: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.or_where_has_user(scope)
+    }
+}
+
+impl core_db::common::model_api::RecordOneRelation<UserCreditTransactionModel> for OneRelation<UserCreditTransactionModel, UserRow, 0> {
+    type Target = UserRow;
+    fn get<'a>(_relation: Self, record: &'a UserCreditTransactionRecord) -> Option<&'a Self::Target> {
+        record.user.as_ref()
+    }
+}
+
+impl core_db::common::model_api::IncludeRelation<UserCreditTransactionModel> for OneRelation<UserCreditTransactionModel, AdminRow, 1> {
+    fn include<'db>(_relation: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query
+    }
+}
+
+impl core_db::common::model_api::WhereHasRelation<UserCreditTransactionModel> for OneRelation<UserCreditTransactionModel, AdminRow, 1> {
+    type Target = AdminModel;
+    fn where_has<'db, F>(_relation: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.where_has_admin(scope)
+    }
+    fn or_where_has<'db, F>(_relation: Self, query: <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserCreditTransactionModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.or_where_has_admin(scope)
+    }
+}
+
+impl core_db::common::model_api::RecordOneRelation<UserCreditTransactionModel> for OneRelation<UserCreditTransactionModel, AdminRow, 1> {
+    type Target = AdminRow;
+    fn get<'a>(_relation: Self, record: &'a UserCreditTransactionRecord) -> Option<&'a Self::Target> {
+        record.admin.as_ref()
+    }
+}
+
 

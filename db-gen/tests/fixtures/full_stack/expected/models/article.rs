@@ -7,19 +7,19 @@ use serde_json::Value as JsonValue;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::attachments::types::{Attachment, AttachmentInput, AttachmentMap};
 use uuid::Uuid;
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
 use core_db::platform::meta::types::MetaMap;
 use crate::generated::localized;
 use core_i18n::current_locale;
-use crate::generated::models::user::{UserCol, UserQuery, UserRow};
-use crate::generated::models::profile::{ProfileCol, ProfileQuery, ProfileRow};
+use crate::generated::models::user::{UserDbCol, UserModel, UserRow, UserRel};
+use crate::generated::models::profile::{ProfileDbCol, ProfileModel, ProfileRow};
 use crate::generated::localized::LocalizedMapHelper;
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
@@ -28,7 +28,7 @@ const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct ArticleCreateInput {
+pub struct ArticleCreate {
     pub id: FieldInput<i64>,
     pub author_id: FieldInput<i64>,
     pub status: FieldInput<ArticleStatus>,
@@ -37,7 +37,7 @@ pub struct ArticleCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct ArticleUpdateChanges {
+pub struct ArticleChanges {
     pub id: Option<FieldChange<i64>>,
     pub author_id: Option<FieldChange<i64>>,
     pub status: Option<FieldChange<ArticleStatus>>,
@@ -54,7 +54,7 @@ pub struct ArticleRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ArticleView {
+pub struct ArticleRecord {
     pub id: i64,
     pub author_id: i64,
     pub status: ArticleStatus,
@@ -66,29 +66,12 @@ pub struct ArticleView {
     pub hero: Option<Attachment>,
     pub hero_url: Option<String>,
     pub meta: std::collections::HashMap<String, JsonValue>,
+    pub author: Option<UserRow>,
 }
 
-impl ArticleView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> ArticleUpdate<'db> {
-        Article::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &Article<'db>) -> ArticleUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> ArticleJson {
-        ArticleJson {
-            id: self.id.clone(),
-            author_id: self.author_id.clone(),
-            status: self.status.clone(),
-            is_system: self.is_system.clone(),
-            status_explained: self.status_explained.clone(),
-            is_system_explained: self.is_system_explained.clone(),
-            title: self.title.clone(),
-            title_translations: self.title_translations.clone(),
-            hero: self.hero.clone(),
-            hero_url: self.hero_url.clone(),
-            meta: self.meta.clone(),
-        }
+impl ArticleRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, ArticleModel> {
+        ArticleModel::query(db.into()).where_col(ArticleDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
     pub fn meta_flags(&self) -> Option<bool> { self.meta.get("flags").and_then(|v| v.as_bool()) }
     pub fn meta_extra_as<T: serde::de::DeserializeOwned>(&self) -> anyhow::Result<Option<T>> { match self.meta.get("extra") { None => Ok(None), Some(v) => Ok(Some(serde_json::from_value(v.clone())?)), } }
@@ -103,39 +86,9 @@ impl ArticleView {
     }
 }
 
-pub trait ArticleViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&ArticleView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&ArticleView) -> K) -> std::collections::HashMap<K, ArticleView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&ArticleView) -> K) -> std::collections::HashMap<K, Vec<ArticleView>> where K: Eq + std::hash::Hash;
-}
-
-impl ArticleViewsExt for Vec<ArticleView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&ArticleView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&ArticleView) -> K) -> std::collections::HashMap<K, ArticleView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&ArticleView) -> K) -> std::collections::HashMap<K, Vec<ArticleView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct ArticleJson {
-    pub id: i64,
-    pub author_id: i64,
-    pub status: ArticleStatus,
-    pub is_system: ArticleSystemFlag,
-    pub status_explained: String,
-    pub is_system_explained: String,
-    pub title: Option<String>,
-    pub title_translations: Option<localized::LocalizedText>,
-    pub hero: Option<Attachment>,
-    pub hero_url: Option<String>,
-    pub meta: std::collections::HashMap<String, JsonValue>,
-}
-
-fn hydrate_view(row: ArticleRow, loc: &LocalizedMap, meta: &MetaMap, attachments: &AttachmentMap, base_url: Option<&str>) -> ArticleView {
+fn hydrate_record(row: ArticleRow, loc: &LocalizedMap, meta: &MetaMap, attachments: &AttachmentMap, base_url: Option<&str>) -> ArticleRecord {
     let locale = current_locale();
-    let mut view = ArticleView {
+    let mut record = ArticleRecord {
         id: row.id,
         author_id: row.author_id,
         status: row.status,
@@ -147,81 +100,82 @@ fn hydrate_view(row: ArticleRow, loc: &LocalizedMap, meta: &MetaMap, attachments
         hero: None,
         hero_url: None,
         meta: HashMap::new(),
+        author: None,
     };
-    let ml_title = loc.get_localized_text("title", view.id);
+    let ml_title = loc.get_localized_text("title", record.id);
     if let Some(ref ml) = ml_title {
-        view.title = Some(ml.get(locale).to_string());
+        record.title = Some(ml.get(locale).to_string());
     }
-    view.title_translations = ml_title;
-    view.meta = meta.get_all_for_owner(view.id);
-    view.hero = attachments.get_single("hero", view.id);
-    view.hero_url = view.hero.as_ref().map(|a| a.url_with_base(base_url));
-    view
+    record.title_translations = ml_title;
+    record.meta = meta.get_all_for_owner(record.id);
+    record.hero = attachments.get_single("hero", record.id);
+    record.hero_url = record.hero.as_ref().map(|a| a.url_with_base(base_url));
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct ArticleWithRelations {
-    #[serde(flatten)]
-    pub row: ArticleView,
-    pub author: Option<UserRow>,
+impl ArticleRecord {
+    pub fn one<R>(&self, relation: R) -> Option<&R::Target>
+    where
+        R: core_db::common::model_api::RecordOneRelation<ArticleModel>,
+    {
+        R::get(relation, self)
+    }
+    pub fn many<R>(&self, relation: R) -> &[R::Target]
+    where
+        R: core_db::common::model_api::RecordManyRelation<ArticleModel>,
+    {
+        R::get(relation, self)
+    }
 }
 
-impl ArticleWithRelations {
-    pub fn into_row(self) -> ArticleView { self.row }
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ArticleCol;
+impl ArticleCol {
+    pub const ID: Column<ArticleModel, i64> = Column::new("id");
+    pub const AUTHOR_ID: Column<ArticleModel, i64> = Column::new("author_id");
+    pub const STATUS: Column<ArticleModel, ArticleStatus> = Column::new("status");
+    pub const IS_SYSTEM: Column<ArticleModel, ArticleSystemFlag> = Column::new("is_system");
 }
 
-impl std::ops::Deref for ArticleWithRelations {
-    type Target = ArticleView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for ArticleWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_article_db_col(sql: &str) -> Option<ArticleDbCol> {
+    match sql {
+        "id" => Some(ArticleDbCol::Id),
+        "author_id" => Some(ArticleDbCol::AuthorId),
+        "status" => Some(ArticleDbCol::Status),
+        "is_system" => Some(ArticleDbCol::IsSystem),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum ArticleCol {
+pub enum ArticleDbCol {
     Id,
     AuthorId,
     Status,
     IsSystem,
 }
 
-impl ArticleCol {
-    pub const fn all() -> &'static [ArticleCol] {
-        &[ArticleCol::Id, ArticleCol::AuthorId, ArticleCol::Status, ArticleCol::IsSystem]
+impl ArticleDbCol {
+    pub const fn all() -> &'static [ArticleDbCol] {
+        &[ArticleDbCol::Id, ArticleDbCol::AuthorId, ArticleDbCol::Status, ArticleDbCol::IsSystem]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            ArticleCol::Id => "id",
-            ArticleCol::AuthorId => "author_id",
-            ArticleCol::Status => "status",
-            ArticleCol::IsSystem => "is_system",
+            ArticleDbCol::Id => "id",
+            ArticleDbCol::AuthorId => "author_id",
+            ArticleDbCol::Status => "status",
+            ArticleDbCol::IsSystem => "is_system",
         }
     }
 }
 
-pub struct Article<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ArticleRel;
+impl ArticleRel {
+    pub const AUTHOR: OneRelation<ArticleModel, UserRow, 0> = OneRelation::<ArticleModel, UserRow, 0>::new("author");
 }
 
-impl<'db> Article<'db> {
-    pub const TABLE: &'static str = "articles";
-    pub const MODEL_KEY: &'static str = "article";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> ArticleQuery<'db> { ArticleQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> ArticleInsert<'db> { ArticleInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> ArticleUpdate<'db> { ArticleUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<ArticleWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-    pub async fn load_author(&self, parents: &[ArticleRow]) -> Result<HashMap<i64, Option<UserRow>>> {
+async fn load_author<'db>(db: DbConn<'db>, parents: &[ArticleRow]) -> Result<HashMap<i64, Option<UserRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -234,7 +188,7 @@ impl<'db> Article<'db> {
         let sql = format!("SELECT * FROM users WHERE id IN ({})", placeholders.join(", "));
         let mut q = sqlx::query_as::<_, UserRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
-        let rows = self.db.fetch_all(q).await?;
+        let rows = db.fetch_all(q).await?;
         let mut by_pk: HashMap<i64, UserRow> = HashMap::new();
         for row in rows { by_pk.insert(row.id.clone(), row); }
         let mut out = HashMap::new();
@@ -243,10 +197,9 @@ impl<'db> Article<'db> {
         }
         Ok(out)
     }
-}
 
 #[derive(Clone)]
-pub struct ArticleQuery<'db> {
+pub struct ArticleQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -269,62 +222,61 @@ pub struct ArticleQuery<'db> {
 
 
 
-impl<'db> ArticleQuery<'db> {
+impl<'db> ArticleQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, author_id, status, is_system".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> ArticleUnsafeQuery<'db> { ArticleUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_author_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::AuthorId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::AuthorId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_author_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::AuthorId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::AuthorId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status(mut self, op: Op, val: ArticleStatus) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_is_system(mut self, op: Op, val: ArticleSystemFlag) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::IsSystem.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::IsSystem.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_is_system_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::IsSystem.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::IsSystem.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(ArticleCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: ArticleCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(ArticleDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: ArticleDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -343,7 +295,7 @@ impl<'db> ArticleQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: ArticleCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: ArticleDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -358,7 +310,7 @@ impl<'db> ArticleQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: ArticleCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: ArticleDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -370,7 +322,7 @@ impl<'db> ArticleQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: ArticleCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: ArticleDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -378,15 +330,15 @@ impl<'db> ArticleQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: ArticleCol) -> Self {
+    pub fn where_null(mut self, col: ArticleDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: ArticleCol) -> Self {
+    pub fn where_not_null(mut self, col: ArticleDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: ArticleCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: ArticleDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -440,7 +392,7 @@ impl<'db> ArticleQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[ArticleCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[ArticleDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, author_id, status, is_system".to_string());
         } else {
@@ -452,7 +404,7 @@ impl<'db> ArticleQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[ArticleCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[ArticleDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -533,26 +485,26 @@ impl<'db> ArticleQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: ArticleCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: ArticleDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: ArticleCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: ArticleDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: ArticleCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: ArticleDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[ArticleCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[ArticleDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[ArticleCol]) -> Self {
+    pub fn select(mut self, cols: &[ArticleDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -600,7 +552,7 @@ impl<'db> ArticleQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[ArticleCol]) -> Self {
+    pub fn group_by(mut self, cols: &[ArticleDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -627,10 +579,10 @@ impl<'db> ArticleQuery<'db> {
         self.offset = Some(n);
         self
     }
-    pub fn where_has_author(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
+    pub fn where_has_author(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.id = articles.author_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -640,10 +592,10 @@ impl<'db> ArticleQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_doesnt_have_author(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
+    pub fn where_doesnt_have_author(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.id = articles.author_id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM users WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -653,10 +605,10 @@ impl<'db> ArticleQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn or_where_has_author(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
+    pub fn or_where_has_author(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.id = articles.author_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -718,7 +670,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<ArticleWithRelations>> {
+    pub async fn get(self) -> Result<Vec<ArticleRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -764,8 +716,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("articles", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = Article { db: db.clone(), base_url: base_url.clone() };
-        let author = m.load_author(&rows).await?;
+        let author = load_author(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = localized::load_article_localized(db.clone(), &ids).await?;
         let meta_map = localized::load_article_meta(db.clone(), &ids).await?;
@@ -773,64 +724,62 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
             let key = r.id.clone();
-            let view = hydrate_view(r.clone(), &localized, &meta_map, &attachments, base_url.as_deref());
-            out_vec.push(ArticleWithRelations {
-                row: view,
-                author: author.get(&key).cloned().unwrap_or(None),
-            });
+            let mut record = hydrate_record(r.clone(), &localized, &meta_map, &attachments, base_url.as_deref());
+            record.author = author.get(&key).cloned().unwrap_or(None);
+            out_vec.push(record);
         }
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<ArticleWithRelations>> {
+    pub async fn first(self) -> Result<Option<ArticleRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<ArticleWithRelations> {
+    pub async fn first_or_fail(self) -> Result<ArticleRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("articles: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<ArticleWithRelations>> {
+    pub async fn find(self, id: i64) -> Result<Option<ArticleRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<ArticleWithRelations> {
+    pub async fn find_or_fail(self, id: i64) -> Result<ArticleRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("articles: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(ArticleInsert<'db>) -> ArticleInsert<'db>) -> Result<ArticleWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(ArticleCreateInner<'db>) -> ArticleCreateInner<'db>) -> Result<ArticleRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(ArticleInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(ArticleCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Article::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        ArticleQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(ArticleUpdate<'db>) -> ArticleUpdate<'db>,
-        on_create: impl FnOnce(ArticleInsert<'db>) -> ArticleInsert<'db>,
-    ) -> Result<ArticleWithRelations> {
+        on_update: impl FnOnce(ArticlePatchInner<'db>) -> ArticlePatchInner<'db>,
+        on_create: impl FnOnce(ArticleCreateInner<'db>) -> ArticleCreateInner<'db>,
+    ) -> Result<ArticleRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = ArticleUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = ArticlePatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Article::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return ArticleQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(ArticleInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(ArticleCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Article::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        ArticleQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: ArticleCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: ArticleDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -845,7 +794,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: ArticleCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: ArticleDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -901,13 +850,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<ArticleWithRelations>) -> Fut,
+        F: FnMut(Vec<ArticleRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = ArticleQuery::new(db.clone(), self.base_url.clone());
+            let mut query = ArticleQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -921,11 +870,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(ArticleCol::Id, OrderDir::Desc)
+        self.order_by(ArticleDbCol::Id, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(ArticleCol::Id, OrderDir::Asc)
+        self.order_by(ArticleDbCol::Id, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -936,7 +885,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<ArticleWithRelations> {
+    pub async fn sole(self) -> Result<ArticleRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -955,7 +904,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&ArticleWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&ArticleRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -963,7 +912,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: ArticleCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: ArticleDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
@@ -984,7 +933,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: ArticleCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: ArticleDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
@@ -1005,7 +954,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: ArticleCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: ArticleDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
@@ -1026,7 +975,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: ArticleCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: ArticleDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
@@ -1047,7 +996,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<ArticleWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<ArticleRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1094,8 +1043,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("articles", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = Article { db: db.clone(), base_url: base_url.clone() };
-        let author = m.load_author(&rows).await?;
+        let author = load_author(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = localized::load_article_localized(db, &ids).await?;
         let meta_map = localized::load_article_meta(db, &ids).await?;
@@ -1103,11 +1051,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let mut data = Vec::with_capacity(rows.len());
         for row in rows {
             let key = row.id.clone();
-            let view = hydrate_view(row.clone(), &localized, &meta_map, &attachments, base_url.as_deref());
-            data.push(ArticleWithRelations {
-                row: view,
-                author: author.get(&key).cloned().unwrap_or(None),
-            });
+            let mut record = hydrate_record(row.clone(), &localized, &meta_map, &attachments, base_url.as_deref());
+            record.author = author.get(&key).cloned().unwrap_or(None);
+            data.push(record);
         }
         Ok(Page { data, total, per_page, current_page, last_page })
     }
@@ -1228,42 +1174,21 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct ArticleUnsafeQuery<'db> {
-    inner: ArticleQuery<'db>,
-}
 
-impl<'db> ArticleUnsafeQuery<'db> {
-    fn new(inner: ArticleQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> ArticleQuery<'db> { self.inner }
-}
-
-
-pub struct ArticleInsert<'db> {
+pub struct ArticleCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<ArticleCol>,
+    cols: Vec<ArticleDbCol>,
     binds: Vec<BindValue>,
     translations: HashMap<&'static str, HashMap<String, String>>,
     meta: HashMap<String, JsonValue>,
     attachments_single: HashMap<&'static str, AttachmentInput>,
     attachments_multi: HashMap<&'static str, Vec<AttachmentInput>>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<ArticleCol>,
+    conflict_cols: Vec<ArticleDbCol>,
 }
 
-impl<'db> ArticleInsert<'db> {
+impl<'db> ArticleCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1281,22 +1206,22 @@ impl<'db> ArticleInsert<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(ArticleCol::Id);
+        self.cols.push(ArticleDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_author_id(mut self, val: i64) -> Self {
-        self.cols.push(ArticleCol::AuthorId);
+        self.cols.push(ArticleDbCol::AuthorId);
         self.binds.push(val.into());
         self
     }
     pub fn set_status(mut self, val: ArticleStatus) -> Self {
-        self.cols.push(ArticleCol::Status);
+        self.cols.push(ArticleDbCol::Status);
         self.binds.push(val.into());
         self
     }
     pub fn set_is_system(mut self, val: ArticleSystemFlag) -> Self {
-        self.cols.push(ArticleCol::IsSystem);
+        self.cols.push(ArticleDbCol::IsSystem);
         self.binds.push(val.into());
         self
     }
@@ -1334,35 +1259,35 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.attachments_single.insert("hero", att);
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[ArticleCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[ArticleDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[ArticleCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[ArticleDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<ArticleCreateInput> {
-        let mut input = ArticleCreateInput::default();
+    fn to_create_input(&self) -> Result<ArticleCreate> {
+        let mut input = ArticleCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                ArticleCol::Id => {
+                ArticleDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                ArticleCol::AuthorId => {
+                ArticleDbCol::AuthorId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.author_id = FieldInput::Set(value);
                 }
-                ArticleCol::Status => {
+                ArticleDbCol::Status => {
                     let value = match bind {
                 BindValue::String(value) => ArticleStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleStatus'", value))?,
@@ -1375,7 +1300,7 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.status = FieldInput::Set(value);
                 }
-                ArticleCol::IsSystem => {
+                ArticleDbCol::IsSystem => {
                     let value = match bind {
                 BindValue::String(value) => ArticleSystemFlag::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleSystemFlag'", value))?,
@@ -1394,7 +1319,7 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
 
 
-pub async fn save(self) -> Result<ArticleView> {
+pub async fn save(self) -> Result<ArticleRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -1412,7 +1337,7 @@ pub async fn save(self) -> Result<ArticleView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1431,10 +1356,10 @@ pub async fn save(self) -> Result<ArticleView> {
                         Err(err) => log_observer_error("created", "article", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "article", table: "articles", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -1446,16 +1371,16 @@ pub async fn save(self) -> Result<ArticleView> {
                         Err(err) => log_observer_error("created", "article", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(ArticleView, ArticleRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(ArticleRecord, ArticleRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, ArticleCol::Id)) {
-            cols.push(ArticleCol::Id);
+        if !cols.iter().any(|c| matches!(c, ArticleDbCol::Id)) {
+            cols.push(ArticleDbCol::Id);
             binds.push(generate_snowflake_i64().into());
         }
         if cols.is_empty() {
@@ -1514,15 +1439,15 @@ pub async fn save(self) -> Result<ArticleView> {
         let localized = localized::load_article_localized(db, &[row.id]).await?;
         let attachments = localized::load_article_attachments(db, &[row.id]).await?;
         let meta_map = localized::load_article_meta(db, &[row.id]).await?;
-        let view = hydrate_view(row.clone(), &localized, &meta_map, &attachments, self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &localized, &meta_map, &attachments, self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct ArticleUpdate<'db> {
+pub struct ArticlePatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(ArticleCol, BindValue, SetMode)>,
+    sets: Vec<(ArticleDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
     translations: HashMap<&'static str, HashMap<String, String>>,
@@ -1533,7 +1458,7 @@ pub struct ArticleUpdate<'db> {
     attachments_delete_multi: HashMap<&'static str, Vec<Uuid>>,
 }
 
-impl<'db> ArticleUpdate<'db> {
+impl<'db> ArticlePatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1549,39 +1474,38 @@ impl<'db> ArticleUpdate<'db> {
             attachments_delete_multi: HashMap::new(),
         }
     }
-    pub fn unsafe_sql(self) -> ArticleUnsafeUpdate<'db> { ArticleUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((ArticleCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((ArticleDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((ArticleCol::Id, val.into(), SetMode::Increment));
+        self.sets.push((ArticleDbCol::Id, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((ArticleCol::Id, val.into(), SetMode::Decrement));
+        self.sets.push((ArticleDbCol::Id, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_author_id(mut self, val: i64) -> Self {
-        self.sets.push((ArticleCol::AuthorId, val.into(), SetMode::Assign));
+        self.sets.push((ArticleDbCol::AuthorId, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_author_id(mut self, val: i64) -> Self {
-        self.sets.push((ArticleCol::AuthorId, val.into(), SetMode::Increment));
+        self.sets.push((ArticleDbCol::AuthorId, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_author_id(mut self, val: i64) -> Self {
-        self.sets.push((ArticleCol::AuthorId, val.into(), SetMode::Decrement));
+        self.sets.push((ArticleDbCol::AuthorId, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_status(mut self, val: ArticleStatus) -> Self {
-        self.sets.push((ArticleCol::Status, val.into(), SetMode::Assign));
+        self.sets.push((ArticleDbCol::Status, val.into(), SetMode::Assign));
         self
     }
     pub fn set_is_system(mut self, val: ArticleSystemFlag) -> Self {
-        self.sets.push((ArticleCol::IsSystem, val.into(), SetMode::Assign));
+        self.sets.push((ArticleDbCol::IsSystem, val.into(), SetMode::Assign));
         self
     }
     pub fn set_title_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
@@ -1624,29 +1548,29 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_author_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::AuthorId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::AuthorId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status(mut self, op: Op, val: ArticleStatus) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_is_system(mut self, op: Op, val: ArticleSystemFlag) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleCol::IsSystem.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::IsSystem.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: ArticleCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: ArticleDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1665,11 +1589,11 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<ArticleUpdateChanges> {
-        let mut changes = ArticleUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<ArticleChanges> {
+        let mut changes = ArticleChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                ArticleCol::Id => {
+                ArticleDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1680,7 +1604,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                ArticleCol::AuthorId => {
+                ArticleDbCol::AuthorId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1691,7 +1615,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                ArticleCol::Status => {
+                ArticleDbCol::Status => {
                     let value = match bind {
                 BindValue::String(value) => ArticleStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleStatus'", value))?,
@@ -1708,7 +1632,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                ArticleCol::IsSystem => {
+                ArticleDbCol::IsSystem => {
                     let value = match bind {
                 BindValue::String(value) => ArticleSystemFlag::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleSystemFlag'", value))?,
@@ -1758,7 +1682,7 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<ArticleUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<ArticleChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
@@ -1884,25 +1808,15 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct ArticleUnsafeUpdate<'db> {
-    inner: ArticleUpdate<'db>,
-}
-
-impl<'db> ArticleUnsafeUpdate<'db> {
-    fn new(inner: ArticleUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> ArticleUpdate<'db> { self.inner }
-}
 
 pub struct ArticleTableAdapter;
 impl ArticleTableAdapter {
-    fn parse_col(name: &str) -> Option<ArticleCol> {
+    fn parse_col(name: &str) -> Option<ArticleDbCol> {
         match name {
-            "id" => Some(ArticleCol::Id),
-            "author_id" => Some(ArticleCol::AuthorId),
-            "status" => Some(ArticleCol::Status),
-            "is_system" => Some(ArticleCol::IsSystem),
+            "id" => Some(ArticleDbCol::Id),
+            "author_id" => Some(ArticleDbCol::AuthorId),
+            "status" => Some(ArticleDbCol::Status),
+            "is_system" => Some(ArticleDbCol::IsSystem),
             _ => None,
         }
     }
@@ -1918,7 +1832,7 @@ impl ArticleTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<ArticleCol> {
+    fn parse_like_col(name: &str) -> Option<ArticleDbCol> {
         match name {
             _ => None,
         }
@@ -1963,8 +1877,8 @@ impl ArticleTableAdapter {
     }
 }
 impl GeneratedTableAdapter for ArticleTableAdapter {
-    type Query<'db> = ArticleQuery<'db>;
-    type Row = ArticleWithRelations;
+    type Query<'db> = Query<'db, ArticleModel>;
+    type Row = ArticleRecord;
     fn model_key(&self) -> &'static str { "Article" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "author_id", "status", "is_system"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &[] }
@@ -2004,7 +1918,7 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
             "f-locale-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: ArticleQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<ArticleQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, ArticleModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, ArticleModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -2041,14 +1955,14 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
                 let Some(field) = Self::parse_locale_field(column.as_str()) else { return Ok(None); };
                 let locale = core_i18n::current_locale().to_string();
                 let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = articles.id AND l.field = ? AND l.locale = ? AND l.value = ?)".to_string();
-                Ok(Some(query.where_exists(clause, vec![localized::ARTICLE_OWNER_TYPE.to_string(), field.to_string(), locale, trimmed.to_string()])))
+                Ok(Some(query.where_exists_raw(clause, vec![localized::ARTICLE_OWNER_TYPE.to_string(), field.to_string(), locale, trimmed.to_string()])))
             }
             ParsedFilter::LocaleLike { column } => {
                 let Some(field) = Self::parse_locale_field(column.as_str()) else { return Ok(None); };
                 let locale = core_i18n::current_locale().to_string();
                 let pattern = format!("%{}%", trimmed);
                 let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = articles.id AND l.field = ? AND l.locale = ? AND l.value LIKE ?)".to_string();
-                Ok(Some(query.where_exists(clause, vec![localized::ARTICLE_OWNER_TYPE.to_string(), field.to_string(), locale, pattern])))
+                Ok(Some(query.where_exists_raw(clause, vec![localized::ARTICLE_OWNER_TYPE.to_string(), field.to_string(), locale, pattern])))
             }
             ParsedFilter::LikeAny { columns } => {
                 let mut applied = false;
@@ -2079,17 +1993,17 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
             }
             ParsedFilter::Has { relation, column } => {
                 match (relation.as_str(), column.as_str()) {
-                    ("author", "id") => { let Some(bind) = Self::parse_bind_for_relation("author", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_author(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))) },
-                    ("author", "name") => { let Some(bind) = Self::parse_bind_for_relation("author", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_author(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))) },
-                    ("author", "profile_id") => { let Some(bind) = Self::parse_bind_for_relation("author", "profile_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_author(|rq| rq.where_col(UserCol::ProfileId, Op::Eq, bind)))) },
-                    ("author__profile", "id") => { let Some(bind) = Self::parse_bind_for_relation("author__profile", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_author(|rq| rq.where_has_profile(|rq| rq.where_col(ProfileCol::Id, Op::Eq, bind))))) },
+                    ("author", "id") => { let Some(bind) = Self::parse_bind_for_relation("author", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))) },
+                    ("author", "name") => { let Some(bind) = Self::parse_bind_for_relation("author", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))) },
+                    ("author", "profile_id") => { let Some(bind) = Self::parse_bind_for_relation("author", "profile_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_col(UserDbCol::ProfileId, Op::Eq, bind)))) },
+                    ("author__profile", "id") => { let Some(bind) = Self::parse_bind_for_relation("author__profile", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_col(ProfileDbCol::Id, Op::Eq, bind))))) },
                     _ => Ok(None),
                 }
             }
             ParsedFilter::HasLike { relation, column } => {
                 let pattern = format!("%{}%", trimmed);
                 match (relation.as_str(), column.as_str()) {
-                    ("author", "name") => Ok(Some(query.where_has_author(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))),
+                    ("author", "name") => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))),
                     _ => Ok(None),
                 }
             }
@@ -2097,7 +2011,7 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
                 let Some(field) = Self::parse_locale_field_for_relation(relation.as_str(), column.as_str()) else { return Ok(None); };
                 let locale = core_i18n::current_locale().to_string();
                 match (relation.as_str(), column.as_str()) {
-                    ("author__profile", "display_name") => Ok(Some(query.where_has_author(|rq| rq.where_has_profile(|rq| rq.where_exists("EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = profiles.id AND l.field = ? AND l.locale = ? AND l.value = ?)".to_string(), vec![localized::PROFILE_OWNER_TYPE.to_string(), field.to_string(), locale.clone(), trimmed.to_string()]))))),
+                    ("author__profile", "display_name") => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_exists_raw("EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = profiles.id AND l.field = ? AND l.locale = ? AND l.value = ?)".to_string(), vec![localized::PROFILE_OWNER_TYPE.to_string(), field.to_string(), locale.clone(), trimmed.to_string()]))))),
                     _ => Ok(None),
                 }
             }
@@ -2106,40 +2020,40 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
                 let locale = core_i18n::current_locale().to_string();
                 let pattern = format!("%{}%", trimmed);
                 match (relation.as_str(), column.as_str()) {
-                    ("author__profile", "display_name") => Ok(Some(query.where_has_author(|rq| rq.where_has_profile(|rq| rq.where_exists("EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = profiles.id AND l.field = ? AND l.locale = ? AND l.value LIKE ?)".to_string(), vec![localized::PROFILE_OWNER_TYPE.to_string(), field.to_string(), locale.clone(), pattern.clone()]))))),
+                    ("author__profile", "display_name") => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_exists_raw("EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = profiles.id AND l.field = ? AND l.locale = ? AND l.value LIKE ?)".to_string(), vec![localized::PROFILE_OWNER_TYPE.to_string(), field.to_string(), locale.clone(), pattern.clone()]))))),
                     _ => Ok(None),
                 }
             }
         }
     }
-    fn apply_sort<'db>(&self, query: ArticleQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<ArticleQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, ArticleModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, ArticleModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(ArticleCol::Id, dir),
-            "author_id" => query.order_by(ArticleCol::AuthorId, dir),
-            "status" => query.order_by(ArticleCol::Status, dir),
-            "is_system" => query.order_by(ArticleCol::IsSystem, dir),
+            "id" => query.order_by(ArticleDbCol::Id, dir),
+            "author_id" => query.order_by(ArticleDbCol::AuthorId, dir),
+            "status" => query.order_by(ArticleDbCol::Status, dir),
+            "is_system" => query.order_by(ArticleDbCol::IsSystem, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: ArticleQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<ArticleQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, ArticleModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, ArticleModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &ArticleWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &ArticleRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "author_id" => Some(row.author_id.to_string()),
             _ => None,
         }
     }
-    fn count<'db>(&self, query: ArticleQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, ArticleModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: ArticleQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<ArticleWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, ArticleModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<ArticleRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -2165,13 +2079,13 @@ impl Default for ArticleDataTableConfig {
     }
 }
 pub trait ArticleDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: ArticleQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> ArticleQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, ArticleModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, ArticleModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: ArticleQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<ArticleQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: ArticleQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<ArticleQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut ArticleWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: ArticleWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, ArticleModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, ArticleModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, ArticleModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, ArticleModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut ArticleRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: ArticleRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         if let Some(id_value) = record.get("id").cloned() {
             let id_text = match id_value {
@@ -2183,10 +2097,10 @@ pub trait ArticleDataTableHooks: Send + Sync + 'static {
         }
         Ok(record)
     }
-    fn row_to_record(&self, row: ArticleWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: ArticleRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: ArticleQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, ArticleModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct ArticleDefaultDataTableHooks;
@@ -2224,15 +2138,15 @@ impl<H: ArticleDataTableHooks> ArticleDataTable<H> {
 impl<H: ArticleDataTableHooks> AutoDataTable for ArticleDataTable<H> {
     type Adapter = ArticleTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> ArticleQuery<'db> {
-        self.hooks.scope(Article::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, ArticleModel> {
+        self.hooks.scope(ArticleModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: ArticleQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<ArticleQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: ArticleQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<ArticleQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut ArticleWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: ArticleWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: ArticleQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, ArticleModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, ArticleModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, ArticleModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, ArticleModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut ArticleRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: ArticleRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, ArticleModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -2242,10 +2156,428 @@ impl<H: ArticleDataTableHooks> AutoDataTable for ArticleDataTable<H> {
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for ArticleView {
+impl ActiveRecord for ArticleRecord {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Article::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        ArticleModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct ArticleModel;
+impl ArticleModel {
+    pub const TABLE: &'static str = "articles";
+    pub const MODEL_KEY: &'static str = "article";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, ArticleModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, ArticleModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, ArticleModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, ArticleModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, ArticleModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, ArticleModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<ArticleRecord>> {
+        ArticleQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for ArticleModel {
+    type Pk = i64;
+    type Record = ArticleRecord;
+    type Create = ArticleCreate;
+    type Changes = ArticleChanges;
+    const TABLE: &'static str = ArticleModel::TABLE;
+    const MODEL_KEY: &'static str = ArticleModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for ArticleModel {
+    type InnerQuery<'db> = ArticleQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        ArticleQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for ArticleModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for ArticleModel {
+    type InnerCreate<'db> = ArticleCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        ArticleCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            ArticleQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("articles: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<ArticleModel> for ArticleDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            ArticleDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ArticleDbCol::AuthorId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ArticleDbCol::Status => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ArticleDbCol::IsSystem => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<ArticleModel> for Column<ArticleModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            ArticleDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ArticleDbCol::AuthorId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ArticleDbCol::Status => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            ArticleDbCol::IsSystem => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<ArticleModel> for ArticleDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<ArticleModel> for Column<ArticleModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<ArticleDbCol> = fields.iter().map(|field| resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<ArticleDbCol> = fields.iter().map(|field| resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for ArticleModel {
+    type InnerQuery<'db> = ArticleQueryInner<'db>;
+    type InnerPatch<'db> = ArticlePatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        ArticlePatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(ArticleDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = ArticlePatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", ArticleDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM articles", ArticleDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = ArticleQueryInner::new(db, base_url);
+            query.where_in(ArticleDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<ArticleModel> for ArticleDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            ArticleDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ArticleDbCol::AuthorId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ArticleDbCol::Status => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ArticleDbCol::IsSystem => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<ArticleModel> for Column<ArticleModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            ArticleDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ArticleDbCol::AuthorId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ArticleDbCol::Status => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            ArticleDbCol::IsSystem => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<ArticleModel> for ArticleDbCol {
+    fn increment<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            ArticleDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            ArticleDbCol::AuthorId => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            ArticleDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            ArticleDbCol::AuthorId => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<ArticleModel> for Column<ArticleModel, i64> {
+    fn increment<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            ArticleDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            ArticleDbCol::AuthorId => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            ArticleDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            ArticleDbCol::AuthorId => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<ArticleModel> for ArticleDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<ArticleModel>>::Value) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<ArticleModel>>::Value) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<ArticleModel>>::Value]) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<ArticleModel> for Column<ArticleModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
+impl core_db::common::model_api::IncludeRelation<ArticleModel> for OneRelation<ArticleModel, UserRow, 0> {
+    fn include<'db>(_relation: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query
+    }
+}
+
+impl core_db::common::model_api::WhereHasRelation<ArticleModel> for OneRelation<ArticleModel, UserRow, 0> {
+    type Target = UserModel;
+    fn where_has<'db, F>(_relation: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.where_has_author(scope)
+    }
+    fn or_where_has<'db, F>(_relation: Self, query: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.or_where_has_author(scope)
+    }
+}
+
+impl core_db::common::model_api::RecordOneRelation<ArticleModel> for OneRelation<ArticleModel, UserRow, 0> {
+    type Target = UserRow;
+    fn get<'a>(_relation: Self, record: &'a ArticleRecord) -> Option<&'a Self::Target> {
+        record.author.as_ref()
+    }
+}
+
 

@@ -2,8 +2,9 @@ use core_db::common::sql::{DbConn, Op};
 use core_i18n::t;
 use core_web::error::AppError;
 use generated::models::{
-    CreditTransactionType, CreditType, Deposit, DepositQuery, DepositReviewAction, DepositStatus,
-    DepositWithRelations, OwnerType, User, UserCreditTransaction,
+    CreditTransactionType, CreditType, DepositCol, DepositModel, DepositRecord,
+    DepositReviewAction, DepositStatus, OwnerType, UserCol, UserCreditTransactionCol,
+    UserCreditTransactionModel, UserModel,
 };
 use time::OffsetDateTime;
 
@@ -15,10 +16,8 @@ use crate::{
 pub async fn detail(
     state: &AppApiState,
     deposit_id: i64,
-) -> Result<DepositWithRelations, AppError> {
-    DepositQuery::new(DbConn::pool(&state.db), None)
-        .where_id(Op::Eq, deposit_id)
-        .first()
+) -> Result<DepositRecord, AppError> {
+    DepositModel::find(DbConn::pool(&state.db), deposit_id)
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(t("Deposit not found")))
@@ -29,10 +28,8 @@ pub async fn review_deposit(
     admin_id: i64,
     deposit_id: i64,
     req: AdminDepositReviewInput,
-) -> Result<DepositWithRelations, AppError> {
-    let deposit = DepositQuery::new(DbConn::pool(&state.db), None)
-        .where_id(Op::Eq, deposit_id)
-        .first()
+) -> Result<DepositRecord, AppError> {
+    let deposit = DepositModel::find(DbConn::pool(&state.db), deposit_id)
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(t("Deposit not found")))?;
@@ -49,13 +46,17 @@ pub async fn review_deposit(
             let conn = scope.conn();
 
             // Update deposit status
-            Deposit::new(conn.clone(), None)
-                .update()
-                .where_id(Op::Eq, deposit_id)
-                .set_status(DepositStatus::Approved)
-                .set_admin_id(Some(admin_id))
-                .set_admin_remark(req.admin_remark)
-                .set_reviewed_at(Some(now))
+            DepositModel::query(conn.clone())
+                .where_col(DepositCol::ID, Op::Eq, deposit_id)
+                .patch()
+                .assign(DepositCol::STATUS, DepositStatus::Approved)
+                .map_err(AppError::from)?
+                .assign(DepositCol::ADMIN_ID, Some(admin_id))
+                .map_err(AppError::from)?
+                .assign(DepositCol::ADMIN_REMARK, req.admin_remark)
+                .map_err(AppError::from)?
+                .assign(DepositCol::REVIEWED_AT, Some(now))
+                .map_err(AppError::from)?
                 .save()
                 .await
                 .map_err(AppError::from)?;
@@ -63,39 +64,60 @@ pub async fn review_deposit(
             // Credit the owner (for User owner_type)
             if deposit.owner_type == OwnerType::User {
                 // Insert credit transaction
-                UserCreditTransaction::new(conn.clone(), None)
-                    .insert()
-                    .set_user_id(deposit.owner_id)
-                    .set_admin_id(Some(admin_id))
-                    .set_credit_type(deposit.credit_type)
-                    .set_amount(deposit.net_amount)
-                    .set_transaction_type(CreditTransactionType::TopUp)
-                    .set_related_key(Some(deposit_id.to_string()))
-                    .set_remark(Some(format!("Deposit #{}", deposit_id)))
-                    .set_custom_description(false)
+                UserCreditTransactionModel::create(conn.clone())
+                    .set(UserCreditTransactionCol::USER_ID, deposit.owner_id)?
+                    .set(UserCreditTransactionCol::ADMIN_ID, Some(admin_id))?
+                    .set(UserCreditTransactionCol::CREDIT_TYPE, deposit.credit_type)?
+                    .set(UserCreditTransactionCol::AMOUNT, deposit.net_amount)?
+                    .set(
+                        UserCreditTransactionCol::TRANSACTION_TYPE,
+                        CreditTransactionType::TopUp,
+                    )?
+                    .set(
+                        UserCreditTransactionCol::RELATED_KEY,
+                        Some(deposit_id.to_string()),
+                    )?
+                    .set(
+                        UserCreditTransactionCol::REMARK,
+                        Some(format!("Deposit #{}", deposit_id)),
+                    )?
+                    .set(UserCreditTransactionCol::CUSTOM_DESCRIPTION, false)?
                     .save()
                     .await
                     .map_err(AppError::from)?;
 
                 // Increment user balance atomically
-                let mut update = User::new(conn, None).update().where_id(Op::Eq, deposit.owner_id);
-                update = match deposit.credit_type {
-                    CreditType::Credit1 => update.increment_credit_1(deposit.net_amount),
-                    CreditType::Credit2 => update.increment_credit_2(deposit.net_amount),
+                let update = match deposit.credit_type {
+                    CreditType::Credit1 => UserModel::query(conn.clone())
+                        .where_col(UserCol::ID, Op::Eq, deposit.owner_id)
+                        .patch()
+                        .increment(UserCol::CREDIT_1, deposit.net_amount),
+                    CreditType::Credit2 => UserModel::query(conn.clone())
+                        .where_col(UserCol::ID, Op::Eq, deposit.owner_id)
+                        .patch()
+                        .increment(UserCol::CREDIT_2, deposit.net_amount),
                 };
-                update.save().await.map_err(AppError::from)?;
+                update
+                    .map_err(AppError::from)?
+                    .save()
+                    .await
+                    .map_err(AppError::from)?;
             }
 
             scope.commit().await.map_err(AppError::from)?;
         }
         DepositReviewAction::Reject => {
-            Deposit::new(DbConn::pool(&state.db), None)
-                .update()
-                .where_id(Op::Eq, deposit_id)
-                .set_status(DepositStatus::Rejected)
-                .set_admin_id(Some(admin_id))
-                .set_admin_remark(req.admin_remark)
-                .set_reviewed_at(Some(now))
+            DepositModel::query(DbConn::pool(&state.db))
+                .where_col(DepositCol::ID, Op::Eq, deposit_id)
+                .patch()
+                .assign(DepositCol::STATUS, DepositStatus::Rejected)
+                .map_err(AppError::from)?
+                .assign(DepositCol::ADMIN_ID, Some(admin_id))
+                .map_err(AppError::from)?
+                .assign(DepositCol::ADMIN_REMARK, req.admin_remark)
+                .map_err(AppError::from)?
+                .assign(DepositCol::REVIEWED_AT, Some(now))
+                .map_err(AppError::from)?
                 .save()
                 .await
                 .map_err(AppError::from)?;

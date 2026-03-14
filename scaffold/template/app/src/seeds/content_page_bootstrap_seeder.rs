@@ -5,7 +5,10 @@ use core_db::{
     common::sql::{generate_snowflake_i64, DbConn, Op},
     seeder::Seeder,
 };
-use generated::models::{ContentPage, ContentPageSystemFlag};
+use generated::{
+    localized::LocalizedInput,
+    models::{ContentPageCol, ContentPageModel, ContentPageSystemFlag},
+};
 
 #[derive(Debug, Default)]
 pub struct ContentPageBootstrapSeeder;
@@ -49,41 +52,42 @@ async fn ensure_page(
     content_en: &str,
     content_zh: &str,
 ) -> anyhow::Result<()> {
-    let model = ContentPage::new(DbConn::pool(db), None);
-    let existing = model
-        .query()
-        .where_tag(Op::Eq, tag.to_string())
+    let existing = ContentPageModel::query(DbConn::pool(db))
+        .where_col(ContentPageCol::TAG, Op::Eq, tag.to_string())
         .first()
         .await?;
 
     if let Some(page) = existing {
-        model
-            .update()
-            .where_id(Op::Eq, page.id)
-            .set_tag(tag.to_string())
-            .set_is_system(ContentPageSystemFlag::Yes)
+        ContentPageModel::query(DbConn::pool(db))
+            .where_col(ContentPageCol::ID, Op::Eq, page.id)
+            .patch()
+            .assign(ContentPageCol::TAG, tag.to_string())?
+            .assign(ContentPageCol::IS_SYSTEM, ContentPageSystemFlag::Yes)?
             .save()
             .await?;
         return Ok(());
     }
 
-    let title_langs = build_localized_text(title_en, title_zh);
-    let content_langs = build_localized_text(content_en, content_zh);
+    let title_input = build_localized_input(title_en, title_zh);
+    let content_input = build_localized_input(content_en, content_zh);
+    let scope = DbConn::pool(db).begin_scope().await?;
+    let conn = scope.conn();
 
-    model
-        .insert()
-        .set_id(generate_snowflake_i64())
-        .set_tag(tag.to_string())
-        .set_is_system(ContentPageSystemFlag::Yes)
-        .set_title_langs(title_langs)
-        .set_content_langs(content_langs)
+    let page = ContentPageModel::create(conn.clone())
+        .set(ContentPageCol::ID, generate_snowflake_i64())?
+        .set(ContentPageCol::TAG, tag.to_string())?
+        .set(ContentPageCol::IS_SYSTEM, ContentPageSystemFlag::Yes)?
         .save()
         .await?;
+
+    page.upsert_title(conn.clone(), Some(title_input)).await?;
+    page.upsert_content(conn, Some(content_input)).await?;
+    scope.commit().await?;
 
     Ok(())
 }
 
-fn build_localized_text(en_value: &str, zh_value: &str) -> generated::LocalizedText {
+fn build_localized_input(en_value: &str, zh_value: &str) -> LocalizedInput {
     let mut payload = BTreeMap::new();
     for &locale in generated::SUPPORTED_LOCALES {
         let value = match locale {
@@ -92,5 +96,5 @@ fn build_localized_text(en_value: &str, zh_value: &str) -> generated::LocalizedT
         };
         payload.insert(locale.to_string(), value.to_string());
     }
-    generated::LocalizedText::from_map(&payload)
+    LocalizedInput::from_map(&payload)
 }

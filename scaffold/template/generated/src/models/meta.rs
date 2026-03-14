@@ -5,19 +5,19 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = false;
 const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct MetaCreateInput {
+pub struct MetaCreate {
     pub id: FieldInput<i64>,
     pub owner_type: FieldInput<String>,
     pub owner_id: FieldInput<i64>,
@@ -27,7 +27,7 @@ pub struct MetaCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct MetaUpdateChanges {
+pub struct MetaChanges {
     pub id: Option<FieldChange<i64>>,
     pub owner_type: Option<FieldChange<String>>,
     pub owner_id: Option<FieldChange<i64>>,
@@ -46,7 +46,7 @@ pub struct MetaRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct MetaView {
+pub struct MetaRecord {
     pub id: i64,
     pub owner_type: String,
     pub owner_id: i64,
@@ -54,81 +54,46 @@ pub struct MetaView {
     pub value: serde_json::Value,
 }
 
-impl MetaView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> MetaUpdate<'db> {
-        Meta::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &Meta<'db>) -> MetaUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> MetaJson {
-        MetaJson {
-            id: self.id.clone(),
-            owner_type: self.owner_type.clone(),
-            owner_id: self.owner_id.clone(),
-            field: self.field.clone(),
-            value: self.value.clone(),
-        }
+impl MetaRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, MetaModel> {
+        MetaModel::query(db.into()).where_col(MetaDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-pub trait MetaViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&MetaView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&MetaView) -> K) -> std::collections::HashMap<K, MetaView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&MetaView) -> K) -> std::collections::HashMap<K, Vec<MetaView>> where K: Eq + std::hash::Hash;
-}
-
-impl MetaViewsExt for Vec<MetaView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&MetaView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&MetaView) -> K) -> std::collections::HashMap<K, MetaView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&MetaView) -> K) -> std::collections::HashMap<K, Vec<MetaView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct MetaJson {
-    pub id: i64,
-    pub owner_type: String,
-    pub owner_id: i64,
-    pub field: String,
-    pub value: serde_json::Value,
-}
-
-fn hydrate_view(row: MetaRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> MetaView {
-    let view = MetaView {
+fn hydrate_record(row: MetaRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> MetaRecord {
+    let mut record = MetaRecord {
         id: row.id,
         owner_type: row.owner_type,
         owner_id: row.owner_id,
         field: row.field,
         value: row.value,
     };
-    view
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct MetaWithRelations {
-    #[serde(flatten)]
-    pub row: MetaView,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MetaCol;
+impl MetaCol {
+    pub const ID: Column<MetaModel, i64> = Column::new("id");
+    pub const OWNER_TYPE: Column<MetaModel, String> = Column::new("owner_type");
+    pub const OWNER_ID: Column<MetaModel, i64> = Column::new("owner_id");
+    pub const FIELD: Column<MetaModel, String> = Column::new("field");
+    pub const VALUE: Column<MetaModel, serde_json::Value> = Column::new("value");
 }
 
-impl MetaWithRelations {
-    pub fn into_row(self) -> MetaView { self.row }
-}
-
-impl std::ops::Deref for MetaWithRelations {
-    type Target = MetaView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for MetaWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_meta_db_col(sql: &str) -> Option<MetaDbCol> {
+    match sql {
+        "id" => Some(MetaDbCol::Id),
+        "owner_type" => Some(MetaDbCol::OwnerType),
+        "owner_id" => Some(MetaDbCol::OwnerId),
+        "field" => Some(MetaDbCol::Field),
+        "value" => Some(MetaDbCol::Value),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum MetaCol {
+pub enum MetaDbCol {
     Id,
     OwnerType,
     OwnerId,
@@ -136,44 +101,24 @@ pub enum MetaCol {
     Value,
 }
 
-impl MetaCol {
-    pub const fn all() -> &'static [MetaCol] {
-        &[MetaCol::Id, MetaCol::OwnerType, MetaCol::OwnerId, MetaCol::Field, MetaCol::Value]
+impl MetaDbCol {
+    pub const fn all() -> &'static [MetaDbCol] {
+        &[MetaDbCol::Id, MetaDbCol::OwnerType, MetaDbCol::OwnerId, MetaDbCol::Field, MetaDbCol::Value]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            MetaCol::Id => "id",
-            MetaCol::OwnerType => "owner_type",
-            MetaCol::OwnerId => "owner_id",
-            MetaCol::Field => "field",
-            MetaCol::Value => "value",
+            MetaDbCol::Id => "id",
+            MetaDbCol::OwnerType => "owner_type",
+            MetaDbCol::OwnerId => "owner_id",
+            MetaDbCol::Field => "field",
+            MetaDbCol::Value => "value",
         }
     }
 }
 
-pub struct Meta<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-}
-
-impl<'db> Meta<'db> {
-    pub const TABLE: &'static str = "meta";
-    pub const MODEL_KEY: &'static str = "meta";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> MetaQuery<'db> { MetaQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> MetaInsert<'db> { MetaInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> MetaUpdate<'db> { MetaUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<MetaWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-}
 
 #[derive(Clone)]
-pub struct MetaQuery<'db> {
+pub struct MetaQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -196,74 +141,73 @@ pub struct MetaQuery<'db> {
 
 
 
-impl<'db> MetaQuery<'db> {
+impl<'db> MetaQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, owner_type, owner_id, field, value".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> MetaUnsafeQuery<'db> { MetaUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_type_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_field(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::Field.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::Field.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_field_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::Field.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::Field.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_value(mut self, op: Op, val: serde_json::Value) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::Value.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::Value.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_value_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::Value.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::Value.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(MetaCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: MetaCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(MetaDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: MetaDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -282,7 +226,7 @@ impl<'db> MetaQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: MetaCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: MetaDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -297,7 +241,7 @@ impl<'db> MetaQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: MetaCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: MetaDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -309,7 +253,7 @@ impl<'db> MetaQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: MetaCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: MetaDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -317,15 +261,15 @@ impl<'db> MetaQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: MetaCol) -> Self {
+    pub fn where_null(mut self, col: MetaDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: MetaCol) -> Self {
+    pub fn where_not_null(mut self, col: MetaDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: MetaCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: MetaDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -379,7 +323,7 @@ impl<'db> MetaQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[MetaCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[MetaDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, owner_type, owner_id, field, value".to_string());
         } else {
@@ -391,7 +335,7 @@ impl<'db> MetaQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[MetaCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[MetaDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -472,26 +416,26 @@ impl<'db> MetaQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: MetaCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: MetaDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: MetaCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: MetaDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: MetaCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: MetaDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[MetaCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[MetaDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[MetaCol]) -> Self {
+    pub fn select(mut self, cols: &[MetaDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -539,7 +483,7 @@ impl<'db> MetaQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[MetaCol]) -> Self {
+    pub fn group_by(mut self, cols: &[MetaDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -614,7 +558,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<MetaWithRelations>> {
+    pub async fn get(self) -> Result<Vec<MetaRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -664,61 +608,61 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
-            out_vec.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            out_vec.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let out_vec: Vec<MetaWithRelations> = out_vec.into_iter().map(|v| MetaWithRelations { row: v }).collect();
+        let out_vec: Vec<MetaRecord> = out_vec;
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<MetaWithRelations>> {
+    pub async fn first(self) -> Result<Option<MetaRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<MetaWithRelations> {
+    pub async fn first_or_fail(self) -> Result<MetaRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("meta: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<MetaWithRelations>> {
+    pub async fn find(self, id: i64) -> Result<Option<MetaRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<MetaWithRelations> {
+    pub async fn find_or_fail(self, id: i64) -> Result<MetaRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("meta: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(MetaInsert<'db>) -> MetaInsert<'db>) -> Result<MetaWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(MetaCreateInner<'db>) -> MetaCreateInner<'db>) -> Result<MetaRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(MetaInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(MetaCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Meta::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        MetaQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(MetaUpdate<'db>) -> MetaUpdate<'db>,
-        on_create: impl FnOnce(MetaInsert<'db>) -> MetaInsert<'db>,
-    ) -> Result<MetaWithRelations> {
+        on_update: impl FnOnce(MetaPatchInner<'db>) -> MetaPatchInner<'db>,
+        on_create: impl FnOnce(MetaCreateInner<'db>) -> MetaCreateInner<'db>,
+    ) -> Result<MetaRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = MetaUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = MetaPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return Meta::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return MetaQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(MetaInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(MetaCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        Meta::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        MetaQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: MetaCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: MetaDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -733,7 +677,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: MetaCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: MetaDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -789,13 +733,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<MetaWithRelations>) -> Fut,
+        F: FnMut(Vec<MetaRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = MetaQuery::new(db.clone(), self.base_url.clone());
+            let mut query = MetaQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -809,11 +753,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(MetaCol::Id, OrderDir::Desc)
+        self.order_by(MetaDbCol::Id, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(MetaCol::Id, OrderDir::Asc)
+        self.order_by(MetaDbCol::Id, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -824,7 +768,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<MetaWithRelations> {
+    pub async fn sole(self) -> Result<MetaRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -843,7 +787,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&MetaWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&MetaRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -851,7 +795,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: MetaCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: MetaDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "meta".to_string());
@@ -872,7 +816,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: MetaCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: MetaDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "meta".to_string());
@@ -893,7 +837,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: MetaCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: MetaDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "meta".to_string());
@@ -914,7 +858,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: MetaCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: MetaDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "meta".to_string());
@@ -935,7 +879,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<MetaWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<MetaRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -986,9 +930,9 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for r in rows {
-            data.push(hydrate_view(r, &LocalizedMap::default(), base_url.as_deref()));
+            data.push(hydrate_record(r, &LocalizedMap::default(), base_url.as_deref()));
         }
-        let data: Vec<MetaWithRelations> = data.into_iter().map(|v| MetaWithRelations { row: v }).collect();
+        let data: Vec<MetaRecord> = data;
         Ok(Page { data, total, per_page, current_page, last_page })
     }
     pub fn to_sql(&self) -> (String, Vec<BindValue>) {
@@ -1108,38 +1052,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct MetaUnsafeQuery<'db> {
-    inner: MetaQuery<'db>,
-}
 
-impl<'db> MetaUnsafeQuery<'db> {
-    fn new(inner: MetaQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> MetaQuery<'db> { self.inner }
-}
-
-
-pub struct MetaInsert<'db> {
+pub struct MetaCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<MetaCol>,
+    cols: Vec<MetaDbCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<MetaCol>,
+    conflict_cols: Vec<MetaDbCol>,
 }
 
-impl<'db> MetaInsert<'db> {
+impl<'db> MetaCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1153,73 +1076,73 @@ impl<'db> MetaInsert<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(MetaCol::Id);
+        self.cols.push(MetaDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_owner_type(mut self, val: String) -> Self {
-        self.cols.push(MetaCol::OwnerType);
+        self.cols.push(MetaDbCol::OwnerType);
         self.binds.push(val.into());
         self
     }
     pub fn set_owner_id(mut self, val: i64) -> Self {
-        self.cols.push(MetaCol::OwnerId);
+        self.cols.push(MetaDbCol::OwnerId);
         self.binds.push(val.into());
         self
     }
     pub fn set_field(mut self, val: String) -> Self {
-        self.cols.push(MetaCol::Field);
+        self.cols.push(MetaDbCol::Field);
         self.binds.push(val.into());
         self
     }
     pub fn set_value(mut self, val: serde_json::Value) -> Self {
-        self.cols.push(MetaCol::Value);
+        self.cols.push(MetaDbCol::Value);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[MetaCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[MetaDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[MetaCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[MetaDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<MetaCreateInput> {
-        let mut input = MetaCreateInput::default();
+    fn to_create_input(&self) -> Result<MetaCreate> {
+        let mut input = MetaCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                MetaCol::Id => {
+                MetaDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                MetaCol::OwnerType => {
+                MetaDbCol::OwnerType => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.owner_type = FieldInput::Set(value);
                 }
-                MetaCol::OwnerId => {
+                MetaDbCol::OwnerId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.owner_id = FieldInput::Set(value);
                 }
-                MetaCol::Field => {
+                MetaDbCol::Field => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.field = FieldInput::Set(value);
                 }
-                MetaCol::Value => {
+                MetaDbCol::Value => {
                     let value = match bind {
             BindValue::Json(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'serde_json::Value'", other),
@@ -1232,7 +1155,7 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
 
 
-pub async fn save(self) -> Result<MetaView> {
+pub async fn save(self) -> Result<MetaRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -1250,7 +1173,7 @@ pub async fn save(self) -> Result<MetaView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1269,10 +1192,10 @@ pub async fn save(self) -> Result<MetaView> {
                         Err(err) => log_observer_error("created", "meta", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "meta", table: "meta", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -1284,12 +1207,12 @@ pub async fn save(self) -> Result<MetaView> {
                         Err(err) => log_observer_error("created", "meta", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(MetaView, MetaRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(MetaRecord, MetaRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
         if cols.is_empty() {
@@ -1323,20 +1246,20 @@ pub async fn save(self) -> Result<MetaView> {
         let row = db.fetch_one(q).await?;
         record_profiled_query("meta", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
-        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct MetaUpdate<'db> {
+pub struct MetaPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(MetaCol, BindValue, SetMode)>,
+    sets: Vec<(MetaDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> MetaUpdate<'db> {
+impl<'db> MetaPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1346,76 +1269,75 @@ impl<'db> MetaUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> MetaUnsafeUpdate<'db> { MetaUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((MetaCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((MetaDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((MetaCol::Id, val.into(), SetMode::Increment));
+        self.sets.push((MetaDbCol::Id, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((MetaCol::Id, val.into(), SetMode::Decrement));
+        self.sets.push((MetaDbCol::Id, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_owner_type(mut self, val: String) -> Self {
-        self.sets.push((MetaCol::OwnerType, val.into(), SetMode::Assign));
+        self.sets.push((MetaDbCol::OwnerType, val.into(), SetMode::Assign));
         self
     }
     pub fn set_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((MetaCol::OwnerId, val.into(), SetMode::Assign));
+        self.sets.push((MetaDbCol::OwnerId, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((MetaCol::OwnerId, val.into(), SetMode::Increment));
+        self.sets.push((MetaDbCol::OwnerId, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_owner_id(mut self, val: i64) -> Self {
-        self.sets.push((MetaCol::OwnerId, val.into(), SetMode::Decrement));
+        self.sets.push((MetaDbCol::OwnerId, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_field(mut self, val: String) -> Self {
-        self.sets.push((MetaCol::Field, val.into(), SetMode::Assign));
+        self.sets.push((MetaDbCol::Field, val.into(), SetMode::Assign));
         self
     }
     pub fn set_value(mut self, val: serde_json::Value) -> Self {
-        self.sets.push((MetaCol::Value, val.into(), SetMode::Assign));
+        self.sets.push((MetaDbCol::Value, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_type(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::OwnerType.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::OwnerType.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_owner_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::OwnerId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::OwnerId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_field(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::Field.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::Field.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_value(mut self, op: Op, val: serde_json::Value) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", MetaCol::Value.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", MetaDbCol::Value.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: MetaCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: MetaDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1434,11 +1356,11 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<MetaUpdateChanges> {
-        let mut changes = MetaUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<MetaChanges> {
+        let mut changes = MetaChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                MetaCol::Id => {
+                MetaDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1449,7 +1371,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                MetaCol::OwnerType => {
+                MetaDbCol::OwnerType => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1460,7 +1382,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                MetaCol::OwnerId => {
+                MetaDbCol::OwnerId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1471,7 +1393,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                MetaCol::Field => {
+                MetaDbCol::Field => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1482,7 +1404,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                MetaCol::Value => {
+                MetaDbCol::Value => {
                     let value = match bind {
             BindValue::Json(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'serde_json::Value'", other),
@@ -1526,7 +1448,7 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<MetaUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<MetaChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
@@ -1617,26 +1539,16 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct MetaUnsafeUpdate<'db> {
-    inner: MetaUpdate<'db>,
-}
-
-impl<'db> MetaUnsafeUpdate<'db> {
-    fn new(inner: MetaUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> MetaUpdate<'db> { self.inner }
-}
 
 pub struct MetaTableAdapter;
 impl MetaTableAdapter {
-    fn parse_col(name: &str) -> Option<MetaCol> {
+    fn parse_col(name: &str) -> Option<MetaDbCol> {
         match name {
-            "id" => Some(MetaCol::Id),
-            "owner_type" => Some(MetaCol::OwnerType),
-            "owner_id" => Some(MetaCol::OwnerId),
-            "field" => Some(MetaCol::Field),
-            "value" => Some(MetaCol::Value),
+            "id" => Some(MetaDbCol::Id),
+            "owner_type" => Some(MetaDbCol::OwnerType),
+            "owner_id" => Some(MetaDbCol::OwnerId),
+            "field" => Some(MetaDbCol::Field),
+            "value" => Some(MetaDbCol::Value),
             _ => None,
         }
     }
@@ -1650,10 +1562,10 @@ impl MetaTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<MetaCol> {
+    fn parse_like_col(name: &str) -> Option<MetaDbCol> {
         match name {
-            "owner_type" => Some(MetaCol::OwnerType),
-            "field" => Some(MetaCol::Field),
+            "owner_type" => Some(MetaDbCol::OwnerType),
+            "field" => Some(MetaDbCol::Field),
             _ => None,
         }
     }
@@ -1694,8 +1606,8 @@ impl MetaTableAdapter {
     }
 }
 impl GeneratedTableAdapter for MetaTableAdapter {
-    type Query<'db> = MetaQuery<'db>;
-    type Row = MetaWithRelations;
+    type Query<'db> = Query<'db, MetaModel>;
+    type Row = MetaRecord;
     fn model_key(&self) -> &'static str { "Meta" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "owner_type", "owner_id", "field"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &[] }
@@ -1726,7 +1638,7 @@ impl GeneratedTableAdapter for MetaTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: MetaQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<MetaQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, MetaModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, MetaModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -1820,25 +1732,25 @@ impl GeneratedTableAdapter for MetaTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: MetaQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<MetaQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, MetaModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, MetaModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(MetaCol::Id, dir),
-            "owner_type" => query.order_by(MetaCol::OwnerType, dir),
-            "owner_id" => query.order_by(MetaCol::OwnerId, dir),
-            "field" => query.order_by(MetaCol::Field, dir),
-            "value" => query.order_by(MetaCol::Value, dir),
+            "id" => query.order_by(MetaDbCol::Id, dir),
+            "owner_type" => query.order_by(MetaDbCol::OwnerType, dir),
+            "owner_id" => query.order_by(MetaDbCol::OwnerId, dir),
+            "field" => query.order_by(MetaDbCol::Field, dir),
+            "value" => query.order_by(MetaDbCol::Value, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: MetaQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<MetaQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, MetaModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, MetaModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &MetaWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &MetaRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "owner_type" => Some(row.owner_type.clone()),
@@ -1847,10 +1759,10 @@ impl GeneratedTableAdapter for MetaTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: MetaQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, MetaModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: MetaQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<MetaWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, MetaModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<MetaRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -1876,20 +1788,20 @@ impl Default for MetaDataTableConfig {
     }
 }
 pub trait MetaDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: MetaQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> MetaQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, MetaModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, MetaModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: MetaQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<MetaQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: MetaQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<MetaQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut MetaWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: MetaWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, MetaModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, MetaModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, MetaModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, MetaModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut MetaRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: MetaRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         Ok(record)
     }
-    fn row_to_record(&self, row: MetaWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: MetaRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: MetaQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, MetaModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct MetaDefaultDataTableHooks;
@@ -1927,15 +1839,15 @@ impl<H: MetaDataTableHooks> MetaDataTable<H> {
 impl<H: MetaDataTableHooks> AutoDataTable for MetaDataTable<H> {
     type Adapter = MetaTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> MetaQuery<'db> {
-        self.hooks.scope(Meta::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, MetaModel> {
+        self.hooks.scope(MetaModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: MetaQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<MetaQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: MetaQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<MetaQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut MetaWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: MetaWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: MetaQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, MetaModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, MetaModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, MetaModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, MetaModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut MetaRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: MetaRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, MetaModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -1945,10 +1857,417 @@ impl<H: MetaDataTableHooks> AutoDataTable for MetaDataTable<H> {
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for MetaView {
+impl ActiveRecord for MetaRecord {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        Meta::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        MetaModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct MetaModel;
+impl MetaModel {
+    pub const TABLE: &'static str = "meta";
+    pub const MODEL_KEY: &'static str = "meta";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, MetaModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, MetaModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, MetaModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, MetaModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, MetaModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, MetaModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<MetaRecord>> {
+        MetaQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for MetaModel {
+    type Pk = i64;
+    type Record = MetaRecord;
+    type Create = MetaCreate;
+    type Changes = MetaChanges;
+    const TABLE: &'static str = MetaModel::TABLE;
+    const MODEL_KEY: &'static str = MetaModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for MetaModel {
+    type InnerQuery<'db> = MetaQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        MetaQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for MetaModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for MetaModel {
+    type InnerCreate<'db> = MetaCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        MetaCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            MetaQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("meta: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<MetaModel> for MetaDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <MetaModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<MetaModel>>::Value) -> anyhow::Result<<MetaModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            MetaDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            MetaDbCol::OwnerType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            MetaDbCol::OwnerId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            MetaDbCol::Field => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            MetaDbCol::Value => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<MetaModel> for Column<MetaModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <MetaModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<MetaModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_meta_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            MetaDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            MetaDbCol::OwnerType => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            MetaDbCol::OwnerId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            MetaDbCol::Field => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            MetaDbCol::Value => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<MetaModel> for MetaDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <MetaModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <MetaModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <MetaModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <MetaModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<MetaModel> for Column<MetaModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <MetaModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <MetaModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<MetaDbCol> = fields.iter().map(|field| resolve_meta_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <MetaModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <MetaModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<MetaDbCol> = fields.iter().map(|field| resolve_meta_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for MetaModel {
+    type InnerQuery<'db> = MetaQueryInner<'db>;
+    type InnerPatch<'db> = MetaPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        MetaPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(MetaDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = MetaPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", MetaDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM meta", MetaDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = MetaQueryInner::new(db, base_url);
+            query.where_in(MetaDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<MetaModel> for MetaDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <MetaModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<MetaModel>>::Value) -> anyhow::Result<<MetaModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            MetaDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            MetaDbCol::OwnerType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            MetaDbCol::OwnerId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            MetaDbCol::Field => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            MetaDbCol::Value => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<MetaModel> for Column<MetaModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <MetaModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<MetaModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_meta_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            MetaDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            MetaDbCol::OwnerType => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            MetaDbCol::OwnerId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            MetaDbCol::Field => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            MetaDbCol::Value => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<MetaModel> for MetaDbCol {
+    fn increment<'db>(field: Self, mut builder: <MetaModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<MetaModel>>::Value) -> anyhow::Result<<MetaModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            MetaDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            MetaDbCol::OwnerId => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <MetaModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<MetaModel>>::Value) -> anyhow::Result<<MetaModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            MetaDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            MetaDbCol::OwnerId => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<MetaModel> for Column<MetaModel, i64> {
+    fn increment<'db>(field: Self, mut builder: <MetaModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<MetaModel>>::Value) -> anyhow::Result<<MetaModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_meta_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            MetaDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            MetaDbCol::OwnerId => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <MetaModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<MetaModel>>::Value) -> anyhow::Result<<MetaModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_meta_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            MetaDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            MetaDbCol::OwnerId => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<MetaModel> for MetaDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<MetaModel>>::Value) -> <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<MetaModel>>::Value) -> <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<MetaModel>>::Value]) -> <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<MetaModel> for Column<MetaModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_meta_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_meta_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_meta_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_meta_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_meta_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <MetaModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_meta_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
 

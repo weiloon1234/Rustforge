@@ -91,8 +91,8 @@ pub struct UserManageOutput {
     pub updated_at: time::OffsetDateTime,
 }
 
-impl From<generated::models::UserView> for UserManageOutput {
-    fn from(value: generated::models::UserView) -> Self {
+impl From<generated::models::UserRecord> for UserManageOutput {
+    fn from(value: generated::models::UserRecord) -> Self {
         Self {
             id: value.id.into(),
             uuid: value.uuid,

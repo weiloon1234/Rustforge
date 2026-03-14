@@ -68,13 +68,14 @@ pub struct AdminOutput {
     pub updated_at: time::OffsetDateTime,
 }
 
-impl From<generated::models::AdminView> for AdminOutput {
-    fn from(value: generated::models::AdminView) -> Self {
+impl From<generated::models::AdminRecord> for AdminOutput {
+    fn from(value: generated::models::AdminRecord) -> Self {
         let abilities = value.parsed_abilities();
+        let identity = value.identity();
 
         Self {
             id: value.id.into(),
-            identity: value.identity(),
+            identity,
             username: value.username,
             email: value.email,
             name: value.name,

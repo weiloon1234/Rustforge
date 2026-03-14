@@ -1,34 +1,34 @@
 use core_db::common::model_observer::ModelEvent;
-use generated::models::{AdminCreateInput, AdminRow, AdminUpdateChanges};
+use generated::models::{AdminCreate, AdminRecord, AdminChanges};
 
-pub async fn creating(_event: &ModelEvent, _new_data: &AdminCreateInput) -> anyhow::Result<()> {
+pub async fn creating(_event: &ModelEvent, _new_data: &AdminCreate) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn created(_event: &ModelEvent, _row: &AdminRow) -> anyhow::Result<()> {
+pub async fn created(_event: &ModelEvent, _row: &AdminRecord) -> anyhow::Result<()> {
     Ok(())
 }
 
 pub async fn updating(
     _event: &ModelEvent,
-    _old_row: &AdminRow,
-    _changes: &AdminUpdateChanges,
+    _old_row: &AdminRecord,
+    _changes: &AdminChanges,
 ) -> anyhow::Result<()> {
     Ok(())
 }
 
 pub async fn updated(
     _event: &ModelEvent,
-    _old_row: &AdminRow,
-    _new_row: &AdminRow,
+    _old_row: &AdminRecord,
+    _new_row: &AdminRecord,
 ) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn deleting(_event: &ModelEvent, _row: &AdminRow) -> anyhow::Result<()> {
+pub async fn deleting(_event: &ModelEvent, _row: &AdminRecord) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn deleted(_event: &ModelEvent, _row: &AdminRow) -> anyhow::Result<()> {
+pub async fn deleted(_event: &ModelEvent, _row: &AdminRecord) -> anyhow::Result<()> {
     Ok(())
 }

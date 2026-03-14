@@ -1,5 +1,5 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
-use core_db::common::sql::Op;
+use core_db::common::{model_api::Query, sql::Op};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
@@ -18,10 +18,10 @@ pub struct UserCreditTransactionDataTableAppHooks;
 impl UserCreditTransactionDataTableHooks for UserCreditTransactionDataTableAppHooks {
     fn scope<'db>(
         &'db self,
-        query: UserCreditTransactionQuery<'db>,
+        query: Query<'db, UserCreditTransactionModel>,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> UserCreditTransactionQuery<'db> {
+    ) -> Query<'db, UserCreditTransactionModel> {
         query
     }
 
@@ -39,31 +39,31 @@ impl UserCreditTransactionDataTableHooks for UserCreditTransactionDataTableAppHo
 
     fn filter_query<'db>(
         &'db self,
-        query: UserCreditTransactionQuery<'db>,
+        query: Query<'db, UserCreditTransactionModel>,
         filter_key: &str,
         value: &str,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<Option<UserCreditTransactionQuery<'db>>> {
+    ) -> anyhow::Result<Option<Query<'db, UserCreditTransactionModel>>> {
         match filter_key {
             "q" => Ok(Some(apply_keyword_filter(query, value))),
             "f-credit_type" => {
                 if let Some(ct) = CreditType::from_storage(value) {
-                    Ok(Some(query.where_credit_type(Op::Eq, ct)))
+                    Ok(Some(query.where_col(UserCreditTransactionCol::CREDIT_TYPE, Op::Eq, ct)))
                 } else {
                     Ok(Some(query))
                 }
             }
             "f-transaction_type" => {
                 if let Some(tt) = CreditTransactionType::from_storage(value) {
-                    Ok(Some(query.where_transaction_type(Op::Eq, tt)))
+                    Ok(Some(query.where_col(UserCreditTransactionCol::TRANSACTION_TYPE, Op::Eq, tt)))
                 } else {
                     Ok(Some(query))
                 }
             }
             "f-user_id" => {
                 if let Ok(uid) = value.trim().parse::<i64>() {
-                    Ok(Some(query.where_user_id(Op::Eq, uid)))
+                    Ok(Some(query.where_col(UserCreditTransactionCol::USER_ID, Op::Eq, uid)))
                 } else {
                     Ok(Some(query))
                 }
@@ -74,7 +74,7 @@ impl UserCreditTransactionDataTableHooks for UserCreditTransactionDataTableAppHo
 
     fn map_row(
         &self,
-        row: &mut generated::models::UserCreditTransactionWithRelations,
+        row: &mut generated::models::UserCreditTransactionRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<()> {
@@ -84,7 +84,7 @@ impl UserCreditTransactionDataTableHooks for UserCreditTransactionDataTableAppHo
 
     fn row_to_record(
         &self,
-        row: generated::models::UserCreditTransactionWithRelations,
+        row: generated::models::UserCreditTransactionRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
@@ -100,15 +100,15 @@ impl UserCreditTransactionDataTableHooks for UserCreditTransactionDataTableAppHo
 }
 
 fn apply_keyword_filter<'db>(
-    query: UserCreditTransactionQuery<'db>,
+    query: Query<'db, UserCreditTransactionModel>,
     value: &str,
-) -> UserCreditTransactionQuery<'db> {
+) -> Query<'db, UserCreditTransactionModel> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return query;
     }
     let pattern = format!("%{trimmed}%");
-    query.where_has_user(|rq| rq.where_col(UserCol::Username, Op::Like, pattern))
+    query.where_has(UserCreditTransactionRel::USER, |rq| rq.where_col(UserCol::USERNAME, Op::Like, pattern))
 }
 
 pub type AppUserCreditTransactionDataTable =

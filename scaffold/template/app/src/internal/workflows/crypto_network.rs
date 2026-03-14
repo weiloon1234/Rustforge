@@ -2,7 +2,8 @@ use core_db::common::sql::{DbConn, Op};
 use core_db::platform::attachments::types::AttachmentInput;
 use core_i18n::t;
 use core_web::error::AppError;
-use generated::models::{CryptoNetwork, CryptoNetworkQuery, CryptoNetworkWithRelations};
+use generated::localized;
+use generated::models::{CryptoNetworkCol, CryptoNetworkModel, CryptoNetworkRecord};
 use time::OffsetDateTime;
 
 use crate::{
@@ -10,10 +11,8 @@ use crate::{
     internal::api::state::AppApiState,
 };
 
-pub async fn detail(state: &AppApiState, id: i64) -> Result<CryptoNetworkWithRelations, AppError> {
-    CryptoNetworkQuery::new(DbConn::pool(&state.db), None)
-        .where_id(Op::Eq, id)
-        .first()
+pub async fn detail(state: &AppApiState, id: i64) -> Result<CryptoNetworkRecord, AppError> {
+    CryptoNetworkModel::find(DbConn::pool(&state.db), id)
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(t("Crypto network not found")))
@@ -23,22 +22,38 @@ pub async fn create(
     state: &AppApiState,
     req: AdminCryptoNetworkInput,
     logo: Option<AttachmentInput>,
-) -> Result<CryptoNetworkWithRelations, AppError> {
+) -> Result<CryptoNetworkRecord, AppError> {
     let now = OffsetDateTime::now_utc();
-    let mut insert = CryptoNetwork::new(DbConn::pool(&state.db), None)
-        .insert()
-        .set_name(req.name)
-        .set_symbol(req.symbol)
-        .set_status(req.status)
-        .set_sort_order(req.sort_order.unwrap_or(0))
-        .set_created_at(now)
-        .set_updated_at(now);
+    let scope = DbConn::pool(&state.db)
+        .begin_scope()
+        .await
+        .map_err(AppError::from)?;
+    let conn = scope.conn();
 
-    if let Some(logo) = logo {
-        insert = insert.set_attachment_logo(logo);
+    let row = CryptoNetworkModel::create(conn.clone())
+        .set(CryptoNetworkCol::NAME, req.name)?
+        .set(CryptoNetworkCol::SYMBOL, req.symbol)?
+        .set(CryptoNetworkCol::STATUS, req.status)?
+        .set(CryptoNetworkCol::SORT_ORDER, req.sort_order.unwrap_or(0))?
+        .set(CryptoNetworkCol::CREATED_AT, now)?
+        .set(CryptoNetworkCol::UPDATED_AT, now)?
+        .save()
+        .await
+        .map_err(AppError::from)?;
+
+    if let Some(logo) = logo.as_ref() {
+        localized::replace_single_attachment(
+            conn,
+            localized::CRYPTO_NETWORK_OWNER_TYPE,
+            row.id,
+            "logo",
+            logo,
+        )
+        .await
+        .map_err(AppError::from)?;
     }
 
-    let row = insert.save().await.map_err(AppError::from)?;
+    scope.commit().await.map_err(AppError::from)?;
 
     detail(state, row.id).await
 }
@@ -48,32 +63,50 @@ pub async fn update(
     id: i64,
     req: AdminCryptoNetworkInput,
     logo: Option<AttachmentInput>,
-) -> Result<CryptoNetworkWithRelations, AppError> {
-    let mut update = CryptoNetwork::new(DbConn::pool(&state.db), None)
-        .update()
-        .where_id(Op::Eq, id)
-        .set_name(req.name)
-        .set_symbol(req.symbol)
-        .set_status(req.status)
-        .set_sort_order(req.sort_order.unwrap_or(0))
-        .set_updated_at(OffsetDateTime::now_utc());
+) -> Result<CryptoNetworkRecord, AppError> {
+    let scope = DbConn::pool(&state.db)
+        .begin_scope()
+        .await
+        .map_err(AppError::from)?;
+    let conn = scope.conn();
 
-    if let Some(logo) = logo {
-        update = update.set_attachment_logo(logo);
-    }
-
-    let affected = update.save().await.map_err(AppError::from)?;
+    let affected = CryptoNetworkModel::query(conn.clone())
+        .where_col(CryptoNetworkCol::ID, Op::Eq, id)
+        .patch()
+        .assign(CryptoNetworkCol::NAME, req.name)?
+        .assign(CryptoNetworkCol::SYMBOL, req.symbol)?
+        .assign(CryptoNetworkCol::STATUS, req.status)?
+        .assign(CryptoNetworkCol::SORT_ORDER, req.sort_order.unwrap_or(0))?
+        .assign(CryptoNetworkCol::UPDATED_AT, OffsetDateTime::now_utc())?
+        .save()
+        .await
+        .map_err(AppError::from)?;
 
     if affected == 0 {
         return Err(AppError::NotFound(t("Crypto network not found")));
     }
 
+    if let Some(logo) = logo.as_ref() {
+        localized::replace_single_attachment(
+            conn,
+            localized::CRYPTO_NETWORK_OWNER_TYPE,
+            id,
+            "logo",
+            logo,
+        )
+        .await
+        .map_err(AppError::from)?;
+    }
+
+    scope.commit().await.map_err(AppError::from)?;
+
     detail(state, id).await
 }
 
 pub async fn delete(state: &AppApiState, id: i64) -> Result<(), AppError> {
-    let affected = CryptoNetwork::new(DbConn::pool(&state.db), None)
-        .delete(id)
+    let affected = CryptoNetworkModel::query(DbConn::pool(&state.db))
+        .where_col(CryptoNetworkCol::ID, Op::Eq, id)
+        .delete()
         .await
         .map_err(AppError::from)?;
 

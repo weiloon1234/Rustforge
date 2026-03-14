@@ -150,8 +150,8 @@ pub struct Article {
     pub updated_at: time::OffsetDateTime,
 }
 
-#[rf_view_impl]
-impl ArticleView {
+#[rf_record_impl]
+impl ArticleRecord {
     pub fn to_special_dto(&self) -> SpecialDto {
         build_special(&self.identity())
     }
@@ -195,8 +195,8 @@ impl ArticleView {
     assert!(article_rs.contains("-> SpecialDto"));
     assert!(article_rs.contains("pub fn is_published"));
     assert!(article_rs.contains("pub fn identity"));
-    assert!(article_rs.contains("identity: self.identity(),"));
-    assert!(article_rs.contains("pub identity: String,"));
+    assert!(article_rs.contains("record.insert(\"identity\".to_string(), serde_json::to_value(row.identity())?);"));
+    assert!(!article_rs.contains("pub struct ArticleJson"));
     assert!(!article_rs.contains("crate::extensions::"));
 
     fs::remove_dir_all(root).expect("failed to remove temp dir");
@@ -333,10 +333,10 @@ pub struct Article {
 
     assert!(article_rs.contains("(\"author__profile\", \"display_name\")"));
     assert!(article_rs.contains(
-        "Ok(Some(query.where_has_author(|rq| rq.where_has_profile(|rq| rq.where_col(ProfileCol::DisplayName, Op::Eq, bind)))))"
+        "Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_col(ProfileCol::Id, Op::Eq, bind)))))"
     ));
     assert!(article_rs.contains(
-        "Ok(Some(query.where_has_author(|rq| rq.where_has_profile(|rq| rq.where_col(ProfileCol::DisplayName, Op::Like, pattern.clone())))))"
+        "Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_col(ProfileCol::DisplayName, Op::Like, pattern.clone())))))"
     ));
 
     fs::remove_dir_all(root).expect("failed to remove temp dir");
@@ -498,8 +498,8 @@ pub struct Article {
     pub title: String,
 }
 
-#[rf_view_impl]
-impl ArticleView {
+#[rf_record_impl]
+impl ArticleRecord {
     #[rf_computed]
     pub fn identity(&self, prefix: &str) -> String {
         format!("{prefix}:{}", self.id)
@@ -518,6 +518,44 @@ impl ArticleView {
 
     assert!(err_text.contains("#[rf_computed] method 'identity'"));
     assert!(err_text.contains("must not take extra arguments"));
+
+    fs::remove_dir_all(root).expect("failed to remove temp dir");
+}
+
+#[test]
+fn schema_load_rejects_legacy_view_impl_attrs() {
+    let root = temp_dir("legacy_view_impl");
+    let models_dir = root.join("models");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
+
+    write_file(
+        models_dir.join("article.rs"),
+        r#"
+#[rf_model(table = "articles")]
+pub struct Article {
+    pub id: i64,
+    pub title: String,
+}
+
+#[rf_view_impl]
+impl ArticleView {
+    pub fn identity(&self) -> String {
+        format!("article:{}", self.id)
+    }
+}
+"#,
+    );
+
+    let err = schema::load(
+        models_dir
+            .to_str()
+            .expect("schema path should be valid utf-8"),
+    )
+    .expect_err("schema load should reject legacy custom impl attrs");
+    let err_text = err.to_string();
+
+    assert!(err_text.contains("#[rf_view_impl]"));
+    assert!(err_text.contains("use #[rf_record_impl] on XxxRecord instead"));
 
     fs::remove_dir_all(root).expect("failed to remove temp dir");
 }
@@ -607,8 +645,8 @@ pub struct Article {
         fs::read_to_string(out_dir.join("article.rs")).expect("article.rs should exist");
     let mod_rs = fs::read_to_string(out_dir.join("mod.rs")).expect("mod.rs should exist");
 
-    assert!(article_rs.contains("pub struct ArticleCreateInput"));
-    assert!(article_rs.contains("pub struct ArticleUpdateChanges"));
+    assert!(article_rs.contains("pub struct ArticleCreate"));
+    assert!(article_rs.contains("pub struct ArticleChanges"));
     assert!(article_rs.contains("pub const MODEL_KEY: &'static str = \"article\";"));
     assert!(article_rs.contains("observer.on_creating(&event, &data).await?;"));
     assert!(article_rs.contains("observer.on_updating(&event, &old_data, &changes_data).await?;"));
@@ -623,9 +661,14 @@ pub struct Article {
     assert!(article_rs.contains("let value = match bind {"));
     assert!(article_rs.contains("FieldInput::Set(value)"));
     assert!(article_rs.contains("FieldChange::Assign(value)"));
-    assert!(mod_rs.contains("ArticleCreateInput"));
-    assert!(mod_rs.contains("ArticleUpdateChanges"));
-    assert!(mod_rs.contains("ArticleRow"));
+    assert!(mod_rs.contains("ArticleModel"));
+    assert!(mod_rs.contains("ArticleRecord"));
+    assert!(mod_rs.contains("ArticleCreate"));
+    assert!(mod_rs.contains("ArticleChanges"));
+    assert!(mod_rs.contains("ArticleCol"));
+    assert!(!mod_rs.contains("ArticleCreateInput"));
+    assert!(!mod_rs.contains("ArticleUpdateChanges"));
+    assert!(!mod_rs.contains("ArticleRow"));
 
     fs::remove_dir_all(root).expect("failed to remove temp dir");
 }

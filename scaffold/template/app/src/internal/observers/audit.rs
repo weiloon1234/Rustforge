@@ -1,6 +1,6 @@
 use core_db::common::model_observer::ModelEvent;
 use core_db::common::sql::{generate_snowflake_i64, DbConn};
-use generated::models::{AuditAction, AuditLog};
+use generated::models::{AuditAction, AuditLogCol, AuditLogModel};
 
 pub async fn created(
     db: &sqlx::PgPool,
@@ -106,20 +106,26 @@ async fn write_log_raw(
     old_data: Option<serde_json::Value>,
     new_data: Option<serde_json::Value>,
 ) {
-    let mut insert = AuditLog::new(DbConn::pool(db), None)
-        .insert()
-        .set_id(generate_snowflake_i64())
-        .set_admin_id(admin_id)
-        .set_action(action)
-        .set_table_name(table_name.to_string())
-        .set_record_key(record_key.to_string());
+    let insert = AuditLogModel::create(DbConn::pool(db))
+        .set(AuditLogCol::ID, generate_snowflake_i64())
+        .and_then(|create| create.set(AuditLogCol::ADMIN_ID, admin_id))
+        .and_then(|create| create.set(AuditLogCol::ACTION, action))
+        .and_then(|create| create.set(AuditLogCol::TABLE_NAME, table_name.to_string()))
+        .and_then(|create| create.set(AuditLogCol::RECORD_KEY, record_key.to_string()));
 
-    if let Some(old) = old_data {
-        insert = insert.set_old_data(Some(old));
-    }
-    if let Some(new) = new_data {
-        insert = insert.set_new_data(Some(new));
-    }
+    let insert = if let Some(old) = old_data {
+        insert.and_then(|create| create.set(AuditLogCol::OLD_DATA, Some(old)))
+    } else {
+        insert
+    };
 
-    let _ = insert.save().await;
+    let insert = if let Some(new) = new_data {
+        insert.and_then(|create| create.set(AuditLogCol::NEW_DATA, Some(new)))
+    } else {
+        insert
+    };
+
+    if let Ok(insert) = insert {
+        let _ = insert.save().await;
+    }
 }

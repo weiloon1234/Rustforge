@@ -6,13 +6,13 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
-use crate::generated::models::crypto_network::{CryptoNetworkCol, CryptoNetworkQuery, CryptoNetworkRow};
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
+use crate::generated::models::crypto_network::{CryptoNetworkDbCol, CryptoNetworkModel, CryptoNetworkRow};
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
@@ -20,7 +20,7 @@ const HAS_UPDATED_AT: bool = true;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct CompanyCryptoAccountCreateInput {
+pub struct CompanyCryptoAccountCreate {
     pub id: FieldInput<i64>,
     pub crypto_network_id: FieldInput<i64>,
     pub wallet_address: FieldInput<String>,
@@ -33,7 +33,7 @@ pub struct CompanyCryptoAccountCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct CompanyCryptoAccountUpdateChanges {
+pub struct CompanyCryptoAccountChanges {
     pub id: Option<FieldChange<i64>>,
     pub crypto_network_id: Option<FieldChange<i64>>,
     pub wallet_address: Option<FieldChange<String>>,
@@ -62,7 +62,7 @@ pub struct CompanyCryptoAccountRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct CompanyCryptoAccountView {
+pub struct CompanyCryptoAccountRecord {
     pub id: i64,
     pub crypto_network_id: i64,
     pub wallet_address: String,
@@ -74,62 +74,17 @@ pub struct CompanyCryptoAccountView {
     #[schemars(with = "String")]
     pub updated_at: time::OffsetDateTime,
     pub status_explained: String,
+    pub crypto_network: Option<CryptoNetworkRow>,
 }
 
-impl CompanyCryptoAccountView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> CompanyCryptoAccountUpdate<'db> {
-        CompanyCryptoAccount::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &CompanyCryptoAccount<'db>) -> CompanyCryptoAccountUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> CompanyCryptoAccountJson {
-        CompanyCryptoAccountJson {
-            id: self.id.clone(),
-            crypto_network_id: self.crypto_network_id.clone(),
-            wallet_address: self.wallet_address.clone(),
-            conversion_rate: self.conversion_rate.clone(),
-            status: self.status.clone(),
-            sort_order: self.sort_order.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            status_explained: self.status_explained.clone(),
-        }
+impl CompanyCryptoAccountRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, CompanyCryptoAccountModel> {
+        CompanyCryptoAccountModel::query(db.into()).where_col(CompanyCryptoAccountDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-pub trait CompanyCryptoAccountViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&CompanyCryptoAccountView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&CompanyCryptoAccountView) -> K) -> std::collections::HashMap<K, CompanyCryptoAccountView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&CompanyCryptoAccountView) -> K) -> std::collections::HashMap<K, Vec<CompanyCryptoAccountView>> where K: Eq + std::hash::Hash;
-}
-
-impl CompanyCryptoAccountViewsExt for Vec<CompanyCryptoAccountView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&CompanyCryptoAccountView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&CompanyCryptoAccountView) -> K) -> std::collections::HashMap<K, CompanyCryptoAccountView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&CompanyCryptoAccountView) -> K) -> std::collections::HashMap<K, Vec<CompanyCryptoAccountView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct CompanyCryptoAccountJson {
-    pub id: i64,
-    pub crypto_network_id: i64,
-    pub wallet_address: String,
-    pub conversion_rate: rust_decimal::Decimal,
-    pub status: CompanyCryptoAccountStatus,
-    pub sort_order: i32,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    pub status_explained: String,
-}
-
-fn hydrate_view(row: CompanyCryptoAccountRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> CompanyCryptoAccountView {
-    let view = CompanyCryptoAccountView {
+fn hydrate_record(row: CompanyCryptoAccountRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> CompanyCryptoAccountRecord {
+    let mut record = CompanyCryptoAccountRecord {
         id: row.id,
         crypto_network_id: row.crypto_network_id,
         wallet_address: row.wallet_address,
@@ -139,33 +94,55 @@ fn hydrate_view(row: CompanyCryptoAccountRow, _loc: &LocalizedMap, _base_url: Op
         created_at: row.created_at,
         updated_at: row.updated_at,
         status_explained: row.status.explained_label(),
+        crypto_network: None,
     };
-    view
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct CompanyCryptoAccountWithRelations {
-    #[serde(flatten)]
-    pub row: CompanyCryptoAccountView,
-    pub crypto_network: Option<CryptoNetworkRow>,
+impl CompanyCryptoAccountRecord {
+    pub fn one<R>(&self, relation: R) -> Option<&R::Target>
+    where
+        R: core_db::common::model_api::RecordOneRelation<CompanyCryptoAccountModel>,
+    {
+        R::get(relation, self)
+    }
+    pub fn many<R>(&self, relation: R) -> &[R::Target]
+    where
+        R: core_db::common::model_api::RecordManyRelation<CompanyCryptoAccountModel>,
+    {
+        R::get(relation, self)
+    }
 }
 
-impl CompanyCryptoAccountWithRelations {
-    pub fn into_row(self) -> CompanyCryptoAccountView { self.row }
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompanyCryptoAccountCol;
+impl CompanyCryptoAccountCol {
+    pub const ID: Column<CompanyCryptoAccountModel, i64> = Column::new("id");
+    pub const CRYPTO_NETWORK_ID: Column<CompanyCryptoAccountModel, i64> = Column::new("crypto_network_id");
+    pub const WALLET_ADDRESS: Column<CompanyCryptoAccountModel, String> = Column::new("wallet_address");
+    pub const CONVERSION_RATE: Column<CompanyCryptoAccountModel, rust_decimal::Decimal> = Column::new("conversion_rate");
+    pub const STATUS: Column<CompanyCryptoAccountModel, CompanyCryptoAccountStatus> = Column::new("status");
+    pub const SORT_ORDER: Column<CompanyCryptoAccountModel, i32> = Column::new("sort_order");
+    pub const CREATED_AT: Column<CompanyCryptoAccountModel, time::OffsetDateTime> = Column::new("created_at");
+    pub const UPDATED_AT: Column<CompanyCryptoAccountModel, time::OffsetDateTime> = Column::new("updated_at");
 }
 
-impl std::ops::Deref for CompanyCryptoAccountWithRelations {
-    type Target = CompanyCryptoAccountView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for CompanyCryptoAccountWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_company_crypto_account_db_col(sql: &str) -> Option<CompanyCryptoAccountDbCol> {
+    match sql {
+        "id" => Some(CompanyCryptoAccountDbCol::Id),
+        "crypto_network_id" => Some(CompanyCryptoAccountDbCol::CryptoNetworkId),
+        "wallet_address" => Some(CompanyCryptoAccountDbCol::WalletAddress),
+        "conversion_rate" => Some(CompanyCryptoAccountDbCol::ConversionRate),
+        "status" => Some(CompanyCryptoAccountDbCol::Status),
+        "sort_order" => Some(CompanyCryptoAccountDbCol::SortOrder),
+        "created_at" => Some(CompanyCryptoAccountDbCol::CreatedAt),
+        "updated_at" => Some(CompanyCryptoAccountDbCol::UpdatedAt),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum CompanyCryptoAccountCol {
+pub enum CompanyCryptoAccountDbCol {
     Id,
     CryptoNetworkId,
     WalletAddress,
@@ -176,44 +153,31 @@ pub enum CompanyCryptoAccountCol {
     UpdatedAt,
 }
 
-impl CompanyCryptoAccountCol {
-    pub const fn all() -> &'static [CompanyCryptoAccountCol] {
-        &[CompanyCryptoAccountCol::Id, CompanyCryptoAccountCol::CryptoNetworkId, CompanyCryptoAccountCol::WalletAddress, CompanyCryptoAccountCol::ConversionRate, CompanyCryptoAccountCol::Status, CompanyCryptoAccountCol::SortOrder, CompanyCryptoAccountCol::CreatedAt, CompanyCryptoAccountCol::UpdatedAt]
+impl CompanyCryptoAccountDbCol {
+    pub const fn all() -> &'static [CompanyCryptoAccountDbCol] {
+        &[CompanyCryptoAccountDbCol::Id, CompanyCryptoAccountDbCol::CryptoNetworkId, CompanyCryptoAccountDbCol::WalletAddress, CompanyCryptoAccountDbCol::ConversionRate, CompanyCryptoAccountDbCol::Status, CompanyCryptoAccountDbCol::SortOrder, CompanyCryptoAccountDbCol::CreatedAt, CompanyCryptoAccountDbCol::UpdatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            CompanyCryptoAccountCol::Id => "id",
-            CompanyCryptoAccountCol::CryptoNetworkId => "crypto_network_id",
-            CompanyCryptoAccountCol::WalletAddress => "wallet_address",
-            CompanyCryptoAccountCol::ConversionRate => "conversion_rate",
-            CompanyCryptoAccountCol::Status => "status",
-            CompanyCryptoAccountCol::SortOrder => "sort_order",
-            CompanyCryptoAccountCol::CreatedAt => "created_at",
-            CompanyCryptoAccountCol::UpdatedAt => "updated_at",
+            CompanyCryptoAccountDbCol::Id => "id",
+            CompanyCryptoAccountDbCol::CryptoNetworkId => "crypto_network_id",
+            CompanyCryptoAccountDbCol::WalletAddress => "wallet_address",
+            CompanyCryptoAccountDbCol::ConversionRate => "conversion_rate",
+            CompanyCryptoAccountDbCol::Status => "status",
+            CompanyCryptoAccountDbCol::SortOrder => "sort_order",
+            CompanyCryptoAccountDbCol::CreatedAt => "created_at",
+            CompanyCryptoAccountDbCol::UpdatedAt => "updated_at",
         }
     }
 }
 
-pub struct CompanyCryptoAccount<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompanyCryptoAccountRel;
+impl CompanyCryptoAccountRel {
+    pub const CRYPTO_NETWORK: OneRelation<CompanyCryptoAccountModel, CryptoNetworkRow, 0> = OneRelation::<CompanyCryptoAccountModel, CryptoNetworkRow, 0>::new("crypto_network");
 }
 
-impl<'db> CompanyCryptoAccount<'db> {
-    pub const TABLE: &'static str = "company_crypto_accounts";
-    pub const MODEL_KEY: &'static str = "company_crypto_account";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> CompanyCryptoAccountQuery<'db> { CompanyCryptoAccountQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> CompanyCryptoAccountInsert<'db> { CompanyCryptoAccountInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> CompanyCryptoAccountUpdate<'db> { CompanyCryptoAccountUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<CompanyCryptoAccountWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-    pub async fn load_crypto_network(&self, parents: &[CompanyCryptoAccountRow]) -> Result<HashMap<i64, Option<CryptoNetworkRow>>> {
+async fn load_crypto_network<'db>(db: DbConn<'db>, parents: &[CompanyCryptoAccountRow]) -> Result<HashMap<i64, Option<CryptoNetworkRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -226,7 +190,7 @@ impl<'db> CompanyCryptoAccount<'db> {
         let sql = format!("SELECT * FROM crypto_networks WHERE id IN ({})", placeholders.join(", "));
         let mut q = sqlx::query_as::<_, CryptoNetworkRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
-        let rows = self.db.fetch_all(q).await?;
+        let rows = db.fetch_all(q).await?;
         let mut by_pk: HashMap<i64, CryptoNetworkRow> = HashMap::new();
         for row in rows { by_pk.insert(row.id.clone(), row); }
         let mut out = HashMap::new();
@@ -235,10 +199,9 @@ impl<'db> CompanyCryptoAccount<'db> {
         }
         Ok(out)
     }
-}
 
 #[derive(Clone)]
-pub struct CompanyCryptoAccountQuery<'db> {
+pub struct CompanyCryptoAccountQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -261,110 +224,109 @@ pub struct CompanyCryptoAccountQuery<'db> {
 
 
 
-impl<'db> CompanyCryptoAccountQuery<'db> {
+impl<'db> CompanyCryptoAccountQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, crypto_network_id, wallet_address, conversion_rate, status, sort_order, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> CompanyCryptoAccountUnsafeQuery<'db> { CompanyCryptoAccountUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_crypto_network_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::CryptoNetworkId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::CryptoNetworkId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_crypto_network_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::CryptoNetworkId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::CryptoNetworkId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_wallet_address(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::WalletAddress.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::WalletAddress.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_wallet_address_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::WalletAddress.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::WalletAddress.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_conversion_rate(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::ConversionRate.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::ConversionRate.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_conversion_rate_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::ConversionRate.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::ConversionRate.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status(mut self, op: Op, val: CompanyCryptoAccountStatus) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_sort_order(mut self, op: Op, val: i32) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::SortOrder.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::SortOrder.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_sort_order_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::SortOrder.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::SortOrder.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(CompanyCryptoAccountCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: CompanyCryptoAccountCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(CompanyCryptoAccountDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: CompanyCryptoAccountDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -383,7 +345,7 @@ impl<'db> CompanyCryptoAccountQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: CompanyCryptoAccountCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: CompanyCryptoAccountDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -398,7 +360,7 @@ impl<'db> CompanyCryptoAccountQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: CompanyCryptoAccountCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: CompanyCryptoAccountDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -410,7 +372,7 @@ impl<'db> CompanyCryptoAccountQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: CompanyCryptoAccountCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: CompanyCryptoAccountDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -418,15 +380,15 @@ impl<'db> CompanyCryptoAccountQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: CompanyCryptoAccountCol) -> Self {
+    pub fn where_null(mut self, col: CompanyCryptoAccountDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: CompanyCryptoAccountCol) -> Self {
+    pub fn where_not_null(mut self, col: CompanyCryptoAccountDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: CompanyCryptoAccountCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: CompanyCryptoAccountDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -480,7 +442,7 @@ impl<'db> CompanyCryptoAccountQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[CompanyCryptoAccountCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[CompanyCryptoAccountDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, crypto_network_id, wallet_address, conversion_rate, status, sort_order, created_at, updated_at".to_string());
         } else {
@@ -492,7 +454,7 @@ impl<'db> CompanyCryptoAccountQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[CompanyCryptoAccountCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[CompanyCryptoAccountDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -573,26 +535,26 @@ impl<'db> CompanyCryptoAccountQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: CompanyCryptoAccountCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: CompanyCryptoAccountDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: CompanyCryptoAccountCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: CompanyCryptoAccountDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: CompanyCryptoAccountCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: CompanyCryptoAccountDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[CompanyCryptoAccountCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[CompanyCryptoAccountDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[CompanyCryptoAccountCol]) -> Self {
+    pub fn select(mut self, cols: &[CompanyCryptoAccountDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -640,7 +602,7 @@ impl<'db> CompanyCryptoAccountQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[CompanyCryptoAccountCol]) -> Self {
+    pub fn group_by(mut self, cols: &[CompanyCryptoAccountDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -667,10 +629,10 @@ impl<'db> CompanyCryptoAccountQuery<'db> {
         self.offset = Some(n);
         self
     }
-    pub fn where_has_crypto_network(mut self, scope: impl FnOnce(CryptoNetworkQuery<'db>) -> CryptoNetworkQuery<'db>) -> Self {
+    pub fn where_has_crypto_network(mut self, scope: impl FnOnce(Query<'db, CryptoNetworkModel>) -> Query<'db, CryptoNetworkModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(CryptoNetworkQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(CryptoNetworkModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "crypto_networks.id = company_crypto_accounts.crypto_network_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM crypto_networks WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -680,10 +642,10 @@ impl<'db> CompanyCryptoAccountQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_doesnt_have_crypto_network(mut self, scope: impl FnOnce(CryptoNetworkQuery<'db>) -> CryptoNetworkQuery<'db>) -> Self {
+    pub fn where_doesnt_have_crypto_network(mut self, scope: impl FnOnce(Query<'db, CryptoNetworkModel>) -> Query<'db, CryptoNetworkModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(CryptoNetworkQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(CryptoNetworkModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "crypto_networks.id = company_crypto_accounts.crypto_network_id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM crypto_networks WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -693,10 +655,10 @@ impl<'db> CompanyCryptoAccountQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn or_where_has_crypto_network(mut self, scope: impl FnOnce(CryptoNetworkQuery<'db>) -> CryptoNetworkQuery<'db>) -> Self {
+    pub fn or_where_has_crypto_network(mut self, scope: impl FnOnce(Query<'db, CryptoNetworkModel>) -> Query<'db, CryptoNetworkModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(CryptoNetworkQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(CryptoNetworkModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "crypto_networks.id = company_crypto_accounts.crypto_network_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM crypto_networks WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -758,7 +720,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<CompanyCryptoAccountWithRelations>> {
+    pub async fn get(self) -> Result<Vec<CompanyCryptoAccountRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -804,71 +766,68 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("company_crypto_accounts", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = CompanyCryptoAccount { db: db.clone(), base_url: base_url.clone() };
-        let crypto_network = m.load_crypto_network(&rows).await?;
+        let crypto_network = load_crypto_network(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
             let key = r.id.clone();
-            let view = hydrate_view(r.clone(), &LocalizedMap::default(), base_url.as_deref());
-            out_vec.push(CompanyCryptoAccountWithRelations {
-                row: view,
-                crypto_network: crypto_network.get(&key).cloned().unwrap_or(None),
-            });
+            let mut record = hydrate_record(r.clone(), &LocalizedMap::default(), base_url.as_deref());
+            record.crypto_network = crypto_network.get(&key).cloned().unwrap_or(None);
+            out_vec.push(record);
         }
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<CompanyCryptoAccountWithRelations>> {
+    pub async fn first(self) -> Result<Option<CompanyCryptoAccountRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<CompanyCryptoAccountWithRelations> {
+    pub async fn first_or_fail(self) -> Result<CompanyCryptoAccountRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("company_crypto_accounts: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<CompanyCryptoAccountWithRelations>> {
+    pub async fn find(self, id: i64) -> Result<Option<CompanyCryptoAccountRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<CompanyCryptoAccountWithRelations> {
+    pub async fn find_or_fail(self, id: i64) -> Result<CompanyCryptoAccountRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("company_crypto_accounts: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(CompanyCryptoAccountInsert<'db>) -> CompanyCryptoAccountInsert<'db>) -> Result<CompanyCryptoAccountWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(CompanyCryptoAccountCreateInner<'db>) -> CompanyCryptoAccountCreateInner<'db>) -> Result<CompanyCryptoAccountRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(CompanyCryptoAccountInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(CompanyCryptoAccountCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        CompanyCryptoAccount::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        CompanyCryptoAccountQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(CompanyCryptoAccountUpdate<'db>) -> CompanyCryptoAccountUpdate<'db>,
-        on_create: impl FnOnce(CompanyCryptoAccountInsert<'db>) -> CompanyCryptoAccountInsert<'db>,
-    ) -> Result<CompanyCryptoAccountWithRelations> {
+        on_update: impl FnOnce(CompanyCryptoAccountPatchInner<'db>) -> CompanyCryptoAccountPatchInner<'db>,
+        on_create: impl FnOnce(CompanyCryptoAccountCreateInner<'db>) -> CompanyCryptoAccountCreateInner<'db>,
+    ) -> Result<CompanyCryptoAccountRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = CompanyCryptoAccountUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = CompanyCryptoAccountPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return CompanyCryptoAccount::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return CompanyCryptoAccountQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(CompanyCryptoAccountInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(CompanyCryptoAccountCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        CompanyCryptoAccount::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        CompanyCryptoAccountQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: CompanyCryptoAccountCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: CompanyCryptoAccountDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -883,7 +842,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: CompanyCryptoAccountCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: CompanyCryptoAccountDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -939,13 +898,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<CompanyCryptoAccountWithRelations>) -> Fut,
+        F: FnMut(Vec<CompanyCryptoAccountRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = CompanyCryptoAccountQuery::new(db.clone(), self.base_url.clone());
+            let mut query = CompanyCryptoAccountQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -959,11 +918,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(CompanyCryptoAccountCol::CreatedAt, OrderDir::Desc)
+        self.order_by(CompanyCryptoAccountDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(CompanyCryptoAccountCol::CreatedAt, OrderDir::Asc)
+        self.order_by(CompanyCryptoAccountDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -974,7 +933,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<CompanyCryptoAccountWithRelations> {
+    pub async fn sole(self) -> Result<CompanyCryptoAccountRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -993,7 +952,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&CompanyCryptoAccountWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&CompanyCryptoAccountRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -1001,7 +960,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: CompanyCryptoAccountCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: CompanyCryptoAccountDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "company_crypto_accounts".to_string());
@@ -1022,7 +981,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn avg(self, col: CompanyCryptoAccountCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: CompanyCryptoAccountDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "company_crypto_accounts".to_string());
@@ -1043,7 +1002,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: CompanyCryptoAccountCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: CompanyCryptoAccountDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "company_crypto_accounts".to_string());
@@ -1064,7 +1023,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: CompanyCryptoAccountCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: CompanyCryptoAccountDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "company_crypto_accounts".to_string());
@@ -1085,7 +1044,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<CompanyCryptoAccountWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<CompanyCryptoAccountRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1132,18 +1091,15 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("company_crypto_accounts", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = CompanyCryptoAccount { db: db.clone(), base_url: base_url.clone() };
-        let crypto_network = m.load_crypto_network(&rows).await?;
+        let crypto_network = load_crypto_network(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for row in rows {
             let key = row.id.clone();
-            let view = hydrate_view(row.clone(), &LocalizedMap::default(), base_url.as_deref());
-            data.push(CompanyCryptoAccountWithRelations {
-                row: view,
-                crypto_network: crypto_network.get(&key).cloned().unwrap_or(None),
-            });
+            let mut record = hydrate_record(row.clone(), &LocalizedMap::default(), base_url.as_deref());
+            record.crypto_network = crypto_network.get(&key).cloned().unwrap_or(None);
+            data.push(record);
         }
         Ok(Page { data, total, per_page, current_page, last_page })
     }
@@ -1264,38 +1220,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct CompanyCryptoAccountUnsafeQuery<'db> {
-    inner: CompanyCryptoAccountQuery<'db>,
-}
 
-impl<'db> CompanyCryptoAccountUnsafeQuery<'db> {
-    fn new(inner: CompanyCryptoAccountQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> CompanyCryptoAccountQuery<'db> { self.inner }
-}
-
-
-pub struct CompanyCryptoAccountInsert<'db> {
+pub struct CompanyCryptoAccountCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<CompanyCryptoAccountCol>,
+    cols: Vec<CompanyCryptoAccountDbCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<CompanyCryptoAccountCol>,
+    conflict_cols: Vec<CompanyCryptoAccountDbCol>,
 }
 
-impl<'db> CompanyCryptoAccountInsert<'db> {
+impl<'db> CompanyCryptoAccountCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1309,88 +1244,88 @@ impl<'db> CompanyCryptoAccountInsert<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(CompanyCryptoAccountCol::Id);
+        self.cols.push(CompanyCryptoAccountDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_crypto_network_id(mut self, val: i64) -> Self {
-        self.cols.push(CompanyCryptoAccountCol::CryptoNetworkId);
+        self.cols.push(CompanyCryptoAccountDbCol::CryptoNetworkId);
         self.binds.push(val.into());
         self
     }
     pub fn set_wallet_address(mut self, val: String) -> Self {
-        self.cols.push(CompanyCryptoAccountCol::WalletAddress);
+        self.cols.push(CompanyCryptoAccountDbCol::WalletAddress);
         self.binds.push(val.into());
         self
     }
     pub fn set_conversion_rate(mut self, val: rust_decimal::Decimal) -> Self {
-        self.cols.push(CompanyCryptoAccountCol::ConversionRate);
+        self.cols.push(CompanyCryptoAccountDbCol::ConversionRate);
         self.binds.push(val.into());
         self
     }
     pub fn set_status(mut self, val: CompanyCryptoAccountStatus) -> Self {
-        self.cols.push(CompanyCryptoAccountCol::Status);
+        self.cols.push(CompanyCryptoAccountDbCol::Status);
         self.binds.push(val.into());
         self
     }
     pub fn set_sort_order(mut self, val: i32) -> Self {
-        self.cols.push(CompanyCryptoAccountCol::SortOrder);
+        self.cols.push(CompanyCryptoAccountDbCol::SortOrder);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(CompanyCryptoAccountCol::CreatedAt);
+        self.cols.push(CompanyCryptoAccountDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(CompanyCryptoAccountCol::UpdatedAt);
+        self.cols.push(CompanyCryptoAccountDbCol::UpdatedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[CompanyCryptoAccountCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[CompanyCryptoAccountDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[CompanyCryptoAccountCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[CompanyCryptoAccountDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<CompanyCryptoAccountCreateInput> {
-        let mut input = CompanyCryptoAccountCreateInput::default();
+    fn to_create_input(&self) -> Result<CompanyCryptoAccountCreate> {
+        let mut input = CompanyCryptoAccountCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                CompanyCryptoAccountCol::Id => {
+                CompanyCryptoAccountDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                CompanyCryptoAccountCol::CryptoNetworkId => {
+                CompanyCryptoAccountDbCol::CryptoNetworkId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.crypto_network_id = FieldInput::Set(value);
                 }
-                CompanyCryptoAccountCol::WalletAddress => {
+                CompanyCryptoAccountDbCol::WalletAddress => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.wallet_address = FieldInput::Set(value);
                 }
-                CompanyCryptoAccountCol::ConversionRate => {
+                CompanyCryptoAccountDbCol::ConversionRate => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
         };
                     input.conversion_rate = FieldInput::Set(value);
                 }
-                CompanyCryptoAccountCol::Status => {
+                CompanyCryptoAccountDbCol::Status => {
                     let value = match bind {
                 BindValue::String(value) => CompanyCryptoAccountStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'CompanyCryptoAccountStatus'", value))?,
@@ -1403,21 +1338,21 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.status = FieldInput::Set(value);
                 }
-                CompanyCryptoAccountCol::SortOrder => {
+                CompanyCryptoAccountDbCol::SortOrder => {
                     let value = match bind {
             BindValue::I32(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i32'", other),
         };
                     input.sort_order = FieldInput::Set(value);
                 }
-                CompanyCryptoAccountCol::CreatedAt => {
+                CompanyCryptoAccountDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                CompanyCryptoAccountCol::UpdatedAt => {
+                CompanyCryptoAccountDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1430,7 +1365,7 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
 
 
-pub async fn save(self) -> Result<CompanyCryptoAccountView> {
+pub async fn save(self) -> Result<CompanyCryptoAccountRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -1448,7 +1383,7 @@ pub async fn save(self) -> Result<CompanyCryptoAccountView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1467,10 +1402,10 @@ pub async fn save(self) -> Result<CompanyCryptoAccountView> {
                         Err(err) => log_observer_error("created", "company_crypto_account", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "company_crypto_account", table: "company_crypto_accounts", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -1482,26 +1417,26 @@ pub async fn save(self) -> Result<CompanyCryptoAccountView> {
                         Err(err) => log_observer_error("created", "company_crypto_account", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(CompanyCryptoAccountView, CompanyCryptoAccountRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(CompanyCryptoAccountRecord, CompanyCryptoAccountRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, CompanyCryptoAccountCol::Id)) {
-            cols.push(CompanyCryptoAccountCol::Id);
+        if !cols.iter().any(|c| matches!(c, CompanyCryptoAccountDbCol::Id)) {
+            cols.push(CompanyCryptoAccountDbCol::Id);
             binds.push(generate_snowflake_i64().into());
         }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, CompanyCryptoAccountCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, CompanyCryptoAccountDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(CompanyCryptoAccountCol::CreatedAt);
+            cols.push(CompanyCryptoAccountDbCol::CreatedAt);
             binds.push(now.into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, CompanyCryptoAccountCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, CompanyCryptoAccountDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(CompanyCryptoAccountCol::UpdatedAt);
+            cols.push(CompanyCryptoAccountDbCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1535,20 +1470,20 @@ pub async fn save(self) -> Result<CompanyCryptoAccountView> {
         let row = db.fetch_one(q).await?;
         record_profiled_query("company_crypto_accounts", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
-        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct CompanyCryptoAccountUpdate<'db> {
+pub struct CompanyCryptoAccountPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(CompanyCryptoAccountCol, BindValue, SetMode)>,
+    sets: Vec<(CompanyCryptoAccountDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> CompanyCryptoAccountUpdate<'db> {
+impl<'db> CompanyCryptoAccountPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1558,122 +1493,121 @@ impl<'db> CompanyCryptoAccountUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> CompanyCryptoAccountUnsafeUpdate<'db> { CompanyCryptoAccountUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((CompanyCryptoAccountDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::Id, val.into(), SetMode::Increment));
+        self.sets.push((CompanyCryptoAccountDbCol::Id, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::Id, val.into(), SetMode::Decrement));
+        self.sets.push((CompanyCryptoAccountDbCol::Id, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_crypto_network_id(mut self, val: i64) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::CryptoNetworkId, val.into(), SetMode::Assign));
+        self.sets.push((CompanyCryptoAccountDbCol::CryptoNetworkId, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_crypto_network_id(mut self, val: i64) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::CryptoNetworkId, val.into(), SetMode::Increment));
+        self.sets.push((CompanyCryptoAccountDbCol::CryptoNetworkId, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_crypto_network_id(mut self, val: i64) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::CryptoNetworkId, val.into(), SetMode::Decrement));
+        self.sets.push((CompanyCryptoAccountDbCol::CryptoNetworkId, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_wallet_address(mut self, val: String) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::WalletAddress, val.into(), SetMode::Assign));
+        self.sets.push((CompanyCryptoAccountDbCol::WalletAddress, val.into(), SetMode::Assign));
         self
     }
     pub fn set_conversion_rate(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::ConversionRate, val.into(), SetMode::Assign));
+        self.sets.push((CompanyCryptoAccountDbCol::ConversionRate, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_conversion_rate(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::ConversionRate, val.into(), SetMode::Increment));
+        self.sets.push((CompanyCryptoAccountDbCol::ConversionRate, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_conversion_rate(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::ConversionRate, val.into(), SetMode::Decrement));
+        self.sets.push((CompanyCryptoAccountDbCol::ConversionRate, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_status(mut self, val: CompanyCryptoAccountStatus) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::Status, val.into(), SetMode::Assign));
+        self.sets.push((CompanyCryptoAccountDbCol::Status, val.into(), SetMode::Assign));
         self
     }
     pub fn set_sort_order(mut self, val: i32) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::SortOrder, val.into(), SetMode::Assign));
+        self.sets.push((CompanyCryptoAccountDbCol::SortOrder, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_sort_order(mut self, val: i32) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::SortOrder, val.into(), SetMode::Increment));
+        self.sets.push((CompanyCryptoAccountDbCol::SortOrder, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_sort_order(mut self, val: i32) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::SortOrder, val.into(), SetMode::Decrement));
+        self.sets.push((CompanyCryptoAccountDbCol::SortOrder, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((CompanyCryptoAccountDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((CompanyCryptoAccountCol::UpdatedAt, val.into(), SetMode::Assign));
+        self.sets.push((CompanyCryptoAccountDbCol::UpdatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_crypto_network_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::CryptoNetworkId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::CryptoNetworkId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_wallet_address(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::WalletAddress.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::WalletAddress.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_conversion_rate(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::ConversionRate.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::ConversionRate.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_status(mut self, op: Op, val: CompanyCryptoAccountStatus) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::Status.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::Status.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_sort_order(mut self, op: Op, val: i32) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::SortOrder.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::SortOrder.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", CompanyCryptoAccountDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: CompanyCryptoAccountCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: CompanyCryptoAccountDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -1692,11 +1626,11 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<CompanyCryptoAccountUpdateChanges> {
-        let mut changes = CompanyCryptoAccountUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<CompanyCryptoAccountChanges> {
+        let mut changes = CompanyCryptoAccountChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                CompanyCryptoAccountCol::Id => {
+                CompanyCryptoAccountDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1707,7 +1641,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                CompanyCryptoAccountCol::CryptoNetworkId => {
+                CompanyCryptoAccountDbCol::CryptoNetworkId => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1718,7 +1652,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                CompanyCryptoAccountCol::WalletAddress => {
+                CompanyCryptoAccountDbCol::WalletAddress => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -1729,7 +1663,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                CompanyCryptoAccountCol::ConversionRate => {
+                CompanyCryptoAccountDbCol::ConversionRate => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
@@ -1740,7 +1674,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                CompanyCryptoAccountCol::Status => {
+                CompanyCryptoAccountDbCol::Status => {
                     let value = match bind {
                 BindValue::String(value) => CompanyCryptoAccountStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'CompanyCryptoAccountStatus'", value))?,
@@ -1757,7 +1691,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                CompanyCryptoAccountCol::SortOrder => {
+                CompanyCryptoAccountDbCol::SortOrder => {
                     let value = match bind {
             BindValue::I32(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i32'", other),
@@ -1768,7 +1702,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                CompanyCryptoAccountCol::CreatedAt => {
+                CompanyCryptoAccountDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1779,7 +1713,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                CompanyCryptoAccountCol::UpdatedAt => {
+                CompanyCryptoAccountDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1823,14 +1757,14 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<CompanyCryptoAccountUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<CompanyCryptoAccountChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, CompanyCryptoAccountCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, CompanyCryptoAccountDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(CompanyCryptoAccountCol::UpdatedAt);
+            cols.push(CompanyCryptoAccountDbCol::UpdatedAt);
             set_binds.push(now.into());
             set_modes.push(SetMode::Assign);
         }
@@ -1920,29 +1854,19 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct CompanyCryptoAccountUnsafeUpdate<'db> {
-    inner: CompanyCryptoAccountUpdate<'db>,
-}
-
-impl<'db> CompanyCryptoAccountUnsafeUpdate<'db> {
-    fn new(inner: CompanyCryptoAccountUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> CompanyCryptoAccountUpdate<'db> { self.inner }
-}
 
 pub struct CompanyCryptoAccountTableAdapter;
 impl CompanyCryptoAccountTableAdapter {
-    fn parse_col(name: &str) -> Option<CompanyCryptoAccountCol> {
+    fn parse_col(name: &str) -> Option<CompanyCryptoAccountDbCol> {
         match name {
-            "id" => Some(CompanyCryptoAccountCol::Id),
-            "crypto_network_id" => Some(CompanyCryptoAccountCol::CryptoNetworkId),
-            "wallet_address" => Some(CompanyCryptoAccountCol::WalletAddress),
-            "conversion_rate" => Some(CompanyCryptoAccountCol::ConversionRate),
-            "status" => Some(CompanyCryptoAccountCol::Status),
-            "sort_order" => Some(CompanyCryptoAccountCol::SortOrder),
-            "created_at" => Some(CompanyCryptoAccountCol::CreatedAt),
-            "updated_at" => Some(CompanyCryptoAccountCol::UpdatedAt),
+            "id" => Some(CompanyCryptoAccountDbCol::Id),
+            "crypto_network_id" => Some(CompanyCryptoAccountDbCol::CryptoNetworkId),
+            "wallet_address" => Some(CompanyCryptoAccountDbCol::WalletAddress),
+            "conversion_rate" => Some(CompanyCryptoAccountDbCol::ConversionRate),
+            "status" => Some(CompanyCryptoAccountDbCol::Status),
+            "sort_order" => Some(CompanyCryptoAccountDbCol::SortOrder),
+            "created_at" => Some(CompanyCryptoAccountDbCol::CreatedAt),
+            "updated_at" => Some(CompanyCryptoAccountDbCol::UpdatedAt),
             _ => None,
         }
     }
@@ -1956,9 +1880,9 @@ impl CompanyCryptoAccountTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<CompanyCryptoAccountCol> {
+    fn parse_like_col(name: &str) -> Option<CompanyCryptoAccountDbCol> {
         match name {
-            "wallet_address" => Some(CompanyCryptoAccountCol::WalletAddress),
+            "wallet_address" => Some(CompanyCryptoAccountDbCol::WalletAddress),
             _ => None,
         }
     }
@@ -2009,8 +1933,8 @@ impl CompanyCryptoAccountTableAdapter {
     }
 }
 impl GeneratedTableAdapter for CompanyCryptoAccountTableAdapter {
-    type Query<'db> = CompanyCryptoAccountQuery<'db>;
-    type Row = CompanyCryptoAccountWithRelations;
+    type Query<'db> = Query<'db, CompanyCryptoAccountModel>;
+    type Row = CompanyCryptoAccountRecord;
     fn model_key(&self) -> &'static str { "CompanyCryptoAccount" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "crypto_network_id", "wallet_address", "conversion_rate", "status", "sort_order", "created_at", "updated_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at"] }
@@ -2051,7 +1975,7 @@ impl GeneratedTableAdapter for CompanyCryptoAccountTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: CompanyCryptoAccountQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<CompanyCryptoAccountQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, CompanyCryptoAccountModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, CompanyCryptoAccountModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -2119,21 +2043,21 @@ impl GeneratedTableAdapter for CompanyCryptoAccountTableAdapter {
             }
             ParsedFilter::Has { relation, column } => {
                 match (relation.as_str(), column.as_str()) {
-                    ("crypto_network", "id") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Id, Op::Eq, bind)))) },
-                    ("crypto_network", "name") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Name, Op::Eq, bind)))) },
-                    ("crypto_network", "symbol") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "symbol", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Symbol, Op::Eq, bind)))) },
-                    ("crypto_network", "status") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Status, Op::Eq, bind)))) },
-                    ("crypto_network", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::SortOrder, Op::Eq, bind)))) },
-                    ("crypto_network", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::CreatedAt, Op::Eq, bind)))) },
-                    ("crypto_network", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("crypto_network", "id") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Id, Op::Eq, bind)))) },
+                    ("crypto_network", "name") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Name, Op::Eq, bind)))) },
+                    ("crypto_network", "symbol") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "symbol", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Symbol, Op::Eq, bind)))) },
+                    ("crypto_network", "status") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "status", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Status, Op::Eq, bind)))) },
+                    ("crypto_network", "sort_order") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "sort_order", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::SortOrder, Op::Eq, bind)))) },
+                    ("crypto_network", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::CreatedAt, Op::Eq, bind)))) },
+                    ("crypto_network", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("crypto_network", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::UpdatedAt, Op::Eq, bind)))) },
                     _ => Ok(None),
                 }
             }
             ParsedFilter::HasLike { relation, column } => {
                 let pattern = format!("%{}%", trimmed);
                 match (relation.as_str(), column.as_str()) {
-                    ("crypto_network", "name") => Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Name, Op::Like, pattern.clone())))),
-                    ("crypto_network", "symbol") => Ok(Some(query.where_has_crypto_network(|rq| rq.where_col(CryptoNetworkCol::Symbol, Op::Like, pattern.clone())))),
+                    ("crypto_network", "name") => Ok(Some(query.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Name, Op::Like, pattern.clone())))),
+                    ("crypto_network", "symbol") => Ok(Some(query.where_has(CompanyCryptoAccountRel::CRYPTO_NETWORK, |rq| rq.where_col(CryptoNetworkDbCol::Symbol, Op::Like, pattern.clone())))),
                     _ => Ok(None),
                 }
             }
@@ -2154,28 +2078,28 @@ impl GeneratedTableAdapter for CompanyCryptoAccountTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: CompanyCryptoAccountQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<CompanyCryptoAccountQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, CompanyCryptoAccountModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, CompanyCryptoAccountModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(CompanyCryptoAccountCol::Id, dir),
-            "crypto_network_id" => query.order_by(CompanyCryptoAccountCol::CryptoNetworkId, dir),
-            "wallet_address" => query.order_by(CompanyCryptoAccountCol::WalletAddress, dir),
-            "conversion_rate" => query.order_by(CompanyCryptoAccountCol::ConversionRate, dir),
-            "status" => query.order_by(CompanyCryptoAccountCol::Status, dir),
-            "sort_order" => query.order_by(CompanyCryptoAccountCol::SortOrder, dir),
-            "created_at" => query.order_by(CompanyCryptoAccountCol::CreatedAt, dir),
-            "updated_at" => query.order_by(CompanyCryptoAccountCol::UpdatedAt, dir),
+            "id" => query.order_by(CompanyCryptoAccountDbCol::Id, dir),
+            "crypto_network_id" => query.order_by(CompanyCryptoAccountDbCol::CryptoNetworkId, dir),
+            "wallet_address" => query.order_by(CompanyCryptoAccountDbCol::WalletAddress, dir),
+            "conversion_rate" => query.order_by(CompanyCryptoAccountDbCol::ConversionRate, dir),
+            "status" => query.order_by(CompanyCryptoAccountDbCol::Status, dir),
+            "sort_order" => query.order_by(CompanyCryptoAccountDbCol::SortOrder, dir),
+            "created_at" => query.order_by(CompanyCryptoAccountDbCol::CreatedAt, dir),
+            "updated_at" => query.order_by(CompanyCryptoAccountDbCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: CompanyCryptoAccountQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<CompanyCryptoAccountQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, CompanyCryptoAccountModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, CompanyCryptoAccountModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &CompanyCryptoAccountWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &CompanyCryptoAccountRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "crypto_network_id" => Some(row.crypto_network_id.to_string()),
@@ -2187,10 +2111,10 @@ impl GeneratedTableAdapter for CompanyCryptoAccountTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: CompanyCryptoAccountQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, CompanyCryptoAccountModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: CompanyCryptoAccountQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<CompanyCryptoAccountWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, CompanyCryptoAccountModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<CompanyCryptoAccountRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -2216,13 +2140,13 @@ impl Default for CompanyCryptoAccountDataTableConfig {
     }
 }
 pub trait CompanyCryptoAccountDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: CompanyCryptoAccountQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> CompanyCryptoAccountQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, CompanyCryptoAccountModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, CompanyCryptoAccountModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: CompanyCryptoAccountQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<CompanyCryptoAccountQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: CompanyCryptoAccountQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<CompanyCryptoAccountQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut CompanyCryptoAccountWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: CompanyCryptoAccountWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, CompanyCryptoAccountModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, CompanyCryptoAccountModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, CompanyCryptoAccountModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, CompanyCryptoAccountModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut CompanyCryptoAccountRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: CompanyCryptoAccountRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         if let Some(id_value) = record.get("id").cloned() {
             let id_text = match id_value {
@@ -2234,10 +2158,10 @@ pub trait CompanyCryptoAccountDataTableHooks: Send + Sync + 'static {
         }
         Ok(record)
     }
-    fn row_to_record(&self, row: CompanyCryptoAccountWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: CompanyCryptoAccountRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: CompanyCryptoAccountQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, CompanyCryptoAccountModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct CompanyCryptoAccountDefaultDataTableHooks;
@@ -2275,15 +2199,15 @@ impl<H: CompanyCryptoAccountDataTableHooks> CompanyCryptoAccountDataTable<H> {
 impl<H: CompanyCryptoAccountDataTableHooks> AutoDataTable for CompanyCryptoAccountDataTable<H> {
     type Adapter = CompanyCryptoAccountTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> CompanyCryptoAccountQuery<'db> {
-        self.hooks.scope(CompanyCryptoAccount::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, CompanyCryptoAccountModel> {
+        self.hooks.scope(CompanyCryptoAccountModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: CompanyCryptoAccountQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<CompanyCryptoAccountQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: CompanyCryptoAccountQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<CompanyCryptoAccountQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut CompanyCryptoAccountWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: CompanyCryptoAccountWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: CompanyCryptoAccountQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, CompanyCryptoAccountModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, CompanyCryptoAccountModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, CompanyCryptoAccountModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, CompanyCryptoAccountModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut CompanyCryptoAccountRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: CompanyCryptoAccountRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, CompanyCryptoAccountModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -2293,10 +2217,538 @@ impl<H: CompanyCryptoAccountDataTableHooks> AutoDataTable for CompanyCryptoAccou
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for CompanyCryptoAccountView {
+impl ActiveRecord for CompanyCryptoAccountRecord {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        CompanyCryptoAccount::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        CompanyCryptoAccountModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct CompanyCryptoAccountModel;
+impl CompanyCryptoAccountModel {
+    pub const TABLE: &'static str = "company_crypto_accounts";
+    pub const MODEL_KEY: &'static str = "company_crypto_account";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, CompanyCryptoAccountModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, CompanyCryptoAccountModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, CompanyCryptoAccountModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, CompanyCryptoAccountModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, CompanyCryptoAccountModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, CompanyCryptoAccountModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<CompanyCryptoAccountRecord>> {
+        CompanyCryptoAccountQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for CompanyCryptoAccountModel {
+    type Pk = i64;
+    type Record = CompanyCryptoAccountRecord;
+    type Create = CompanyCryptoAccountCreate;
+    type Changes = CompanyCryptoAccountChanges;
+    const TABLE: &'static str = CompanyCryptoAccountModel::TABLE;
+    const MODEL_KEY: &'static str = CompanyCryptoAccountModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for CompanyCryptoAccountModel {
+    type InnerQuery<'db> = CompanyCryptoAccountQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        CompanyCryptoAccountQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for CompanyCryptoAccountModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for CompanyCryptoAccountModel {
+    type InnerCreate<'db> = CompanyCryptoAccountCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        CompanyCryptoAccountCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            CompanyCryptoAccountQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("company_crypto_accounts: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<CompanyCryptoAccountModel> for CompanyCryptoAccountDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <CompanyCryptoAccountModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<CompanyCryptoAccountModel>>::Value) -> anyhow::Result<<CompanyCryptoAccountModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            CompanyCryptoAccountDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::CryptoNetworkId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::WalletAddress => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::ConversionRate => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::Status => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::SortOrder => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<CompanyCryptoAccountModel> for Column<CompanyCryptoAccountModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <CompanyCryptoAccountModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<CompanyCryptoAccountModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            CompanyCryptoAccountDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::CryptoNetworkId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::WalletAddress => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::ConversionRate => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::Status => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::SortOrder => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<CompanyCryptoAccountModel> for CompanyCryptoAccountDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <CompanyCryptoAccountModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <CompanyCryptoAccountModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <CompanyCryptoAccountModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <CompanyCryptoAccountModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<CompanyCryptoAccountModel> for Column<CompanyCryptoAccountModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <CompanyCryptoAccountModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <CompanyCryptoAccountModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<CompanyCryptoAccountDbCol> = fields.iter().map(|field| resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <CompanyCryptoAccountModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <CompanyCryptoAccountModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<CompanyCryptoAccountDbCol> = fields.iter().map(|field| resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for CompanyCryptoAccountModel {
+    type InnerQuery<'db> = CompanyCryptoAccountQueryInner<'db>;
+    type InnerPatch<'db> = CompanyCryptoAccountPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        CompanyCryptoAccountPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(CompanyCryptoAccountDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = CompanyCryptoAccountPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", CompanyCryptoAccountDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM company_crypto_accounts", CompanyCryptoAccountDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = CompanyCryptoAccountQueryInner::new(db, base_url);
+            query.where_in(CompanyCryptoAccountDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<CompanyCryptoAccountModel> for CompanyCryptoAccountDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<CompanyCryptoAccountModel>>::Value) -> anyhow::Result<<CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            CompanyCryptoAccountDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::CryptoNetworkId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::WalletAddress => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::ConversionRate => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::Status => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::SortOrder => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<CompanyCryptoAccountModel> for Column<CompanyCryptoAccountModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            CompanyCryptoAccountDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::CryptoNetworkId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::WalletAddress => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::ConversionRate => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::Status => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::SortOrder => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            CompanyCryptoAccountDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<CompanyCryptoAccountModel> for CompanyCryptoAccountDbCol {
+    fn increment<'db>(field: Self, mut builder: <CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<CompanyCryptoAccountModel>>::Value) -> anyhow::Result<<CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            CompanyCryptoAccountDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            CompanyCryptoAccountDbCol::CryptoNetworkId => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            CompanyCryptoAccountDbCol::ConversionRate => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            CompanyCryptoAccountDbCol::SortOrder => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<CompanyCryptoAccountModel>>::Value) -> anyhow::Result<<CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            CompanyCryptoAccountDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            CompanyCryptoAccountDbCol::CryptoNetworkId => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            CompanyCryptoAccountDbCol::ConversionRate => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            CompanyCryptoAccountDbCol::SortOrder => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<CompanyCryptoAccountModel> for Column<CompanyCryptoAccountModel, i32> {
+    fn increment<'db>(field: Self, mut builder: <CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<CompanyCryptoAccountModel>>::Value) -> anyhow::Result<<CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            CompanyCryptoAccountDbCol::SortOrder => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<CompanyCryptoAccountModel>>::Value) -> anyhow::Result<<CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            CompanyCryptoAccountDbCol::SortOrder => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<CompanyCryptoAccountModel> for Column<CompanyCryptoAccountModel, i64> {
+    fn increment<'db>(field: Self, mut builder: <CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<CompanyCryptoAccountModel>>::Value) -> anyhow::Result<<CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            CompanyCryptoAccountDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            CompanyCryptoAccountDbCol::CryptoNetworkId => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<CompanyCryptoAccountModel>>::Value) -> anyhow::Result<<CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            CompanyCryptoAccountDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            CompanyCryptoAccountDbCol::CryptoNetworkId => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<CompanyCryptoAccountModel> for Column<CompanyCryptoAccountModel, rust_decimal::Decimal> {
+    fn increment<'db>(field: Self, mut builder: <CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<CompanyCryptoAccountModel>>::Value) -> anyhow::Result<<CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            CompanyCryptoAccountDbCol::ConversionRate => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<CompanyCryptoAccountModel>>::Value) -> anyhow::Result<<CompanyCryptoAccountModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            CompanyCryptoAccountDbCol::ConversionRate => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<CompanyCryptoAccountModel> for CompanyCryptoAccountDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<CompanyCryptoAccountModel>>::Value) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<CompanyCryptoAccountModel>>::Value) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<CompanyCryptoAccountModel>>::Value]) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<CompanyCryptoAccountModel> for Column<CompanyCryptoAccountModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_company_crypto_account_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
+impl core_db::common::model_api::IncludeRelation<CompanyCryptoAccountModel> for OneRelation<CompanyCryptoAccountModel, CryptoNetworkRow, 0> {
+    fn include<'db>(_relation: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query
+    }
+}
+
+impl core_db::common::model_api::WhereHasRelation<CompanyCryptoAccountModel> for OneRelation<CompanyCryptoAccountModel, CryptoNetworkRow, 0> {
+    type Target = CryptoNetworkModel;
+    fn where_has<'db, F>(_relation: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.where_has_crypto_network(scope)
+    }
+    fn or_where_has<'db, F>(_relation: Self, query: <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <CompanyCryptoAccountModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.or_where_has_crypto_network(scope)
+    }
+}
+
+impl core_db::common::model_api::RecordOneRelation<CompanyCryptoAccountModel> for OneRelation<CompanyCryptoAccountModel, CryptoNetworkRow, 0> {
+    type Target = CryptoNetworkRow;
+    fn get<'a>(_relation: Self, record: &'a CompanyCryptoAccountRecord) -> Option<&'a Self::Target> {
+        record.crypto_network.as_ref()
+    }
+}
+
 

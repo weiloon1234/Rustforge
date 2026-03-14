@@ -95,7 +95,7 @@ pub fn routes(state: AppApiState) -> ApiRouter<AppApiState> {
                 </p>
                 <ul>
                     <li>
-                        Extension point: <code>app/models/admin.rs</code> with <code>#[rf_view_impl]</code>
+                        Extension point: <code>app/models/admin.rs</code> with <code>#[rf_record_impl]</code>
                     </li>
                     <li>
                         API contract mapping: <code>app/src/contracts/api/v1/admin/*.rs</code>

@@ -6,12 +6,12 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use sqlx::FromRow;
-use core_db::common::sql::{BindValue, Op, OrderDir, RawClause, RawGroupExpr, RawJoinKind, RawJoinSpec, RawOrderExpr, RawSelectExpr, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
+use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::collection::TypedCollectionExt;
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
@@ -19,7 +19,7 @@ const HAS_UPDATED_AT: bool = true;
 const HAS_SOFT_DELETE: bool = false;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct UserCreateInput {
+pub struct UserCreate {
     pub id: FieldInput<i64>,
     pub uuid: FieldInput<String>,
     pub username: FieldInput<String>,
@@ -39,7 +39,7 @@ pub struct UserCreateInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[doc(hidden)]
-pub struct UserUpdateChanges {
+pub struct UserChanges {
     pub id: Option<FieldChange<i64>>,
     pub uuid: Option<FieldChange<String>>,
     pub username: Option<FieldChange<String>>,
@@ -82,7 +82,7 @@ pub struct UserRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct UserView {
+pub struct UserRecord {
     pub id: i64,
     pub uuid: String,
     pub username: String,
@@ -101,76 +101,21 @@ pub struct UserView {
     #[schemars(with = "String")]
     pub updated_at: time::OffsetDateTime,
     pub ban_explained: String,
+    pub introducer: Option<UserRow>,
+    pub downlines: Vec<UserRow>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub __relation_counts: std::collections::HashMap<String, i64>,
 }
 
-impl UserView {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> UserUpdate<'db> {
-        User::new(db.into(), None).update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn update_with<'db>(&self, model: &User<'db>) -> UserUpdate<'db> {
-        model.update().where_id(Op::Eq, self.id.clone())
-    }
-    pub fn to_json(&self) -> UserJson {
-        UserJson {
-            id: self.id.clone(),
-            uuid: self.uuid.clone(),
-            username: self.username.clone(),
-            name: self.name.clone(),
-            email: self.email.clone(),
-            locale: self.locale.clone(),
-            password: self.password.clone(),
-            country_iso2: self.country_iso2.clone(),
-            contact_number: self.contact_number.clone(),
-            introducer_user_id: self.introducer_user_id.clone(),
-            ban: self.ban.clone(),
-            credit_1: self.credit_1.clone(),
-            credit_2: self.credit_2.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            ban_explained: self.ban_explained.clone(),
-        }
+impl UserRecord {
+    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, UserModel> {
+        UserModel::query(db.into()).where_col(UserDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
 }
 
-pub trait UserViewsExt {
-    fn ids(&self) -> Vec<i64>;
-    fn pluck<R>(&self, f: impl Fn(&UserView) -> R) -> Vec<R>;
-    fn key_by<K>(&self, f: impl Fn(&UserView) -> K) -> std::collections::HashMap<K, UserView> where K: Eq + std::hash::Hash;
-    fn group_by<K>(&self, f: impl Fn(&UserView) -> K) -> std::collections::HashMap<K, Vec<UserView>> where K: Eq + std::hash::Hash;
-}
-
-impl UserViewsExt for Vec<UserView> {
-    fn ids(&self) -> Vec<i64> { self.as_slice().pluck_typed(|v| v.id.clone()) }
-    fn pluck<R>(&self, f: impl Fn(&UserView) -> R) -> Vec<R> { self.as_slice().pluck_typed(f) }
-    fn key_by<K>(&self, f: impl Fn(&UserView) -> K) -> std::collections::HashMap<K, UserView> where K: Eq + std::hash::Hash { self.as_slice().key_by_typed(f) }
-    fn group_by<K>(&self, f: impl Fn(&UserView) -> K) -> std::collections::HashMap<K, Vec<UserView>> where K: Eq + std::hash::Hash { self.as_slice().group_by_typed(f) }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct UserJson {
-    pub id: i64,
-    pub uuid: String,
-    pub username: String,
-    pub name: Option<String>,
-    pub email: Option<String>,
-    pub locale: Option<String>,
-    pub password: String,
-    pub country_iso2: Option<String>,
-    pub contact_number: Option<String>,
-    pub introducer_user_id: Option<i64>,
-    pub ban: UserBanStatus,
-    pub credit_1: rust_decimal::Decimal,
-    pub credit_2: rust_decimal::Decimal,
-    #[schemars(with = "String")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    pub updated_at: time::OffsetDateTime,
-    pub ban_explained: String,
-}
-
-fn hydrate_view(row: UserRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> UserView {
-    let view = UserView {
+fn hydrate_record(row: UserRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> UserRecord {
+    let mut record = UserRecord {
         id: row.id,
         uuid: row.uuid,
         username: row.username,
@@ -187,34 +132,77 @@ fn hydrate_view(row: UserRow, _loc: &LocalizedMap, _base_url: Option<&str>) -> U
         created_at: row.created_at,
         updated_at: row.updated_at,
         ban_explained: row.ban.explained_label(),
+        introducer: None,
+        downlines: Vec::new(),
+        __relation_counts: HashMap::new(),
     };
-    view
+    record
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[doc(hidden)]
-pub struct UserWithRelations {
-    #[serde(flatten)]
-    pub row: UserView,
-    pub introducer: Option<UserRow>,
-    pub downlines: Vec<UserRow>,
+impl UserRecord {
+    pub fn one<R>(&self, relation: R) -> Option<&R::Target>
+    where
+        R: core_db::common::model_api::RecordOneRelation<UserModel>,
+    {
+        R::get(relation, self)
+    }
+    pub fn many<R>(&self, relation: R) -> &[R::Target]
+    where
+        R: core_db::common::model_api::RecordManyRelation<UserModel>,
+    {
+        R::get(relation, self)
+    }
+    pub fn count<R>(&self, relation: R) -> Option<i64>
+    where
+        R: core_db::common::model_api::CountRelation<UserModel>,
+    {
+        self.__relation_counts.get(R::name(relation)).copied()
+    }
 }
 
-impl UserWithRelations {
-    pub fn into_row(self) -> UserView { self.row }
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UserCol;
+impl UserCol {
+    pub const ID: Column<UserModel, i64> = Column::new("id");
+    pub const UUID: Column<UserModel, String> = Column::new("uuid");
+    pub const USERNAME: Column<UserModel, String> = Column::new("username");
+    pub const NAME: Column<UserModel, Option<String>> = Column::new("name");
+    pub const EMAIL: Column<UserModel, Option<String>> = Column::new("email");
+    pub const LOCALE: Column<UserModel, Option<String>> = Column::new("locale");
+    pub const PASSWORD: Column<UserModel, String> = Column::new("password");
+    pub const COUNTRY_ISO2: Column<UserModel, Option<String>> = Column::new("country_iso2");
+    pub const CONTACT_NUMBER: Column<UserModel, Option<String>> = Column::new("contact_number");
+    pub const INTRODUCER_USER_ID: Column<UserModel, Option<i64>> = Column::new("introducer_user_id");
+    pub const BAN: Column<UserModel, UserBanStatus> = Column::new("ban");
+    pub const CREDIT_1: Column<UserModel, rust_decimal::Decimal> = Column::new("credit_1");
+    pub const CREDIT_2: Column<UserModel, rust_decimal::Decimal> = Column::new("credit_2");
+    pub const CREATED_AT: Column<UserModel, time::OffsetDateTime> = Column::new("created_at");
+    pub const UPDATED_AT: Column<UserModel, time::OffsetDateTime> = Column::new("updated_at");
 }
 
-impl std::ops::Deref for UserWithRelations {
-    type Target = UserView;
-    fn deref(&self) -> &Self::Target { &self.row }
-}
-
-impl std::ops::DerefMut for UserWithRelations {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.row }
+fn resolve_user_db_col(sql: &str) -> Option<UserDbCol> {
+    match sql {
+        "id" => Some(UserDbCol::Id),
+        "uuid" => Some(UserDbCol::Uuid),
+        "username" => Some(UserDbCol::Username),
+        "name" => Some(UserDbCol::Name),
+        "email" => Some(UserDbCol::Email),
+        "locale" => Some(UserDbCol::Locale),
+        "password" => Some(UserDbCol::Password),
+        "country_iso2" => Some(UserDbCol::CountryIso2),
+        "contact_number" => Some(UserDbCol::ContactNumber),
+        "introducer_user_id" => Some(UserDbCol::IntroducerUserId),
+        "ban" => Some(UserDbCol::Ban),
+        "credit_1" => Some(UserDbCol::Credit1),
+        "credit_2" => Some(UserDbCol::Credit2),
+        "created_at" => Some(UserDbCol::CreatedAt),
+        "updated_at" => Some(UserDbCol::UpdatedAt),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum UserCol {
+pub enum UserDbCol {
     Id,
     Uuid,
     Username,
@@ -232,74 +220,39 @@ pub enum UserCol {
     UpdatedAt,
 }
 
-impl UserCol {
-    pub const fn all() -> &'static [UserCol] {
-        &[UserCol::Id, UserCol::Uuid, UserCol::Username, UserCol::Name, UserCol::Email, UserCol::Locale, UserCol::Password, UserCol::CountryIso2, UserCol::ContactNumber, UserCol::IntroducerUserId, UserCol::Ban, UserCol::Credit1, UserCol::Credit2, UserCol::CreatedAt, UserCol::UpdatedAt]
+impl UserDbCol {
+    pub const fn all() -> &'static [UserDbCol] {
+        &[UserDbCol::Id, UserDbCol::Uuid, UserDbCol::Username, UserDbCol::Name, UserDbCol::Email, UserDbCol::Locale, UserDbCol::Password, UserDbCol::CountryIso2, UserDbCol::ContactNumber, UserDbCol::IntroducerUserId, UserDbCol::Ban, UserDbCol::Credit1, UserDbCol::Credit2, UserDbCol::CreatedAt, UserDbCol::UpdatedAt]
     }
     pub const fn as_sql(self) -> &'static str {
         match self {
-            UserCol::Id => "id",
-            UserCol::Uuid => "uuid",
-            UserCol::Username => "username",
-            UserCol::Name => "name",
-            UserCol::Email => "email",
-            UserCol::Locale => "locale",
-            UserCol::Password => "password",
-            UserCol::CountryIso2 => "country_iso2",
-            UserCol::ContactNumber => "contact_number",
-            UserCol::IntroducerUserId => "introducer_user_id",
-            UserCol::Ban => "ban",
-            UserCol::Credit1 => "credit_1",
-            UserCol::Credit2 => "credit_2",
-            UserCol::CreatedAt => "created_at",
-            UserCol::UpdatedAt => "updated_at",
+            UserDbCol::Id => "id",
+            UserDbCol::Uuid => "uuid",
+            UserDbCol::Username => "username",
+            UserDbCol::Name => "name",
+            UserDbCol::Email => "email",
+            UserDbCol::Locale => "locale",
+            UserDbCol::Password => "password",
+            UserDbCol::CountryIso2 => "country_iso2",
+            UserDbCol::ContactNumber => "contact_number",
+            UserDbCol::IntroducerUserId => "introducer_user_id",
+            UserDbCol::Ban => "ban",
+            UserDbCol::Credit1 => "credit_1",
+            UserDbCol::Credit2 => "credit_2",
+            UserDbCol::CreatedAt => "created_at",
+            UserDbCol::UpdatedAt => "updated_at",
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, JsonSchema)]
-pub enum UserRel {
-    Downlines,
-}
-
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UserRel;
 impl UserRel {
-    pub const fn name(self) -> &'static str {
-        match self {
-            UserRel::Downlines => "downlines",
-        }
-    }
-    pub const fn target_table(self) -> &'static str {
-        match self {
-            UserRel::Downlines => "users",
-        }
-    }
-    pub const fn foreign_key(self) -> &'static str {
-        match self {
-            UserRel::Downlines => "introducer_user_id",
-        }
-    }
+    pub const INTRODUCER: OneRelation<UserModel, UserRow, 0> = OneRelation::<UserModel, UserRow, 0>::new("introducer");
+    pub const DOWNLINES: ManyRelation<UserModel, UserRow, 1> = ManyRelation::<UserModel, UserRow, 1>::new("downlines", "users", "introducer_user_id");
 }
 
-pub struct User<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-}
-
-impl<'db> User<'db> {
-    pub const TABLE: &'static str = "users";
-    pub const MODEL_KEY: &'static str = "user";
-    pub const PK: &'static str = "id";
-    pub fn new(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self { Self { db: db.into(), base_url } }
-    pub fn query(&self) -> UserQuery<'db> { UserQuery::new(self.db.clone(), self.base_url.clone()) }
-    pub fn insert(&self) -> UserInsert<'db> { UserInsert::new(self.db.clone(), self.base_url.clone()) }
-    pub fn update(&self) -> UserUpdate<'db> { UserUpdate::new(self.db.clone(), self.base_url.clone()) }
-    pub async fn find(&self, id: i64) -> Result<Option<UserWithRelations>> {
-        self.query().find(id).await
-    }
-    pub async fn delete(&self, id: i64) -> Result<u64> {
-        self.query().where_id(Op::Eq, id).delete().await
-    }
-    pub async fn load_introducer(&self, parents: &[UserRow]) -> Result<HashMap<i64, Option<UserRow>>> {
+async fn load_introducer<'db>(db: DbConn<'db>, parents: &[UserRow]) -> Result<HashMap<i64, Option<UserRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -311,7 +264,7 @@ impl<'db> User<'db> {
         let sql = format!("SELECT * FROM users WHERE id IN ({})", placeholders.join(", "));
         let mut q = sqlx::query_as::<_, UserRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
-        let rows = self.db.fetch_all(q).await?;
+        let rows = db.fetch_all(q).await?;
         let mut by_pk: HashMap<i64, UserRow> = HashMap::new();
         for row in rows { by_pk.insert(row.id.clone(), row); }
         let mut out = HashMap::new();
@@ -320,24 +273,23 @@ impl<'db> User<'db> {
         }
         Ok(out)
     }
-    pub async fn load_downlines(&self, parents: &[UserRow]) -> Result<HashMap<i64, Vec<UserRow>>> {
+async fn load_downlines<'db>(db: DbConn<'db>, parents: &[UserRow]) -> Result<HashMap<i64, Vec<UserRow>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let ids: Vec<i64> = parents.iter().map(|p| p.id.clone()).collect();
         let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("${}", i)).collect();
         let sql = format!("SELECT * FROM users WHERE introducer_user_id IN ({})", placeholders.join(", "));
         let mut q = sqlx::query_as::<_, UserRow>(&sql);
         for id in ids { q = bind(q, id.into()); }
-        let rows = self.db.fetch_all(q).await?;
+        let rows = db.fetch_all(q).await?;
         let mut map: HashMap<i64, Vec<UserRow>> = HashMap::new();
         for row in rows {
             if let Some(fk_val) = row.introducer_user_id.clone() { map.entry(fk_val).or_default().push(row); }
         }
         Ok(map)
     }
-}
 
 #[derive(Clone)]
-pub struct UserQuery<'db> {
+pub struct UserQueryInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
     select_sql: Option<String>,
@@ -360,194 +312,193 @@ pub struct UserQuery<'db> {
 
 
 
-impl<'db> UserQuery<'db> {
+impl<'db> UserQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, uuid, username, name, email, locale, password, country_iso2, contact_number, introducer_user_id, ban, credit_1, credit_2, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
     }
-    pub fn unsafe_sql(self) -> UserUnsafeQuery<'db> { UserUnsafeQuery::new(self) }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_uuid(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Uuid.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Uuid.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_uuid_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Uuid.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Uuid.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_username(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Username.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_username_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Username.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_email(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Email.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Email.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_email_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Email.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Email.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_locale(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Locale.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Locale.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_locale_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Locale.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Locale.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_password(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Password.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Password.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_password_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Password.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Password.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_country_iso2(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::CountryIso2.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::CountryIso2.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_country_iso2_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::CountryIso2.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::CountryIso2.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_contact_number(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::ContactNumber.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::ContactNumber.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_contact_number_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::ContactNumber.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::ContactNumber.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_introducer_user_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::IntroducerUserId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::IntroducerUserId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_introducer_user_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::IntroducerUserId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::IntroducerUserId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_ban(mut self, op: Op, val: UserBanStatus) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Ban.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Ban.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_ban_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Ban.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Ban.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_1(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Credit1.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Credit1.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_1_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Credit1.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Credit1.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_2(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Credit2.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Credit2.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_2_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Credit2.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Credit2.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(UserCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: UserCol, op: Op, val: T) -> Self {
+    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(UserDbCol::Id, vals) }
+    pub fn where_col<T: Into<BindValue>>(mut self, col: UserDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -566,7 +517,7 @@ impl<'db> UserQuery<'db> {
         self.binds.extend(incoming);
         self
     }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: UserCol, vals: &[T]) -> Self {
+    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: UserDbCol, vals: &[T]) -> Self {
         if vals.is_empty() {
             self.where_sql.push("1=0".to_string());
             return self;
@@ -581,7 +532,7 @@ impl<'db> UserQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: UserCol, vals: &[T]) -> Self {
+    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: UserDbCol, vals: &[T]) -> Self {
         if vals.is_empty() { return self; }
         let start = self.binds.len() + 1;
         let mut placeholders = Vec::with_capacity(vals.len());
@@ -593,7 +544,7 @@ impl<'db> UserQuery<'db> {
         self.where_sql.push(clause);
         self
     }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: UserCol, low: T, high: T) -> Self {
+    pub fn where_between<T: Into<BindValue>>(mut self, col: UserDbCol, low: T, high: T) -> Self {
         let idx1 = self.binds.len() + 1;
         let idx2 = idx1 + 1;
         self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
@@ -601,15 +552,15 @@ impl<'db> UserQuery<'db> {
         self.binds.push(high.into());
         self
     }
-    pub fn where_null(mut self, col: UserCol) -> Self {
+    pub fn where_null(mut self, col: UserDbCol) -> Self {
         self.where_sql.push(format!("{} IS NULL", col.as_sql()));
         self
     }
-    pub fn where_not_null(mut self, col: UserCol) -> Self {
+    pub fn where_not_null(mut self, col: UserDbCol) -> Self {
         self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
         self
     }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: UserCol, op: Op, val: T) -> Self {
+    pub fn or_where_col<T: Into<BindValue>>(mut self, col: UserDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -663,7 +614,7 @@ impl<'db> UserQuery<'db> {
         }
         result
     }
-    pub fn select_cols(mut self, cols: &[UserCol]) -> Self {
+    pub fn select_cols(mut self, cols: &[UserDbCol]) -> Self {
         if cols.is_empty() {
             self.select_sql = Some("id, uuid, username, name, email, locale, password, country_iso2, contact_number, introducer_user_id, ban, credit_1, credit_2, created_at, updated_at".to_string());
         } else {
@@ -675,7 +626,7 @@ impl<'db> UserQuery<'db> {
         }
         self
     }
-    pub fn add_select_cols(mut self, cols: &[UserCol]) -> Self {
+    pub fn add_select_cols(mut self, cols: &[UserDbCol]) -> Self {
         let mut seen = std::collections::BTreeSet::new();
         let mut list: Vec<String> = match self.select_sql.take() {
             Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
@@ -756,26 +707,26 @@ impl<'db> UserQuery<'db> {
         self.join_binds.append(&mut incoming);
         self
     }
-    pub fn order_by(mut self, col: UserCol, dir: OrderDir) -> Self {
+    pub fn order_by(mut self, col: UserDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_first(mut self, col: UserCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_first(mut self, col: UserDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
         self
     }
-    pub fn order_by_nulls_last(mut self, col: UserCol, dir: OrderDir) -> Self {
+    pub fn order_by_nulls_last(mut self, col: UserDbCol, dir: OrderDir) -> Self {
         self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
         self
     }
     pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[UserCol]) -> Self {
+    pub fn distinct_on(mut self, cols: &[UserDbCol]) -> Self {
         if cols.is_empty() { return self; }
         let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
         self.distinct_on = Some(list.join(", "));
         self
     }
-    pub fn select(mut self, cols: &[UserCol]) -> Self {
+    pub fn select(mut self, cols: &[UserDbCol]) -> Self {
         let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
         self.select_sql = Some(names.join(", "));
         self
@@ -823,7 +774,7 @@ impl<'db> UserQuery<'db> {
     pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
     pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
     pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[UserCol]) -> Self {
+    pub fn group_by(mut self, cols: &[UserDbCol]) -> Self {
         for c in cols {
             self.group_by_sql.push(c.as_sql().to_string());
         }
@@ -850,10 +801,10 @@ impl<'db> UserQuery<'db> {
         self.offset = Some(n);
         self
     }
-    pub fn where_has_introducer(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
+    pub fn where_has_introducer(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.id = users.introducer_user_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -863,10 +814,10 @@ impl<'db> UserQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_has_downlines(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
+    pub fn where_has_downlines(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.introducer_user_id = users.id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -876,10 +827,10 @@ impl<'db> UserQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_doesnt_have_introducer(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
+    pub fn where_doesnt_have_introducer(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.id = users.introducer_user_id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM users WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -889,10 +840,10 @@ impl<'db> UserQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn where_doesnt_have_downlines(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
+    pub fn where_doesnt_have_downlines(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.introducer_user_id = users.id".to_string());
         let mut clause = String::from("NOT EXISTS (SELECT 1 FROM users WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -902,10 +853,10 @@ impl<'db> UserQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn or_where_has_introducer(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
+    pub fn or_where_has_introducer(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.id = users.introducer_user_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -919,10 +870,10 @@ impl<'db> UserQuery<'db> {
         self.binds.extend(sub_binds);
         self
     }
-    pub fn or_where_has_downlines(mut self, scope: impl FnOnce(UserQuery<'db>) -> UserQuery<'db>) -> Self {
+    pub fn or_where_has_downlines(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
         let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserQuery::new(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_where_parts();
+        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
+        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.introducer_user_id = users.id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
         clause.push_str(&sub_where.join(" AND "));
@@ -984,7 +935,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         Ok(db.fetch_all(q).await?)
     }
-    pub async fn get(self) -> Result<Vec<UserWithRelations>> {
+    pub async fn get(self) -> Result<Vec<UserRecord>> {
         let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
         let mut where_sql = where_sql;
         let select_clause = match (distinct, distinct_on.as_ref()) {
@@ -1030,73 +981,70 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in having_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("users", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = User { db: db.clone(), base_url: base_url.clone() };
-        let introducer = m.load_introducer(&rows).await?;
-        let downlines = m.load_downlines(&rows).await?;
+        let introducer = load_introducer(db.clone(), &rows).await?;
+        let downlines = load_downlines(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut out_vec = Vec::with_capacity(rows.len());
         for r in rows {
             let key = r.id.clone();
-            let view = hydrate_view(r.clone(), &LocalizedMap::default(), base_url.as_deref());
-            out_vec.push(UserWithRelations {
-                row: view,
-                introducer: introducer.get(&key).cloned().unwrap_or(None),
-                downlines: downlines.get(&key).cloned().unwrap_or_default(),
-            });
+            let mut record = hydrate_record(r.clone(), &LocalizedMap::default(), base_url.as_deref());
+            record.introducer = introducer.get(&key).cloned().unwrap_or(None);
+            record.downlines = downlines.get(&key).cloned().unwrap_or_default();
+            out_vec.push(record);
         }
         Ok(out_vec)
     }
 
-    pub async fn first(self) -> Result<Option<UserWithRelations>> {
+    pub async fn first(self) -> Result<Option<UserRecord>> {
         let mut v = self.limit(1).get().await?;
         Ok(v.pop())
     }
 
-    pub async fn first_or_fail(self) -> Result<UserWithRelations> {
+    pub async fn first_or_fail(self) -> Result<UserRecord> {
         self.first().await?.ok_or_else(|| anyhow::anyhow!("users: record not found"))
     }
 
-    pub async fn find(self, id: i64) -> Result<Option<UserWithRelations>> {
+    pub async fn find(self, id: i64) -> Result<Option<UserRecord>> {
         self.where_id(Op::Eq, id).first().await
     }
-    pub async fn find_or_fail(self, id: i64) -> Result<UserWithRelations> {
+    pub async fn find_or_fail(self, id: i64) -> Result<UserRecord> {
         self.find(id).await?.ok_or_else(|| anyhow::anyhow!("users: record not found"))
     }
-    pub async fn first_or_create(self, create: impl FnOnce(UserInsert<'db>) -> UserInsert<'db>) -> Result<UserWithRelations> {
+    pub async fn first_or_create(self, create: impl FnOnce(UserCreateInner<'db>) -> UserCreateInner<'db>) -> Result<UserRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         if let Some(existing) = self.first().await? {
             return Ok(existing);
         }
-        let insert_builder = create(UserInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = create(UserCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        User::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        UserQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
     pub async fn update_or_create(
         self,
-        on_update: impl FnOnce(UserUpdate<'db>) -> UserUpdate<'db>,
-        on_create: impl FnOnce(UserInsert<'db>) -> UserInsert<'db>,
-    ) -> Result<UserWithRelations> {
+        on_update: impl FnOnce(UserPatchInner<'db>) -> UserPatchInner<'db>,
+        on_create: impl FnOnce(UserCreateInner<'db>) -> UserCreateInner<'db>,
+    ) -> Result<UserRecord> {
         let db = self.db.clone();
         let base_url = self.base_url.clone();
         let where_sql = self.where_sql.clone();
         let binds = self.binds.clone();
         if let Some(existing) = self.first().await? {
-            let mut update_builder = UserUpdate::new(db.clone(), base_url.clone());
+            let mut update_builder = UserPatchInner::new(db.clone(), base_url.clone());
             update_builder.where_sql = where_sql;
             update_builder.binds = binds;
             let update_builder = on_update(update_builder);
             update_builder.save().await?;
-            return User::new(db, base_url.clone()).query().find(existing.id.clone()).await.map(|r| r.unwrap());
+            return UserQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
         }
-        let insert_builder = on_create(UserInsert::new(db.clone(), base_url.clone()));
+        let insert_builder = on_create(UserCreateInner::new(db.clone(), base_url.clone()));
         let view = insert_builder.save().await?;
-        User::new(db, base_url).query().find(view.id).await.map(|r| r.unwrap())
+        UserQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
     }
 
-    pub async fn increment(self, col: UserCol, amount: i64) -> Result<u64> {
+    pub async fn increment(self, col: UserDbCol, amount: i64) -> Result<u64> {
         let db = self.db.clone();
         let mut where_sql = self.where_sql;
         let binds = self.binds;
@@ -1111,7 +1059,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(res.rows_affected())
     }
 
-    pub async fn decrement(self, col: UserCol, amount: i64) -> Result<u64> {
+    pub async fn decrement(self, col: UserDbCol, amount: i64) -> Result<u64> {
         self.increment(col, -amount).await
     }
 
@@ -1167,13 +1115,13 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
     pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
     where
-        F: FnMut(Vec<UserWithRelations>) -> Fut,
+        F: FnMut(Vec<UserRecord>) -> Fut,
         Fut: std::future::Future<Output = Result<bool>>,
     {
         let mut page = 0i64;
         let db = self.db.clone();
         loop {
-            let mut query = UserQuery::new(db.clone(), self.base_url.clone());
+            let mut query = UserQueryInner::new(db.clone(), self.base_url.clone());
             query.where_sql = self.where_sql.clone();
             query.binds = self.binds.clone();
             query.order_sql = self.order_sql.clone();
@@ -1187,11 +1135,11 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
     }
 
     pub fn latest(self) -> Self {
-        self.order_by(UserCol::CreatedAt, OrderDir::Desc)
+        self.order_by(UserDbCol::CreatedAt, OrderDir::Desc)
     }
 
     pub fn oldest(self) -> Self {
-        self.order_by(UserCol::CreatedAt, OrderDir::Asc)
+        self.order_by(UserDbCol::CreatedAt, OrderDir::Asc)
     }
 
     pub fn take(self, n: i64) -> Self {
@@ -1202,7 +1150,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self.offset(n)
     }
 
-    pub async fn sole(self) -> Result<UserWithRelations> {
+    pub async fn sole(self) -> Result<UserRecord> {
         let mut rows = self.limit(2).get().await?;
         match rows.len() {
             0 => anyhow::bail!("sole: no record found"),
@@ -1221,7 +1169,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         self
     }
 
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&UserWithRelations) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
+    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&UserRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
     where
         K: Eq + std::hash::Hash,
     {
@@ -1229,7 +1177,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(rows.into_iter().map(|r| extract(&r)).collect())
     }
 
-    pub async fn sum(self, col: UserCol) -> Result<Option<f64>> {
+    pub async fn sum(self, col: UserDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "users".to_string());
@@ -1250,28 +1198,31 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn with_counts(self, rels: &[UserRel]) -> Result<(Vec<UserWithRelations>, std::collections::HashMap<String, std::collections::HashMap<i64, i64>>)> {
+    pub async fn with_count<R>(self, rel: R) -> Result<Vec<UserRecord>>
+    where
+        R: core_db::common::model_api::CountRelation<UserModel>,
+    {
         let db = self.db.clone();
-        let rows = self.get().await?;
+        let mut rows = self.get().await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
-        if ids.is_empty() { return Ok((rows, std::collections::HashMap::new())); }
-        let mut all_counts: std::collections::HashMap<String, std::collections::HashMap<i64, i64>> = std::collections::HashMap::new();
-        for rel in rels {
+        if ids.is_empty() { return Ok(rows); }
             let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("${}", i)).collect();
             let sql = format!(
                 "SELECT {}, COUNT(*) as cnt FROM {} WHERE {} IN ({}) GROUP BY {}",
-                rel.foreign_key(), rel.target_table(), rel.foreign_key(), placeholders.join(", "), rel.foreign_key()
+                R::foreign_key(rel), R::target_table(rel), R::foreign_key(rel), placeholders.join(", "), R::foreign_key(rel)
             );
             let mut q = sqlx::query_as::<_, (i64, i64)>(&sql);
             for id in &ids { q = q.bind(*id); }
-            let count_rows: Vec<(i64, i64)> = db.fetch_all(q).await?;
-            let counts: std::collections::HashMap<i64, i64> = count_rows.into_iter().collect();
-            all_counts.insert(rel.name().to_string(), counts);
+        let count_rows: Vec<(i64, i64)> = db.fetch_all(q).await?;
+        let counts: std::collections::HashMap<i64, i64> = count_rows.into_iter().collect();
+        for row in &mut rows {
+            let count = counts.get(&row.id).copied().unwrap_or(0);
+            row.__relation_counts.insert(R::name(rel).to_string(), count);
         }
-        Ok((rows, all_counts))
+        Ok(rows)
     }
 
-    pub async fn avg(self, col: UserCol) -> Result<Option<f64>> {
+    pub async fn avg(self, col: UserDbCol) -> Result<Option<f64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "users".to_string());
@@ -1292,7 +1243,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn min_val(self, col: UserCol) -> Result<Option<i64>> {
+    pub async fn min_val(self, col: UserDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "users".to_string());
@@ -1313,7 +1264,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn max_val(self, col: UserCol) -> Result<Option<i64>> {
+    pub async fn max_val(self, col: UserDbCol) -> Result<Option<i64>> {
         let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
         let mut where_sql = where_sql;
         let table_name = from_sql.unwrap_or_else(|| "users".to_string());
@@ -1334,7 +1285,7 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         Ok(result)
     }
 
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<UserWithRelations>> {
+    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<UserRecord>> {
         let page = if page < 1 { 1 } else { page };
         let per_page = resolve_per_page(per_page);
         let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
@@ -1381,20 +1332,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
         for b in join_binds { q = bind(q, b); }
         let rows = db.fetch_all(q).await?;
         record_profiled_query("users", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let m = User { db: db.clone(), base_url: base_url.clone() };
-        let introducer = m.load_introducer(&rows).await?;
-        let downlines = m.load_downlines(&rows).await?;
+        let introducer = load_introducer(db.clone(), &rows).await?;
+        let downlines = load_downlines(db.clone(), &rows).await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
         let localized = LocalizedMap::default();
         let mut data = Vec::with_capacity(rows.len());
         for row in rows {
             let key = row.id.clone();
-            let view = hydrate_view(row.clone(), &LocalizedMap::default(), base_url.as_deref());
-            data.push(UserWithRelations {
-                row: view,
-                introducer: introducer.get(&key).cloned().unwrap_or(None),
-                downlines: downlines.get(&key).cloned().unwrap_or_default(),
-            });
+            let mut record = hydrate_record(row.clone(), &LocalizedMap::default(), base_url.as_deref());
+            record.introducer = introducer.get(&key).cloned().unwrap_or(None);
+            record.downlines = downlines.get(&key).cloned().unwrap_or_default();
+            data.push(record);
         }
         Ok(Page { data, total, per_page, current_page, last_page })
     }
@@ -1515,38 +1463,17 @@ pub async fn get_as<T>(self) -> Result<Vec<T>>
 
 
 
-#[doc(hidden)]
-pub struct UserUnsafeQuery<'db> {
-    inner: UserQuery<'db>,
-}
 
-impl<'db> UserUnsafeQuery<'db> {
-    fn new(inner: UserQuery<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn or_where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.or_where_raw(sql, binds); self }
-    pub fn join_raw(mut self, spec: RawJoinSpec) -> Self { let (kind, table, on, binds) = spec.into_parts(); self.inner = match kind { RawJoinKind::Inner => self.inner.inner_join_raw(table, on, binds), RawJoinKind::Left => self.inner.left_join_raw(table, on, binds), RawJoinKind::Right => self.inner.right_join_raw(table, on, binds), RawJoinKind::Full => self.inner.full_join_raw(table, on, binds), }; self }
-    pub fn select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.select_raw(expr.into_inner()); self }
-    pub fn add_select_raw(mut self, expr: RawSelectExpr) -> Self { self.inner = self.inner.add_select_raw(expr.into_inner()); self }
-    pub fn select_subquery(mut self, alias: impl Into<String>, sql: RawSelectExpr) -> Self { let alias = alias.into(); let raw = sql.into_inner(); self.inner = self.inner.select_subquery(&alias, &raw); self }
-    pub fn from_raw(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.from_raw(&raw); self }
-    pub fn count_sql(mut self, expr: RawSelectExpr) -> Self { let raw = expr.into_inner(); self.inner = self.inner.count_sql(&raw); self }
-    pub fn where_exists(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_exists(sql, binds); self }
-    pub fn order_by_raw(mut self, expr: RawOrderExpr) -> Self { self.inner = self.inner.order_by_raw(expr.into_inner()); self }
-    pub fn group_by_raw(mut self, expr: RawGroupExpr) -> Self { self.inner = self.inner.group_by_raw(expr.into_inner()); self }
-    pub fn done(self) -> UserQuery<'db> { self.inner }
-}
-
-
-pub struct UserInsert<'db> {
+pub struct UserCreateInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    cols: Vec<UserCol>,
+    cols: Vec<UserDbCol>,
     binds: Vec<BindValue>,
     conflict_action: Option<&'static str>,
-    conflict_cols: Vec<UserCol>,
+    conflict_cols: Vec<UserDbCol>,
 }
 
-impl<'db> UserInsert<'db> {
+impl<'db> UserCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1560,171 +1487,171 @@ impl<'db> UserInsert<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(UserCol::Id);
+        self.cols.push(UserDbCol::Id);
         self.binds.push(val.into());
         self
     }
     pub fn set_uuid(mut self, val: String) -> Self {
-        self.cols.push(UserCol::Uuid);
+        self.cols.push(UserDbCol::Uuid);
         self.binds.push(val.into());
         self
     }
     pub fn set_username(mut self, val: String) -> Self {
-        self.cols.push(UserCol::Username);
+        self.cols.push(UserDbCol::Username);
         self.binds.push(val.into());
         self
     }
     pub fn set_name(mut self, val: Option<String>) -> Self {
-        self.cols.push(UserCol::Name);
+        self.cols.push(UserDbCol::Name);
         self.binds.push(val.into());
         self
     }
     pub fn set_email(mut self, val: Option<String>) -> Self {
-        self.cols.push(UserCol::Email);
+        self.cols.push(UserDbCol::Email);
         self.binds.push(val.into());
         self
     }
     pub fn set_locale(mut self, val: Option<String>) -> Self {
-        self.cols.push(UserCol::Locale);
+        self.cols.push(UserDbCol::Locale);
         self.binds.push(val.into());
         self
     }
     pub fn set_password(mut self, val: &str) -> anyhow::Result<Self> {
         let hashed = core_db::common::auth::hash::hash_password(val)?;
-        self.cols.push(UserCol::Password);
+        self.cols.push(UserDbCol::Password);
         self.binds.push(hashed.into());
         Ok(self)
     }
     pub fn set_password_raw(mut self, val: String) -> Self {
-        self.cols.push(UserCol::Password);
+        self.cols.push(UserDbCol::Password);
         self.binds.push(val.into());
         self
     }
     pub fn set_country_iso2(mut self, val: Option<String>) -> Self {
-        self.cols.push(UserCol::CountryIso2);
+        self.cols.push(UserDbCol::CountryIso2);
         self.binds.push(val.into());
         self
     }
     pub fn set_contact_number(mut self, val: Option<String>) -> Self {
-        self.cols.push(UserCol::ContactNumber);
+        self.cols.push(UserDbCol::ContactNumber);
         self.binds.push(val.into());
         self
     }
     pub fn set_introducer_user_id(mut self, val: Option<i64>) -> Self {
-        self.cols.push(UserCol::IntroducerUserId);
+        self.cols.push(UserDbCol::IntroducerUserId);
         self.binds.push(val.into());
         self
     }
     pub fn set_ban(mut self, val: UserBanStatus) -> Self {
-        self.cols.push(UserCol::Ban);
+        self.cols.push(UserDbCol::Ban);
         self.binds.push(val.into());
         self
     }
     pub fn set_credit_1(mut self, val: rust_decimal::Decimal) -> Self {
-        self.cols.push(UserCol::Credit1);
+        self.cols.push(UserDbCol::Credit1);
         self.binds.push(val.into());
         self
     }
     pub fn set_credit_2(mut self, val: rust_decimal::Decimal) -> Self {
-        self.cols.push(UserCol::Credit2);
+        self.cols.push(UserDbCol::Credit2);
         self.binds.push(val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(UserCol::CreatedAt);
+        self.cols.push(UserDbCol::CreatedAt);
         self.binds.push(val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(UserCol::UpdatedAt);
+        self.cols.push(UserDbCol::UpdatedAt);
         self.binds.push(val.into());
         self
     }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[UserCol]) -> Self {
+    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[UserDbCol]) -> Self {
         self.conflict_action = Some("DO NOTHING");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    pub fn on_conflict_update(mut self, conflict_cols: &[UserCol]) -> Self {
+    pub fn on_conflict_update(mut self, conflict_cols: &[UserDbCol]) -> Self {
         self.conflict_action = Some("DO UPDATE");
         self.conflict_cols = conflict_cols.to_vec();
         self
     }
-    fn to_create_input(&self) -> Result<UserCreateInput> {
-        let mut input = UserCreateInput::default();
+    fn to_create_input(&self) -> Result<UserCreate> {
+        let mut input = UserCreate::default();
         for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
             match col {
-                UserCol::Id => {
+                UserDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                UserCol::Uuid => {
+                UserDbCol::Uuid => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.uuid = FieldInput::Set(value);
                 }
-                UserCol::Username => {
+                UserDbCol::Username => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.username = FieldInput::Set(value);
                 }
-                UserCol::Name => {
+                UserDbCol::Name => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.name = FieldInput::Set(value);
                 }
-                UserCol::Email => {
+                UserDbCol::Email => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.email = FieldInput::Set(value);
                 }
-                UserCol::Locale => {
+                UserDbCol::Locale => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.locale = FieldInput::Set(value);
                 }
-                UserCol::Password => {
+                UserDbCol::Password => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
         };
                     input.password = FieldInput::Set(value);
                 }
-                UserCol::CountryIso2 => {
+                UserDbCol::CountryIso2 => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.country_iso2 = FieldInput::Set(value);
                 }
-                UserCol::ContactNumber => {
+                UserDbCol::ContactNumber => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.contact_number = FieldInput::Set(value);
                 }
-                UserCol::IntroducerUserId => {
+                UserDbCol::IntroducerUserId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
             };
                     input.introducer_user_id = FieldInput::Set(value);
                 }
-                UserCol::Ban => {
+                UserDbCol::Ban => {
                     let value = match bind {
                 BindValue::String(value) => UserBanStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'UserBanStatus'", value))?,
@@ -1737,28 +1664,28 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.ban = FieldInput::Set(value);
                 }
-                UserCol::Credit1 => {
+                UserDbCol::Credit1 => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
         };
                     input.credit_1 = FieldInput::Set(value);
                 }
-                UserCol::Credit2 => {
+                UserDbCol::Credit2 => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
         };
                     input.credit_2 = FieldInput::Set(value);
                 }
-                UserCol::CreatedAt => {
+                UserDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                UserCol::UpdatedAt => {
+                UserDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1771,7 +1698,7 @@ pub fn set_id(mut self, val: i64) -> Self {
     }
 
 
-pub async fn save(self) -> Result<UserView> {
+pub async fn save(self) -> Result<UserRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -1789,7 +1716,7 @@ pub async fn save(self) -> Result<UserView> {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (view, row) = {
+                let (record, row) = {
                     let db = DbConn::tx(tx_lock.clone());
                     self.save_with_db(db).await?
                 };
@@ -1808,10 +1735,10 @@ pub async fn save(self) -> Result<UserView> {
                         Err(err) => log_observer_error("created", "user", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
             DbConn::Tx(_) => {
-                let (view, row) = self.save_with_db(db_conn).await?;
+                let (record, row) = self.save_with_db(db_conn).await?;
                 if let Some(observer) = try_get_observer() {
                     let event = ModelEvent { model: "user", table: "users", record_key: Some(format!("{}", row.id)) };
                     match serde_json::to_value(&row) {
@@ -1823,26 +1750,26 @@ pub async fn save(self) -> Result<UserView> {
                         Err(err) => log_observer_error("created", "user", &err),
                     }
                 }
-                Ok(view)
+                Ok(record)
             }
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(UserView, UserRow)> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(UserRecord, UserRow)> {
         let mut cols = self.cols;
         let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, UserCol::Id)) {
-            cols.push(UserCol::Id);
+        if !cols.iter().any(|c| matches!(c, UserDbCol::Id)) {
+            cols.push(UserDbCol::Id);
             binds.push(generate_snowflake_i64().into());
         }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, UserCol::CreatedAt)) {
+        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, UserDbCol::CreatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(UserCol::CreatedAt);
+            cols.push(UserDbCol::CreatedAt);
             binds.push(now.into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, UserCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, UserDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(UserCol::UpdatedAt);
+            cols.push(UserDbCol::UpdatedAt);
             binds.push(now.into());
         }
         if cols.is_empty() {
@@ -1876,20 +1803,20 @@ pub async fn save(self) -> Result<UserView> {
         let row = db.fetch_one(q).await?;
         record_profiled_query("users", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
-        let view = hydrate_view(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
-        Ok((view, row))
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        Ok((record, row))
     }
 }
 
-pub struct UserUpdate<'db> {
+pub struct UserPatchInner<'db> {
     db: DbConn<'db>,
     base_url: Option<String>,
-    sets: Vec<(UserCol, BindValue, SetMode)>,
+    sets: Vec<(UserDbCol, BindValue, SetMode)>,
     where_sql: Vec<String>,
     binds: Vec<BindValue>,
 }
 
-impl<'db> UserUpdate<'db> {
+impl<'db> UserPatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             db,
@@ -1899,189 +1826,188 @@ impl<'db> UserUpdate<'db> {
             binds: vec![],
         }
     }
-    pub fn unsafe_sql(self) -> UserUnsafeUpdate<'db> { UserUnsafeUpdate::new(self) }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((UserCol::Id, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::Id, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((UserCol::Id, val.into(), SetMode::Increment));
+        self.sets.push((UserDbCol::Id, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((UserCol::Id, val.into(), SetMode::Decrement));
+        self.sets.push((UserDbCol::Id, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_uuid(mut self, val: String) -> Self {
-        self.sets.push((UserCol::Uuid, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::Uuid, val.into(), SetMode::Assign));
         self
     }
     pub fn set_username(mut self, val: String) -> Self {
-        self.sets.push((UserCol::Username, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::Username, val.into(), SetMode::Assign));
         self
     }
     pub fn set_name(mut self, val: Option<String>) -> Self {
-        self.sets.push((UserCol::Name, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::Name, val.into(), SetMode::Assign));
         self
     }
     pub fn set_email(mut self, val: Option<String>) -> Self {
-        self.sets.push((UserCol::Email, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::Email, val.into(), SetMode::Assign));
         self
     }
     pub fn set_locale(mut self, val: Option<String>) -> Self {
-        self.sets.push((UserCol::Locale, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::Locale, val.into(), SetMode::Assign));
         self
     }
     pub fn set_password(mut self, val: &str) -> anyhow::Result<Self> {
         let hashed = core_db::common::auth::hash::hash_password(val)?;
-        self.sets.push((UserCol::Password, hashed.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::Password, hashed.into(), SetMode::Assign));
         Ok(self)
     }
     pub fn set_password_raw(mut self, val: String) -> Self {
-        self.sets.push((UserCol::Password, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::Password, val.into(), SetMode::Assign));
         self
     }
     pub fn set_country_iso2(mut self, val: Option<String>) -> Self {
-        self.sets.push((UserCol::CountryIso2, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::CountryIso2, val.into(), SetMode::Assign));
         self
     }
     pub fn set_contact_number(mut self, val: Option<String>) -> Self {
-        self.sets.push((UserCol::ContactNumber, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::ContactNumber, val.into(), SetMode::Assign));
         self
     }
     pub fn set_introducer_user_id(mut self, val: Option<i64>) -> Self {
-        self.sets.push((UserCol::IntroducerUserId, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::IntroducerUserId, val.into(), SetMode::Assign));
         self
     }
     pub fn set_ban(mut self, val: UserBanStatus) -> Self {
-        self.sets.push((UserCol::Ban, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::Ban, val.into(), SetMode::Assign));
         self
     }
     pub fn set_credit_1(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((UserCol::Credit1, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::Credit1, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_credit_1(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((UserCol::Credit1, val.into(), SetMode::Increment));
+        self.sets.push((UserDbCol::Credit1, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_credit_1(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((UserCol::Credit1, val.into(), SetMode::Decrement));
+        self.sets.push((UserDbCol::Credit1, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_credit_2(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((UserCol::Credit2, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::Credit2, val.into(), SetMode::Assign));
         self
     }
     pub fn increment_credit_2(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((UserCol::Credit2, val.into(), SetMode::Increment));
+        self.sets.push((UserDbCol::Credit2, val.into(), SetMode::Increment));
         self
     }
     pub fn decrement_credit_2(mut self, val: rust_decimal::Decimal) -> Self {
-        self.sets.push((UserCol::Credit2, val.into(), SetMode::Decrement));
+        self.sets.push((UserDbCol::Credit2, val.into(), SetMode::Decrement));
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((UserCol::CreatedAt, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::CreatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((UserCol::UpdatedAt, val.into(), SetMode::Assign));
+        self.sets.push((UserDbCol::UpdatedAt, val.into(), SetMode::Assign));
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Id.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Id.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_uuid(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Uuid.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Uuid.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_username(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Username.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Username.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_name(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Name.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Name.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_email(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Email.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Email.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_locale(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Locale.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Locale.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_password(mut self, op: Op, val: String) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Password.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Password.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_country_iso2(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::CountryIso2.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::CountryIso2.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_contact_number(mut self, op: Op, val: Option<String>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::ContactNumber.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::ContactNumber.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_introducer_user_id(mut self, op: Op, val: Option<i64>) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::IntroducerUserId.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::IntroducerUserId.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_ban(mut self, op: Op, val: UserBanStatus) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Ban.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Ban.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_1(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Credit1.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Credit1.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_credit_2(mut self, op: Op, val: rust_decimal::Decimal) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::Credit2.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::Credit2.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
         let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", UserCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.where_sql.push(format!("{} {} ${}", UserDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
         self
     }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: UserCol, op: Op, val: T) -> Self {
+    pub fn where_col<T: Into<BindValue>>(mut self, col: UserDbCol, op: Op, val: T) -> Self {
         let idx = self.binds.len() + 1;
         self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
         self.binds.push(val.into());
@@ -2100,11 +2026,11 @@ pub fn set_id(mut self, val: i64) -> Self {
         self.binds.extend(incoming);
         self
     }
-    fn to_update_changes(&self) -> Result<UserUpdateChanges> {
-        let mut changes = UserUpdateChanges::default();
+    fn to_update_changes(&self) -> Result<UserChanges> {
+        let mut changes = UserChanges::default();
         for (col, bind, mode) in &self.sets {
             match col {
-                UserCol::Id => {
+                UserDbCol::Id => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -2115,7 +2041,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::Uuid => {
+                UserDbCol::Uuid => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -2126,7 +2052,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::Username => {
+                UserDbCol::Username => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -2137,7 +2063,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::Name => {
+                UserDbCol::Name => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2148,7 +2074,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::Email => {
+                UserDbCol::Email => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2159,7 +2085,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::Locale => {
+                UserDbCol::Locale => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2170,7 +2096,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::Password => {
+                UserDbCol::Password => {
                     let value = match bind {
             BindValue::String(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'String'", other),
@@ -2181,7 +2107,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::CountryIso2 => {
+                UserDbCol::CountryIso2 => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2192,7 +2118,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::ContactNumber => {
+                UserDbCol::ContactNumber => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -2203,7 +2129,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::IntroducerUserId => {
+                UserDbCol::IntroducerUserId => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
@@ -2214,7 +2140,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::Ban => {
+                UserDbCol::Ban => {
                     let value = match bind {
                 BindValue::String(value) => UserBanStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'UserBanStatus'", value))?,
@@ -2231,7 +2157,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::Credit1 => {
+                UserDbCol::Credit1 => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
@@ -2242,7 +2168,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::Credit2 => {
+                UserDbCol::Credit2 => {
                     let value = match bind {
             BindValue::Decimal(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'rust_decimal::Decimal'", other),
@@ -2253,7 +2179,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::CreatedAt => {
+                UserDbCol::CreatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2264,7 +2190,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                UserCol::UpdatedAt => {
+                UserDbCol::UpdatedAt => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -2308,14 +2234,14 @@ pub async fn save(self) -> Result<u64> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<UserUpdateChanges>) -> Result<u64> {
+    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<UserChanges>) -> Result<u64> {
         let mut cols = Vec::new();
         let mut set_binds = Vec::new();
         let mut set_modes = Vec::new();
         for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, UserCol::UpdatedAt)) {
+        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, UserDbCol::UpdatedAt)) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(UserCol::UpdatedAt);
+            cols.push(UserDbCol::UpdatedAt);
             set_binds.push(now.into());
             set_modes.push(SetMode::Assign);
         }
@@ -2405,36 +2331,26 @@ pub async fn save(self) -> Result<u64> {
 }
 
 
-#[doc(hidden)]
-pub struct UserUnsafeUpdate<'db> {
-    inner: UserUpdate<'db>,
-}
-
-impl<'db> UserUnsafeUpdate<'db> {
-    fn new(inner: UserUpdate<'db>) -> Self { Self { inner } }
-    pub fn where_raw(mut self, clause: RawClause) -> Self { let (sql, binds) = clause.into_parts(); self.inner = self.inner.where_raw(sql, binds); self }
-    pub fn done(self) -> UserUpdate<'db> { self.inner }
-}
 
 pub struct UserTableAdapter;
 impl UserTableAdapter {
-    fn parse_col(name: &str) -> Option<UserCol> {
+    fn parse_col(name: &str) -> Option<UserDbCol> {
         match name {
-            "id" => Some(UserCol::Id),
-            "uuid" => Some(UserCol::Uuid),
-            "username" => Some(UserCol::Username),
-            "name" => Some(UserCol::Name),
-            "email" => Some(UserCol::Email),
-            "locale" => Some(UserCol::Locale),
-            "password" => Some(UserCol::Password),
-            "country_iso2" => Some(UserCol::CountryIso2),
-            "contact_number" => Some(UserCol::ContactNumber),
-            "introducer_user_id" => Some(UserCol::IntroducerUserId),
-            "ban" => Some(UserCol::Ban),
-            "credit_1" => Some(UserCol::Credit1),
-            "credit_2" => Some(UserCol::Credit2),
-            "created_at" => Some(UserCol::CreatedAt),
-            "updated_at" => Some(UserCol::UpdatedAt),
+            "id" => Some(UserDbCol::Id),
+            "uuid" => Some(UserDbCol::Uuid),
+            "username" => Some(UserDbCol::Username),
+            "name" => Some(UserDbCol::Name),
+            "email" => Some(UserDbCol::Email),
+            "locale" => Some(UserDbCol::Locale),
+            "password" => Some(UserDbCol::Password),
+            "country_iso2" => Some(UserDbCol::CountryIso2),
+            "contact_number" => Some(UserDbCol::ContactNumber),
+            "introducer_user_id" => Some(UserDbCol::IntroducerUserId),
+            "ban" => Some(UserDbCol::Ban),
+            "credit_1" => Some(UserDbCol::Credit1),
+            "credit_2" => Some(UserDbCol::Credit2),
+            "created_at" => Some(UserDbCol::CreatedAt),
+            "updated_at" => Some(UserDbCol::UpdatedAt),
             _ => None,
         }
     }
@@ -2448,16 +2364,16 @@ impl UserTableAdapter {
             _ => None,
         }
     }
-    fn parse_like_col(name: &str) -> Option<UserCol> {
+    fn parse_like_col(name: &str) -> Option<UserDbCol> {
         match name {
-            "uuid" => Some(UserCol::Uuid),
-            "username" => Some(UserCol::Username),
-            "name" => Some(UserCol::Name),
-            "email" => Some(UserCol::Email),
-            "locale" => Some(UserCol::Locale),
-            "password" => Some(UserCol::Password),
-            "country_iso2" => Some(UserCol::CountryIso2),
-            "contact_number" => Some(UserCol::ContactNumber),
+            "uuid" => Some(UserDbCol::Uuid),
+            "username" => Some(UserDbCol::Username),
+            "name" => Some(UserDbCol::Name),
+            "email" => Some(UserDbCol::Email),
+            "locale" => Some(UserDbCol::Locale),
+            "password" => Some(UserDbCol::Password),
+            "country_iso2" => Some(UserDbCol::CountryIso2),
+            "contact_number" => Some(UserDbCol::ContactNumber),
             _ => None,
         }
     }
@@ -2718,8 +2634,8 @@ impl UserTableAdapter {
     }
 }
 impl GeneratedTableAdapter for UserTableAdapter {
-    type Query<'db> = UserQuery<'db>;
-    type Row = UserWithRelations;
+    type Query<'db> = Query<'db, UserModel>;
+    type Row = UserRecord;
     fn model_key(&self) -> &'static str { "User" }
     fn sortable_columns(&self) -> &'static [&'static str] { &["id", "uuid", "username", "name", "email", "locale", "password", "country_iso2", "contact_number", "introducer_user_id", "ban", "credit_1", "credit_2", "created_at", "updated_at"] }
     fn timestamp_columns(&self) -> &'static [&'static str] { &["created_at", "updated_at"] }
@@ -2970,7 +2886,7 @@ impl GeneratedTableAdapter for UserTableAdapter {
             "f-has-like-<relation>-<col>",
         ]
     }
-    fn apply_auto_filter<'db>(&self, query: UserQuery<'db>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<UserQuery<'db>>> where Self: 'db {
+    fn apply_auto_filter<'db>(&self, query: Query<'db, UserModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, UserModel>>> where Self: 'db {
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
@@ -3038,334 +2954,334 @@ impl GeneratedTableAdapter for UserTableAdapter {
             }
             ParsedFilter::Has { relation, column } => {
                 match (relation.as_str(), column.as_str()) {
-                    ("introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))) },
-                    ("introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))) },
-                    ("introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))) },
-                    ("introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))) },
-                    ("introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))) },
-                    ("introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))) },
-                    ("introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))) },
-                    ("introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))) },
-                    ("introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))) },
-                    ("introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))) },
-                    ("introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))) },
-                    ("introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))) },
-                    ("introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))) },
-                    ("introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))) },
-                    ("introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))) },
-                    ("introducer__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Id, Op::Eq, bind))))) },
-                    ("introducer__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind))))) },
-                    ("introducer__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Eq, bind))))) },
-                    ("introducer__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Eq, bind))))) },
-                    ("introducer__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Eq, bind))))) },
-                    ("introducer__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind))))) },
-                    ("introducer__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Eq, bind))))) },
-                    ("introducer__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind))))) },
-                    ("introducer__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind))))) },
-                    ("introducer__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind))))) },
-                    ("introducer__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind))))) },
-                    ("introducer__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind))))) },
-                    ("introducer__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind))))) },
-                    ("introducer__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind))))) },
-                    ("introducer__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind))))) },
-                    ("introducer__introducer__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))))) },
-                    ("introducer__introducer__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))))) },
-                    ("introducer__introducer__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))))) },
-                    ("introducer__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Id, Op::Eq, bind))))) },
-                    ("introducer__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind))))) },
-                    ("introducer__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Eq, bind))))) },
-                    ("introducer__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Eq, bind))))) },
-                    ("introducer__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Eq, bind))))) },
-                    ("introducer__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind))))) },
-                    ("introducer__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Eq, bind))))) },
-                    ("introducer__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind))))) },
-                    ("introducer__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind))))) },
-                    ("introducer__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind))))) },
-                    ("introducer__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind))))) },
-                    ("introducer__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind))))) },
-                    ("introducer__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind))))) },
-                    ("introducer__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind))))) },
-                    ("introducer__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind))))) },
-                    ("introducer__downlines__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))))) },
-                    ("introducer__downlines__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))))) },
-                    ("introducer__downlines__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))))) },
-                    ("downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))) },
-                    ("downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))) },
-                    ("downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))) },
-                    ("downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))) },
-                    ("downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))) },
-                    ("downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))) },
-                    ("downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))) },
-                    ("downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))) },
-                    ("downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))) },
-                    ("downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))) },
-                    ("downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))) },
-                    ("downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))) },
-                    ("downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))) },
-                    ("downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))) },
-                    ("downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))) },
-                    ("downlines__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Id, Op::Eq, bind))))) },
-                    ("downlines__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind))))) },
-                    ("downlines__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Eq, bind))))) },
-                    ("downlines__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Eq, bind))))) },
-                    ("downlines__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Eq, bind))))) },
-                    ("downlines__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind))))) },
-                    ("downlines__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Eq, bind))))) },
-                    ("downlines__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind))))) },
-                    ("downlines__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind))))) },
-                    ("downlines__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind))))) },
-                    ("downlines__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind))))) },
-                    ("downlines__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind))))) },
-                    ("downlines__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind))))) },
-                    ("downlines__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind))))) },
-                    ("downlines__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind))))) },
-                    ("downlines__introducer__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))))) },
-                    ("downlines__introducer__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))))) },
-                    ("downlines__introducer__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))))) },
-                    ("downlines__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Id, Op::Eq, bind))))) },
-                    ("downlines__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind))))) },
-                    ("downlines__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Eq, bind))))) },
-                    ("downlines__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Eq, bind))))) },
-                    ("downlines__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Eq, bind))))) },
-                    ("downlines__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind))))) },
-                    ("downlines__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Eq, bind))))) },
-                    ("downlines__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind))))) },
-                    ("downlines__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind))))) },
-                    ("downlines__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind))))) },
-                    ("downlines__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind))))) },
-                    ("downlines__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind))))) },
-                    ("downlines__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind))))) },
-                    ("downlines__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind))))) },
-                    ("downlines__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind))))) },
-                    ("downlines__downlines__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))))) },
-                    ("downlines__downlines__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Id, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::IntroducerUserId, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Ban, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit1, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Credit2, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CreatedAt, Op::Eq, bind)))))) },
-                    ("downlines__downlines__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::UpdatedAt, Op::Eq, bind)))))) },
+                    ("introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))) },
+                    ("introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))) },
+                    ("introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))) },
+                    ("introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))) },
+                    ("introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))) },
+                    ("introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))) },
+                    ("introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))) },
+                    ("introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))) },
+                    ("introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))) },
+                    ("introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))) },
+                    ("introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))) },
+                    ("introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))) },
+                    ("introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))) },
+                    ("introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))) },
+                    ("introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("introducer__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind))))) },
+                    ("introducer__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind))))) },
+                    ("introducer__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind))))) },
+                    ("introducer__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind))))) },
+                    ("introducer__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind))))) },
+                    ("introducer__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind))))) },
+                    ("introducer__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind))))) },
+                    ("introducer__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind))))) },
+                    ("introducer__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind))))) },
+                    ("introducer__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind))))) },
+                    ("introducer__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind))))) },
+                    ("introducer__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind))))) },
+                    ("introducer__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind))))) },
+                    ("introducer__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind))))) },
+                    ("introducer__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind))))) },
+                    ("introducer__introducer__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))))) },
+                    ("introducer__introducer__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))))) },
+                    ("introducer__introducer__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__introducer__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))))) },
+                    ("introducer__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind))))) },
+                    ("introducer__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind))))) },
+                    ("introducer__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind))))) },
+                    ("introducer__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind))))) },
+                    ("introducer__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind))))) },
+                    ("introducer__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind))))) },
+                    ("introducer__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind))))) },
+                    ("introducer__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind))))) },
+                    ("introducer__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind))))) },
+                    ("introducer__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind))))) },
+                    ("introducer__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind))))) },
+                    ("introducer__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind))))) },
+                    ("introducer__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind))))) },
+                    ("introducer__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind))))) },
+                    ("introducer__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind))))) },
+                    ("introducer__downlines__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))))) },
+                    ("introducer__downlines__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))))) },
+                    ("introducer__downlines__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("introducer__downlines__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))))) },
+                    ("downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))) },
+                    ("downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))) },
+                    ("downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))) },
+                    ("downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))) },
+                    ("downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))) },
+                    ("downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))) },
+                    ("downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))) },
+                    ("downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))) },
+                    ("downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))) },
+                    ("downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))) },
+                    ("downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))) },
+                    ("downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))) },
+                    ("downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))) },
+                    ("downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))) },
+                    ("downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))) },
+                    ("downlines__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind))))) },
+                    ("downlines__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind))))) },
+                    ("downlines__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind))))) },
+                    ("downlines__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind))))) },
+                    ("downlines__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind))))) },
+                    ("downlines__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind))))) },
+                    ("downlines__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind))))) },
+                    ("downlines__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind))))) },
+                    ("downlines__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind))))) },
+                    ("downlines__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind))))) },
+                    ("downlines__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind))))) },
+                    ("downlines__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind))))) },
+                    ("downlines__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind))))) },
+                    ("downlines__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind))))) },
+                    ("downlines__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind))))) },
+                    ("downlines__introducer__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))))) },
+                    ("downlines__introducer__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))))) },
+                    ("downlines__introducer__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__introducer__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))))) },
+                    ("downlines__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind))))) },
+                    ("downlines__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind))))) },
+                    ("downlines__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind))))) },
+                    ("downlines__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind))))) },
+                    ("downlines__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind))))) },
+                    ("downlines__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind))))) },
+                    ("downlines__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind))))) },
+                    ("downlines__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind))))) },
+                    ("downlines__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind))))) },
+                    ("downlines__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind))))) },
+                    ("downlines__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind))))) },
+                    ("downlines__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind))))) },
+                    ("downlines__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind))))) },
+                    ("downlines__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind))))) },
+                    ("downlines__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind))))) },
+                    ("downlines__downlines__introducer", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))))) },
+                    ("downlines__downlines__introducer", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__introducer", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "uuid") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "uuid", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "username") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "username", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "name") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "email") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "email", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "locale") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "locale", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "password") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "password", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "country_iso2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "country_iso2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "contact_number") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "contact_number", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "introducer_user_id") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "introducer_user_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::IntroducerUserId, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "ban") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "ban", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Ban, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "credit_1") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "credit_1", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit1, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "credit_2") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "credit_2", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Credit2, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "created_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "created_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CreatedAt, Op::Eq, bind)))))) },
+                    ("downlines__downlines__downlines", "updated_at") => { let Some(bind) = Self::parse_bind_for_relation("downlines__downlines__downlines", "updated_at", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::UpdatedAt, Op::Eq, bind)))))) },
                     _ => Ok(None),
                 }
             }
             ParsedFilter::HasLike { relation, column } => {
                 let pattern = format!("%{}%", trimmed);
                 match (relation.as_str(), column.as_str()) {
-                    ("introducer", "uuid") => Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))),
-                    ("introducer", "username") => Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))),
-                    ("introducer", "name") => Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))),
-                    ("introducer", "email") => Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))),
-                    ("introducer", "locale") => Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))),
-                    ("introducer", "password") => Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))),
-                    ("introducer", "country_iso2") => Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))),
-                    ("introducer", "contact_number") => Ok(Some(query.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))),
-                    ("introducer__introducer", "uuid") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone()))))),
-                    ("introducer__introducer", "username") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone()))))),
-                    ("introducer__introducer", "name") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone()))))),
-                    ("introducer__introducer", "email") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone()))))),
-                    ("introducer__introducer", "locale") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone()))))),
-                    ("introducer__introducer", "password") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone()))))),
-                    ("introducer__introducer", "country_iso2") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone()))))),
-                    ("introducer__introducer", "contact_number") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone()))))),
-                    ("introducer__introducer__introducer", "uuid") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__introducer", "username") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__introducer", "name") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__introducer", "email") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__introducer", "locale") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__introducer", "password") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__introducer", "country_iso2") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__introducer", "contact_number") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__downlines", "uuid") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__downlines", "username") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__downlines", "name") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__downlines", "email") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__downlines", "locale") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__downlines", "password") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__downlines", "country_iso2") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))))),
-                    ("introducer__introducer__downlines", "contact_number") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines", "uuid") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone()))))),
-                    ("introducer__downlines", "username") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone()))))),
-                    ("introducer__downlines", "name") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone()))))),
-                    ("introducer__downlines", "email") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone()))))),
-                    ("introducer__downlines", "locale") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone()))))),
-                    ("introducer__downlines", "password") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone()))))),
-                    ("introducer__downlines", "country_iso2") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone()))))),
-                    ("introducer__downlines", "contact_number") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone()))))),
-                    ("introducer__downlines__introducer", "uuid") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__introducer", "username") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__introducer", "name") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__introducer", "email") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__introducer", "locale") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__introducer", "password") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__introducer", "country_iso2") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__introducer", "contact_number") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__downlines", "uuid") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__downlines", "username") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__downlines", "name") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__downlines", "email") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__downlines", "locale") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__downlines", "password") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__downlines", "country_iso2") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))))),
-                    ("introducer__downlines__downlines", "contact_number") => Ok(Some(query.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))))),
-                    ("downlines", "uuid") => Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))),
-                    ("downlines", "username") => Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))),
-                    ("downlines", "name") => Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))),
-                    ("downlines", "email") => Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))),
-                    ("downlines", "locale") => Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))),
-                    ("downlines", "password") => Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))),
-                    ("downlines", "country_iso2") => Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))),
-                    ("downlines", "contact_number") => Ok(Some(query.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))),
-                    ("downlines__introducer", "uuid") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone()))))),
-                    ("downlines__introducer", "username") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone()))))),
-                    ("downlines__introducer", "name") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone()))))),
-                    ("downlines__introducer", "email") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone()))))),
-                    ("downlines__introducer", "locale") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone()))))),
-                    ("downlines__introducer", "password") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone()))))),
-                    ("downlines__introducer", "country_iso2") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone()))))),
-                    ("downlines__introducer", "contact_number") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone()))))),
-                    ("downlines__introducer__introducer", "uuid") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__introducer", "username") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__introducer", "name") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__introducer", "email") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__introducer", "locale") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__introducer", "password") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__introducer", "country_iso2") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__introducer", "contact_number") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__downlines", "uuid") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__downlines", "username") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__downlines", "name") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__downlines", "email") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__downlines", "locale") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__downlines", "password") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__downlines", "country_iso2") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))))),
-                    ("downlines__introducer__downlines", "contact_number") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines", "uuid") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone()))))),
-                    ("downlines__downlines", "username") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone()))))),
-                    ("downlines__downlines", "name") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone()))))),
-                    ("downlines__downlines", "email") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone()))))),
-                    ("downlines__downlines", "locale") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone()))))),
-                    ("downlines__downlines", "password") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone()))))),
-                    ("downlines__downlines", "country_iso2") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone()))))),
-                    ("downlines__downlines", "contact_number") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone()))))),
-                    ("downlines__downlines__introducer", "uuid") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__introducer", "username") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__introducer", "name") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__introducer", "email") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__introducer", "locale") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__introducer", "password") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__introducer", "country_iso2") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__introducer", "contact_number") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_introducer(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__downlines", "uuid") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Uuid, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__downlines", "username") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Username, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__downlines", "name") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Name, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__downlines", "email") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Email, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__downlines", "locale") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Locale, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__downlines", "password") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::Password, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__downlines", "country_iso2") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::CountryIso2, Op::Like, pattern.clone())))))),
-                    ("downlines__downlines__downlines", "contact_number") => Ok(Some(query.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_has_downlines(|rq| rq.where_col(UserCol::ContactNumber, Op::Like, pattern.clone())))))),
+                    ("introducer", "uuid") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))),
+                    ("introducer", "username") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))),
+                    ("introducer", "name") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))),
+                    ("introducer", "email") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))),
+                    ("introducer", "locale") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))),
+                    ("introducer", "password") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))),
+                    ("introducer", "country_iso2") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))),
+                    ("introducer", "contact_number") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))),
+                    ("introducer__introducer", "uuid") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone()))))),
+                    ("introducer__introducer", "username") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone()))))),
+                    ("introducer__introducer", "name") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone()))))),
+                    ("introducer__introducer", "email") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone()))))),
+                    ("introducer__introducer", "locale") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone()))))),
+                    ("introducer__introducer", "password") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone()))))),
+                    ("introducer__introducer", "country_iso2") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone()))))),
+                    ("introducer__introducer", "contact_number") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone()))))),
+                    ("introducer__introducer__introducer", "uuid") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__introducer", "username") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__introducer", "name") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__introducer", "email") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__introducer", "locale") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__introducer", "password") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__introducer", "country_iso2") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__introducer", "contact_number") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__downlines", "uuid") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__downlines", "username") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__downlines", "name") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__downlines", "email") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__downlines", "locale") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__downlines", "password") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__downlines", "country_iso2") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))))),
+                    ("introducer__introducer__downlines", "contact_number") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines", "uuid") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone()))))),
+                    ("introducer__downlines", "username") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone()))))),
+                    ("introducer__downlines", "name") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone()))))),
+                    ("introducer__downlines", "email") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone()))))),
+                    ("introducer__downlines", "locale") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone()))))),
+                    ("introducer__downlines", "password") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone()))))),
+                    ("introducer__downlines", "country_iso2") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone()))))),
+                    ("introducer__downlines", "contact_number") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone()))))),
+                    ("introducer__downlines__introducer", "uuid") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__introducer", "username") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__introducer", "name") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__introducer", "email") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__introducer", "locale") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__introducer", "password") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__introducer", "country_iso2") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__introducer", "contact_number") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__downlines", "uuid") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__downlines", "username") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__downlines", "name") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__downlines", "email") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__downlines", "locale") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__downlines", "password") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__downlines", "country_iso2") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))))),
+                    ("introducer__downlines__downlines", "contact_number") => Ok(Some(query.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))))),
+                    ("downlines", "uuid") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))),
+                    ("downlines", "username") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))),
+                    ("downlines", "name") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))),
+                    ("downlines", "email") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))),
+                    ("downlines", "locale") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))),
+                    ("downlines", "password") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))),
+                    ("downlines", "country_iso2") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))),
+                    ("downlines", "contact_number") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))),
+                    ("downlines__introducer", "uuid") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone()))))),
+                    ("downlines__introducer", "username") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone()))))),
+                    ("downlines__introducer", "name") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone()))))),
+                    ("downlines__introducer", "email") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone()))))),
+                    ("downlines__introducer", "locale") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone()))))),
+                    ("downlines__introducer", "password") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone()))))),
+                    ("downlines__introducer", "country_iso2") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone()))))),
+                    ("downlines__introducer", "contact_number") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone()))))),
+                    ("downlines__introducer__introducer", "uuid") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__introducer", "username") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__introducer", "name") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__introducer", "email") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__introducer", "locale") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__introducer", "password") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__introducer", "country_iso2") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__introducer", "contact_number") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__downlines", "uuid") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__downlines", "username") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__downlines", "name") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__downlines", "email") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__downlines", "locale") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__downlines", "password") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__downlines", "country_iso2") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))))),
+                    ("downlines__introducer__downlines", "contact_number") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines", "uuid") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone()))))),
+                    ("downlines__downlines", "username") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone()))))),
+                    ("downlines__downlines", "name") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone()))))),
+                    ("downlines__downlines", "email") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone()))))),
+                    ("downlines__downlines", "locale") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone()))))),
+                    ("downlines__downlines", "password") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone()))))),
+                    ("downlines__downlines", "country_iso2") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone()))))),
+                    ("downlines__downlines", "contact_number") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone()))))),
+                    ("downlines__downlines__introducer", "uuid") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__introducer", "username") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__introducer", "name") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__introducer", "email") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__introducer", "locale") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__introducer", "password") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__introducer", "country_iso2") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__introducer", "contact_number") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::INTRODUCER, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__downlines", "uuid") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Uuid, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__downlines", "username") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Username, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__downlines", "name") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__downlines", "email") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Email, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__downlines", "locale") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Locale, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__downlines", "password") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::Password, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__downlines", "country_iso2") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::CountryIso2, Op::Like, pattern.clone())))))),
+                    ("downlines__downlines__downlines", "contact_number") => Ok(Some(query.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_has(UserRel::DOWNLINES, |rq| rq.where_col(UserDbCol::ContactNumber, Op::Like, pattern.clone())))))),
                     _ => Ok(None),
                 }
             }
@@ -3386,35 +3302,35 @@ impl GeneratedTableAdapter for UserTableAdapter {
             }
         }
     }
-    fn apply_sort<'db>(&self, query: UserQuery<'db>, column: &str, dir: SortDirection) -> anyhow::Result<UserQuery<'db>> where Self: 'db {
+    fn apply_sort<'db>(&self, query: Query<'db, UserModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, UserModel>> where Self: 'db {
         let dir = match dir { SortDirection::Asc => OrderDir::Asc, SortDirection::Desc => OrderDir::Desc };
         let next = match column {
-            "id" => query.order_by(UserCol::Id, dir),
-            "uuid" => query.order_by(UserCol::Uuid, dir),
-            "username" => query.order_by(UserCol::Username, dir),
-            "name" => query.order_by(UserCol::Name, dir),
-            "email" => query.order_by(UserCol::Email, dir),
-            "locale" => query.order_by(UserCol::Locale, dir),
-            "password" => query.order_by(UserCol::Password, dir),
-            "country_iso2" => query.order_by(UserCol::CountryIso2, dir),
-            "contact_number" => query.order_by(UserCol::ContactNumber, dir),
-            "introducer_user_id" => query.order_by(UserCol::IntroducerUserId, dir),
-            "ban" => query.order_by(UserCol::Ban, dir),
-            "credit_1" => query.order_by(UserCol::Credit1, dir),
-            "credit_2" => query.order_by(UserCol::Credit2, dir),
-            "created_at" => query.order_by(UserCol::CreatedAt, dir),
-            "updated_at" => query.order_by(UserCol::UpdatedAt, dir),
+            "id" => query.order_by(UserDbCol::Id, dir),
+            "uuid" => query.order_by(UserDbCol::Uuid, dir),
+            "username" => query.order_by(UserDbCol::Username, dir),
+            "name" => query.order_by(UserDbCol::Name, dir),
+            "email" => query.order_by(UserDbCol::Email, dir),
+            "locale" => query.order_by(UserDbCol::Locale, dir),
+            "password" => query.order_by(UserDbCol::Password, dir),
+            "country_iso2" => query.order_by(UserDbCol::CountryIso2, dir),
+            "contact_number" => query.order_by(UserDbCol::ContactNumber, dir),
+            "introducer_user_id" => query.order_by(UserDbCol::IntroducerUserId, dir),
+            "ban" => query.order_by(UserDbCol::Ban, dir),
+            "credit_1" => query.order_by(UserDbCol::Credit1, dir),
+            "credit_2" => query.order_by(UserDbCol::Credit2, dir),
+            "created_at" => query.order_by(UserDbCol::CreatedAt, dir),
+            "updated_at" => query.order_by(UserDbCol::UpdatedAt, dir),
             _ => query,
         };
         Ok(next)
     }
-    fn apply_cursor<'db>(&self, query: UserQuery<'db>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<UserQuery<'db>>> where Self: 'db {
+    fn apply_cursor<'db>(&self, query: Query<'db, UserModel>, column: &str, dir: SortDirection, cursor: &str) -> anyhow::Result<Option<Query<'db, UserModel>>> where Self: 'db {
         let Some(col) = Self::parse_col(column) else { return Ok(None); };
         let Some(bind) = Self::parse_bind_for_col(column, cursor) else { return Ok(None); };
         let op = match dir { SortDirection::Asc => Op::Gt, SortDirection::Desc => Op::Lt };
         Ok(Some(query.where_col(col, op, bind)))
     }
-    fn cursor_from_row(&self, row: &UserWithRelations, column: &str) -> Option<String> {
+    fn cursor_from_row(&self, row: &UserRecord, column: &str) -> Option<String> {
         match column {
             "id" => Some(row.id.to_string()),
             "uuid" => Some(row.uuid.clone()),
@@ -3433,10 +3349,10 @@ impl GeneratedTableAdapter for UserTableAdapter {
             _ => None,
         }
     }
-    fn count<'db>(&self, query: UserQuery<'db>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
+    fn count<'db>(&self, query: Query<'db, UserModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
         Box::pin(async move { query.count().await })
     }
-    fn fetch_page<'db>(&self, query: UserQuery<'db>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<UserWithRelations>>> where Self: 'db {
+    fn fetch_page<'db>(&self, query: Query<'db, UserModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<UserRecord>>> where Self: 'db {
         Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
     }
 }
@@ -3462,13 +3378,13 @@ impl Default for UserDataTableConfig {
     }
 }
 pub trait UserDataTableHooks: Send + Sync + 'static {
-    fn scope<'db>(&'db self, query: UserQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> UserQuery<'db> { query }
+    fn scope<'db>(&'db self, query: Query<'db, UserModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> Query<'db, UserModel> { query }
     fn authorize(&self, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<bool> { Ok(true) }
-    fn filter_query<'db>(&'db self, _query: UserQuery<'db>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<UserQuery<'db>>> { Ok(None) }
-    fn filters<'db>(&'db self, query: UserQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<UserQuery<'db>> { Ok(query) }
-    fn map_row(&self, _row: &mut UserWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
-    fn default_row_to_record(&self, row: UserWithRelations) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(row)?;
+    fn filter_query<'db>(&'db self, _query: Query<'db, UserModel>, _filter_key: &str, _value: &str, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, UserModel>>> { Ok(None) }
+    fn filters<'db>(&'db self, query: Query<'db, UserModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, UserModel>> { Ok(query) }
+    fn map_row(&self, _row: &mut UserRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
+    fn default_row_to_record(&self, row: UserRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+        let value = serde_json::to_value(&row)?;
         let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
         if let Some(id_value) = record.get("id").cloned() {
             let id_text = match id_value {
@@ -3480,10 +3396,10 @@ pub trait UserDataTableHooks: Send + Sync + 'static {
         }
         Ok(record)
     }
-    fn row_to_record(&self, row: UserWithRelations, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    fn row_to_record(&self, row: UserRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
         self.default_row_to_record(row)
     }
-    fn summary<'db>(&'db self, _query: UserQuery<'db>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
+    fn summary<'db>(&'db self, _query: Query<'db, UserModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> { Box::pin(async { Ok(None) }) }
 }
 #[derive(Default)]
 pub struct UserDefaultDataTableHooks;
@@ -3521,15 +3437,15 @@ impl<H: UserDataTableHooks> UserDataTable<H> {
 impl<H: UserDataTableHooks> AutoDataTable for UserDataTable<H> {
     type Adapter = UserTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
-    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> UserQuery<'db> {
-        self.hooks.scope(User::new(&self.db, None).query(), input, ctx)
+    fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, UserModel> {
+        self.hooks.scope(UserModel::query(&self.db), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
-    fn filter_query<'db>(&'db self, query: UserQuery<'db>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<UserQuery<'db>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
-    fn filters<'db>(&'db self, query: UserQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<UserQuery<'db>> { self.hooks.filters(query, input, ctx) }
-    fn map_row(&self, row: &mut UserWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
-    fn row_to_record(&self, row: UserWithRelations, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
-    fn summary<'db>(&'db self, query: UserQuery<'db>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
+    fn filter_query<'db>(&'db self, query: Query<'db, UserModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, UserModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
+    fn filters<'db>(&'db self, query: Query<'db, UserModel>, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Query<'db, UserModel>> { self.hooks.filters(query, input, ctx) }
+    fn map_row(&self, row: &mut UserRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<()> { self.hooks.map_row(row, input, ctx) }
+    fn row_to_record(&self, row: UserRecord, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> { self.hooks.row_to_record(row, input, ctx) }
+    fn summary<'db>(&'db self, query: Query<'db, UserModel>, input: &DataTableInput, ctx: &DataTableContext) -> BoxFuture<'db, anyhow::Result<Option<serde_json::Value>>> where Self: 'db { self.hooks.summary(query, input, ctx) }
     fn default_sorting_column(&self) -> &'static str { self.config.default_sorting_column }
     fn default_sorted(&self) -> SortDirection { self.config.default_sorted }
     fn default_export_ignore_columns(&self) -> &'static [&'static str] { self.config.default_export_ignore_columns }
@@ -3539,10 +3455,690 @@ impl<H: UserDataTableHooks> AutoDataTable for UserDataTable<H> {
 }
 use core_db::common::active_record::ActiveRecord;
 #[async_trait::async_trait]
-impl ActiveRecord for UserView {
+impl ActiveRecord for UserRecord {
     type Id = i64;
     async fn find(db: &sqlx::PgPool, id: Self::Id) -> anyhow::Result<Option<Self>> {
-        User::new(db, None).find(id).await.map(|opt| opt.map(|r| r.into_row())).map_err(|e| e.into())
+        UserModel::find(db, id).await.map_err(|e| e.into())
     }
 }
+pub struct UserModel;
+impl UserModel {
+    pub const TABLE: &'static str = "users";
+    pub const MODEL_KEY: &'static str = "user";
+    pub const PK: &'static str = "id";
+    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, UserModel> {
+        Query::new(db)
+    }
+    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, UserModel> {
+        Query::new_with_base_url(db, base_url)
+    }
+    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, UserModel> {
+        Create::new(db)
+    }
+    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, UserModel> {
+        Create::new_with_base_url(db, base_url)
+    }
+    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, UserModel> {
+        Patch::new(db)
+    }
+    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, UserModel> {
+        Patch::new_with_base_url(db, base_url)
+    }
+    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<UserRecord>> {
+        UserQueryInner::new(db.into(), None).find(id).await
+    }
+}
+
+impl ModelDef for UserModel {
+    type Pk = i64;
+    type Record = UserRecord;
+    type Create = UserCreate;
+    type Changes = UserChanges;
+    const TABLE: &'static str = UserModel::TABLE;
+    const MODEL_KEY: &'static str = UserModel::MODEL_KEY;
+}
+
+impl core_db::common::model_api::QueryModel for UserModel {
+    type InnerQuery<'db> = UserQueryInner<'db>;
+    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
+        UserQueryInner::new(db, base_url)
+    }
+    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { query.get().await })
+    }
+    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.first().await })
+    }
+    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { query.find(id).await })
+    }
+    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { query.count().await })
+    }
+    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { query.delete().await })
+    }
+    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = query.paginate(page, per_page).await?;
+            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+        })
+    }
+    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        query.limit(limit)
+    }
+    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        query.offset(offset)
+    }
+    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update()
+    }
+    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_update_skip_locked()
+    }
+    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        query.for_no_key_update()
+    }
+    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    where
+        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
+    {
+        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+    }
+}
+
+impl core_db::common::model_api::UnsafeQueryModel for UserModel {
+    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_raw(clause, binds)
+    }
+    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.where_exists(clause, binds)
+    }
+    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.order_by_raw(expr)
+    }
+    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        query.select_raw(expr)
+    }
+    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        query.inner_join_raw(table, on_clause, binds)
+    }
+}
+
+impl core_db::common::model_api::CreateModel for UserModel {
+    type InnerCreate<'db> = UserCreateInner<'db>;
+    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
+        UserCreateInner::new(db, base_url)
+    }
+    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+        Box::pin(async move {
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let created = builder.save().await?;
+            UserQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("users: created record not found"))
+        })
+    }
+}
+
+impl core_db::common::model_api::CreateField<UserModel> for UserDbCol {
+    type Value = BindValue;
+    fn set<'db>(field: Self, mut builder: <UserModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<UserModel>>::Value) -> anyhow::Result<<UserModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        match field {
+            UserDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Uuid => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Username => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Name => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Email => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Locale => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Password => {
+                let BindValue::String(value) = value else {
+                    anyhow::bail!("column '{}' expects String input before hashing, got '{:?}'", UserDbCol::Password.as_sql(), value);
+                };
+                let hashed = core_db::common::auth::hash::hash_password(&value)?;
+                builder.cols.push(field);
+                builder.binds.push(hashed.into());
+                Ok(builder)
+            }
+            UserDbCol::CountryIso2 => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::ContactNumber => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::IntroducerUserId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Ban => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Credit1 => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Credit2 => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::CreateField<UserModel> for Column<UserModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn set<'db>(field: Self, mut builder: <UserModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<UserModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
+        let field = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            UserDbCol::Id => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Uuid => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Username => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Name => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Email => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Locale => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Password => {
+                let BindValue::String(value) = value else {
+                    anyhow::bail!("column '{}' expects String input before hashing, got '{:?}'", UserDbCol::Password.as_sql(), value);
+                };
+                let hashed = core_db::common::auth::hash::hash_password(&value)?;
+                builder.cols.push(field);
+                builder.binds.push(hashed.into());
+                Ok(builder)
+            }
+            UserDbCol::CountryIso2 => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::ContactNumber => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::IntroducerUserId => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Ban => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Credit1 => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::Credit2 => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::CreatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+            UserDbCol::UpdatedAt => {
+                builder.cols.push(field);
+                builder.binds.push(value);
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::CreateConflictField<UserModel> for UserDbCol {
+    fn on_conflict_do_nothing<'db>(builder: <UserModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <UserModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_do_nothing(fields)
+    }
+    fn on_conflict_update<'db>(builder: <UserModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <UserModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        builder.on_conflict_update(fields)
+    }
+}
+
+impl<T> core_db::common::model_api::CreateConflictField<UserModel> for Column<UserModel, T> {
+    fn on_conflict_do_nothing<'db>(builder: <UserModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <UserModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<UserDbCol> = fields.iter().map(|field| resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_do_nothing(&fields)
+    }
+    fn on_conflict_update<'db>(builder: <UserModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <UserModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
+        let fields: Vec<UserDbCol> = fields.iter().map(|field| resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
+        builder.on_conflict_update(&fields)
+    }
+}
+
+impl core_db::common::model_api::PatchModel for UserModel {
+    type InnerQuery<'db> = UserQueryInner<'db>;
+    type InnerPatch<'db> = UserPatchInner<'db>;
+    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
+        UserPatchInner::new(db, base_url)
+    }
+    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = query.db.clone();
+        let base_url = query.base_url.clone();
+        query.select_sql = Some(UserDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = query.to_sql();
+        let mut builder = UserPatchInner::new(db, base_url);
+        builder.where_sql.push(format!("{} IN ({})", UserDbCol::Id.as_sql(), scope_sql));
+        builder.binds = binds;
+        builder
+    }
+    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { builder.save().await })
+    }
+    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if builder.where_sql.is_empty() {
+                anyhow::bail!("update: no conditions set");
+            }
+            let db = builder.db.clone();
+            let base_url = builder.base_url.clone();
+            let mut select_sql = format!("SELECT {} FROM users", UserDbCol::Id.as_sql());
+            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
+            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            let target_ids = db.fetch_all_scalar(select_q).await?;
+            builder.save().await?;
+            if target_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut query = UserQueryInner::new(db, base_url);
+            query.where_in(UserDbCol::Id, &target_ids).get().await
+        })
+    }
+}
+
+impl core_db::common::model_api::PatchAssignField<UserModel> for UserDbCol {
+    type Value = BindValue;
+    fn assign<'db>(field: Self, mut builder: <UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserModel>>::Value) -> anyhow::Result<<UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            UserDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Uuid => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Username => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Name => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Email => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Locale => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Password => {
+                let BindValue::String(value) = value else {
+                    anyhow::bail!("column '{}' expects String input before hashing, got '{:?}'", UserDbCol::Password.as_sql(), value);
+                };
+                let hashed = core_db::common::auth::hash::hash_password(&value)?;
+                builder.sets.push((field, hashed.into(), SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::CountryIso2 => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::ContactNumber => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::IntroducerUserId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Ban => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Credit1 => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Credit2 => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl<T> core_db::common::model_api::PatchAssignField<UserModel> for Column<UserModel, T>
+where
+    T: Into<BindValue>,
+{
+    type Value = T;
+    fn assign<'db>(field: Self, mut builder: <UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let value = value.into();
+        match field {
+            UserDbCol::Id => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Uuid => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Username => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Name => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Email => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Locale => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Password => {
+                let BindValue::String(value) = value else {
+                    anyhow::bail!("column '{}' expects String input before hashing, got '{:?}'", UserDbCol::Password.as_sql(), value);
+                };
+                let hashed = core_db::common::auth::hash::hash_password(&value)?;
+                builder.sets.push((field, hashed.into(), SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::CountryIso2 => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::ContactNumber => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::IntroducerUserId => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Ban => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Credit1 => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::Credit2 => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::CreatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+            UserDbCol::UpdatedAt => {
+                builder.sets.push((field, value, SetMode::Assign));
+                Ok(builder)
+            }
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<UserModel> for UserDbCol {
+    fn increment<'db>(field: Self, mut builder: <UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserModel>>::Value) -> anyhow::Result<<UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            UserDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            UserDbCol::Credit1 => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            UserDbCol::Credit2 => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserModel>>::Value) -> anyhow::Result<<UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        match field {
+            UserDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            UserDbCol::Credit1 => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            UserDbCol::Credit2 => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<UserModel> for Column<UserModel, i64> {
+    fn increment<'db>(field: Self, mut builder: <UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserModel>>::Value) -> anyhow::Result<<UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            UserDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserModel>>::Value) -> anyhow::Result<<UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            UserDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::PatchNumericField<UserModel> for Column<UserModel, rust_decimal::Decimal> {
+    fn increment<'db>(field: Self, mut builder: <UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserModel>>::Value) -> anyhow::Result<<UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            UserDbCol::Credit1 => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            UserDbCol::Credit2 => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        }
+    }
+    fn decrement<'db>(field: Self, mut builder: <UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<UserModel>>::Value) -> anyhow::Result<<UserModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+        let field = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match field {
+            UserDbCol::Credit1 => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            UserDbCol::Credit2 => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        }
+    }
+}
+
+impl core_db::common::model_api::QueryField<UserModel> for UserDbCol {
+    type Value = BindValue;
+    fn where_col<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<UserModel>>::Value) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_col(field, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<UserModel>>::Value) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.or_where_col(field, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<UserModel>>::Value]) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_in(field, values)
+    }
+    fn order_by<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.order_by(field, dir)
+    }
+    fn where_null<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_null(field)
+    }
+    fn where_not_null<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query.where_not_null(field)
+    }
+}
+
+impl<T> core_db::common::model_api::QueryField<UserModel> for Column<UserModel, T>
+where
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+    fn where_col<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_col(col, op, value)
+    }
+    fn or_where_col<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.or_where_col(col, op, value)
+    }
+    fn where_in<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_in(col, values)
+    }
+    fn order_by<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.order_by(col, dir)
+    }
+    fn where_null<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_null(col)
+    }
+    fn where_not_null<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        let col = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        query.where_not_null(col)
+    }
+}
+
+impl core_db::common::model_api::IncludeRelation<UserModel> for OneRelation<UserModel, UserRow, 0> {
+    fn include<'db>(_relation: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query
+    }
+}
+
+impl core_db::common::model_api::WhereHasRelation<UserModel> for OneRelation<UserModel, UserRow, 0> {
+    type Target = UserModel;
+    fn where_has<'db, F>(_relation: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.where_has_introducer(scope)
+    }
+    fn or_where_has<'db, F>(_relation: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.or_where_has_introducer(scope)
+    }
+}
+
+impl core_db::common::model_api::RecordOneRelation<UserModel> for OneRelation<UserModel, UserRow, 0> {
+    type Target = UserRow;
+    fn get<'a>(_relation: Self, record: &'a UserRecord) -> Option<&'a Self::Target> {
+        record.introducer.as_ref()
+    }
+}
+
+impl core_db::common::model_api::IncludeRelation<UserModel> for ManyRelation<UserModel, UserRow, 1> {
+    fn include<'db>(_relation: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        query
+    }
+}
+
+impl core_db::common::model_api::WhereHasRelation<UserModel> for ManyRelation<UserModel, UserRow, 1> {
+    type Target = UserModel;
+    fn where_has<'db, F>(_relation: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.where_has_downlines(scope)
+    }
+    fn or_where_has<'db, F>(_relation: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    where
+        F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
+    {
+        query.or_where_has_downlines(scope)
+    }
+}
+
+impl core_db::common::model_api::RecordManyRelation<UserModel> for ManyRelation<UserModel, UserRow, 1> {
+    type Target = UserRow;
+    fn get<'a>(_relation: Self, record: &'a UserRecord) -> &'a [Self::Target] {
+        &record.downlines
+    }
+}
+
 

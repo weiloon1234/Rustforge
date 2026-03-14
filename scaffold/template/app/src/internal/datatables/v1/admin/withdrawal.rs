@@ -1,5 +1,5 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
-use core_db::common::sql::Op;
+use core_db::common::{model_api::Query, sql::Op};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
@@ -18,10 +18,10 @@ pub struct WithdrawalDataTableAppHooks;
 impl WithdrawalDataTableHooks for WithdrawalDataTableAppHooks {
     fn scope<'db>(
         &'db self,
-        query: WithdrawalQuery<'db>,
+        query: Query<'db, WithdrawalModel>,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> WithdrawalQuery<'db> {
+    ) -> Query<'db, WithdrawalModel> {
         query
     }
 
@@ -39,38 +39,38 @@ impl WithdrawalDataTableHooks for WithdrawalDataTableAppHooks {
 
     fn filter_query<'db>(
         &'db self,
-        query: WithdrawalQuery<'db>,
+        query: Query<'db, WithdrawalModel>,
         filter_key: &str,
         value: &str,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
-    ) -> anyhow::Result<Option<WithdrawalQuery<'db>>> {
+    ) -> anyhow::Result<Option<Query<'db, WithdrawalModel>>> {
         match filter_key {
             "q" => Ok(Some(apply_keyword_filter(query, value))),
             "f-owner_type" => {
                 if let Some(ot) = OwnerType::from_storage(value) {
-                    Ok(Some(query.where_owner_type(Op::Eq, ot)))
+                    Ok(Some(query.where_col(WithdrawalCol::OWNER_TYPE, Op::Eq, ot)))
                 } else {
                     Ok(Some(query))
                 }
             }
             "f-credit_type" => {
                 if let Some(ct) = CreditType::from_storage(value) {
-                    Ok(Some(query.where_credit_type(Op::Eq, ct)))
+                    Ok(Some(query.where_col(WithdrawalCol::CREDIT_TYPE, Op::Eq, ct)))
                 } else {
                     Ok(Some(query))
                 }
             }
             "f-withdrawal_method" => {
                 if let Some(wm) = WithdrawalMethod::from_storage(value) {
-                    Ok(Some(query.where_withdrawal_method(Op::Eq, wm)))
+                    Ok(Some(query.where_col(WithdrawalCol::WITHDRAWAL_METHOD, Op::Eq, wm)))
                 } else {
                     Ok(Some(query))
                 }
             }
             "f-status" => {
                 if let Some(s) = WithdrawalStatus::from_storage(value) {
-                    Ok(Some(query.where_status(Op::Eq, s)))
+                    Ok(Some(query.where_col(WithdrawalCol::STATUS, Op::Eq, s)))
                 } else {
                     Ok(Some(query))
                 }
@@ -81,7 +81,7 @@ impl WithdrawalDataTableHooks for WithdrawalDataTableAppHooks {
 
     fn map_row(
         &self,
-        _row: &mut generated::models::WithdrawalWithRelations,
+        _row: &mut WithdrawalRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<()> {
@@ -90,7 +90,7 @@ impl WithdrawalDataTableHooks for WithdrawalDataTableAppHooks {
 
     fn row_to_record(
         &self,
-        row: generated::models::WithdrawalWithRelations,
+        row: WithdrawalRecord,
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
@@ -125,16 +125,19 @@ impl WithdrawalDataTableHooks for WithdrawalDataTableAppHooks {
     }
 }
 
-fn apply_keyword_filter<'db>(query: WithdrawalQuery<'db>, value: &str) -> WithdrawalQuery<'db> {
+fn apply_keyword_filter<'db>(
+    query: Query<'db, WithdrawalModel>,
+    value: &str,
+) -> Query<'db, WithdrawalModel> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return query;
     }
     if let Ok(id) = trimmed.parse::<i64>() {
-        return query.where_id(Op::Eq, id);
+        return query.where_col(WithdrawalCol::ID, Op::Eq, id);
     }
     let pattern = format!("%{trimmed}%");
-    query.where_related_key(Op::Like, Some(pattern))
+    query.where_col(WithdrawalCol::RELATED_KEY, Op::Like, Some(pattern))
 }
 
 pub type AppWithdrawalDataTable = WithdrawalDataTable<WithdrawalDataTableAppHooks>;
