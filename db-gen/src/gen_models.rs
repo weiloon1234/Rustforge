@@ -2179,7 +2179,7 @@ fn render_typed_query_field_impl(
     writeln!(out, "    type Value = T;").unwrap();
     writeln!(
         out,
-        "    fn where_col<'db>(field: Self, query: <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db> {{"
+        "    fn where_col<'db>(field: Self, state: <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db> {{"
     )
     .unwrap();
     writeln!(
@@ -2187,11 +2187,11 @@ fn render_typed_query_field_impl(
         "        let col = {resolver_ident}(field.as_sql()).expect(\"typed generated column must resolve to an internal db column\");"
     )
     .unwrap();
-    writeln!(out, "        query.where_col(col, op, value)").unwrap();
+    writeln!(out, "        state.where_col_str(col.as_sql(), op, value.into())").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn or_where_col<'db>(field: Self, query: <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db> {{"
+        "    fn or_where_col<'db>(field: Self, state: <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db> {{"
     )
     .unwrap();
     writeln!(
@@ -2199,11 +2199,11 @@ fn render_typed_query_field_impl(
         "        let col = {resolver_ident}(field.as_sql()).expect(\"typed generated column must resolve to an internal db column\");"
     )
     .unwrap();
-    writeln!(out, "        query.or_where_col(col, op, value)").unwrap();
+    writeln!(out, "        state.or_where_col_str(col.as_sql(), op, value.into())").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn where_in<'db>(field: Self, query: <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db> {{"
+        "    fn where_in<'db>(field: Self, state: <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db> {{"
     )
     .unwrap();
     writeln!(
@@ -2211,11 +2211,12 @@ fn render_typed_query_field_impl(
         "        let col = {resolver_ident}(field.as_sql()).expect(\"typed generated column must resolve to an internal db column\");"
     )
     .unwrap();
-    writeln!(out, "        query.where_in(col, values)").unwrap();
+    writeln!(out, "        let bind_values: Vec<BindValue> = values.iter().map(|v| v.clone().into()).collect();").unwrap();
+    writeln!(out, "        state.where_in_str(col.as_sql(), &bind_values)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn order_by<'db>(field: Self, query: <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db> {{"
+        "    fn order_by<'db>(field: Self, state: <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db> {{"
     )
     .unwrap();
     writeln!(
@@ -2223,11 +2224,11 @@ fn render_typed_query_field_impl(
         "        let col = {resolver_ident}(field.as_sql()).expect(\"typed generated column must resolve to an internal db column\");"
     )
     .unwrap();
-    writeln!(out, "        query.order_by(col, dir)").unwrap();
+    writeln!(out, "        state.order_by_str(col.as_sql(), dir)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn where_null<'db>(field: Self, query: <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db> {{"
+        "    fn where_null<'db>(field: Self, state: <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db> {{"
     )
     .unwrap();
     writeln!(
@@ -2235,11 +2236,11 @@ fn render_typed_query_field_impl(
         "        let col = {resolver_ident}(field.as_sql()).expect(\"typed generated column must resolve to an internal db column\");"
     )
     .unwrap();
-    writeln!(out, "        query.where_null(col)").unwrap();
+    writeln!(out, "        state.where_null_str(col.as_sql())").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn where_not_null<'db>(field: Self, query: <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db> {{"
+        "    fn where_not_null<'db>(field: Self, state: <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db> {{"
     )
     .unwrap();
     writeln!(
@@ -2247,7 +2248,7 @@ fn render_typed_query_field_impl(
         "        let col = {resolver_ident}(field.as_sql()).expect(\"typed generated column must resolve to an internal db column\");"
     )
     .unwrap();
-    writeln!(out, "        query.where_not_null(col)").unwrap();
+    writeln!(out, "        state.where_not_null_str(col.as_sql())").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
     out
@@ -3734,7 +3735,7 @@ fn render_patch_model_impl(
         "impl core_db::common::model_api::PatchModel for {model_title}Model {{"
     )
     .unwrap();
-    writeln!(out, "    type InnerQuery<'db> = {query_ident}<'db>;").unwrap();
+    writeln!(out, "    type InnerQuery<'db> = QueryState<'db>;").unwrap();
     writeln!(out, "    type InnerPatch<'db> = {update_ident}<'db>;").unwrap();
     writeln!(
         out,
@@ -3745,17 +3746,17 @@ fn render_patch_model_impl(
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {{"
+        "    fn patch_from_query<'db>(mut state: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        let db = query.db.clone();").unwrap();
-    writeln!(out, "        let base_url = query.base_url.clone();").unwrap();
+    writeln!(out, "        let db = state.db.clone();").unwrap();
+    writeln!(out, "        let base_url = state.base_url.clone();").unwrap();
     writeln!(
         out,
-        "        query.select_sql = Some({col_ident}::{pk_col_variant}.as_sql().to_string());"
+        "        state.select_sql = Some({col_ident}::{pk_col_variant}.as_sql().to_string());"
     )
     .unwrap();
-    writeln!(out, "        let (scope_sql, binds) = query.to_sql();").unwrap();
+    writeln!(out, "        let (scope_sql, binds) = state.to_sql();").unwrap();
     writeln!(
         out,
         "        let mut builder = {update_ident}::new(db, base_url);"
@@ -4401,7 +4402,7 @@ fn render_model(
     .unwrap();
     writeln!(
         imports,
-        "use core_db::common::model_api::{{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query}};"
+        "use core_db::common::model_api::{{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query, QueryState}};"
     )
     .unwrap();
     if has_meta {
@@ -5215,6 +5216,38 @@ fn render_model(
         writeln!(
             out,
             "        Self {{ db, base_url, select_sql: Some(\"{base_select}\".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }}"
+        )
+        .unwrap();
+    }
+    writeln!(out, "    }}").unwrap();
+    // from_state: construct inner query from QueryState
+    writeln!(out, "    pub fn from_state(state: QueryState<'db>) -> Self {{").unwrap();
+    if has_soft_delete {
+        writeln!(
+            out,
+            "        Self {{ db: state.db, base_url: state.base_url, select_sql: state.select_sql, from_sql: state.from_sql, count_sql: state.count_sql, distinct: state.distinct, distinct_on: state.distinct_on, lock_sql: state.lock_sql, join_sql: state.join_sql, join_binds: state.join_binds, where_sql: state.where_sql, order_sql: state.order_sql, group_by_sql: state.group_by_sql, having_sql: state.having_sql, having_binds: state.having_binds, offset: state.offset, limit: state.limit, binds: state.binds, with_deleted: state.with_deleted, only_deleted: state.only_deleted }}"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            out,
+            "        Self {{ db: state.db, base_url: state.base_url, select_sql: state.select_sql, from_sql: state.from_sql, count_sql: state.count_sql, distinct: state.distinct, distinct_on: state.distinct_on, lock_sql: state.lock_sql, join_sql: state.join_sql, join_binds: state.join_binds, where_sql: state.where_sql, order_sql: state.order_sql, group_by_sql: state.group_by_sql, having_sql: state.having_sql, having_binds: state.having_binds, offset: state.offset, limit: state.limit, binds: state.binds }}"
+        )
+        .unwrap();
+    }
+    writeln!(out, "    }}").unwrap();
+    // into_state: convert inner query back to QueryState
+    writeln!(out, "    pub fn into_state(self) -> QueryState<'db> {{").unwrap();
+    if has_soft_delete {
+        writeln!(
+            out,
+            "        QueryState {{ db: self.db, base_url: self.base_url, select_sql: self.select_sql, from_sql: self.from_sql, count_sql: self.count_sql, distinct: self.distinct, distinct_on: self.distinct_on, lock_sql: self.lock_sql, join_sql: self.join_sql, join_binds: self.join_binds, where_sql: self.where_sql, order_sql: self.order_sql, group_by_sql: self.group_by_sql, having_sql: self.having_sql, having_binds: self.having_binds, offset: self.offset, limit: self.limit, binds: self.binds, with_deleted: self.with_deleted, only_deleted: self.only_deleted }}"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            out,
+            "        QueryState {{ db: self.db, base_url: self.base_url, select_sql: self.select_sql, from_sql: self.from_sql, count_sql: self.count_sql, distinct: self.distinct, distinct_on: self.distinct_on, lock_sql: self.lock_sql, join_sql: self.join_sql, join_binds: self.join_binds, where_sql: self.where_sql, order_sql: self.order_sql, group_by_sql: self.group_by_sql, having_sql: self.having_sql, having_binds: self.having_binds, offset: self.offset, limit: self.limit, binds: self.binds, with_deleted: false, only_deleted: false }}"
         )
         .unwrap();
     }
@@ -8065,7 +8098,7 @@ fn render_model(
         "    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: {parent_pk_ty}) -> Result<Option<{model_title}Record>> {{"
     )
     .unwrap();
-    writeln!(out, "        {query_ident}::new(db.into(), None).find(id).await").unwrap();
+    writeln!(out, "        Query::<{model_title}Model>::new(db).find(id).await").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
     if !cfg.model_impl_items.is_empty() {
@@ -8085,80 +8118,81 @@ fn render_model(
         "    const MODEL_KEY: &'static str = {model_title}Model::MODEL_KEY;"
     )
     .unwrap();
+    writeln!(out, "    const PK_COL: &'static str = \"{pk}\";").unwrap();
     writeln!(out, "}}\n").unwrap();
     writeln!(
         out,
         "impl core_db::common::model_api::QueryModel for {model_title}Model {{"
     )
     .unwrap();
-    writeln!(out, "    type InnerQuery<'db> = {query_ident}<'db>;").unwrap();
+    writeln!(out, "    type InnerQuery<'db> = QueryState<'db>;").unwrap();
     writeln!(
         out,
         "    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        {query_ident}::new(db, base_url)").unwrap();
+    writeln!(out, "        QueryState::new(db, base_url, \"{base_select}\")").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {{"
+        "    fn query_all<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {{"
     )
     .unwrap();
-    writeln!(out, "        Box::pin(async move {{ query.get().await }})").unwrap();
+    writeln!(out, "        Box::pin(async move {{ {query_ident}::from_state(state).get().await }})").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {{"
+        "    fn query_first<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {{"
     )
     .unwrap();
     writeln!(
         out,
-        "        Box::pin(async move {{ query.first().await }})"
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        Box::pin(async move {{ query.find(id).await }})"
+        "        Box::pin(async move {{ {query_ident}::from_state(state).first().await }})"
     )
     .unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {{"
+        "    fn query_find<'db>(state: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {{"
     )
     .unwrap();
     writeln!(
         out,
-        "        Box::pin(async move {{ query.count().await }})"
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        Box::pin(async move {{ query.delete().await }})"
+        "        Box::pin(async move {{ {query_ident}::from_state(state).find(id).await }})"
     )
     .unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {{"
+        "    fn query_count<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        Box::pin(async move {{ {query_ident}::from_state(state).count().await }})"
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn query_delete<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        Box::pin(async move {{ {query_ident}::from_state(state).delete().await }})"
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn query_paginate<'db>(state: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {{"
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
     writeln!(
         out,
-        "            let page = query.paginate(page, per_page).await?;"
+        "            let page = {query_ident}::from_state(state).paginate(page, per_page).await?;"
     )
     .unwrap();
     writeln!(
@@ -8170,42 +8204,42 @@ fn render_model(
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {{"
+        "    fn query_limit<'db>(state: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        query.limit(limit)").unwrap();
+    writeln!(out, "        state.limit(limit)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {{"
+        "    fn query_offset<'db>(state: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        query.offset(offset)").unwrap();
+    writeln!(out, "        state.offset(offset)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {{"
+        "    fn query_for_update<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        query.for_update()").unwrap();
+    writeln!(out, "        state.for_update()").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {{"
+        "    fn query_for_update_skip_locked<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        query.for_update_skip_locked()").unwrap();
+    writeln!(out, "        state.for_update_skip_locked()").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {{"
+        "    fn query_for_no_key_update<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        query.for_no_key_update()").unwrap();
+    writeln!(out, "        state.for_no_key_update()").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>"
+        "    fn query_where_group<'db, F>(state: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>"
     )
     .unwrap();
     writeln!(out, "    where").unwrap();
@@ -8217,13 +8251,13 @@ fn render_model(
     writeln!(out, "    {{").unwrap();
     writeln!(
         out,
-        "        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())"
+        "        state.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())"
     )
     .unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>"
+        "    fn query_or_where_group<'db, F>(state: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>"
     )
     .unwrap();
     writeln!(out, "    where").unwrap();
@@ -8235,7 +8269,7 @@ fn render_model(
     writeln!(out, "    {{").unwrap();
     writeln!(
         out,
-        "        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())"
+        "        state.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())"
     )
     .unwrap();
     writeln!(out, "    }}").unwrap();
@@ -8247,38 +8281,38 @@ fn render_model(
     .unwrap();
     writeln!(
         out,
-        "    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {{"
+        "    fn query_where_raw<'db>(state: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        query.where_raw(clause, binds)").unwrap();
+    writeln!(out, "        state.where_raw(clause, binds)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {{"
+        "    fn query_where_exists<'db>(state: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        query.where_exists(clause, binds)").unwrap();
+    writeln!(out, "        state.where_exists_raw(clause, binds)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {{"
+        "    fn query_order_raw<'db>(state: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        query.order_by_raw(expr)").unwrap();
+    writeln!(out, "        state.order_raw(expr)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {{"
+        "    fn query_select_raw<'db>(state: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        query.select_raw(expr)").unwrap();
+    writeln!(out, "        state.select_raw(expr)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {{"
+        "    fn query_join_raw<'db>(state: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        query.inner_join_raw(table, on_clause, binds)").unwrap();
+    writeln!(out, "        state.join_raw(\"INNER JOIN\", table, on_clause, binds)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
     out.push_str(&render_create_model_impl(
@@ -8349,45 +8383,45 @@ fn render_model(
         format!("<Self as core_db::common::model_api::QueryField<{model_title}Model>>::Value");
     writeln!(
         out,
-        "    fn where_col<'db>(field: Self, query: {model_query_ty}, op: Op, value: {model_query_value_ty}) -> {model_query_ty} {{"
+        "    fn where_col<'db>(field: Self, state: {model_query_ty}, op: Op, value: {model_query_value_ty}) -> {model_query_ty} {{"
     )
     .unwrap();
-    writeln!(out, "        query.where_col(field, op, value)").unwrap();
+    writeln!(out, "        state.where_col_str(field.as_sql(), op, value)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn or_where_col<'db>(field: Self, query: {model_query_ty}, op: Op, value: {model_query_value_ty}) -> {model_query_ty} {{"
+        "    fn or_where_col<'db>(field: Self, state: {model_query_ty}, op: Op, value: {model_query_value_ty}) -> {model_query_ty} {{"
     )
     .unwrap();
-    writeln!(out, "        query.or_where_col(field, op, value)").unwrap();
+    writeln!(out, "        state.or_where_col_str(field.as_sql(), op, value)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn where_in<'db>(field: Self, query: {model_query_ty}, values: &[{model_query_value_ty}]) -> {model_query_ty} {{"
+        "    fn where_in<'db>(field: Self, state: {model_query_ty}, values: &[{model_query_value_ty}]) -> {model_query_ty} {{"
     )
     .unwrap();
-    writeln!(out, "        query.where_in(field, values)").unwrap();
+    writeln!(out, "        state.where_in_str(field.as_sql(), values)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn order_by<'db>(field: Self, query: {model_query_ty}, dir: OrderDir) -> {model_query_ty} {{"
+        "    fn order_by<'db>(field: Self, state: {model_query_ty}, dir: OrderDir) -> {model_query_ty} {{"
     )
     .unwrap();
-    writeln!(out, "        query.order_by(field, dir)").unwrap();
+    writeln!(out, "        state.order_by_str(field.as_sql(), dir)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn where_null<'db>(field: Self, query: {model_query_ty}) -> {model_query_ty} {{"
+        "    fn where_null<'db>(field: Self, state: {model_query_ty}) -> {model_query_ty} {{"
     )
     .unwrap();
-    writeln!(out, "        query.where_null(field)").unwrap();
+    writeln!(out, "        state.where_null_str(field.as_sql())").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn where_not_null<'db>(field: Self, query: {model_query_ty}) -> {model_query_ty} {{"
+        "    fn where_not_null<'db>(field: Self, state: {model_query_ty}) -> {model_query_ty} {{"
     )
     .unwrap();
-    writeln!(out, "        query.where_not_null(field)").unwrap();
+    writeln!(out, "        state.where_not_null_str(field.as_sql())").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
     out.push_str(&render_typed_query_field_impl(
@@ -8418,10 +8452,10 @@ fn render_model(
             .unwrap();
             writeln!(
                 out,
-                "    fn include<'db>(_relation: Self, query: {model_query_ty}) -> {model_query_ty} {{"
+                "    fn include<'db>(_relation: Self, state: {model_query_ty}) -> {model_query_ty} {{"
             )
             .unwrap();
-            writeln!(out, "        query").unwrap();
+            writeln!(out, "        state").unwrap();
             writeln!(out, "    }}").unwrap();
             writeln!(out, "}}\n").unwrap();
 
@@ -8433,7 +8467,7 @@ fn render_model(
             writeln!(out, "    type Target = {target_model_title}Model;").unwrap();
             writeln!(
                 out,
-                "    fn where_has<'db, F>(_relation: Self, query: {model_query_ty}, scope: F) -> {model_query_ty}"
+                "    fn where_has<'db, F>(_relation: Self, state: {model_query_ty}, scope: F) -> {model_query_ty}"
             )
             .unwrap();
             writeln!(out, "    where").unwrap();
@@ -8443,11 +8477,11 @@ fn render_model(
             )
             .unwrap();
             writeln!(out, "    {{").unwrap();
-            writeln!(out, "        query.where_has_{rel_snake}(scope)").unwrap();
+            writeln!(out, "        {query_ident}::from_state(state).where_has_{rel_snake}(scope).into_state()").unwrap();
             writeln!(out, "    }}").unwrap();
             writeln!(
                 out,
-                "    fn or_where_has<'db, F>(_relation: Self, query: {model_query_ty}, scope: F) -> {model_query_ty}"
+                "    fn or_where_has<'db, F>(_relation: Self, state: {model_query_ty}, scope: F) -> {model_query_ty}"
             )
             .unwrap();
             writeln!(out, "    where").unwrap();
@@ -8457,7 +8491,7 @@ fn render_model(
             )
             .unwrap();
             writeln!(out, "    {{").unwrap();
-            writeln!(out, "        query.or_where_has_{rel_snake}(scope)").unwrap();
+            writeln!(out, "        {query_ident}::from_state(state).or_where_has_{rel_snake}(scope).into_state()").unwrap();
             writeln!(out, "    }}").unwrap();
             writeln!(out, "}}\n").unwrap();
 

@@ -333,10 +333,10 @@ pub struct Article {
 
     assert!(article_rs.contains("(\"author__profile\", \"display_name\")"));
     assert!(article_rs.contains(
-        "Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_col(ProfileCol::Id, Op::Eq, bind)))))"
+        "Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_col(ProfileDbCol::Id, Op::Eq, bind)))))"
     ));
     assert!(article_rs.contains(
-        "Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_col(ProfileCol::DisplayName, Op::Like, pattern.clone())))))"
+        "Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_col(ProfileDbCol::DisplayName, Op::Like, pattern.clone())))))"
     ));
 
     fs::remove_dir_all(root).expect("failed to remove temp dir");
