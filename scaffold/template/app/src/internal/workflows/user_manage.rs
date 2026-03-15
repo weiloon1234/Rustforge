@@ -81,8 +81,13 @@ pub async fn update(
     req: UpdateUserInput,
 ) -> Result<UserRecord, AppError> {
     let existing = detail(state, id).await?;
+    let scope = DbConn::pool(&state.db)
+        .begin_scope()
+        .await
+        .map_err(AppError::from)?;
+    let conn = scope.conn();
     let mut update = Ok(
-        UserModel::query(DbConn::pool(&state.db))
+        UserModel::query(conn.clone())
             .where_col(UserCol::ID, Op::Eq, id)
             .patch(),
     );
@@ -180,7 +185,9 @@ pub async fn update(
     }
 
     // Revoke all tokens so the user must re-login with updated credentials.
-    let _ = user_guard::revoke_tokens(DbConn::pool(&state.db), &id.to_string()).await;
+    let _ = user_guard::revoke_tokens(conn, &id.to_string()).await;
+
+    scope.commit().await.map_err(AppError::from)?;
 
     detail(state, id).await
 }
@@ -192,7 +199,13 @@ pub async fn set_ban(
 ) -> Result<UserRecord, AppError> {
     let _existing = detail(state, id).await?;
 
-    let affected = UserModel::query(DbConn::pool(&state.db))
+    let scope = DbConn::pool(&state.db)
+        .begin_scope()
+        .await
+        .map_err(AppError::from)?;
+    let conn = scope.conn();
+
+    let affected = UserModel::query(conn.clone())
         .where_col(UserCol::ID, Op::Eq, id)
         .patch()
         .assign(UserCol::BAN, ban)
@@ -206,7 +219,9 @@ pub async fn set_ban(
     }
 
     // Revoke all tokens on ban/unban so the user must re-login.
-    let _ = user_guard::revoke_tokens(DbConn::pool(&state.db), &id.to_string()).await;
+    let _ = user_guard::revoke_tokens(conn, &id.to_string()).await;
+
+    scope.commit().await.map_err(AppError::from)?;
 
     detail(state, id).await
 }
@@ -219,13 +234,16 @@ pub async fn batch_resolve_usernames(
         return Ok(Vec::new());
     }
 
-    let mut results = Vec::new();
-    for &id in ids {
-        if let Ok(Some(user)) = UserModel::find(DbConn::pool(&state.db), id).await {
-            results.push((user.id, user.username, user.name));
-        }
-    }
-    Ok(results)
+    let users = UserModel::query(DbConn::pool(&state.db))
+        .where_in(UserCol::ID, ids.iter().copied())
+        .all()
+        .await
+        .map_err(AppError::from)?;
+
+    Ok(users
+        .into_iter()
+        .map(|u| (u.id, u.username, u.name))
+        .collect())
 }
 
 async fn generate_unique_uuid(state: &AppApiState) -> Result<String, AppError> {

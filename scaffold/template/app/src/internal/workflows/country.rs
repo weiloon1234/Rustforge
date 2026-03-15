@@ -90,14 +90,26 @@ pub async fn set_default(
     let iso2 =
         normalize_country_iso2(iso2).ok_or_else(|| AppError::NotFound(t("Country not found")))?;
 
+    let scope = DbConn::pool(&state.db)
+        .begin_scope()
+        .await
+        .map_err(AppError::from)?;
+    let conn = scope.conn();
+
     // Clear all defaults first
-    sqlx::query("UPDATE countries SET is_default = 0, updated_at = NOW()")
-        .execute(&state.db)
+    CountryModel::query(conn.clone())
+        .where_col(CountryCol::IS_DEFAULT, Op::Eq, CountryIsDefault::Yes)
+        .patch()
+        .assign(CountryCol::IS_DEFAULT, CountryIsDefault::No)
+        .map_err(AppError::from)?
+        .assign(CountryCol::UPDATED_AT, time::OffsetDateTime::now_utc())
+        .map_err(AppError::from)?
+        .save()
         .await
         .map_err(AppError::from)?;
 
     // Set the target as default
-    let affected = CountryModel::query(DbConn::pool(&state.db))
+    let affected = CountryModel::query(conn.clone())
         .where_col(CountryCol::ISO2, Op::Eq, iso2.clone())
         .patch()
         .assign(CountryCol::IS_DEFAULT, CountryIsDefault::Yes)
@@ -112,12 +124,14 @@ pub async fn set_default(
         return Err(AppError::NotFound(t("Country not found")));
     }
 
-    let updated = CountryModel::query(DbConn::pool(&state.db))
+    let updated = CountryModel::query(conn)
         .where_col(CountryCol::ISO2, Op::Eq, iso2)
         .first()
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(t("Country not found")))?;
+
+    scope.commit().await.map_err(AppError::from)?;
 
     invalidate_bootstrap_country_cache(state).await?;
     Ok(country_record_to_runtime(updated))

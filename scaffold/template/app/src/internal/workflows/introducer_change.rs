@@ -74,7 +74,13 @@ pub async fn change_introducer(
 
     let from_user_id = target_user.introducer_user_id;
 
-    UserModel::query(DbConn::pool(&state.db))
+    let scope = DbConn::pool(&state.db)
+        .begin_scope()
+        .await
+        .map_err(AppError::from)?;
+    let conn = scope.conn();
+
+    UserModel::query(conn.clone())
         .where_col(UserCol::ID, Op::Eq, target_user.id)
         .patch()
         .assign(UserCol::INTRODUCER_USER_ID, Some(new_introducer.id))
@@ -83,9 +89,9 @@ pub async fn change_introducer(
         .await
         .map_err(AppError::from)?;
 
-    let _ = user_guard::revoke_tokens(DbConn::pool(&state.db), &target_user.id.to_string()).await;
+    let _ = user_guard::revoke_tokens(conn.clone(), &target_user.id.to_string()).await;
 
-    let log = IntroducerChangeModel::create(DbConn::pool(&state.db))
+    let log = IntroducerChangeModel::create(conn)
         .set(IntroducerChangeCol::ID, generate_snowflake_i64())
         .map_err(AppError::from)?
         .set(IntroducerChangeCol::USER_ID, target_user.id)
@@ -101,6 +107,8 @@ pub async fn change_introducer(
         .save()
         .await
         .map_err(AppError::from)?;
+
+    scope.commit().await.map_err(AppError::from)?;
 
     Ok(log)
 }

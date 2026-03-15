@@ -3,7 +3,7 @@ use core_db::platform::attachments::types::AttachmentInput;
 use core_i18n::t;
 use core_web::error::AppError;
 use generated::localized;
-use generated::models::{BankCol, BankModel, BankRecord};
+use generated::models::{BankCol, BankModel, BankRecord, CountryCol, CountryModel};
 use time::OffsetDateTime;
 
 use crate::{
@@ -23,13 +23,11 @@ pub async fn create(
     req: AdminBankInput,
     logo: Option<AttachmentInput>,
 ) -> Result<BankRecord, AppError> {
-    let country_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM countries WHERE iso2 = $1)",
-    )
-    .bind(&req.country_iso2)
-    .fetch_one(&state.db)
-    .await
-    .map_err(AppError::from)?;
+    let country_exists = CountryModel::query(DbConn::pool(&state.db))
+        .where_col(CountryCol::ISO2, Op::Eq, req.country_iso2.clone())
+        .count()
+        .await
+        .map_err(AppError::from)? > 0;
 
     if !country_exists {
         return Err(AppError::BadRequest(t("Country not found")));
@@ -71,13 +69,11 @@ pub async fn update(
     req: AdminBankInput,
     logo: Option<AttachmentInput>,
 ) -> Result<BankRecord, AppError> {
-    let country_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM countries WHERE iso2 = $1)",
-    )
-    .bind(&req.country_iso2)
-    .fetch_one(&state.db)
-    .await
-    .map_err(AppError::from)?;
+    let country_exists = CountryModel::query(DbConn::pool(&state.db))
+        .where_col(CountryCol::ISO2, Op::Eq, req.country_iso2.clone())
+        .count()
+        .await
+        .map_err(AppError::from)? > 0;
 
     if !country_exists {
         return Err(AppError::BadRequest(t("Country not found")));
