@@ -74,8 +74,11 @@ dev-frontend: ensure-frontend-deps
 .PHONY: dev
 dev: ensure-frontend-deps
 	@command -v cargo-watch >/dev/null 2>&1 || (echo "cargo-watch not found. Run: make install-tools" && exit 1)
+	@echo "Building websocket-server..."
+	@cargo build -p app --bin websocket-server
 	@trap 'kill 0' EXIT; \
 	RUN_WORKER=true cargo watch -x "run -p app --bin api-server" & \
+	./target/debug/websocket-server & \
 	npm --prefix frontend run dev:user & \
 	npm --prefix frontend run dev:admin & \
 	wait

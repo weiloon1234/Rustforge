@@ -5,6 +5,7 @@ import Sidebar from "@user/components/Sidebar";
 import BottomNav from "@user/components/BottomNav";
 import { ModalOutlet } from "@shared/components";
 import { useAuthStore } from "@user/stores/auth";
+import { useRealtimeStore } from "@user/stores/realtime";
 import { userLocalePersistence } from "@user/locale";
 
 const MOBILE_BREAKPOINT = 768;
@@ -23,10 +24,21 @@ function useIsMobile() {
 export default function UserLayout() {
   const isMobile = useIsMobile();
   const account = useAuthStore((s) => s.account);
+  const connect = useRealtimeStore((s) => s.connect);
+  const disconnect = useRealtimeStore((s) => s.disconnect);
 
   useEffect(() => {
     void userLocalePersistence.syncFromAccount(account);
   }, [account]);
+
+  useEffect(() => {
+    // Small delay to survive React StrictMode's mount→unmount→remount cycle
+    const timer = setTimeout(() => connect(), 50);
+    return () => {
+      clearTimeout(timer);
+      disconnect();
+    };
+  }, [connect, disconnect]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
