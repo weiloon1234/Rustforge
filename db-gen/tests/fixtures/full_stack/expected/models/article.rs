@@ -14,7 +14,7 @@ use core_db::platform::attachments::types::{Attachment, AttachmentInput, Attachm
 use uuid::Uuid;
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::model_api::{Column, Create, CreateState, ManyRelation, ModelDef, OneRelation, Patch, PatchState, Query, QueryState};
+use core_db::common::model_api::{ColExpr, Column, Create, CreateState, ManyRelation, ModelDef, OneRelation, Patch, PatchState, Query, QueryState};
 use core_db::platform::meta::types::MetaMap;
 use crate::generated::localized;
 use core_i18n::current_locale;
@@ -1187,6 +1187,8 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
     const DEFAULT_SELECT: &'static str = "id, author_id, status, is_system";
     const HAS_SOFT_DELETE: bool = false;
     const SOFT_DELETE_COL: &'static str = "";
+    const HAS_CREATED_AT: bool = false;
+    const HAS_UPDATED_AT: bool = false;
     fn query_all<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
         Box::pin(async move {
             let (sql, binds) = state.to_select_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);
@@ -1433,6 +1435,10 @@ impl core_db::common::model_api::PatchNumericField<ArticleModel> for ArticleDbCo
             _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
         }
     }
+}
+
+impl core_db::common::model_api::ColExpr for ArticleDbCol {
+    fn col_sql(self) -> &'static str { self.as_sql() }
 }
 
 impl core_db::common::model_api::QueryField<ArticleModel> for ArticleDbCol {

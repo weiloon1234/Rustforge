@@ -23,6 +23,8 @@ pub trait QueryModel: ModelDef {
     const DEFAULT_SELECT: &'static str;
     const HAS_SOFT_DELETE: bool;
     const SOFT_DELETE_COL: &'static str;
+    const HAS_CREATED_AT: bool;
+    const HAS_UPDATED_AT: bool;
 
     fn query_all<'db>(state: QueryState<'db>) -> BoxModelFuture<'db, Vec<Self::Record>>;
     fn query_first<'db>(state: QueryState<'db>) -> BoxModelFuture<'db, Option<Self::Record>>;
@@ -100,6 +102,18 @@ pub trait CountRelation<M: ModelDef>: Copy {
     fn name(relation: Self) -> &'static str;
     fn target_table(relation: Self) -> &'static str;
     fn foreign_key(relation: Self) -> &'static str;
+}
+
+/// Trait for types that represent a SQL column expression.
+/// Implemented by `Column<M, T>` (typed) and per-model `DbCol` enums (untyped).
+pub trait ColExpr: Copy {
+    fn col_sql(self) -> &'static str;
+}
+
+impl<M, T> ColExpr for Column<M, T> {
+    fn col_sql(self) -> &'static str {
+        self.as_sql()
+    }
 }
 
 pub trait CreateModel: ModelDef {
@@ -534,6 +548,282 @@ impl<'db, M: QueryModel> Query<'db, M> {
             state: M::patch_from_query(self.state),
             _marker: PhantomData,
         }
+    }
+
+    // ── Aggregate terminal methods ────────────────────────────────────
+
+    pub async fn sum(self, col: impl ColExpr) -> Result<Option<f64>> {
+        self.state
+            .aggregate_scalar(
+                &format!("SUM({}::DOUBLE PRECISION)", col.col_sql()),
+                M::TABLE,
+                M::HAS_SOFT_DELETE,
+                M::SOFT_DELETE_COL,
+            )
+            .await
+    }
+
+    pub async fn avg(self, col: impl ColExpr) -> Result<Option<f64>> {
+        self.state
+            .aggregate_scalar(
+                &format!("AVG({}::DOUBLE PRECISION)", col.col_sql()),
+                M::TABLE,
+                M::HAS_SOFT_DELETE,
+                M::SOFT_DELETE_COL,
+            )
+            .await
+    }
+
+    pub async fn min_val(self, col: impl ColExpr) -> Result<Option<f64>> {
+        self.state
+            .aggregate_scalar(
+                &format!("MIN({}::DOUBLE PRECISION)", col.col_sql()),
+                M::TABLE,
+                M::HAS_SOFT_DELETE,
+                M::SOFT_DELETE_COL,
+            )
+            .await
+    }
+
+    pub async fn max_val(self, col: impl ColExpr) -> Result<Option<f64>> {
+        self.state
+            .aggregate_scalar(
+                &format!("MAX({}::DOUBLE PRECISION)", col.col_sql()),
+                M::TABLE,
+                M::HAS_SOFT_DELETE,
+                M::SOFT_DELETE_COL,
+            )
+            .await
+    }
+
+    pub async fn exists(self) -> Result<bool> {
+        Ok(self.count().await? > 0)
+    }
+
+    // ── Increment / Decrement ─────────────────────────────────────────
+
+    pub async fn increment(self, col: impl ColExpr, amount: i64) -> Result<u64> {
+        self.state
+            .execute_increment(
+                col.col_sql(),
+                BindValue::I64(amount),
+                M::TABLE,
+                M::HAS_SOFT_DELETE,
+                M::SOFT_DELETE_COL,
+                M::HAS_UPDATED_AT,
+            )
+            .await
+    }
+
+    pub async fn decrement(self, col: impl ColExpr, amount: i64) -> Result<u64> {
+        self.increment(col, -amount).await
+    }
+
+    // ── Fail-fast terminal methods ────────────────────────────────────
+
+    pub async fn first_or_fail(self) -> Result<M::Record> {
+        self.first()
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("{}: record not found", M::TABLE))
+    }
+
+    pub async fn find_or_fail(self, id: M::Pk) -> Result<M::Record> {
+        self.find(id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("{}: record not found", M::TABLE))
+    }
+
+    pub async fn sole(self) -> Result<M::Record> {
+        let mut rows = self.limit(2).all().await?;
+        match rows.len() {
+            0 => anyhow::bail!("{}: no record found", M::TABLE),
+            1 => Ok(rows.remove(0)),
+            _ => anyhow::bail!("{}: multiple records found", M::TABLE),
+        }
+    }
+
+    // ── Chunk iteration ───────────────────────────────────────────────
+
+    pub async fn chunk<F, Fut>(self, size: i64, mut callback: F) -> Result<()>
+    where
+        F: FnMut(Vec<M::Record>) -> Fut,
+        Fut: std::future::Future<Output = Result<bool>>,
+    {
+        let mut page = 0i64;
+        loop {
+            let page_state = {
+                let mut s = self.state.clone();
+                s.offset = Some(page * size);
+                s.limit = Some(size);
+                s
+            };
+            let rows = M::query_all(page_state).await?;
+            if rows.is_empty() {
+                break;
+            }
+            let should_continue = callback(rows).await?;
+            if !should_continue {
+                break;
+            }
+            page += 1;
+        }
+        Ok(())
+    }
+
+    // ── Convenience builder methods ───────────────────────────────────
+
+    pub fn take(self, n: i64) -> Self {
+        self.limit(n)
+    }
+
+    pub fn skip(self, n: i64) -> Self {
+        self.offset(n)
+    }
+
+    pub fn latest(self) -> Self {
+        if M::HAS_CREATED_AT {
+            Self {
+                state: self.state.order_by_str("created_at", OrderDir::Desc),
+                _marker: PhantomData,
+            }
+        } else {
+            Self {
+                state: self.state.order_by_str(M::PK_COL, OrderDir::Desc),
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    pub fn oldest(self) -> Self {
+        if M::HAS_CREATED_AT {
+            Self {
+                state: self.state.order_by_str("created_at", OrderDir::Asc),
+                _marker: PhantomData,
+            }
+        } else {
+            Self {
+                state: self.state.order_by_str(M::PK_COL, OrderDir::Asc),
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    pub fn in_random_order(self) -> Self {
+        Self {
+            state: self.state.order_raw("RANDOM()".to_string()),
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn distinct(self) -> Self {
+        Self {
+            state: self.state.distinct(),
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn for_share(self) -> Self {
+        Self {
+            state: self.state.for_share(),
+            _marker: PhantomData,
+        }
+    }
+
+    // ── Additional WHERE methods ──────────────────────────────────────
+
+    pub fn where_between<F, V>(self, field: F, low: V, high: V) -> Self
+    where
+        F: ColExpr,
+        V: Into<BindValue>,
+    {
+        Self {
+            state: self.state.where_between_str(field.col_sql(), low.into(), high.into()),
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn where_not_in<F, I, V>(self, field: F, values: I) -> Self
+    where
+        F: ColExpr,
+        I: IntoIterator<Item = V>,
+        V: Into<BindValue>,
+    {
+        let bind_values: Vec<BindValue> = values.into_iter().map(Into::into).collect();
+        Self {
+            state: self.state.where_not_in_str(field.col_sql(), &bind_values),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Conditionally apply a scope. Laravel's `when()`.
+    pub fn when<F>(self, condition: bool, scope: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        if condition {
+            scope(self)
+        } else {
+            self
+        }
+    }
+
+    /// Conditionally apply a scope, with an else branch.
+    pub fn when_else<F, G>(self, condition: bool, if_true: F, if_false: G) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+        G: FnOnce(Self) -> Self,
+    {
+        if condition {
+            if_true(self)
+        } else {
+            if_false(self)
+        }
+    }
+
+    // ── Soft delete: restore ──────────────────────────────────────────
+
+    pub async fn restore(self) -> Result<u64> {
+        if !M::HAS_SOFT_DELETE {
+            anyhow::bail!("{}: restore() not supported (no soft delete)", M::TABLE);
+        }
+        self.state
+            .execute_restore(M::TABLE, M::SOFT_DELETE_COL, M::HAS_UPDATED_AT)
+            .await
+    }
+
+    /// Include soft-deleted records (Laravel's withTrashed).
+    pub fn with_deleted(self) -> Self {
+        Self {
+            state: self.state.with_deleted(),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Only return soft-deleted records (Laravel's onlyTrashed).
+    pub fn only_deleted(self) -> Self {
+        Self {
+            state: self.state.only_deleted(),
+            _marker: PhantomData,
+        }
+    }
+
+    // ── Pluck helpers ─────────────────────────────────────────────────
+
+    pub async fn pluck<K, E>(self, extract: E) -> Result<Vec<K>>
+    where
+        E: Fn(&M::Record) -> K,
+    {
+        let rows = self.all().await?;
+        Ok(rows.iter().map(|r| extract(r)).collect())
+    }
+
+    pub async fn pluck_map<K, V, E>(self, extract: E) -> Result<std::collections::HashMap<K, V>>
+    where
+        K: Eq + std::hash::Hash,
+        E: Fn(&M::Record) -> (K, V),
+    {
+        let rows = self.all().await?;
+        Ok(rows.iter().map(|r| extract(r)).collect())
     }
 }
 
@@ -1342,6 +1632,138 @@ impl<'db> QueryState<'db> {
         all_binds.extend(self.join_binds);
         all_binds.extend(self.having_binds);
         (sql, all_binds)
+    }
+
+    // ── Aggregate execution ───────────────────────────────────────────
+
+    pub async fn aggregate_scalar(
+        self,
+        agg_expr: &str,
+        table: &str,
+        has_soft_delete: bool,
+        soft_delete_col: &str,
+    ) -> Result<Option<f64>> {
+        use crate::common::sql::{bind_scalar, PgQueryScalar};
+
+        let mut where_sql = self.where_sql;
+        Self::apply_soft_delete(
+            &mut where_sql,
+            has_soft_delete,
+            soft_delete_col,
+            self.with_deleted,
+            self.only_deleted,
+        );
+
+        let table_name = self.from_sql.as_deref().unwrap_or(table);
+        let from_clause = if self.join_sql.is_empty() {
+            format!("FROM {}", table_name)
+        } else {
+            format!("FROM {} {}", table_name, self.join_sql.join(" "))
+        };
+        let where_clause = if where_sql.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", where_sql.join(" AND "))
+        };
+        let sql = format!("SELECT {} {}{}", agg_expr, from_clause, where_clause);
+
+        let mut q: PgQueryScalar<'_, Option<f64>> = sqlx::query_scalar(&sql);
+        for b in &self.binds {
+            q = bind_scalar(q, b.clone());
+        }
+        for b in &self.join_binds {
+            q = bind_scalar(q, b.clone());
+        }
+        let result = self.db.fetch_scalar(q).await?;
+        Ok(result)
+    }
+
+    // ── Increment execution ───────────────────────────────────────────
+
+    pub async fn execute_increment(
+        self,
+        col_sql: &str,
+        amount: BindValue,
+        table: &str,
+        has_soft_delete: bool,
+        soft_delete_col: &str,
+        has_updated_at: bool,
+    ) -> Result<u64> {
+        use crate::common::sql::{bind_query, renumber_placeholders};
+
+        let mut where_sql = self.where_sql;
+        Self::apply_soft_delete(
+            &mut where_sql,
+            has_soft_delete,
+            soft_delete_col,
+            self.with_deleted,
+            self.only_deleted,
+        );
+
+        let mut set_parts = format!("{} = {} + $1", col_sql, col_sql);
+        let mut bind_offset = 1;
+
+        if has_updated_at {
+            set_parts.push_str(", updated_at = NOW()");
+        }
+
+        let mut sql = format!("UPDATE {} SET {}", table, set_parts);
+        if !where_sql.is_empty() {
+            let renumbered: Vec<String> = where_sql
+                .iter()
+                .map(|clause| renumber_placeholders(clause, bind_offset + 1))
+                .collect();
+            sql.push_str(" WHERE ");
+            sql.push_str(&renumbered.join(" AND "));
+        }
+
+        let mut q = sqlx::query(&sql);
+        q = bind_query(q, amount);
+        for b in self.binds {
+            q = bind_query(q, b);
+        }
+        let result = self.db.execute(q).await?;
+        Ok(result.rows_affected())
+    }
+
+    // ── Restore (soft-delete undo) ────────────────────────────────────
+
+    pub async fn execute_restore(
+        self,
+        table: &str,
+        soft_delete_col: &str,
+        has_updated_at: bool,
+    ) -> Result<u64> {
+        use crate::common::sql::bind_query;
+
+        if self.where_sql.is_empty() {
+            anyhow::bail!("restore: no conditions set");
+        }
+        if self.limit.is_some() {
+            anyhow::bail!("restore: does not support limit; add where clauses");
+        }
+
+        let mut where_sql = self.where_sql;
+        // Only restore records that ARE deleted
+        where_sql.push(format!("{} IS NOT NULL", soft_delete_col));
+
+        let mut set_clause = format!("{} = NULL", soft_delete_col);
+        if has_updated_at {
+            set_clause.push_str(", updated_at = NOW()");
+        }
+
+        let mut sql = format!("UPDATE {} SET {}", table, set_clause);
+        if !where_sql.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&where_sql.join(" AND "));
+        }
+
+        let mut q = sqlx::query(&sql);
+        for b in self.binds {
+            q = bind_query(q, b);
+        }
+        let result = self.db.execute(q).await?;
+        Ok(result.rows_affected())
     }
 }
 

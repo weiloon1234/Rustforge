@@ -4907,7 +4907,7 @@ fn render_model(
     .unwrap();
     writeln!(
         imports,
-        "use core_db::common::model_api::{{Column, Create, CreateState, ManyRelation, ModelDef, OneRelation, Patch, PatchState, Query, QueryState}};"
+        "use core_db::common::model_api::{{ColExpr, Column, Create, CreateState, ManyRelation, ModelDef, OneRelation, Patch, PatchState, Query, QueryState}};"
     )
     .unwrap();
     if has_meta {
@@ -8307,6 +8307,8 @@ fn render_model(
         let sd_col = if has_soft_delete { "deleted_at" } else { "" };
         writeln!(out, "    const SOFT_DELETE_COL: &'static str = \"{sd_col}\";").unwrap();
     }
+    writeln!(out, "    const HAS_CREATED_AT: bool = {has_created_at};").unwrap();
+    writeln!(out, "    const HAS_UPDATED_AT: bool = {has_updated_at};").unwrap();
     writeln!(
         out,
         "    fn query_all<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {{"
@@ -8438,6 +8440,13 @@ fn render_model(
         &col_ident,
         &db_fields,
     ));
+    writeln!(
+        out,
+        "impl core_db::common::model_api::ColExpr for {col_ident} {{"
+    )
+    .unwrap();
+    writeln!(out, "    fn col_sql(self) -> &'static str {{ self.as_sql() }}").unwrap();
+    writeln!(out, "}}\n").unwrap();
     writeln!(
         out,
         "impl core_db::common::model_api::QueryField<{model_title}Model> for {col_ident} {{"
