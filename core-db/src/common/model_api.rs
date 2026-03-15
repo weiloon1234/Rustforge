@@ -1701,7 +1701,6 @@ impl<'db> QueryState<'db> {
         );
 
         let mut set_parts = format!("{} = {} + $1", col_sql, col_sql);
-        let mut bind_offset = 1;
 
         if has_updated_at {
             set_parts.push_str(", updated_at = NOW()");
@@ -1711,7 +1710,7 @@ impl<'db> QueryState<'db> {
         if !where_sql.is_empty() {
             let renumbered: Vec<String> = where_sql
                 .iter()
-                .map(|clause| renumber_placeholders(clause, bind_offset + 1))
+                .map(|clause| renumber_placeholders(clause, 2))
                 .collect();
             sql.push_str(" WHERE ");
             sql.push_str(&renumbered.join(" AND "));
