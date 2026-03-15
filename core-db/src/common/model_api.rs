@@ -20,57 +20,23 @@ pub trait ModelDef: Sized + 'static {
 }
 
 pub trait QueryModel: ModelDef {
-    type InnerQuery<'db>: Clone + Send + 'db;
+    const DEFAULT_SELECT: &'static str;
+    const HAS_SOFT_DELETE: bool;
+    const SOFT_DELETE_COL: &'static str;
 
-    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db>;
-    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db>;
-    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db>;
-    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db>;
-    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db>;
-    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db>;
-    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
-    where
-        F: FnOnce(Query<'db, Self>) -> Query<'db, Self>;
-    fn query_or_where_group<'db, F>(
-        query: Self::InnerQuery<'db>,
-        scope: F,
-    ) -> Self::InnerQuery<'db>
-    where
-        F: FnOnce(Query<'db, Self>) -> Query<'db, Self>;
-    fn query_all<'db>(query: Self::InnerQuery<'db>) -> BoxModelFuture<'db, Vec<Self::Record>>;
-    fn query_first<'db>(query: Self::InnerQuery<'db>) -> BoxModelFuture<'db, Option<Self::Record>>;
+    fn query_all<'db>(state: QueryState<'db>) -> BoxModelFuture<'db, Vec<Self::Record>>;
+    fn query_first<'db>(state: QueryState<'db>) -> BoxModelFuture<'db, Option<Self::Record>>;
     fn query_find<'db>(
-        query: Self::InnerQuery<'db>,
+        state: QueryState<'db>,
         id: Self::Pk,
     ) -> BoxModelFuture<'db, Option<Self::Record>>;
-    fn query_count<'db>(query: Self::InnerQuery<'db>) -> BoxModelFuture<'db, i64>;
-    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> BoxModelFuture<'db, u64>;
+    fn query_count<'db>(state: QueryState<'db>) -> BoxModelFuture<'db, i64>;
+    fn query_delete<'db>(state: QueryState<'db>) -> BoxModelFuture<'db, u64>;
     fn query_paginate<'db>(
-        query: Self::InnerQuery<'db>,
+        state: QueryState<'db>,
         page: i64,
         per_page: i64,
     ) -> BoxModelFuture<'db, Page<Self::Record>>;
-}
-
-pub trait UnsafeQueryModel: QueryModel {
-    fn query_where_raw<'db>(
-        query: Self::InnerQuery<'db>,
-        clause: String,
-        binds: Vec<BindValue>,
-    ) -> Self::InnerQuery<'db>;
-    fn query_where_exists<'db>(
-        query: Self::InnerQuery<'db>,
-        clause: String,
-        binds: Vec<BindValue>,
-    ) -> Self::InnerQuery<'db>;
-    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db>;
-    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db>;
-    fn query_join_raw<'db>(
-        query: Self::InnerQuery<'db>,
-        table: String,
-        on_clause: String,
-        binds: Vec<BindValue>,
-    ) -> Self::InnerQuery<'db>;
 }
 
 pub trait QueryField<M: QueryModel>: Copy {
@@ -78,42 +44,42 @@ pub trait QueryField<M: QueryModel>: Copy {
 
     fn where_col<'db>(
         field: Self,
-        query: M::InnerQuery<'db>,
+        state: QueryState<'db>,
         op: Op,
         value: Self::Value,
-    ) -> M::InnerQuery<'db>;
+    ) -> QueryState<'db>;
     fn or_where_col<'db>(
         field: Self,
-        query: M::InnerQuery<'db>,
+        state: QueryState<'db>,
         op: Op,
         value: Self::Value,
-    ) -> M::InnerQuery<'db>;
+    ) -> QueryState<'db>;
     fn where_in<'db>(
         field: Self,
-        query: M::InnerQuery<'db>,
+        state: QueryState<'db>,
         values: &[Self::Value],
-    ) -> M::InnerQuery<'db>;
-    fn order_by<'db>(field: Self, query: M::InnerQuery<'db>, dir: OrderDir) -> M::InnerQuery<'db>;
-    fn where_null<'db>(field: Self, query: M::InnerQuery<'db>) -> M::InnerQuery<'db>;
-    fn where_not_null<'db>(field: Self, query: M::InnerQuery<'db>) -> M::InnerQuery<'db>;
+    ) -> QueryState<'db>;
+    fn order_by<'db>(field: Self, state: QueryState<'db>, dir: OrderDir) -> QueryState<'db>;
+    fn where_null<'db>(field: Self, state: QueryState<'db>) -> QueryState<'db>;
+    fn where_not_null<'db>(field: Self, state: QueryState<'db>) -> QueryState<'db>;
 }
 
 pub trait IncludeRelation<M: QueryModel>: Copy {
-    fn include<'db>(relation: Self, query: M::InnerQuery<'db>) -> M::InnerQuery<'db>;
+    fn include<'db>(relation: Self, state: QueryState<'db>) -> QueryState<'db>;
 }
 
 pub trait WhereHasRelation<M: QueryModel>: Copy {
     type Target: QueryModel;
 
-    fn where_has<'db, F>(relation: Self, query: M::InnerQuery<'db>, scope: F) -> M::InnerQuery<'db>
+    fn where_has<'db, F>(relation: Self, state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>;
 
     fn or_where_has<'db, F>(
         relation: Self,
-        query: M::InnerQuery<'db>,
+        state: QueryState<'db>,
         scope: F,
-    ) -> M::InnerQuery<'db>
+    ) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>;
 }
@@ -137,10 +103,8 @@ pub trait CountRelation<M: ModelDef>: Copy {
 }
 
 pub trait CreateModel: ModelDef {
-    type InnerCreate<'db>: Send + 'db;
-
-    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db>;
-    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> BoxModelFuture<'db, Self::Record>;
+    fn create_save<'db>(state: CreateState<'db>) -> BoxModelFuture<'db, Self::Record>;
+    fn transform_create_value(col: &str, value: BindValue) -> Result<BindValue>;
 }
 
 pub trait CreateField<M: CreateModel>: Copy {
@@ -148,31 +112,28 @@ pub trait CreateField<M: CreateModel>: Copy {
 
     fn set<'db>(
         field: Self,
-        builder: M::InnerCreate<'db>,
+        state: CreateState<'db>,
         value: Self::Value,
-    ) -> Result<M::InnerCreate<'db>>;
+    ) -> Result<CreateState<'db>>;
 }
 
 pub trait CreateConflictField<M: CreateModel>: Copy {
     fn on_conflict_do_nothing<'db>(
-        builder: M::InnerCreate<'db>,
+        state: CreateState<'db>,
         fields: &[Self],
-    ) -> M::InnerCreate<'db>;
+    ) -> CreateState<'db>;
 
     fn on_conflict_update<'db>(
-        builder: M::InnerCreate<'db>,
+        state: CreateState<'db>,
         fields: &[Self],
-    ) -> M::InnerCreate<'db>;
+    ) -> CreateState<'db>;
 }
 
 pub trait PatchModel: ModelDef {
-    type InnerQuery<'db>: Clone + Send + 'db;
-    type InnerPatch<'db>: Send + 'db;
-
-    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db>;
-    fn patch_from_query<'db>(query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db>;
-    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> BoxModelFuture<'db, u64>;
-    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> BoxModelFuture<'db, Vec<Self::Record>>;
+    fn patch_from_query<'db>(state: QueryState<'db>) -> PatchState<'db>;
+    fn patch_save<'db>(state: PatchState<'db>) -> BoxModelFuture<'db, u64>;
+    fn patch_fetch<'db>(state: PatchState<'db>) -> BoxModelFuture<'db, Vec<Self::Record>>;
+    fn transform_patch_value(col: &str, value: BindValue) -> Result<BindValue>;
 }
 
 pub trait PatchAssignField<M: PatchModel>: Copy {
@@ -180,22 +141,22 @@ pub trait PatchAssignField<M: PatchModel>: Copy {
 
     fn assign<'db>(
         field: Self,
-        builder: M::InnerPatch<'db>,
+        state: PatchState<'db>,
         value: Self::Value,
-    ) -> Result<M::InnerPatch<'db>>;
+    ) -> Result<PatchState<'db>>;
 }
 
 pub trait PatchNumericField<M: PatchModel>: PatchAssignField<M> {
     fn increment<'db>(
         field: Self,
-        builder: M::InnerPatch<'db>,
+        state: PatchState<'db>,
         value: Self::Value,
-    ) -> Result<M::InnerPatch<'db>>;
+    ) -> Result<PatchState<'db>>;
     fn decrement<'db>(
         field: Self,
-        builder: M::InnerPatch<'db>,
+        state: PatchState<'db>,
         value: Self::Value,
-    ) -> Result<M::InnerPatch<'db>>;
+    ) -> Result<PatchState<'db>>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -318,14 +279,20 @@ impl<M: ModelDef, T, const KEY: usize> CountRelation<M> for ManyRelation<M, T, K
     }
 }
 
+// ---------------------------------------------------------------------------
+// Query wrapper
+// ---------------------------------------------------------------------------
+
 pub struct Query<'db, M: QueryModel> {
-    inner: M::InnerQuery<'db>,
+    state: QueryState<'db>,
+    _marker: PhantomData<M>,
 }
 
 impl<'db, M: QueryModel> Clone for Query<'db, M> {
     fn clone(&self) -> Self {
         Self {
-            inner: self.inner.clone(),
+            state: self.state.clone(),
+            _marker: PhantomData,
         }
     }
 }
@@ -333,22 +300,27 @@ impl<'db, M: QueryModel> Clone for Query<'db, M> {
 impl<'db, M: QueryModel> Query<'db, M> {
     pub fn new(db: impl Into<DbConn<'db>>) -> Self {
         Self {
-            inner: M::query_root(db.into(), None),
+            state: QueryState::new(db.into(), None, M::DEFAULT_SELECT),
+            _marker: PhantomData,
         }
     }
 
     pub fn new_with_base_url(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self {
         Self {
-            inner: M::query_root(db.into(), base_url),
+            state: QueryState::new(db.into(), base_url, M::DEFAULT_SELECT),
+            _marker: PhantomData,
         }
     }
 
-    pub fn from_inner(inner: M::InnerQuery<'db>) -> Self {
-        Self { inner }
+    pub fn from_inner(state: QueryState<'db>) -> Self {
+        Self {
+            state,
+            _marker: PhantomData,
+        }
     }
 
-    pub fn into_inner(self) -> M::InnerQuery<'db> {
-        self.inner
+    pub fn into_inner(self) -> QueryState<'db> {
+        self.state
     }
 
     pub fn where_col<F, V>(self, field: F, op: Op, value: V) -> Self
@@ -357,7 +329,8 @@ impl<'db, M: QueryModel> Query<'db, M> {
         V: Into<F::Value>,
     {
         Self {
-            inner: F::where_col(field, self.inner, op, value.into()),
+            state: F::where_col(field, self.state, op, value.into()),
+            _marker: PhantomData,
         }
     }
 
@@ -367,7 +340,8 @@ impl<'db, M: QueryModel> Query<'db, M> {
         V: Into<F::Value>,
     {
         Self {
-            inner: F::or_where_col(field, self.inner, op, value.into()),
+            state: F::or_where_col(field, self.state, op, value.into()),
+            _marker: PhantomData,
         }
     }
 
@@ -379,7 +353,8 @@ impl<'db, M: QueryModel> Query<'db, M> {
     {
         let values: Vec<F::Value> = values.into_iter().map(Into::into).collect();
         Self {
-            inner: F::where_in(field, self.inner, &values),
+            state: F::where_in(field, self.state, &values),
+            _marker: PhantomData,
         }
     }
 
@@ -388,7 +363,8 @@ impl<'db, M: QueryModel> Query<'db, M> {
         F: QueryField<M>,
     {
         Self {
-            inner: F::where_null(field, self.inner),
+            state: F::where_null(field, self.state),
+            _marker: PhantomData,
         }
     }
 
@@ -397,37 +373,43 @@ impl<'db, M: QueryModel> Query<'db, M> {
         F: QueryField<M>,
     {
         Self {
-            inner: F::where_not_null(field, self.inner),
+            state: F::where_not_null(field, self.state),
+            _marker: PhantomData,
         }
     }
 
     pub fn limit(self, limit: i64) -> Self {
         Self {
-            inner: M::query_limit(self.inner, limit),
+            state: self.state.limit(limit),
+            _marker: PhantomData,
         }
     }
 
     pub fn offset(self, offset: i64) -> Self {
         Self {
-            inner: M::query_offset(self.inner, offset),
+            state: self.state.offset(offset),
+            _marker: PhantomData,
         }
     }
 
     pub fn for_update(self) -> Self {
         Self {
-            inner: M::query_for_update(self.inner),
+            state: self.state.for_update(),
+            _marker: PhantomData,
         }
     }
 
     pub fn for_update_skip_locked(self) -> Self {
         Self {
-            inner: M::query_for_update_skip_locked(self.inner),
+            state: self.state.for_update_skip_locked(),
+            _marker: PhantomData,
         }
     }
 
     pub fn for_no_key_update(self) -> Self {
         Self {
-            inner: M::query_for_no_key_update(self.inner),
+            state: self.state.for_no_key_update(),
+            _marker: PhantomData,
         }
     }
 
@@ -435,8 +417,12 @@ impl<'db, M: QueryModel> Query<'db, M> {
     where
         F: FnOnce(Self) -> Self,
     {
+        let state = self.state.where_group(|group_state| {
+            scope(Self::from_inner(group_state)).state
+        });
         Self {
-            inner: M::query_where_group(self.inner, scope),
+            state,
+            _marker: PhantomData,
         }
     }
 
@@ -444,8 +430,12 @@ impl<'db, M: QueryModel> Query<'db, M> {
     where
         F: FnOnce(Self) -> Self,
     {
+        let state = self.state.or_where_group(|group_state| {
+            scope(Self::from_inner(group_state)).state
+        });
         Self {
-            inner: M::query_or_where_group(self.inner, scope),
+            state,
+            _marker: PhantomData,
         }
     }
 
@@ -454,7 +444,8 @@ impl<'db, M: QueryModel> Query<'db, M> {
         F: QueryField<M>,
     {
         Self {
-            inner: F::order_by(field, self.inner, dir),
+            state: F::order_by(field, self.state, dir),
+            _marker: PhantomData,
         }
     }
 
@@ -463,7 +454,8 @@ impl<'db, M: QueryModel> Query<'db, M> {
         R: IncludeRelation<M>,
     {
         Self {
-            inner: R::include(relation, self.inner),
+            state: R::include(relation, self.state),
+            _marker: PhantomData,
         }
     }
 
@@ -473,7 +465,8 @@ impl<'db, M: QueryModel> Query<'db, M> {
         F: FnOnce(Query<'db, R::Target>) -> Query<'db, R::Target>,
     {
         Self {
-            inner: R::where_has(relation, self.inner, scope),
+            state: R::where_has(relation, self.state, scope),
+            _marker: PhantomData,
         }
     }
 
@@ -483,14 +476,12 @@ impl<'db, M: QueryModel> Query<'db, M> {
         F: FnOnce(Query<'db, R::Target>) -> Query<'db, R::Target>,
     {
         Self {
-            inner: R::or_where_has(relation, self.inner, scope),
+            state: R::or_where_has(relation, self.state, scope),
+            _marker: PhantomData,
         }
     }
 
-    pub fn unsafe_sql(self) -> UnsafeQuery<'db, M>
-    where
-        M: UnsafeQueryModel,
-    {
+    pub fn unsafe_sql(self) -> UnsafeQuery<'db, M> {
         UnsafeQuery { inner: self }
     }
 
@@ -500,79 +491,91 @@ impl<'db, M: QueryModel> Query<'db, M> {
         binds: impl IntoIterator<Item = T>,
     ) -> Self
     where
-        M: UnsafeQueryModel,
         T: Into<BindValue>,
     {
         Self {
-            inner: M::query_where_exists(
-                self.inner,
+            state: self.state.where_exists_raw(
                 clause.into(),
                 binds.into_iter().map(Into::into).collect(),
             ),
+            _marker: PhantomData,
         }
     }
 
     pub async fn all(self) -> Result<Vec<M::Record>> {
-        M::query_all(self.inner).await
+        M::query_all(self.state).await
     }
 
     pub async fn first(self) -> Result<Option<M::Record>> {
-        M::query_first(self.inner).await
+        M::query_first(self.state).await
     }
 
     pub async fn find(self, id: M::Pk) -> Result<Option<M::Record>> {
-        M::query_find(self.inner, id).await
+        M::query_find(self.state, id).await
     }
 
     pub async fn count(self) -> Result<i64> {
-        M::query_count(self.inner).await
+        M::query_count(self.state).await
     }
 
     pub async fn delete(self) -> Result<u64> {
-        M::query_delete(self.inner).await
+        M::query_delete(self.state).await
     }
 
     pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<M::Record>> {
-        M::query_paginate(self.inner, page, per_page).await
+        M::query_paginate(self.state, page, per_page).await
     }
 
     pub fn patch(self) -> Patch<'db, M>
     where
-        M: PatchModel<InnerQuery<'db> = <M as QueryModel>::InnerQuery<'db>>,
+        M: PatchModel,
     {
         Patch {
-            inner: M::patch_from_query(self.inner),
+            state: M::patch_from_query(self.state),
+            _marker: PhantomData,
         }
     }
 }
 
-pub struct UnsafeQuery<'db, M: UnsafeQueryModel> {
+// ---------------------------------------------------------------------------
+// UnsafeQuery wrapper — uses QueryState methods directly (no trait needed)
+// ---------------------------------------------------------------------------
+
+pub struct UnsafeQuery<'db, M: QueryModel> {
     inner: Query<'db, M>,
 }
 
-impl<'db, M: UnsafeQueryModel> UnsafeQuery<'db, M> {
+impl<'db, M: QueryModel> UnsafeQuery<'db, M> {
     pub fn where_raw<T>(self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self
     where
         T: Into<BindValue>,
     {
         Self {
-            inner: Query::from_inner(M::query_where_raw(
-                self.inner.into_inner(),
-                clause.into(),
-                binds.into_iter().map(Into::into).collect(),
-            )),
+            inner: Query {
+                state: self.inner.state.where_raw(
+                    clause.into(),
+                    binds.into_iter().map(Into::into).collect(),
+                ),
+                _marker: PhantomData,
+            },
         }
     }
 
     pub fn order_raw(self, expr: impl Into<String>) -> Self {
         Self {
-            inner: Query::from_inner(M::query_order_raw(self.inner.into_inner(), expr.into())),
+            inner: Query {
+                state: self.inner.state.order_raw(expr.into()),
+                _marker: PhantomData,
+            },
         }
     }
 
     pub fn select_raw(self, expr: impl Into<String>) -> Self {
         Self {
-            inner: Query::from_inner(M::query_select_raw(self.inner.into_inner(), expr.into())),
+            inner: Query {
+                state: self.inner.state.select_raw(expr.into()),
+                _marker: PhantomData,
+            },
         }
     }
 
@@ -586,12 +589,15 @@ impl<'db, M: UnsafeQueryModel> UnsafeQuery<'db, M> {
         T: Into<BindValue>,
     {
         Self {
-            inner: Query::from_inner(M::query_join_raw(
-                self.inner.into_inner(),
-                table.into(),
-                on_clause.into(),
-                binds.into_iter().map(Into::into).collect(),
-            )),
+            inner: Query {
+                state: self.inner.state.join_raw(
+                    "INNER JOIN",
+                    table.into(),
+                    on_clause.into(),
+                    binds.into_iter().map(Into::into).collect(),
+                ),
+                _marker: PhantomData,
+            },
         }
     }
 
@@ -600,29 +606,39 @@ impl<'db, M: UnsafeQueryModel> UnsafeQuery<'db, M> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Create wrapper
+// ---------------------------------------------------------------------------
+
 pub struct Create<'db, M: CreateModel> {
-    inner: M::InnerCreate<'db>,
+    state: CreateState<'db>,
+    _marker: PhantomData<M>,
 }
 
 impl<'db, M: CreateModel> Create<'db, M> {
     pub fn new(db: impl Into<DbConn<'db>>) -> Self {
         Self {
-            inner: M::create_root(db.into(), None),
+            state: CreateState::new(db.into(), None, M::TABLE),
+            _marker: PhantomData,
         }
     }
 
     pub fn new_with_base_url(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self {
         Self {
-            inner: M::create_root(db.into(), base_url),
+            state: CreateState::new(db.into(), base_url, M::TABLE),
+            _marker: PhantomData,
         }
     }
 
-    pub fn from_inner(inner: M::InnerCreate<'db>) -> Self {
-        Self { inner }
+    pub fn from_inner(state: CreateState<'db>) -> Self {
+        Self {
+            state,
+            _marker: PhantomData,
+        }
     }
 
-    pub fn into_inner(self) -> M::InnerCreate<'db> {
-        self.inner
+    pub fn into_inner(self) -> CreateState<'db> {
+        self.state
     }
 
     pub fn set<F, V>(self, field: F, value: V) -> Result<Self>
@@ -631,7 +647,8 @@ impl<'db, M: CreateModel> Create<'db, M> {
         V: Into<F::Value>,
     {
         Ok(Self {
-            inner: F::set(field, self.inner, value.into())?,
+            state: F::set(field, self.state, value.into())?,
+            _marker: PhantomData,
         })
     }
 
@@ -640,7 +657,8 @@ impl<'db, M: CreateModel> Create<'db, M> {
         F: CreateConflictField<M>,
     {
         Self {
-            inner: F::on_conflict_do_nothing(self.inner, fields),
+            state: F::on_conflict_do_nothing(self.state, fields),
+            _marker: PhantomData,
         }
     }
 
@@ -649,38 +667,49 @@ impl<'db, M: CreateModel> Create<'db, M> {
         F: CreateConflictField<M>,
     {
         Self {
-            inner: F::on_conflict_update(self.inner, fields),
+            state: F::on_conflict_update(self.state, fields),
+            _marker: PhantomData,
         }
     }
 
     pub async fn save(self) -> Result<M::Record> {
-        M::create_save(self.inner).await
+        M::create_save(self.state).await
     }
 }
 
+// ---------------------------------------------------------------------------
+// Patch wrapper
+// ---------------------------------------------------------------------------
+
 pub struct Patch<'db, M: PatchModel> {
-    inner: M::InnerPatch<'db>,
+    state: PatchState<'db>,
+    _marker: PhantomData<M>,
 }
 
 impl<'db, M: PatchModel> Patch<'db, M> {
     pub fn new(db: impl Into<DbConn<'db>>) -> Self {
         Self {
-            inner: M::patch_root(db.into(), None),
+            state: PatchState::new(db.into(), None, M::TABLE),
+            _marker: PhantomData,
         }
     }
 
     pub fn new_with_base_url(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self {
         Self {
-            inner: M::patch_root(db.into(), base_url),
+            state: PatchState::new(db.into(), base_url, M::TABLE),
+            _marker: PhantomData,
         }
     }
 
-    pub fn from_inner(inner: M::InnerPatch<'db>) -> Self {
-        Self { inner }
+    pub fn from_inner(state: PatchState<'db>) -> Self {
+        Self {
+            state,
+            _marker: PhantomData,
+        }
     }
 
-    pub fn into_inner(self) -> M::InnerPatch<'db> {
-        self.inner
+    pub fn into_inner(self) -> PatchState<'db> {
+        self.state
     }
 
     pub fn assign<F, V>(self, field: F, value: V) -> Result<Self>
@@ -689,7 +718,8 @@ impl<'db, M: PatchModel> Patch<'db, M> {
         V: Into<F::Value>,
     {
         Ok(Self {
-            inner: F::assign(field, self.inner, value.into())?,
+            state: F::assign(field, self.state, value.into())?,
+            _marker: PhantomData,
         })
     }
 
@@ -699,7 +729,8 @@ impl<'db, M: PatchModel> Patch<'db, M> {
         V: Into<F::Value>,
     {
         Ok(Self {
-            inner: F::increment(field, self.inner, value.into())?,
+            state: F::increment(field, self.state, value.into())?,
+            _marker: PhantomData,
         })
     }
 
@@ -709,16 +740,17 @@ impl<'db, M: PatchModel> Patch<'db, M> {
         V: Into<F::Value>,
     {
         Ok(Self {
-            inner: F::decrement(field, self.inner, value.into())?,
+            state: F::decrement(field, self.state, value.into())?,
+            _marker: PhantomData,
         })
     }
 
     pub async fn save(self) -> Result<u64> {
-        M::patch_save(self.inner).await
+        M::patch_save(self.state).await
     }
 
     pub async fn fetch(self) -> Result<Vec<M::Record>> {
-        M::patch_fetch(self.inner).await
+        M::patch_fetch(self.state).await
     }
 }
 
@@ -1508,3 +1540,138 @@ impl<'db> PatchState<'db> {
         (sql, all_binds)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Blanket impls for Column<M, T>
+// ---------------------------------------------------------------------------
+
+impl<M, T> QueryField<M> for Column<M, T>
+where
+    M: QueryModel,
+    T: Clone + Into<BindValue>,
+{
+    type Value = T;
+
+    fn where_col<'db>(
+        field: Self,
+        state: QueryState<'db>,
+        op: Op,
+        value: Self::Value,
+    ) -> QueryState<'db> {
+        state.where_col_str(field.as_sql(), op, value.into())
+    }
+
+    fn or_where_col<'db>(
+        field: Self,
+        state: QueryState<'db>,
+        op: Op,
+        value: Self::Value,
+    ) -> QueryState<'db> {
+        state.or_where_col_str(field.as_sql(), op, value.into())
+    }
+
+    fn where_in<'db>(
+        _field: Self,
+        state: QueryState<'db>,
+        values: &[Self::Value],
+    ) -> QueryState<'db> {
+        let bind_values: Vec<BindValue> = values.iter().map(|v| v.clone().into()).collect();
+        state.where_in_str(_field.as_sql(), &bind_values)
+    }
+
+    fn order_by<'db>(field: Self, state: QueryState<'db>, dir: OrderDir) -> QueryState<'db> {
+        state.order_by_str(field.as_sql(), dir)
+    }
+
+    fn where_null<'db>(field: Self, state: QueryState<'db>) -> QueryState<'db> {
+        state.where_null_str(field.as_sql())
+    }
+
+    fn where_not_null<'db>(field: Self, state: QueryState<'db>) -> QueryState<'db> {
+        state.where_not_null_str(field.as_sql())
+    }
+}
+
+impl<M, T> CreateField<M> for Column<M, T>
+where
+    M: CreateModel,
+    T: Into<BindValue>,
+{
+    type Value = T;
+
+    fn set<'db>(
+        field: Self,
+        state: CreateState<'db>,
+        value: Self::Value,
+    ) -> Result<CreateState<'db>> {
+        let value = M::transform_create_value(field.as_sql(), value.into())?;
+        Ok(state.set_col(field.as_sql(), value))
+    }
+}
+
+impl<M, T> CreateConflictField<M> for Column<M, T>
+where
+    M: CreateModel,
+{
+    fn on_conflict_do_nothing<'db>(
+        state: CreateState<'db>,
+        fields: &[Self],
+    ) -> CreateState<'db> {
+        let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();
+        state.on_conflict_do_nothing(&cols)
+    }
+
+    fn on_conflict_update<'db>(
+        state: CreateState<'db>,
+        fields: &[Self],
+    ) -> CreateState<'db> {
+        let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();
+        state.on_conflict_update(&cols)
+    }
+}
+
+impl<M, T> PatchAssignField<M> for Column<M, T>
+where
+    M: PatchModel,
+    T: Into<BindValue>,
+{
+    type Value = T;
+
+    fn assign<'db>(
+        field: Self,
+        state: PatchState<'db>,
+        value: Self::Value,
+    ) -> Result<PatchState<'db>> {
+        let value = M::transform_patch_value(field.as_sql(), value.into())?;
+        Ok(state.assign_col(field.as_sql(), value))
+    }
+}
+
+macro_rules! impl_patch_numeric_field {
+    ($($ty:ty),*) => {
+        $(
+            impl<M> PatchNumericField<M> for Column<M, $ty>
+            where
+                M: PatchModel,
+            {
+                fn increment<'db>(
+                    field: Self,
+                    state: PatchState<'db>,
+                    value: Self::Value,
+                ) -> Result<PatchState<'db>> {
+                    Ok(state.increment_col(field.as_sql(), value.into()))
+                }
+
+                fn decrement<'db>(
+                    field: Self,
+                    state: PatchState<'db>,
+                    value: Self::Value,
+                ) -> Result<PatchState<'db>> {
+                    Ok(state.decrement_col(field.as_sql(), value.into()))
+                }
+            }
+        )*
+    };
+}
+
+impl_patch_numeric_field!(i16, i32, i64, f64, rust_decimal::Decimal);

@@ -3260,10 +3260,10 @@ fn render_query_all_body(
     skip_profiler: bool,
 ) -> String {
     let mut out = String::new();
-    let soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
+    let _soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
     writeln!(
         out,
-        "            let (sql, binds) = state.to_select_sql(\"{table}\", HAS_SOFT_DELETE, \"{soft_delete_col}\");"
+        "            let (sql, binds) = state.to_select_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);"
     )
     .unwrap();
     if !skip_profiler {
@@ -3380,10 +3380,10 @@ fn render_query_count_body(
     skip_profiler: bool,
 ) -> String {
     let mut out = String::new();
-    let soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
+    let _soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
     writeln!(
         out,
-        "            let (sql, binds) = state.to_count_sql(\"{table}\", HAS_SOFT_DELETE, \"{soft_delete_col}\");"
+        "            let (sql, binds) = state.to_count_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);"
     )
     .unwrap();
     if !skip_profiler {
@@ -3432,13 +3432,13 @@ fn render_query_paginate_body(
     skip_profiler: bool,
 ) -> String {
     let mut out = String::new();
-    let soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
+    let _soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
     writeln!(out, "            let page = if page < 1 {{ 1 }} else {{ page }};").unwrap();
     writeln!(out, "            let per_page = resolve_per_page(per_page);").unwrap();
     // Count query
     writeln!(
         out,
-        "            let (count_sql, count_binds) = state.to_count_sql(\"{table}\", HAS_SOFT_DELETE, \"{soft_delete_col}\");"
+        "            let (count_sql, count_binds) = state.to_count_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);"
     )
     .unwrap();
     if !skip_profiler {
@@ -3480,7 +3480,7 @@ fn render_query_paginate_body(
     writeln!(out, "            state.limit = Some(per_page);").unwrap();
     writeln!(
         out,
-        "            let (sql, binds) = state.to_select_sql(\"{table}\", HAS_SOFT_DELETE, \"{soft_delete_col}\");"
+        "            let (sql, binds) = state.to_select_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);"
     )
     .unwrap();
     if !skip_profiler {
@@ -4068,7 +4068,7 @@ fn render_decrement_method(col_ident: &str) -> String {
 fn render_create_model_impl(
     model_title: &str,
     insert_ident: &str,
-    query_ident: &str,
+    _query_ident: &str,
     pk: &str,
     table: &str,
 ) -> String {
@@ -4078,20 +4078,13 @@ fn render_create_model_impl(
         "impl core_db::common::model_api::CreateModel for {model_title}Model {{"
     )
     .unwrap();
-    writeln!(out, "    type InnerCreate<'db> = {insert_ident}<'db>;").unwrap();
     writeln!(
         out,
-        "    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {{"
-    )
-    .unwrap();
-    writeln!(out, "        {insert_ident}::new(db, base_url)").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {{"
+        "    fn create_save<'db>(state: CreateState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {{"
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
+    writeln!(out, "            let builder = {insert_ident}::from_state(state);").unwrap();
     writeln!(out, "            let db = builder.state.db.clone();").unwrap();
     writeln!(out, "            let base_url = builder.state.base_url.clone();").unwrap();
     writeln!(out, "            let created = builder.save().await?;").unwrap();
@@ -4102,11 +4095,18 @@ fn render_create_model_impl(
     .unwrap();
     writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn transform_create_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {{"
+    )
+    .unwrap();
+    writeln!(out, "        Self::_transform_create_value(col, value)").unwrap();
+    writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
     out
 }
 
-fn render_create_field_impl(model_title: &str, col_ident: &str, db_fields: &[FieldSpec]) -> String {
+fn render_create_field_impl(model_title: &str, col_ident: &str, _db_fields: &[FieldSpec]) -> String {
     let mut out = String::new();
     writeln!(
         out,
@@ -4116,38 +4116,11 @@ fn render_create_field_impl(model_title: &str, col_ident: &str, db_fields: &[Fie
     writeln!(out, "    type Value = BindValue;").unwrap();
     writeln!(
         out,
-        "    fn set<'db>(field: Self, mut builder: <{model_title}Model as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<{model_title}Model>>::Value) -> anyhow::Result<<{model_title}Model as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {{"
+        "    fn set<'db>(field: Self, state: CreateState<'db>, value: BindValue) -> anyhow::Result<CreateState<'db>> {{"
     )
     .unwrap();
-    writeln!(out, "        match field {{").unwrap();
-    for field in db_fields {
-        let col_variant = to_title_case(&field.name);
-        writeln!(out, "            {col_ident}::{col_variant} => {{").unwrap();
-        if let Some(SpecialType::Hashed) = field.special_type {
-            writeln!(
-                out,
-                "                let BindValue::String(value) = value else {{"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "                    anyhow::bail!(\"column '{{}}' expects String input before hashing, got '{{:?}}'\", {col_ident}::{col_variant}.as_sql(), value);"
-            )
-            .unwrap();
-            writeln!(out, "                }};").unwrap();
-            writeln!(
-                out,
-                "                let hashed = core_db::common::auth::hash::hash_password(&value)?;"
-            )
-            .unwrap();
-            writeln!(out, "                builder.state = builder.state.set_col(field.as_sql(), hashed.into());").unwrap();
-        } else {
-            writeln!(out, "                builder.state = builder.state.set_col(field.as_sql(), value);").unwrap();
-        }
-        writeln!(out, "                Ok(builder)").unwrap();
-        writeln!(out, "            }}").unwrap();
-    }
-    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        let value = <{model_title}Model as core_db::common::model_api::CreateModel>::transform_create_value(field.as_sql(), value)?;").unwrap();
+    writeln!(out, "        Ok(state.set_col(field.as_sql(), value))").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
     out
@@ -4162,17 +4135,19 @@ fn render_create_conflict_field_impl(model_title: &str, col_ident: &str) -> Stri
     .unwrap();
     writeln!(
         out,
-        "    fn on_conflict_do_nothing<'db>(builder: <{model_title}Model as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <{model_title}Model as core_db::common::model_api::CreateModel>::InnerCreate<'db> {{"
+        "    fn on_conflict_do_nothing<'db>(state: CreateState<'db>, fields: &[Self]) -> CreateState<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        builder.on_conflict_do_nothing(fields)").unwrap();
+    writeln!(out, "        let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();").unwrap();
+    writeln!(out, "        state.on_conflict_do_nothing(&cols)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn on_conflict_update<'db>(builder: <{model_title}Model as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <{model_title}Model as core_db::common::model_api::CreateModel>::InnerCreate<'db> {{"
+        "    fn on_conflict_update<'db>(state: CreateState<'db>, fields: &[Self]) -> CreateState<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        builder.on_conflict_update(fields)").unwrap();
+    writeln!(out, "        let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();").unwrap();
+    writeln!(out, "        state.on_conflict_update(&cols)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
     out
@@ -4282,7 +4257,7 @@ fn render_typed_create_conflict_field_impl(
 
 fn render_patch_model_impl(
     model_title: &str,
-    query_ident: &str,
+    _query_ident: &str,
     update_ident: &str,
     col_ident: &str,
     pk_col_variant: &str,
@@ -4296,18 +4271,9 @@ fn render_patch_model_impl(
         "impl core_db::common::model_api::PatchModel for {model_title}Model {{"
     )
     .unwrap();
-    writeln!(out, "    type InnerQuery<'db> = QueryState<'db>;").unwrap();
-    writeln!(out, "    type InnerPatch<'db> = {update_ident}<'db>;").unwrap();
     writeln!(
         out,
-        "    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {{"
-    )
-    .unwrap();
-    writeln!(out, "        {update_ident}::new(db, base_url)").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn patch_from_query<'db>(mut state: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {{"
+        "    fn patch_from_query<'db>(mut state: QueryState<'db>) -> PatchState<'db> {{"
     )
     .unwrap();
     writeln!(out, "        let db = state.db.clone();").unwrap();
@@ -4320,43 +4286,42 @@ fn render_patch_model_impl(
     writeln!(out, "        let (scope_sql, binds) = state.to_sql();").unwrap();
     writeln!(
         out,
-        "        let mut builder = {update_ident}::new(db, base_url);"
+        "        let mut ps = PatchState::new(db, base_url, \"{table}\");"
     )
     .unwrap();
     writeln!(
         out,
-        "        builder.state.where_sql.push(format!(\"{{}} IN ({{}})\", {col_ident}::{pk_col_variant}.as_sql(), scope_sql));"
+        "        ps.where_sql.push(format!(\"{{}} IN ({{}})\", {col_ident}::{pk_col_variant}.as_sql(), scope_sql));"
     )
     .unwrap();
-    writeln!(out, "        builder.state.where_binds = binds;").unwrap();
-    writeln!(out, "        builder").unwrap();
+    writeln!(out, "        ps.where_binds = binds;").unwrap();
+    writeln!(out, "        ps").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        Box::pin(async move {{ builder.save().await }})"
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {{"
+        "    fn patch_save<'db>(state: PatchState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {{"
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
-    writeln!(out, "            if builder.state.where_sql.is_empty() {{").unwrap();
+    writeln!(out, "            let builder = {update_ident}::from_state(state);").unwrap();
+    writeln!(out, "            builder.save().await").unwrap();
+    writeln!(out, "        }})").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn patch_fetch<'db>(state: PatchState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {{"
+    )
+    .unwrap();
+    writeln!(out, "        Box::pin(async move {{").unwrap();
+    writeln!(out, "            if state.where_sql.is_empty() {{").unwrap();
     writeln!(
         out,
         "                anyhow::bail!(\"update: no conditions set\");"
     )
     .unwrap();
     writeln!(out, "            }}").unwrap();
-    writeln!(out, "            let db = builder.state.db.clone();").unwrap();
-    writeln!(out, "            let base_url = builder.state.base_url.clone();").unwrap();
+    writeln!(out, "            let db = state.db.clone();").unwrap();
+    writeln!(out, "            let base_url = state.base_url.clone();").unwrap();
     writeln!(
         out,
         "            let mut select_sql = format!(\"SELECT {{}} FROM {table}\", {col_ident}::{pk_col_variant}.as_sql());"
@@ -4364,7 +4329,7 @@ fn render_patch_model_impl(
     .unwrap();
     writeln!(
         out,
-        "            select_sql.push_str(&format!(\" WHERE {{}}\", builder.state.where_sql.join(\" AND \")));"
+        "            select_sql.push_str(&format!(\" WHERE {{}}\", state.where_sql.join(\" AND \")));"
     )
     .unwrap();
     writeln!(
@@ -4374,7 +4339,7 @@ fn render_patch_model_impl(
     .unwrap();
     writeln!(
         out,
-        "            for bind_value in &builder.state.where_binds {{ select_q = bind_scalar(select_q, bind_value.clone()); }}"
+        "            for bind_value in &state.where_binds {{ select_q = bind_scalar(select_q, bind_value.clone()); }}"
     )
     .unwrap();
     writeln!(
@@ -4382,13 +4347,14 @@ fn render_patch_model_impl(
         "            let target_ids = db.fetch_all_scalar(select_q).await?;"
     )
     .unwrap();
+    writeln!(out, "            let builder = {update_ident}::from_state(state);").unwrap();
     writeln!(out, "            builder.save().await?;").unwrap();
     writeln!(out, "            if target_ids.is_empty() {{").unwrap();
     writeln!(out, "                return Ok(Vec::new());").unwrap();
     writeln!(out, "            }}").unwrap();
     writeln!(
         out,
-        "            let mut query = Query::<{model_title}Model>::new_with_base_url(db, base_url);"
+        "            let query = Query::<{model_title}Model>::new_with_base_url(db, base_url);"
     )
     .unwrap();
     if has_soft_delete {
@@ -4407,6 +4373,13 @@ fn render_patch_model_impl(
     }
     writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn transform_patch_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {{"
+    )
+    .unwrap();
+    writeln!(out, "        Self::_transform_patch_value(col, value)").unwrap();
+    writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
     out
 }
@@ -4414,7 +4387,7 @@ fn render_patch_model_impl(
 fn render_patch_assign_field_impl(
     model_title: &str,
     col_ident: &str,
-    db_fields: &[FieldSpec],
+    _db_fields: &[FieldSpec],
 ) -> String {
     let mut out = String::new();
     writeln!(
@@ -4425,46 +4398,11 @@ fn render_patch_assign_field_impl(
     writeln!(out, "    type Value = BindValue;").unwrap();
     writeln!(
         out,
-        "    fn assign<'db>(field: Self, mut builder: <{model_title}Model as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<{model_title}Model>>::Value) -> anyhow::Result<<{model_title}Model as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {{"
+        "    fn assign<'db>(field: Self, state: PatchState<'db>, value: BindValue) -> anyhow::Result<PatchState<'db>> {{"
     )
     .unwrap();
-    writeln!(out, "        match field {{").unwrap();
-    for field in db_fields {
-        let col_variant = to_title_case(&field.name);
-        writeln!(out, "            {col_ident}::{col_variant} => {{").unwrap();
-        if let Some(SpecialType::Hashed) = field.special_type {
-            writeln!(
-                out,
-                "                let BindValue::String(value) = value else {{"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "                    anyhow::bail!(\"column '{{}}' expects String input before hashing, got '{{:?}}'\", {col_ident}::{col_variant}.as_sql(), value);"
-            )
-            .unwrap();
-            writeln!(out, "                }};").unwrap();
-            writeln!(
-                out,
-                "                let hashed = core_db::common::auth::hash::hash_password(&value)?;"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "                builder.state = builder.state.assign_col(field.as_sql(), hashed.into());"
-            )
-            .unwrap();
-        } else {
-            writeln!(
-                out,
-                "                builder.state = builder.state.assign_col(field.as_sql(), value);"
-            )
-            .unwrap();
-        }
-        writeln!(out, "                Ok(builder)").unwrap();
-        writeln!(out, "            }}").unwrap();
-    }
-    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        let value = <{model_title}Model as core_db::common::model_api::PatchModel>::transform_patch_value(field.as_sql(), value)?;").unwrap();
+    writeln!(out, "        Ok(state.assign_col(field.as_sql(), value))").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
     out
@@ -4561,7 +4499,7 @@ fn render_patch_numeric_field_impl(
     .unwrap();
     writeln!(
         out,
-        "    fn increment<'db>(field: Self, mut builder: <{model_title}Model as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<{model_title}Model>>::Value) -> anyhow::Result<<{model_title}Model as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {{"
+        "    fn increment<'db>(field: Self, state: PatchState<'db>, value: BindValue) -> anyhow::Result<PatchState<'db>> {{"
     )
     .unwrap();
     writeln!(out, "        match field {{").unwrap();
@@ -4569,7 +4507,7 @@ fn render_patch_numeric_field_impl(
         let col_variant = to_title_case(&field.name);
         writeln!(
             out,
-            "            {col_ident}::{col_variant} => {{ builder.state = builder.state.increment_col(field.as_sql(), value); Ok(builder) }}"
+            "            {col_ident}::{col_variant} => Ok(state.increment_col(field.as_sql(), value)),"
         )
         .unwrap();
     }
@@ -4582,7 +4520,7 @@ fn render_patch_numeric_field_impl(
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn decrement<'db>(field: Self, mut builder: <{model_title}Model as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<{model_title}Model>>::Value) -> anyhow::Result<<{model_title}Model as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {{"
+        "    fn decrement<'db>(field: Self, state: PatchState<'db>, value: BindValue) -> anyhow::Result<PatchState<'db>> {{"
     )
     .unwrap();
     writeln!(out, "        match field {{").unwrap();
@@ -4590,7 +4528,7 @@ fn render_patch_numeric_field_impl(
         let col_variant = to_title_case(&field.name);
         writeln!(
             out,
-            "            {col_ident}::{col_variant} => {{ builder.state = builder.state.decrement_col(field.as_sql(), value); Ok(builder) }}"
+            "            {col_ident}::{col_variant} => Ok(state.decrement_col(field.as_sql(), value)),"
         )
         .unwrap();
     }
@@ -4969,7 +4907,7 @@ fn render_model(
     .unwrap();
     writeln!(
         imports,
-        "use core_db::common::model_api::{{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query, QueryState}};"
+        "use core_db::common::model_api::{{Column, Create, CreateState, ManyRelation, ModelDef, OneRelation, Patch, PatchState, Query, QueryState}};"
     )
     .unwrap();
     if has_meta {
@@ -5818,6 +5756,25 @@ fn render_model(
     }
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn from_state(state: core_db::common::model_api::CreateState<'db>) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        Self {{").unwrap();
+    writeln!(out, "            state,").unwrap();
+    if !localized_fields.is_empty() {
+        writeln!(out, "            translations: HashMap::new(),").unwrap();
+    }
+    if has_meta {
+        writeln!(out, "            meta: HashMap::new(),").unwrap();
+    }
+    if has_attachments {
+        writeln!(out, "            attachments_single: HashMap::new(),").unwrap();
+        writeln!(out, "            attachments_multi: HashMap::new(),").unwrap();
+    }
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
 
     let insert_struct_section = out;
     let mut out = String::new();
@@ -6299,6 +6256,27 @@ fn render_model(
     .unwrap();
     writeln!(out, "        Self {{").unwrap();
     writeln!(out, "            state: core_db::common::model_api::PatchState::new(db, base_url, \"{table}\"),").unwrap();
+    if !localized_fields.is_empty() {
+        writeln!(out, "            translations: HashMap::new(),").unwrap();
+    }
+    if has_meta {
+        writeln!(out, "            meta: HashMap::new(),").unwrap();
+    }
+    if has_attachments {
+        writeln!(out, "            attachments_single: HashMap::new(),").unwrap();
+        writeln!(out, "            attachments_multi: HashMap::new(),").unwrap();
+        writeln!(out, "            attachments_clear_single: Vec::new(),").unwrap();
+        writeln!(out, "            attachments_delete_multi: HashMap::new(),").unwrap();
+    }
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn from_state(state: core_db::common::model_api::PatchState<'db>) -> Self {{"
+    )
+    .unwrap();
+    writeln!(out, "        Self {{").unwrap();
+    writeln!(out, "            state,").unwrap();
     if !localized_fields.is_empty() {
         writeln!(out, "            translations: HashMap::new(),").unwrap();
     }
@@ -8244,6 +8222,60 @@ fn render_model(
     .unwrap();
     writeln!(out, "        Query::<{model_title}Model>::new(db).find(id).await").unwrap();
     writeln!(out, "    }}").unwrap();
+    // _transform_create_value — handles hashed fields for CreateModel::transform_create_value
+    writeln!(out, "    fn _transform_create_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {{").unwrap();
+    {
+        let hashed_fields: Vec<&FieldSpec> = db_fields
+            .iter()
+            .filter(|f| matches!(f.special_type, Some(SpecialType::Hashed)))
+            .collect();
+        if hashed_fields.is_empty() {
+            writeln!(out, "        let _ = col;").unwrap();
+            writeln!(out, "        Ok(value)").unwrap();
+        } else {
+            writeln!(out, "        match col {{").unwrap();
+            for field in &hashed_fields {
+                let col_variant = to_title_case(&field.name);
+                writeln!(out, "            c if c == {col_ident}::{col_variant}.as_sql() => {{").unwrap();
+                writeln!(out, "                let BindValue::String(value) = value else {{").unwrap();
+                writeln!(out, "                    anyhow::bail!(\"column '{{}}' expects String before hashing, got '{{:?}}'\", col, value);").unwrap();
+                writeln!(out, "                }};").unwrap();
+                writeln!(out, "                let hashed = core_db::common::auth::hash::hash_password(&value)?;").unwrap();
+                writeln!(out, "                Ok(hashed.into())").unwrap();
+                writeln!(out, "            }}").unwrap();
+            }
+            writeln!(out, "            _ => Ok(value),").unwrap();
+            writeln!(out, "        }}").unwrap();
+        }
+    }
+    writeln!(out, "    }}").unwrap();
+    // _transform_patch_value — handles hashed fields for PatchModel::transform_patch_value
+    writeln!(out, "    fn _transform_patch_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {{").unwrap();
+    {
+        let hashed_fields: Vec<&FieldSpec> = db_fields
+            .iter()
+            .filter(|f| matches!(f.special_type, Some(SpecialType::Hashed)))
+            .collect();
+        if hashed_fields.is_empty() {
+            writeln!(out, "        let _ = col;").unwrap();
+            writeln!(out, "        Ok(value)").unwrap();
+        } else {
+            writeln!(out, "        match col {{").unwrap();
+            for field in &hashed_fields {
+                let col_variant = to_title_case(&field.name);
+                writeln!(out, "            c if c == {col_ident}::{col_variant}.as_sql() => {{").unwrap();
+                writeln!(out, "                let BindValue::String(value) = value else {{").unwrap();
+                writeln!(out, "                    anyhow::bail!(\"column '{{}}' expects String before hashing, got '{{:?}}'\", col, value);").unwrap();
+                writeln!(out, "                }};").unwrap();
+                writeln!(out, "                let hashed = core_db::common::auth::hash::hash_password(&value)?;").unwrap();
+                writeln!(out, "                Ok(hashed.into())").unwrap();
+                writeln!(out, "            }}").unwrap();
+            }
+            writeln!(out, "            _ => Ok(value),").unwrap();
+            writeln!(out, "        }}").unwrap();
+        }
+    }
+    writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
     if !cfg.model_impl_items.is_empty() {
         out.push_str(&render_custom_impl_block(
@@ -8269,17 +8301,15 @@ fn render_model(
         "impl core_db::common::model_api::QueryModel for {model_title}Model {{"
     )
     .unwrap();
-    writeln!(out, "    type InnerQuery<'db> = QueryState<'db>;").unwrap();
+    writeln!(out, "    const DEFAULT_SELECT: &'static str = \"{base_select}\";").unwrap();
+    writeln!(out, "    const HAS_SOFT_DELETE: bool = {has_soft_delete};").unwrap();
+    {
+        let sd_col = if has_soft_delete { "deleted_at" } else { "" };
+        writeln!(out, "    const SOFT_DELETE_COL: &'static str = \"{sd_col}\";").unwrap();
+    }
     writeln!(
         out,
-        "    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {{"
-    )
-    .unwrap();
-    writeln!(out, "        QueryState::new(db, base_url, \"{base_select}\")").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_all<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {{"
+        "    fn query_all<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {{"
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
@@ -8302,7 +8332,7 @@ fn render_model(
     // query_first: limit(1) + query_all
     writeln!(
         out,
-        "    fn query_first<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {{"
+        "    fn query_first<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {{"
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
@@ -8313,7 +8343,7 @@ fn render_model(
     // query_find: where_col_str + query_first
     writeln!(
         out,
-        "    fn query_find<'db>(state: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {{"
+        "    fn query_find<'db>(state: QueryState<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {{"
     )
     .unwrap();
     writeln!(
@@ -8325,7 +8355,7 @@ fn render_model(
     // query_count: use to_count_sql
     writeln!(
         out,
-        "    fn query_count<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {{"
+        "    fn query_count<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {{"
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
@@ -8335,7 +8365,7 @@ fn render_model(
     // query_delete: inline with observer hooks and soft-delete
     writeln!(
         out,
-        "    fn query_delete<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {{"
+        "    fn query_delete<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {{"
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
@@ -8354,7 +8384,7 @@ fn render_model(
     // query_paginate: inline using to_count_sql + to_select_sql
     writeln!(
         out,
-        "    fn query_paginate<'db>(state: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {{"
+        "    fn query_paginate<'db>(state: QueryState<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {{"
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
@@ -8374,118 +8404,6 @@ fn render_model(
     ));
     writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_limit<'db>(state: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {{"
-    )
-    .unwrap();
-    writeln!(out, "        state.limit(limit)").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_offset<'db>(state: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {{"
-    )
-    .unwrap();
-    writeln!(out, "        state.offset(offset)").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_for_update<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {{"
-    )
-    .unwrap();
-    writeln!(out, "        state.for_update()").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_for_update_skip_locked<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {{"
-    )
-    .unwrap();
-    writeln!(out, "        state.for_update_skip_locked()").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_for_no_key_update<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {{"
-    )
-    .unwrap();
-    writeln!(out, "        state.for_no_key_update()").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_where_group<'db, F>(state: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>"
-    )
-    .unwrap();
-    writeln!(out, "    where").unwrap();
-    writeln!(
-        out,
-        "        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,"
-    )
-    .unwrap();
-    writeln!(out, "    {{").unwrap();
-    writeln!(
-        out,
-        "        state.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())"
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_or_where_group<'db, F>(state: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>"
-    )
-    .unwrap();
-    writeln!(out, "    where").unwrap();
-    writeln!(
-        out,
-        "        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,"
-    )
-    .unwrap();
-    writeln!(out, "    {{").unwrap();
-    writeln!(
-        out,
-        "        state.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())"
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out, "}}\n").unwrap();
-    writeln!(
-        out,
-        "impl core_db::common::model_api::UnsafeQueryModel for {model_title}Model {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    fn query_where_raw<'db>(state: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {{"
-    )
-    .unwrap();
-    writeln!(out, "        state.where_raw(clause, binds)").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_where_exists<'db>(state: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {{"
-    )
-    .unwrap();
-    writeln!(out, "        state.where_exists_raw(clause, binds)").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_order_raw<'db>(state: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {{"
-    )
-    .unwrap();
-    writeln!(out, "        state.order_raw(expr)").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_select_raw<'db>(state: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {{"
-    )
-    .unwrap();
-    writeln!(out, "        state.select_raw(expr)").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn query_join_raw<'db>(state: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {{"
-    )
-    .unwrap();
-    writeln!(out, "        state.join_raw(\"INNER JOIN\", table, on_clause, binds)").unwrap();
-    writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
     out.push_str(&render_create_model_impl(
         &model_title,
@@ -8499,18 +8417,7 @@ fn render_model(
         &col_ident,
         &db_fields,
     ));
-    out.push_str(&render_typed_create_field_impl(
-        &model_title,
-        &model_snake,
-        &col_ident,
-        &db_fields,
-    ));
     out.push_str(&render_create_conflict_field_impl(&model_title, &col_ident));
-    out.push_str(&render_typed_create_conflict_field_impl(
-        &model_title,
-        &model_snake,
-        &col_ident,
-    ));
     out.push_str(&render_patch_model_impl(
         &model_title,
         &query_ident,
@@ -8526,20 +8433,8 @@ fn render_model(
         &col_ident,
         &db_fields,
     ));
-    out.push_str(&render_typed_patch_assign_field_impl(
-        &model_title,
-        &model_snake,
-        &col_ident,
-        &db_fields,
-    ));
     out.push_str(&render_patch_numeric_field_impl(
         &model_title,
-        &col_ident,
-        &db_fields,
-    ));
-    out.push_str(&render_typed_patch_numeric_field_impl(
-        &model_title,
-        &model_snake,
         &col_ident,
         &db_fields,
     ));
@@ -8549,62 +8444,51 @@ fn render_model(
     )
     .unwrap();
     writeln!(out, "    type Value = BindValue;").unwrap();
-    let model_query_ty =
-        format!("<{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>");
-    let model_query_value_ty =
-        format!("<Self as core_db::common::model_api::QueryField<{model_title}Model>>::Value");
     writeln!(
         out,
-        "    fn where_col<'db>(field: Self, state: {model_query_ty}, op: Op, value: {model_query_value_ty}) -> {model_query_ty} {{"
+        "    fn where_col<'db>(field: Self, state: QueryState<'db>, op: Op, value: BindValue) -> QueryState<'db> {{"
     )
     .unwrap();
     writeln!(out, "        state.where_col_str(field.as_sql(), op, value)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn or_where_col<'db>(field: Self, state: {model_query_ty}, op: Op, value: {model_query_value_ty}) -> {model_query_ty} {{"
+        "    fn or_where_col<'db>(field: Self, state: QueryState<'db>, op: Op, value: BindValue) -> QueryState<'db> {{"
     )
     .unwrap();
     writeln!(out, "        state.or_where_col_str(field.as_sql(), op, value)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn where_in<'db>(field: Self, state: {model_query_ty}, values: &[{model_query_value_ty}]) -> {model_query_ty} {{"
+        "    fn where_in<'db>(field: Self, state: QueryState<'db>, values: &[BindValue]) -> QueryState<'db> {{"
     )
     .unwrap();
     writeln!(out, "        state.where_in_str(field.as_sql(), values)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn order_by<'db>(field: Self, state: {model_query_ty}, dir: OrderDir) -> {model_query_ty} {{"
+        "    fn order_by<'db>(field: Self, state: QueryState<'db>, dir: OrderDir) -> QueryState<'db> {{"
     )
     .unwrap();
     writeln!(out, "        state.order_by_str(field.as_sql(), dir)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn where_null<'db>(field: Self, state: {model_query_ty}) -> {model_query_ty} {{"
+        "    fn where_null<'db>(field: Self, state: QueryState<'db>) -> QueryState<'db> {{"
     )
     .unwrap();
     writeln!(out, "        state.where_null_str(field.as_sql())").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn where_not_null<'db>(field: Self, state: {model_query_ty}) -> {model_query_ty} {{"
+        "    fn where_not_null<'db>(field: Self, state: QueryState<'db>) -> QueryState<'db> {{"
     )
     .unwrap();
     writeln!(out, "        state.where_not_null_str(field.as_sql())").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
-    out.push_str(&render_typed_query_field_impl(
-        &model_title,
-        &model_snake,
-        &col_ident,
-    ));
     if !relations.is_empty() {
-        let model_query_ty = format!(
-            "<{model_title}Model as core_db::common::model_api::QueryModel>::InnerQuery<'db>"
-        );
+        let model_query_ty = "QueryState<'db>".to_string();
         for (rel_idx, rel) in relations.iter().enumerate() {
             let rel_snake = to_snake(&rel.name);
             let target_model_title = to_title_case(&rel.target_model);

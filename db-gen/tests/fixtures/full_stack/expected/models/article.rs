@@ -14,7 +14,7 @@ use core_db::platform::attachments::types::{Attachment, AttachmentInput, Attachm
 use uuid::Uuid;
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query, QueryState};
+use core_db::common::model_api::{Column, Create, CreateState, ManyRelation, ModelDef, OneRelation, Patch, PatchState, Query, QueryState};
 use core_db::platform::meta::types::MetaMap;
 use crate::generated::localized;
 use core_i18n::current_locale;
@@ -210,6 +210,15 @@ impl<'db> ArticleCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             state: core_db::common::model_api::CreateState::new(db, base_url, "articles"),
+            translations: HashMap::new(),
+            meta: HashMap::new(),
+            attachments_single: HashMap::new(),
+            attachments_multi: HashMap::new(),
+        }
+    }
+    pub fn from_state(state: core_db::common::model_api::CreateState<'db>) -> Self {
+        Self {
+            state,
             translations: HashMap::new(),
             meta: HashMap::new(),
             attachments_single: HashMap::new(),
@@ -446,6 +455,17 @@ impl<'db> ArticlePatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
             state: core_db::common::model_api::PatchState::new(db, base_url, "articles"),
+            translations: HashMap::new(),
+            meta: HashMap::new(),
+            attachments_single: HashMap::new(),
+            attachments_multi: HashMap::new(),
+            attachments_clear_single: Vec::new(),
+            attachments_delete_multi: HashMap::new(),
+        }
+    }
+    pub fn from_state(state: core_db::common::model_api::PatchState<'db>) -> Self {
+        Self {
+            state,
             translations: HashMap::new(),
             meta: HashMap::new(),
             attachments_single: HashMap::new(),
@@ -1143,6 +1163,14 @@ impl ArticleModel {
     pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<ArticleRecord>> {
         Query::<ArticleModel>::new(db).find(id).await
     }
+    fn _transform_create_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {
+        let _ = col;
+        Ok(value)
+    }
+    fn _transform_patch_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {
+        let _ = col;
+        Ok(value)
+    }
 }
 
 impl ModelDef for ArticleModel {
@@ -1156,13 +1184,12 @@ impl ModelDef for ArticleModel {
 }
 
 impl core_db::common::model_api::QueryModel for ArticleModel {
-    type InnerQuery<'db> = QueryState<'db>;
-    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
-        QueryState::new(db, base_url, "id, author_id, status, is_system")
-    }
-    fn query_all<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+    const DEFAULT_SELECT: &'static str = "id, author_id, status, is_system";
+    const HAS_SOFT_DELETE: bool = false;
+    const SOFT_DELETE_COL: &'static str = "";
+    fn query_all<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
         Box::pin(async move {
-            let (sql, binds) = state.to_select_sql("articles", HAS_SOFT_DELETE, "");
+            let (sql, binds) = state.to_select_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);
             let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
             let __profiler_start = std::time::Instant::now();
             let mut q = sqlx::query_as::<_, ArticleRow>(&sql);
@@ -1185,18 +1212,18 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
             Ok(out_vec)
         })
     }
-    fn query_first<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+    fn query_first<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
         Box::pin(async move {
             let mut v = Self::query_all(state.limit(1)).await?;
             Ok(v.pop())
         })
     }
-    fn query_find<'db>(state: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+    fn query_find<'db>(state: QueryState<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
         Box::pin(async move { Self::query_first(state.where_col_str("id", Op::Eq, id.into())).await })
     }
-    fn query_count<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+    fn query_count<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
         Box::pin(async move {
-            let (sql, binds) = state.to_count_sql("articles", HAS_SOFT_DELETE, "");
+            let (sql, binds) = state.to_count_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);
             let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
             let __profiler_start = std::time::Instant::now();
             let mut q = sqlx::query_scalar::<_, i64>(&sql);
@@ -1206,7 +1233,7 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
             Ok(count)
         })
     }
-    fn query_delete<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+    fn query_delete<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
         Box::pin(async move {
             if state.limit.is_some() {
                 anyhow::bail!("delete() does not support limit; add where clauses");
@@ -1263,11 +1290,11 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
             Ok(res.rows_affected())
         })
     }
-    fn query_paginate<'db>(state: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+    fn query_paginate<'db>(state: QueryState<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
         Box::pin(async move {
             let page = if page < 1 { 1 } else { page };
             let per_page = resolve_per_page(per_page);
-            let (count_sql, count_binds) = state.to_count_sql("articles", HAS_SOFT_DELETE, "");
+            let (count_sql, count_binds) = state.to_count_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);
             let __profiler_binds = if is_sql_profiler_enabled() { count_binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
             let __profiler_start = std::time::Instant::now();
             let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
@@ -1280,7 +1307,7 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
             let mut state = state;
             state.offset = Some(offset_val);
             state.limit = Some(per_page);
-            let (sql, binds) = state.to_select_sql("articles", HAS_SOFT_DELETE, "");
+            let (sql, binds) = state.to_select_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);
             let __profiler_start = std::time::Instant::now();
             let mut q = sqlx::query_as::<_, ArticleRow>(&sql);
             for b in binds { q = bind(q, b); }
@@ -1302,336 +1329,143 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
             Ok(core_db::common::model_api::Page { data, total, per_page, current_page, last_page })
         })
     }
-    fn query_limit<'db>(state: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
-        state.limit(limit)
-    }
-    fn query_offset<'db>(state: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
-        state.offset(offset)
-    }
-    fn query_for_update<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
-        state.for_update()
-    }
-    fn query_for_update_skip_locked<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
-        state.for_update_skip_locked()
-    }
-    fn query_for_no_key_update<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
-        state.for_no_key_update()
-    }
-    fn query_where_group<'db, F>(state: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
-    where
-        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
-    {
-        state.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
-    }
-    fn query_or_where_group<'db, F>(state: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
-    where
-        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
-    {
-        state.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
-    }
-}
-
-impl core_db::common::model_api::UnsafeQueryModel for ArticleModel {
-    fn query_where_raw<'db>(state: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
-        state.where_raw(clause, binds)
-    }
-    fn query_where_exists<'db>(state: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
-        state.where_exists_raw(clause, binds)
-    }
-    fn query_order_raw<'db>(state: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
-        state.order_raw(expr)
-    }
-    fn query_select_raw<'db>(state: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
-        state.select_raw(expr)
-    }
-    fn query_join_raw<'db>(state: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
-        state.join_raw("INNER JOIN", table, on_clause, binds)
-    }
 }
 
 impl core_db::common::model_api::CreateModel for ArticleModel {
-    type InnerCreate<'db> = ArticleCreateInner<'db>;
-    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
-        ArticleCreateInner::new(db, base_url)
-    }
-    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+    fn create_save<'db>(state: CreateState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
         Box::pin(async move {
+            let builder = ArticleCreateInner::from_state(state);
             let db = builder.state.db.clone();
             let base_url = builder.state.base_url.clone();
             let created = builder.save().await?;
             Query::<ArticleModel>::new_with_base_url(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("articles: created record not found"))
         })
     }
+    fn transform_create_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {
+        Self::_transform_create_value(col, value)
+    }
 }
 
 impl core_db::common::model_api::CreateField<ArticleModel> for ArticleDbCol {
     type Value = BindValue;
-    fn set<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
-        match field {
-            ArticleDbCol::Id => {
-                builder.state = builder.state.set_col(field.as_sql(), value);
-                Ok(builder)
-            }
-            ArticleDbCol::AuthorId => {
-                builder.state = builder.state.set_col(field.as_sql(), value);
-                Ok(builder)
-            }
-            ArticleDbCol::Status => {
-                builder.state = builder.state.set_col(field.as_sql(), value);
-                Ok(builder)
-            }
-            ArticleDbCol::IsSystem => {
-                builder.state = builder.state.set_col(field.as_sql(), value);
-                Ok(builder)
-            }
-        }
-    }
-}
-
-impl<T> core_db::common::model_api::CreateField<ArticleModel> for Column<ArticleModel, T>
-where
-    T: Into<BindValue>,
-{
-    type Value = T;
-    fn set<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
-        let field = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        let value = value.into();
-        match field {
-            ArticleDbCol::Id => {
-                builder.state = builder.state.set_col(field.as_sql(), value);
-                Ok(builder)
-            }
-            ArticleDbCol::AuthorId => {
-                builder.state = builder.state.set_col(field.as_sql(), value);
-                Ok(builder)
-            }
-            ArticleDbCol::Status => {
-                builder.state = builder.state.set_col(field.as_sql(), value);
-                Ok(builder)
-            }
-            ArticleDbCol::IsSystem => {
-                builder.state = builder.state.set_col(field.as_sql(), value);
-                Ok(builder)
-            }
-        }
+    fn set<'db>(field: Self, state: CreateState<'db>, value: BindValue) -> anyhow::Result<CreateState<'db>> {
+        let value = <ArticleModel as core_db::common::model_api::CreateModel>::transform_create_value(field.as_sql(), value)?;
+        Ok(state.set_col(field.as_sql(), value))
     }
 }
 
 impl core_db::common::model_api::CreateConflictField<ArticleModel> for ArticleDbCol {
-    fn on_conflict_do_nothing<'db>(builder: <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
-        builder.on_conflict_do_nothing(fields)
+    fn on_conflict_do_nothing<'db>(state: CreateState<'db>, fields: &[Self]) -> CreateState<'db> {
+        let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();
+        state.on_conflict_do_nothing(&cols)
     }
-    fn on_conflict_update<'db>(builder: <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
-        builder.on_conflict_update(fields)
-    }
-}
-
-impl<T> core_db::common::model_api::CreateConflictField<ArticleModel> for Column<ArticleModel, T> {
-    fn on_conflict_do_nothing<'db>(builder: <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
-        let fields: Vec<ArticleDbCol> = fields.iter().map(|field| resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
-        builder.on_conflict_do_nothing(&fields)
-    }
-    fn on_conflict_update<'db>(builder: <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
-        let fields: Vec<ArticleDbCol> = fields.iter().map(|field| resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
-        builder.on_conflict_update(&fields)
+    fn on_conflict_update<'db>(state: CreateState<'db>, fields: &[Self]) -> CreateState<'db> {
+        let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();
+        state.on_conflict_update(&cols)
     }
 }
 
 impl core_db::common::model_api::PatchModel for ArticleModel {
-    type InnerQuery<'db> = QueryState<'db>;
-    type InnerPatch<'db> = ArticlePatchInner<'db>;
-    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
-        ArticlePatchInner::new(db, base_url)
-    }
-    fn patch_from_query<'db>(mut state: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+    fn patch_from_query<'db>(mut state: QueryState<'db>) -> PatchState<'db> {
         let db = state.db.clone();
         let base_url = state.base_url.clone();
         state.select_sql = Some(ArticleDbCol::Id.as_sql().to_string());
         let (scope_sql, binds) = state.to_sql();
-        let mut builder = ArticlePatchInner::new(db, base_url);
-        builder.state.where_sql.push(format!("{} IN ({})", ArticleDbCol::Id.as_sql(), scope_sql));
-        builder.state.where_binds = binds;
-        builder
+        let mut ps = PatchState::new(db, base_url, "articles");
+        ps.where_sql.push(format!("{} IN ({})", ArticleDbCol::Id.as_sql(), scope_sql));
+        ps.where_binds = binds;
+        ps
     }
-    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
-        Box::pin(async move { builder.save().await })
-    }
-    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+    fn patch_save<'db>(state: PatchState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
         Box::pin(async move {
-            if builder.state.where_sql.is_empty() {
+            let builder = ArticlePatchInner::from_state(state);
+            builder.save().await
+        })
+    }
+    fn patch_fetch<'db>(state: PatchState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if state.where_sql.is_empty() {
                 anyhow::bail!("update: no conditions set");
             }
-            let db = builder.state.db.clone();
-            let base_url = builder.state.base_url.clone();
+            let db = state.db.clone();
+            let base_url = state.base_url.clone();
             let mut select_sql = format!("SELECT {} FROM articles", ArticleDbCol::Id.as_sql());
-            select_sql.push_str(&format!(" WHERE {}", builder.state.where_sql.join(" AND ")));
+            select_sql.push_str(&format!(" WHERE {}", state.where_sql.join(" AND ")));
             let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
-            for bind_value in &builder.state.where_binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            for bind_value in &state.where_binds { select_q = bind_scalar(select_q, bind_value.clone()); }
             let target_ids = db.fetch_all_scalar(select_q).await?;
+            let builder = ArticlePatchInner::from_state(state);
             builder.save().await?;
             if target_ids.is_empty() {
                 return Ok(Vec::new());
             }
-            let mut query = Query::<ArticleModel>::new_with_base_url(db, base_url);
+            let query = Query::<ArticleModel>::new_with_base_url(db, base_url);
             let binds: Vec<BindValue> = target_ids.iter().cloned().map(Into::into).collect();
             let state = query.into_inner().where_in_str(ArticleDbCol::Id.as_sql(), &binds);
             <Self as core_db::common::model_api::QueryModel>::query_all(state).await
         })
     }
+    fn transform_patch_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {
+        Self::_transform_patch_value(col, value)
+    }
 }
 
 impl core_db::common::model_api::PatchAssignField<ArticleModel> for ArticleDbCol {
     type Value = BindValue;
-    fn assign<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
-        match field {
-            ArticleDbCol::Id => {
-                builder.state = builder.state.assign_col(field.as_sql(), value);
-                Ok(builder)
-            }
-            ArticleDbCol::AuthorId => {
-                builder.state = builder.state.assign_col(field.as_sql(), value);
-                Ok(builder)
-            }
-            ArticleDbCol::Status => {
-                builder.state = builder.state.assign_col(field.as_sql(), value);
-                Ok(builder)
-            }
-            ArticleDbCol::IsSystem => {
-                builder.state = builder.state.assign_col(field.as_sql(), value);
-                Ok(builder)
-            }
-        }
-    }
-}
-
-impl<T> core_db::common::model_api::PatchAssignField<ArticleModel> for Column<ArticleModel, T>
-where
-    T: Into<BindValue>,
-{
-    type Value = T;
-    fn assign<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
-        let resolved = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        let value = value.into();
-        match resolved {
-            ArticleDbCol::Id => {
-                builder.state = builder.state.assign_col(resolved.as_sql(), value);
-                Ok(builder)
-            }
-            ArticleDbCol::AuthorId => {
-                builder.state = builder.state.assign_col(resolved.as_sql(), value);
-                Ok(builder)
-            }
-            ArticleDbCol::Status => {
-                builder.state = builder.state.assign_col(resolved.as_sql(), value);
-                Ok(builder)
-            }
-            ArticleDbCol::IsSystem => {
-                builder.state = builder.state.assign_col(resolved.as_sql(), value);
-                Ok(builder)
-            }
-        }
+    fn assign<'db>(field: Self, state: PatchState<'db>, value: BindValue) -> anyhow::Result<PatchState<'db>> {
+        let value = <ArticleModel as core_db::common::model_api::PatchModel>::transform_patch_value(field.as_sql(), value)?;
+        Ok(state.assign_col(field.as_sql(), value))
     }
 }
 
 impl core_db::common::model_api::PatchNumericField<ArticleModel> for ArticleDbCol {
-    fn increment<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+    fn increment<'db>(field: Self, state: PatchState<'db>, value: BindValue) -> anyhow::Result<PatchState<'db>> {
         match field {
-            ArticleDbCol::Id => { builder.state = builder.state.increment_col(field.as_sql(), value); Ok(builder) }
-            ArticleDbCol::AuthorId => { builder.state = builder.state.increment_col(field.as_sql(), value); Ok(builder) }
+            ArticleDbCol::Id => Ok(state.increment_col(field.as_sql(), value)),
+            ArticleDbCol::AuthorId => Ok(state.increment_col(field.as_sql(), value)),
             _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
         }
     }
-    fn decrement<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+    fn decrement<'db>(field: Self, state: PatchState<'db>, value: BindValue) -> anyhow::Result<PatchState<'db>> {
         match field {
-            ArticleDbCol::Id => { builder.state = builder.state.decrement_col(field.as_sql(), value); Ok(builder) }
-            ArticleDbCol::AuthorId => { builder.state = builder.state.decrement_col(field.as_sql(), value); Ok(builder) }
+            ArticleDbCol::Id => Ok(state.decrement_col(field.as_sql(), value)),
+            ArticleDbCol::AuthorId => Ok(state.decrement_col(field.as_sql(), value)),
             _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
-        }
-    }
-}
-
-impl core_db::common::model_api::PatchNumericField<ArticleModel> for Column<ArticleModel, i64> {
-    fn increment<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
-        let resolved = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        match resolved {
-            ArticleDbCol::Id => { builder.state = builder.state.increment_col(resolved.as_sql(), value.into()); Ok(builder) }
-            ArticleDbCol::AuthorId => { builder.state = builder.state.increment_col(resolved.as_sql(), value.into()); Ok(builder) }
-            _ => anyhow::bail!("column '{}' does not support increment", resolved.as_sql()),
-        }
-    }
-    fn decrement<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
-        let resolved = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        match resolved {
-            ArticleDbCol::Id => { builder.state = builder.state.decrement_col(resolved.as_sql(), value.into()); Ok(builder) }
-            ArticleDbCol::AuthorId => { builder.state = builder.state.decrement_col(resolved.as_sql(), value.into()); Ok(builder) }
-            _ => anyhow::bail!("column '{}' does not support decrement", resolved.as_sql()),
         }
     }
 }
 
 impl core_db::common::model_api::QueryField<ArticleModel> for ArticleDbCol {
     type Value = BindValue;
-    fn where_col<'db>(field: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<ArticleModel>>::Value) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn where_col<'db>(field: Self, state: QueryState<'db>, op: Op, value: BindValue) -> QueryState<'db> {
         state.where_col_str(field.as_sql(), op, value)
     }
-    fn or_where_col<'db>(field: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<ArticleModel>>::Value) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn or_where_col<'db>(field: Self, state: QueryState<'db>, op: Op, value: BindValue) -> QueryState<'db> {
         state.or_where_col_str(field.as_sql(), op, value)
     }
-    fn where_in<'db>(field: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<ArticleModel>>::Value]) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn where_in<'db>(field: Self, state: QueryState<'db>, values: &[BindValue]) -> QueryState<'db> {
         state.where_in_str(field.as_sql(), values)
     }
-    fn order_by<'db>(field: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn order_by<'db>(field: Self, state: QueryState<'db>, dir: OrderDir) -> QueryState<'db> {
         state.order_by_str(field.as_sql(), dir)
     }
-    fn where_null<'db>(field: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn where_null<'db>(field: Self, state: QueryState<'db>) -> QueryState<'db> {
         state.where_null_str(field.as_sql())
     }
-    fn where_not_null<'db>(field: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn where_not_null<'db>(field: Self, state: QueryState<'db>) -> QueryState<'db> {
         state.where_not_null_str(field.as_sql())
     }
 }
 
-impl<T> core_db::common::model_api::QueryField<ArticleModel> for Column<ArticleModel, T>
-where
-    T: Clone + Into<BindValue>,
-{
-    type Value = T;
-    fn where_col<'db>(field: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        let col = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        state.where_col_str(col.as_sql(), op, value.into())
-    }
-    fn or_where_col<'db>(field: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        let col = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        state.or_where_col_str(col.as_sql(), op, value.into())
-    }
-    fn where_in<'db>(field: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        let col = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        let bind_values: Vec<BindValue> = values.iter().map(|v| v.clone().into()).collect();
-        state.where_in_str(col.as_sql(), &bind_values)
-    }
-    fn order_by<'db>(field: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        let col = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        state.order_by_str(col.as_sql(), dir)
-    }
-    fn where_null<'db>(field: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        let col = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        state.where_null_str(col.as_sql())
-    }
-    fn where_not_null<'db>(field: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        let col = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        state.where_not_null_str(col.as_sql())
-    }
-}
-
 impl core_db::common::model_api::IncludeRelation<ArticleModel> for OneRelation<ArticleModel, UserRow, 0> {
-    fn include<'db>(_relation: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn include<'db>(_relation: Self, state: QueryState<'db>) -> QueryState<'db> {
         state
     }
 }
 
 impl core_db::common::model_api::WhereHasRelation<ArticleModel> for OneRelation<ArticleModel, UserRow, 0> {
     type Target = UserModel;
-    fn where_has<'db, F>(_relation: Self, mut state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn where_has<'db, F>(_relation: Self, mut state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
@@ -1647,7 +1481,7 @@ impl core_db::common::model_api::WhereHasRelation<ArticleModel> for OneRelation<
         state.binds.extend(sub_binds);
         state
     }
-    fn or_where_has<'db, F>(_relation: Self, mut state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn or_where_has<'db, F>(_relation: Self, mut state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
