@@ -1812,10 +1812,11 @@ fn render_soft_delete_scope_methods() -> String {
     out
 }
 
-fn render_insert_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> String {
+fn render_insert_field_setters(db_fields: &[FieldSpec], _col_ident: &str) -> String {
     let mut out = String::new();
     for f in db_fields {
         let fn_name = format!("set_{}", to_snake(&f.name));
+        let col_sql = to_snake(&f.name);
         if let Some(SpecialType::Hashed) = f.special_type {
             writeln!(
                 out,
@@ -1829,11 +1830,9 @@ fn render_insert_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> Stri
             .unwrap();
             writeln!(
                 out,
-                "        self.cols.push({col_ident}::{});",
-                to_title_case(&f.name)
+                "        self.state = self.state.set_col(\"{col_sql}\", hashed.into());"
             )
             .unwrap();
-            writeln!(out, "        self.binds.push(hashed.into());").unwrap();
             writeln!(out, "        Ok(self)").unwrap();
             writeln!(out, "    }}").unwrap();
 
@@ -1845,11 +1844,9 @@ fn render_insert_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> Stri
             .unwrap();
             writeln!(
                 out,
-                "        self.cols.push({col_ident}::{});",
-                to_title_case(&f.name)
+                "        self.state = self.state.set_col(\"{col_sql}\", val.into());"
             )
             .unwrap();
-            writeln!(out, "        self.binds.push(val.into());").unwrap();
             writeln!(out, "        self").unwrap();
             writeln!(out, "    }}").unwrap();
         } else {
@@ -1861,11 +1858,9 @@ fn render_insert_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> Stri
             .unwrap();
             writeln!(
                 out,
-                "        self.cols.push({col_ident}::{});",
-                to_title_case(&f.name)
+                "        self.state = self.state.set_col(\"{col_sql}\", val.into());"
             )
             .unwrap();
-            writeln!(out, "        self.binds.push(val.into());").unwrap();
             writeln!(out, "        self").unwrap();
             writeln!(out, "    }}").unwrap();
         }
@@ -2272,7 +2267,7 @@ fn render_update_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> Stri
             .unwrap();
             writeln!(
                 out,
-                "        self.sets.push(({col_ident}::{col_variant}, hashed.into(), SetMode::Assign));",
+                "        self.state = self.state.assign_col({col_ident}::{col_variant}.as_sql(), hashed.into());",
             )
             .unwrap();
             writeln!(out, "        Ok(self)").unwrap();
@@ -2286,7 +2281,7 @@ fn render_update_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> Stri
             .unwrap();
             writeln!(
                 out,
-                "        self.sets.push(({col_ident}::{col_variant}, val.into(), SetMode::Assign));",
+                "        self.state = self.state.assign_col({col_ident}::{col_variant}.as_sql(), val.into());",
             )
             .unwrap();
             writeln!(out, "        self").unwrap();
@@ -2300,7 +2295,7 @@ fn render_update_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> Stri
             .unwrap();
             writeln!(
                 out,
-                "        self.sets.push(({col_ident}::{col_variant}, val.into(), SetMode::Assign));",
+                "        self.state = self.state.assign_col({col_ident}::{col_variant}.as_sql(), val.into());",
             )
             .unwrap();
             writeln!(out, "        self").unwrap();
@@ -2319,7 +2314,7 @@ fn render_update_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> Stri
                 .unwrap();
                 writeln!(
                     out,
-                    "        self.sets.push(({col_ident}::{col_variant}, val.into(), SetMode::Increment));",
+                    "        self.state = self.state.increment_col({col_ident}::{col_variant}.as_sql(), val.into());",
                 )
                 .unwrap();
                 writeln!(out, "        self").unwrap();
@@ -2333,7 +2328,7 @@ fn render_update_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> Stri
                 .unwrap();
                 writeln!(
                     out,
-                    "        self.sets.push(({col_ident}::{col_variant}, val.into(), SetMode::Decrement));",
+                    "        self.state = self.state.decrement_col({col_ident}::{col_variant}.as_sql(), val.into());",
                 )
                 .unwrap();
                 writeln!(out, "        self").unwrap();
@@ -3248,6 +3243,576 @@ fn render_get_method(
     out
 }
 
+/// Generate the body of `query_all` that uses QueryState::to_select_sql + hydration.
+/// Returns the code inside the `Box::pin(async move { ... })` block.
+fn render_query_all_body(
+    model_title: &str,
+    row_ident: &str,
+    has_soft_delete: bool,
+    table: &str,
+    model_snake: &str,
+    pk: &str,
+    parent_pk_ty: &str,
+    relations: &[RelationSpec],
+    localized_fields: &[String],
+    has_meta: bool,
+    has_attachments: bool,
+    skip_profiler: bool,
+) -> String {
+    let mut out = String::new();
+    let soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
+    writeln!(
+        out,
+        "            let (sql, binds) = state.to_select_sql(\"{table}\", HAS_SOFT_DELETE, \"{soft_delete_col}\");"
+    )
+    .unwrap();
+    if !skip_profiler {
+        writeln!(out, "            let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+        writeln!(
+            out,
+            "            let __profiler_start = std::time::Instant::now();"
+        )
+        .unwrap();
+    }
+    writeln!(
+        out,
+        "            let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
+    )
+    .unwrap();
+    writeln!(out, "            for b in binds {{ q = bind(q, b); }}").unwrap();
+    writeln!(
+        out,
+        "            let rows = state.db.fetch_all(q).await?;"
+    )
+    .unwrap();
+    if !skip_profiler {
+        writeln!(out, "            record_profiled_query(\"{table}\", \"SELECT\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
+    }
+    if !relations.is_empty() {
+        // Relation loader bindings use `db.clone()` - we need a db ref
+        writeln!(out, "            let db = state.db.clone();").unwrap();
+        for rel in relations {
+            let rel_name = to_snake(&rel.name);
+            writeln!(
+                out,
+                "            let {rel_name} = load_{rel_name}(db.clone(), &rows).await?;"
+            )
+            .unwrap();
+        }
+    }
+    // Support data loaders (localized, meta, attachments)
+    let db_expr = if relations.is_empty() {
+        "state.db.clone()"
+    } else {
+        "db.clone()"
+    };
+    // Indent: render_support_data_loaders generates 8-space indented code, we need 12
+    let support_loaders = render_support_data_loaders(
+        model_snake,
+        pk,
+        parent_pk_ty,
+        localized_fields,
+        has_meta,
+        has_attachments,
+        "rows",
+        db_expr,
+    );
+    // Re-indent from 8 to 12 spaces
+    for line in support_loaders.lines() {
+        if line.trim().is_empty() {
+            writeln!(out).unwrap();
+        } else {
+            writeln!(out, "    {}", line).unwrap();
+        }
+    }
+    // Record collection build
+    let base_url_expr = "state.base_url.as_deref()";
+    if !relations.is_empty() {
+        let build = render_record_collection_build(
+            relations,
+            pk,
+            "rows",
+            "r",
+            "out_vec",
+            localized_fields,
+            has_meta,
+            has_attachments,
+            base_url_expr,
+        );
+        for line in build.lines() {
+            if line.trim().is_empty() {
+                writeln!(out).unwrap();
+            } else {
+                writeln!(out, "    {}", line).unwrap();
+            }
+        }
+    } else {
+        let build = render_record_collection_build_no_relations(
+            "out_vec",
+            "r",
+            "rows",
+            localized_fields,
+            has_meta,
+            has_attachments,
+            base_url_expr,
+        );
+        for line in build.lines() {
+            if line.trim().is_empty() {
+                writeln!(out).unwrap();
+            } else {
+                writeln!(out, "    {}", line).unwrap();
+            }
+        }
+        writeln!(
+            out,
+            "            let out_vec: Vec<{model_title}Record> = out_vec;"
+        )
+        .unwrap();
+    }
+    writeln!(out, "            Ok(out_vec)").unwrap();
+    out
+}
+
+/// Generate the body of `query_count` using QueryState::to_count_sql.
+fn render_query_count_body(
+    has_soft_delete: bool,
+    table: &str,
+    skip_profiler: bool,
+) -> String {
+    let mut out = String::new();
+    let soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
+    writeln!(
+        out,
+        "            let (sql, binds) = state.to_count_sql(\"{table}\", HAS_SOFT_DELETE, \"{soft_delete_col}\");"
+    )
+    .unwrap();
+    if !skip_profiler {
+        writeln!(out, "            let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+        writeln!(
+            out,
+            "            let __profiler_start = std::time::Instant::now();"
+        )
+        .unwrap();
+    }
+    writeln!(
+        out,
+        "            let mut q = sqlx::query_scalar::<_, i64>(&sql);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            for b in binds {{ q = bind_scalar(q, b); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            let count = state.db.fetch_scalar(q).await?;"
+    )
+    .unwrap();
+    if !skip_profiler {
+        writeln!(out, "            record_profiled_query(\"{table}\", \"COUNT\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
+    }
+    writeln!(out, "            Ok(count)").unwrap();
+    out
+}
+
+/// Generate the body of `query_paginate` using QueryState.
+fn render_query_paginate_body(
+    model_title: &str,
+    row_ident: &str,
+    has_soft_delete: bool,
+    table: &str,
+    model_snake: &str,
+    pk: &str,
+    parent_pk_ty: &str,
+    relations: &[RelationSpec],
+    localized_fields: &[String],
+    has_meta: bool,
+    has_attachments: bool,
+    skip_profiler: bool,
+) -> String {
+    let mut out = String::new();
+    let soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
+    writeln!(out, "            let page = if page < 1 {{ 1 }} else {{ page }};").unwrap();
+    writeln!(out, "            let per_page = resolve_per_page(per_page);").unwrap();
+    // Count query
+    writeln!(
+        out,
+        "            let (count_sql, count_binds) = state.to_count_sql(\"{table}\", HAS_SOFT_DELETE, \"{soft_delete_col}\");"
+    )
+    .unwrap();
+    if !skip_profiler {
+        writeln!(out, "            let __profiler_binds = if is_sql_profiler_enabled() {{ count_binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+        writeln!(
+            out,
+            "            let __profiler_start = std::time::Instant::now();"
+        )
+        .unwrap();
+    }
+    writeln!(
+        out,
+        "            let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            for b in count_binds {{ count_q = bind_scalar(count_q, b); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            let total: i64 = state.db.fetch_scalar(count_q).await?;"
+    )
+    .unwrap();
+    if !skip_profiler {
+        writeln!(out, "            record_profiled_query(\"{table}\", \"COUNT\", &count_sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
+    }
+    writeln!(out, "            let last_page = ((total + per_page - 1) / per_page).max(1);").unwrap();
+    writeln!(out, "            let current_page = page.min(last_page);").unwrap();
+    writeln!(
+        out,
+        "            let offset_val = (current_page - 1) * per_page;"
+    )
+    .unwrap();
+    // Data query - override offset/limit on state
+    writeln!(out, "            let mut state = state;").unwrap();
+    writeln!(out, "            state.offset = Some(offset_val);").unwrap();
+    writeln!(out, "            state.limit = Some(per_page);").unwrap();
+    writeln!(
+        out,
+        "            let (sql, binds) = state.to_select_sql(\"{table}\", HAS_SOFT_DELETE, \"{soft_delete_col}\");"
+    )
+    .unwrap();
+    if !skip_profiler {
+        writeln!(
+            out,
+            "            let __profiler_start = std::time::Instant::now();"
+        )
+        .unwrap();
+    }
+    writeln!(
+        out,
+        "            let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
+    )
+    .unwrap();
+    writeln!(out, "            for b in binds {{ q = bind(q, b); }}").unwrap();
+    writeln!(
+        out,
+        "            let rows = state.db.fetch_all(q).await?;"
+    )
+    .unwrap();
+    if !skip_profiler {
+        writeln!(out, "            record_profiled_query(\"{table}\", \"SELECT\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
+    }
+    // Hydration (same as query_all)
+    if !relations.is_empty() {
+        writeln!(out, "            let db = state.db.clone();").unwrap();
+        for rel in relations {
+            let rel_name = to_snake(&rel.name);
+            writeln!(
+                out,
+                "            let {rel_name} = load_{rel_name}(db.clone(), &rows).await?;"
+            )
+            .unwrap();
+        }
+    }
+    let db_expr = if relations.is_empty() {
+        "state.db.clone()"
+    } else {
+        "db.clone()"
+    };
+    let support_loaders = render_support_data_loaders(
+        model_snake, pk, parent_pk_ty, localized_fields, has_meta, has_attachments, "rows", db_expr,
+    );
+    for line in support_loaders.lines() {
+        if line.trim().is_empty() {
+            writeln!(out).unwrap();
+        } else {
+            writeln!(out, "    {}", line).unwrap();
+        }
+    }
+    let base_url_expr = "state.base_url.as_deref()";
+    if !relations.is_empty() {
+        let build = render_record_collection_build(
+            relations, pk, "rows", "r", "data", localized_fields, has_meta, has_attachments, base_url_expr,
+        );
+        for line in build.lines() {
+            if line.trim().is_empty() {
+                writeln!(out).unwrap();
+            } else {
+                writeln!(out, "    {}", line).unwrap();
+            }
+        }
+    } else {
+        let build = render_record_collection_build_no_relations(
+            "data", "r", "rows", localized_fields, has_meta, has_attachments, base_url_expr,
+        );
+        for line in build.lines() {
+            if line.trim().is_empty() {
+                writeln!(out).unwrap();
+            } else {
+                writeln!(out, "    {}", line).unwrap();
+            }
+        }
+        writeln!(
+            out,
+            "            let data: Vec<{model_title}Record> = data;"
+        )
+        .unwrap();
+    }
+    writeln!(
+        out,
+        "            Ok(core_db::common::model_api::Page {{ data, total, per_page, current_page, last_page }})"
+    )
+    .unwrap();
+    out
+}
+
+/// Generate the body of `query_delete` using state fields directly.
+/// Handles observer hooks and soft-delete logic.
+fn render_query_delete_body(
+    table: &str,
+    model_key: &str,
+    col_ident: &str,
+    has_soft_delete: bool,
+    emit_hooks: bool,
+    row_ident: &str,
+    pk_snake: &str,
+    skip_profiler: bool,
+) -> String {
+    let mut out = String::new();
+    writeln!(out, "            if state.limit.is_some() {{").unwrap();
+    writeln!(
+        out,
+        "                anyhow::bail!(\"delete() does not support limit; add where clauses\");"
+    )
+    .unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "            let db = state.db;").unwrap();
+    writeln!(out, "            let mut where_sql = state.where_sql;").unwrap();
+    writeln!(out, "            let binds = state.binds;").unwrap();
+    if has_soft_delete {
+        writeln!(out, "            let with_deleted = state.with_deleted;").unwrap();
+        writeln!(out, "            let only_deleted = state.only_deleted;").unwrap();
+    }
+    writeln!(
+        out,
+        "            if where_sql.is_empty() {{ anyhow::bail!(\"delete(): no conditions set\"); }}"
+    )
+    .unwrap();
+    writeln!(out, "            let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+    if emit_hooks {
+        writeln!(
+            out,
+            "            let __observer_active = try_get_observer().is_some();"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            let __old_rows: Vec<{row_ident}> = if __observer_active {{"
+        )
+        .unwrap();
+        writeln!(out, "                let select_sql = format!(\"SELECT * FROM {table} WHERE {{}}\", where_sql.join(\" AND \"));").unwrap();
+        writeln!(
+            out,
+            "                let mut fq = sqlx::query_as::<_, {row_ident}>(&select_sql);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                for b in &binds {{ fq = bind(fq, b.clone()); }}"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                let rows: Vec<{row_ident}> = db.fetch_all(fq).await.unwrap_or_default();"
+        )
+        .unwrap();
+        writeln!(out, "                rows").unwrap();
+        writeln!(out, "            }} else {{").unwrap();
+        writeln!(out, "                Vec::new()").unwrap();
+        writeln!(out, "            }};").unwrap();
+        writeln!(out, "            if !__old_rows.is_empty() {{").unwrap();
+        writeln!(
+            out,
+            "                if let Some(observer) = try_get_observer() {{"
+        )
+        .unwrap();
+        writeln!(out, "                    for old_row in &__old_rows {{").unwrap();
+        writeln!(
+            out,
+            "                        let old_data = serde_json::to_value(old_row)?;"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                        let event = ModelEvent {{ model: \"{model_key}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", old_row.{pk_snake})) }};"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                        observer.on_deleting(&event, &old_data).await?;"
+        )
+        .unwrap();
+        writeln!(out, "                    }}").unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
+    }
+    if has_soft_delete {
+        writeln!(out, "            if HAS_SOFT_DELETE {{").unwrap();
+        writeln!(out, "                if only_deleted {{").unwrap();
+        writeln!(
+            out,
+            "                    where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));"
+        )
+        .unwrap();
+        writeln!(out, "                }} else if !with_deleted {{").unwrap();
+        writeln!(
+            out,
+            "                    where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));"
+        )
+        .unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "                let idx = binds.len() + 1;").unwrap();
+        writeln!(
+            out,
+            "                let mut sql = format!(\"UPDATE {table} SET {{}} = ${{}}\", {col_ident}::DeletedAt.as_sql(), idx);"
+        )
+        .unwrap();
+        writeln!(out, "                if !where_sql.is_empty() {{").unwrap();
+        writeln!(out, "                    sql.push_str(\" WHERE \");").unwrap();
+        writeln!(
+            out,
+            "                    sql.push_str(&where_sql.join(\" AND \"));"
+        )
+        .unwrap();
+        writeln!(out, "                }}").unwrap();
+        if !skip_profiler {
+            writeln!(
+                out,
+                "                let __profiler_start = std::time::Instant::now();"
+            )
+            .unwrap();
+        }
+        writeln!(out, "                let mut q = sqlx::query(&sql);").unwrap();
+        writeln!(
+            out,
+            "                for b in binds {{ q = bind_query(q, b); }}"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                q = bind_query(q, time::OffsetDateTime::now_utc().into());"
+        )
+        .unwrap();
+        writeln!(out, "                let res = db.execute(q).await?;").unwrap();
+        if !skip_profiler {
+            writeln!(out, "                record_profiled_query(\"{table}\", \"UPDATE\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
+        }
+        if emit_hooks {
+            writeln!(
+                out,
+                "                if !__old_rows.is_empty() && res.rows_affected() > 0 {{"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                    if let Some(observer) = try_get_observer() {{"
+            )
+            .unwrap();
+            writeln!(out, "                        for old_row in &__old_rows {{").unwrap();
+            writeln!(
+                out,
+                "                            let event = ModelEvent {{ model: \"{model_key}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", old_row.{pk_snake})) }};"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                            match serde_json::to_value(old_row) {{"
+            )
+            .unwrap();
+            writeln!(out, "                                Ok(old_data) => {{").unwrap();
+            writeln!(out, "                                    if let Err(err) = observer.on_deleted(&event, &old_data).await {{").unwrap();
+            writeln!(out, "                                        log_observer_error(\"deleted\", \"{model_key}\", &err);").unwrap();
+            writeln!(out, "                                    }}").unwrap();
+            writeln!(out, "                                }}").unwrap();
+            writeln!(out, "                                Err(err) => log_observer_error(\"deleted\", \"{model_key}\", &err),").unwrap();
+            writeln!(out, "                            }}").unwrap();
+            writeln!(out, "                        }}").unwrap();
+            writeln!(out, "                    }}").unwrap();
+            writeln!(out, "                }}").unwrap();
+        }
+        writeln!(out, "                return Ok(res.rows_affected());").unwrap();
+        writeln!(out, "            }}").unwrap();
+    }
+    // Hard delete path
+    writeln!(
+        out,
+        "            let mut sql = String::from(\"DELETE FROM {table}\");"
+    )
+    .unwrap();
+    writeln!(out, "            if !where_sql.is_empty() {{").unwrap();
+    writeln!(out, "                sql.push_str(\" WHERE \");").unwrap();
+    writeln!(
+        out,
+        "                sql.push_str(&where_sql.join(\" AND \"));"
+    )
+    .unwrap();
+    writeln!(out, "            }}").unwrap();
+    if !skip_profiler {
+        writeln!(
+            out,
+            "            let __profiler_start = std::time::Instant::now();"
+        )
+        .unwrap();
+    }
+    writeln!(out, "            let mut q = sqlx::query(&sql);").unwrap();
+    writeln!(
+        out,
+        "            for b in binds {{ q = bind_query(q, b); }}"
+    )
+    .unwrap();
+    writeln!(out, "            let res = db.execute(q).await?;").unwrap();
+    if !skip_profiler {
+        writeln!(out, "            record_profiled_query(\"{table}\", \"DELETE\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
+    }
+    if emit_hooks {
+        writeln!(
+            out,
+            "            if !__old_rows.is_empty() && res.rows_affected() > 0 {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                if let Some(observer) = try_get_observer() {{"
+        )
+        .unwrap();
+        writeln!(out, "                    for old_row in &__old_rows {{").unwrap();
+        writeln!(
+            out,
+            "                        let event = ModelEvent {{ model: \"{model_key}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", old_row.{pk_snake})) }};"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                        match serde_json::to_value(old_row) {{"
+        )
+        .unwrap();
+        writeln!(out, "                            Ok(old_data) => {{").unwrap();
+        writeln!(out, "                                if let Err(err) = observer.on_deleted(&event, &old_data).await {{").unwrap();
+        writeln!(out, "                                    log_observer_error(\"deleted\", \"{model_key}\", &err);").unwrap();
+        writeln!(out, "                                }}").unwrap();
+        writeln!(out, "                            }}").unwrap();
+        writeln!(out, "                            Err(err) => log_observer_error(\"deleted\", \"{model_key}\", &err),").unwrap();
+        writeln!(out, "                        }}").unwrap();
+        writeln!(out, "                    }}").unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
+    }
+    writeln!(out, "            Ok(res.rows_affected())").unwrap();
+    out
+}
+
 fn render_with_counts_method(
     model_title: &str,
     record_ident: &str,
@@ -3527,12 +4092,12 @@ fn render_create_model_impl(
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
-    writeln!(out, "            let db = builder.db.clone();").unwrap();
-    writeln!(out, "            let base_url = builder.base_url.clone();").unwrap();
+    writeln!(out, "            let db = builder.state.db.clone();").unwrap();
+    writeln!(out, "            let base_url = builder.state.base_url.clone();").unwrap();
     writeln!(out, "            let created = builder.save().await?;").unwrap();
     writeln!(
         out,
-        "            {query_ident}::new(db, base_url).find(created.{pk}.clone()).await?.ok_or_else(|| anyhow::anyhow!(\"{table}: created record not found\"))"
+        "            Query::<{model_title}Model>::new_with_base_url(db, base_url).find(created.{pk}.clone()).await?.ok_or_else(|| anyhow::anyhow!(\"{table}: created record not found\"))"
     )
     .unwrap();
     writeln!(out, "        }})").unwrap();
@@ -3575,11 +4140,9 @@ fn render_create_field_impl(model_title: &str, col_ident: &str, db_fields: &[Fie
                 "                let hashed = core_db::common::auth::hash::hash_password(&value)?;"
             )
             .unwrap();
-            writeln!(out, "                builder.cols.push(field);").unwrap();
-            writeln!(out, "                builder.binds.push(hashed.into());").unwrap();
+            writeln!(out, "                builder.state = builder.state.set_col(field.as_sql(), hashed.into());").unwrap();
         } else {
-            writeln!(out, "                builder.cols.push(field);").unwrap();
-            writeln!(out, "                builder.binds.push(value);").unwrap();
+            writeln!(out, "                builder.state = builder.state.set_col(field.as_sql(), value);").unwrap();
         }
         writeln!(out, "                Ok(builder)").unwrap();
         writeln!(out, "            }}").unwrap();
@@ -3664,11 +4227,9 @@ fn render_typed_create_field_impl(
                 "                let hashed = core_db::common::auth::hash::hash_password(&value)?;"
             )
             .unwrap();
-            writeln!(out, "                builder.cols.push(field);").unwrap();
-            writeln!(out, "                builder.binds.push(hashed.into());").unwrap();
+            writeln!(out, "                builder.state = builder.state.set_col(field.as_sql(), hashed.into());").unwrap();
         } else {
-            writeln!(out, "                builder.cols.push(field);").unwrap();
-            writeln!(out, "                builder.binds.push(value);").unwrap();
+            writeln!(out, "                builder.state = builder.state.set_col(field.as_sql(), value);").unwrap();
         }
         writeln!(out, "                Ok(builder)").unwrap();
         writeln!(out, "            }}").unwrap();
@@ -3764,10 +4325,10 @@ fn render_patch_model_impl(
     .unwrap();
     writeln!(
         out,
-        "        builder.where_sql.push(format!(\"{{}} IN ({{}})\", {col_ident}::{pk_col_variant}.as_sql(), scope_sql));"
+        "        builder.state.where_sql.push(format!(\"{{}} IN ({{}})\", {col_ident}::{pk_col_variant}.as_sql(), scope_sql));"
     )
     .unwrap();
-    writeln!(out, "        builder.binds = binds;").unwrap();
+    writeln!(out, "        builder.state.where_binds = binds;").unwrap();
     writeln!(out, "        builder").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
@@ -3787,15 +4348,15 @@ fn render_patch_model_impl(
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
-    writeln!(out, "            if builder.where_sql.is_empty() {{").unwrap();
+    writeln!(out, "            if builder.state.where_sql.is_empty() {{").unwrap();
     writeln!(
         out,
         "                anyhow::bail!(\"update: no conditions set\");"
     )
     .unwrap();
     writeln!(out, "            }}").unwrap();
-    writeln!(out, "            let db = builder.db.clone();").unwrap();
-    writeln!(out, "            let base_url = builder.base_url.clone();").unwrap();
+    writeln!(out, "            let db = builder.state.db.clone();").unwrap();
+    writeln!(out, "            let base_url = builder.state.base_url.clone();").unwrap();
     writeln!(
         out,
         "            let mut select_sql = format!(\"SELECT {{}} FROM {table}\", {col_ident}::{pk_col_variant}.as_sql());"
@@ -3803,7 +4364,7 @@ fn render_patch_model_impl(
     .unwrap();
     writeln!(
         out,
-        "            select_sql.push_str(&format!(\" WHERE {{}}\", builder.where_sql.join(\" AND \")));"
+        "            select_sql.push_str(&format!(\" WHERE {{}}\", builder.state.where_sql.join(\" AND \")));"
     )
     .unwrap();
     writeln!(
@@ -3813,7 +4374,7 @@ fn render_patch_model_impl(
     .unwrap();
     writeln!(
         out,
-        "            for bind_value in &builder.binds {{ select_q = bind_scalar(select_q, bind_value.clone()); }}"
+        "            for bind_value in &builder.state.where_binds {{ select_q = bind_scalar(select_q, bind_value.clone()); }}"
     )
     .unwrap();
     writeln!(
@@ -3827,17 +4388,23 @@ fn render_patch_model_impl(
     writeln!(out, "            }}").unwrap();
     writeln!(
         out,
-        "            let mut query = {query_ident}::new(db, base_url);"
+        "            let mut query = Query::<{model_title}Model>::new_with_base_url(db, base_url);"
     )
     .unwrap();
     if has_soft_delete {
-        writeln!(out, "            query = query.with_deleted();").unwrap();
+        writeln!(out, "            let mut state = query.into_inner().with_deleted();").unwrap();
+        writeln!(out, "            let binds: Vec<BindValue> = target_ids.iter().cloned().map(Into::into).collect();").unwrap();
+        writeln!(
+            out,
+            "            state = state.where_in_str({col_ident}::{pk_col_variant}.as_sql(), &binds);"
+        )
+        .unwrap();
+        writeln!(out, "            <Self as core_db::common::model_api::QueryModel>::query_all(state).await").unwrap();
+    } else {
+        writeln!(out, "            let binds: Vec<BindValue> = target_ids.iter().cloned().map(Into::into).collect();").unwrap();
+        writeln!(out, "            let state = query.into_inner().where_in_str({col_ident}::{pk_col_variant}.as_sql(), &binds);").unwrap();
+        writeln!(out, "            <Self as core_db::common::model_api::QueryModel>::query_all(state).await").unwrap();
     }
-    writeln!(
-        out,
-        "            query.where_in({col_ident}::{pk_col_variant}, &target_ids).get().await"
-    )
-    .unwrap();
     writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
@@ -3884,13 +4451,13 @@ fn render_patch_assign_field_impl(
             .unwrap();
             writeln!(
                 out,
-                "                builder.sets.push((field, hashed.into(), SetMode::Assign));"
+                "                builder.state = builder.state.assign_col(field.as_sql(), hashed.into());"
             )
             .unwrap();
         } else {
             writeln!(
                 out,
-                "                builder.sets.push((field, value, SetMode::Assign));"
+                "                builder.state = builder.state.assign_col(field.as_sql(), value);"
             )
             .unwrap();
         }
@@ -3927,11 +4494,11 @@ fn render_typed_patch_assign_field_impl(
     .unwrap();
     writeln!(
         out,
-        "        let field = {resolver_ident}(field.as_sql()).expect(\"typed generated column must resolve to an internal db column\");"
+        "        let resolved = {resolver_ident}(field.as_sql()).expect(\"typed generated column must resolve to an internal db column\");"
     )
     .unwrap();
     writeln!(out, "        let value = value.into();").unwrap();
-    writeln!(out, "        match field {{").unwrap();
+    writeln!(out, "        match resolved {{").unwrap();
     for field in db_fields {
         let col_variant = to_title_case(&field.name);
         writeln!(out, "            {col_ident}::{col_variant} => {{").unwrap();
@@ -3954,13 +4521,13 @@ fn render_typed_patch_assign_field_impl(
             .unwrap();
             writeln!(
                 out,
-                "                builder.sets.push((field, hashed.into(), SetMode::Assign));"
+                "                builder.state = builder.state.assign_col(resolved.as_sql(), hashed.into());"
             )
             .unwrap();
         } else {
             writeln!(
                 out,
-                "                builder.sets.push((field, value, SetMode::Assign));"
+                "                builder.state = builder.state.assign_col(resolved.as_sql(), value);"
             )
             .unwrap();
         }
@@ -4002,7 +4569,7 @@ fn render_patch_numeric_field_impl(
         let col_variant = to_title_case(&field.name);
         writeln!(
             out,
-            "            {col_ident}::{col_variant} => {{ builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }}"
+            "            {col_ident}::{col_variant} => {{ builder.state = builder.state.increment_col(field.as_sql(), value); Ok(builder) }}"
         )
         .unwrap();
     }
@@ -4023,7 +4590,7 @@ fn render_patch_numeric_field_impl(
         let col_variant = to_title_case(&field.name);
         writeln!(
             out,
-            "            {col_ident}::{col_variant} => {{ builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }}"
+            "            {col_ident}::{col_variant} => {{ builder.state = builder.state.decrement_col(field.as_sql(), value); Ok(builder) }}"
         )
         .unwrap();
     }
@@ -4077,21 +4644,21 @@ fn render_typed_patch_numeric_field_impl(
         .unwrap();
         writeln!(
             out,
-            "        let field = {resolver_ident}(field.as_sql()).expect(\"typed generated column must resolve to an internal db column\");"
+            "        let resolved = {resolver_ident}(field.as_sql()).expect(\"typed generated column must resolve to an internal db column\");"
         )
         .unwrap();
-        writeln!(out, "        match field {{").unwrap();
+        writeln!(out, "        match resolved {{").unwrap();
         for field in &matching_fields {
             let col_variant = to_title_case(&field.name);
             writeln!(
                 out,
-                "            {col_ident}::{col_variant} => {{ builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }}"
+                "            {col_ident}::{col_variant} => {{ builder.state = builder.state.increment_col(resolved.as_sql(), value.into()); Ok(builder) }}"
             )
             .unwrap();
         }
         writeln!(
             out,
-            "            _ => anyhow::bail!(\"column '{{}}' does not support increment\", field.as_sql()),"
+            "            _ => anyhow::bail!(\"column '{{}}' does not support increment\", resolved.as_sql()),"
         )
         .unwrap();
         writeln!(out, "        }}").unwrap();
@@ -4103,21 +4670,21 @@ fn render_typed_patch_numeric_field_impl(
         .unwrap();
         writeln!(
             out,
-            "        let field = {resolver_ident}(field.as_sql()).expect(\"typed generated column must resolve to an internal db column\");"
+            "        let resolved = {resolver_ident}(field.as_sql()).expect(\"typed generated column must resolve to an internal db column\");"
         )
         .unwrap();
-        writeln!(out, "        match field {{").unwrap();
+        writeln!(out, "        match resolved {{").unwrap();
         for field in &matching_fields {
             let col_variant = to_title_case(&field.name);
             writeln!(
                 out,
-                "            {col_ident}::{col_variant} => {{ builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }}"
+                "            {col_ident}::{col_variant} => {{ builder.state = builder.state.decrement_col(resolved.as_sql(), value.into()); Ok(builder) }}"
             )
             .unwrap();
         }
         writeln!(
             out,
-            "            _ => anyhow::bail!(\"column '{{}}' does not support decrement\", field.as_sql()),"
+            "            _ => anyhow::bail!(\"column '{{}}' does not support decrement\", resolved.as_sql()),"
         )
         .unwrap();
         writeln!(out, "        }}").unwrap();
@@ -5168,317 +5735,13 @@ fn render_model(
     writeln!(out).unwrap();
 
     let column_model_section = out;
-    let mut out = String::new();
 
-    // Query
-    writeln!(out, "#[derive(Clone)]").unwrap();
-    writeln!(out, "pub struct {query_ident}<'db> {{").unwrap();
-    writeln!(out, "    db: DbConn<'db>,").unwrap();
-    writeln!(out, "    base_url: Option<String>,").unwrap();
-    writeln!(out, "    select_sql: Option<String>,").unwrap();
-    writeln!(out, "    from_sql: Option<String>,").unwrap();
-    writeln!(out, "    count_sql: Option<String>,").unwrap();
-    writeln!(out, "    distinct: bool,").unwrap();
-    writeln!(out, "    distinct_on: Option<String>,").unwrap();
-    writeln!(out, "    lock_sql: Option<&'static str>,").unwrap();
-    writeln!(out, "    join_sql: Vec<String>,").unwrap();
-    writeln!(out, "    join_binds: Vec<BindValue>,").unwrap();
-    writeln!(out, "    where_sql: Vec<String>,").unwrap();
-    writeln!(out, "    order_sql: Vec<String>,").unwrap();
-    writeln!(out, "    group_by_sql: Vec<String>,").unwrap();
-    writeln!(out, "    having_sql: Vec<String>,").unwrap();
-    writeln!(out, "    having_binds: Vec<BindValue>,").unwrap();
-    writeln!(out, "    offset: Option<i64>,").unwrap();
-    writeln!(out, "    limit: Option<i64>,").unwrap();
-    writeln!(out, "    binds: Vec<BindValue>,").unwrap();
-    if has_soft_delete {
-        writeln!(out, "    with_deleted: bool,").unwrap();
-        writeln!(out, "    only_deleted: bool,").unwrap();
-    }
-    writeln!(out, "}}\n").unwrap();
-
-    let query_struct_section = out;
-    let mut out = String::new();
-
-    writeln!(out, "impl<'db> {query_ident}<'db> {{").unwrap();
-    writeln!(
-        out,
-        "    pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {{"
-    )
-    .unwrap();
-    if has_soft_delete {
-        writeln!(
-            out,
-            "        Self {{ db, base_url, select_sql: Some(\"{base_select}\".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![], with_deleted: false, only_deleted: false }}"
-        )
-        .unwrap();
-    } else {
-        writeln!(
-            out,
-            "        Self {{ db, base_url, select_sql: Some(\"{base_select}\".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }}"
-        )
-        .unwrap();
-    }
-    writeln!(out, "    }}").unwrap();
-    // from_state: construct inner query from QueryState
-    writeln!(out, "    pub fn from_state(state: QueryState<'db>) -> Self {{").unwrap();
-    if has_soft_delete {
-        writeln!(
-            out,
-            "        Self {{ db: state.db, base_url: state.base_url, select_sql: state.select_sql, from_sql: state.from_sql, count_sql: state.count_sql, distinct: state.distinct, distinct_on: state.distinct_on, lock_sql: state.lock_sql, join_sql: state.join_sql, join_binds: state.join_binds, where_sql: state.where_sql, order_sql: state.order_sql, group_by_sql: state.group_by_sql, having_sql: state.having_sql, having_binds: state.having_binds, offset: state.offset, limit: state.limit, binds: state.binds, with_deleted: state.with_deleted, only_deleted: state.only_deleted }}"
-        )
-        .unwrap();
-    } else {
-        writeln!(
-            out,
-            "        Self {{ db: state.db, base_url: state.base_url, select_sql: state.select_sql, from_sql: state.from_sql, count_sql: state.count_sql, distinct: state.distinct, distinct_on: state.distinct_on, lock_sql: state.lock_sql, join_sql: state.join_sql, join_binds: state.join_binds, where_sql: state.where_sql, order_sql: state.order_sql, group_by_sql: state.group_by_sql, having_sql: state.having_sql, having_binds: state.having_binds, offset: state.offset, limit: state.limit, binds: state.binds }}"
-        )
-        .unwrap();
-    }
-    writeln!(out, "    }}").unwrap();
-    // into_state: convert inner query back to QueryState
-    writeln!(out, "    pub fn into_state(self) -> QueryState<'db> {{").unwrap();
-    if has_soft_delete {
-        writeln!(
-            out,
-            "        QueryState {{ db: self.db, base_url: self.base_url, select_sql: self.select_sql, from_sql: self.from_sql, count_sql: self.count_sql, distinct: self.distinct, distinct_on: self.distinct_on, lock_sql: self.lock_sql, join_sql: self.join_sql, join_binds: self.join_binds, where_sql: self.where_sql, order_sql: self.order_sql, group_by_sql: self.group_by_sql, having_sql: self.having_sql, having_binds: self.having_binds, offset: self.offset, limit: self.limit, binds: self.binds, with_deleted: self.with_deleted, only_deleted: self.only_deleted }}"
-        )
-        .unwrap();
-    } else {
-        writeln!(
-            out,
-            "        QueryState {{ db: self.db, base_url: self.base_url, select_sql: self.select_sql, from_sql: self.from_sql, count_sql: self.count_sql, distinct: self.distinct, distinct_on: self.distinct_on, lock_sql: self.lock_sql, join_sql: self.join_sql, join_binds: self.join_binds, where_sql: self.where_sql, order_sql: self.order_sql, group_by_sql: self.group_by_sql, having_sql: self.having_sql, having_binds: self.having_binds, offset: self.offset, limit: self.limit, binds: self.binds, with_deleted: false, only_deleted: false }}"
-        )
-        .unwrap();
-    }
-    writeln!(out, "    }}").unwrap();
-    out.push_str(&render_query_field_where_methods(&db_fields, &col_ident));
-
-    writeln!(
-        out,
-        "    pub fn where_key(self, id: {parent_pk_ty}) -> Self {{ self.where_{pk}(Op::Eq, id) }}",
-        pk = to_snake(&pk)
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self {{ self.where_in({col_ident}::{pk_col_variant}, vals) }}"
-    )
-    .unwrap();
-
-    writeln!(
-        out,
-        "    pub fn where_col<T: Into<BindValue>>(mut self, col: {col_ident}, op: Op, val: T) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        let idx = self.binds.len() + 1;").unwrap();
-    writeln!(
-        out,
-        "        self.where_sql.push(format!(\"{{}} {{}} ${{}}\", col.as_sql(), op.as_sql(), idx));"
-    )
-    .unwrap();
-    writeln!(out, "        self.binds.push(val.into());").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    fn where_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        let mut clause = clause.into();").unwrap();
-    writeln!(
-        out,
-        "        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
-    )
-    .unwrap();
-    writeln!(out, "        let mut idx = self.binds.len() + 1;").unwrap();
-    writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
-    writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
-    writeln!(out, "            clause.replace_range(pos..pos + 1, &ph);").unwrap();
-    writeln!(out, "            idx += 1;").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        self.where_sql.push(clause);").unwrap();
-    writeln!(out, "        self.binds.extend(incoming);").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    out.push_str(&render_where_set_methods(&col_ident));
-    out.push_str(&render_null_check_methods(&col_ident));
-    out.push_str(&render_or_where_methods(&col_ident));
-    out.push_str(&render_where_group_methods());
-    out.push_str(&render_select_list_methods(&col_ident, &base_select));
-    out.push_str(&render_raw_join_method("inner_join_raw", "INNER JOIN"));
-    out.push_str(&render_raw_join_method("left_join_raw", "LEFT JOIN"));
-    out.push_str(&render_raw_join_method("right_join_raw", "RIGHT JOIN"));
-    out.push_str(&render_raw_join_method("full_join_raw", "FULL OUTER JOIN"));
-    out.push_str(&render_order_methods(&col_ident));
-    out.push_str(&render_distinct_methods(&col_ident));
-    out.push_str(&render_query_select_method(&col_ident));
-    out.push_str(&render_simple_join_method("join", "JOIN"));
-    out.push_str(&render_simple_join_method("left_join", "LEFT JOIN"));
-    out.push_str(&render_simple_join_method("right_join", "RIGHT JOIN"));
-    out.push_str(&render_query_source_methods());
-    out.push_str(&render_where_exists_method());
-    out.push_str(&render_select_subquery_method());
-    out.push_str(&render_lock_methods());
-    out.push_str(&render_group_by_method(&col_ident));
-    out.push_str(&render_having_raw_method());
-    out.push_str(&render_limit_offset_methods());
-    if has_soft_delete {
-        out.push_str(&render_soft_delete_scope_methods());
-    }
-
-    out.push_str(&render_query_relation_filter_methods(&relations, &table));
-
-    let query_builder_methods_section = out;
-    let mut out = String::new();
-
-    out.push_str(&render_get_as_method(&table));
-    out.push_str(&render_get_method(
-        &model_title,
-        &row_ident,
-        has_soft_delete,
-        &col_ident,
-        &table,
-        &model_snake,
-        &pk,
-        &parent_pk_ty,
-        &relations,
-        &localized_fields,
-        has_meta,
-        has_attachments,
-        skip_profiler,
-    ));
-
-    out.push_str(&render_find_methods(
-        &model_title,
-        &parent_pk_ty,
-        &table,
-        &pk,
-    ));
-
-    out.push_str(&render_first_or_create_method(
-        &insert_ident,
-        &model_title,
-        &query_ident,
-        &pk,
-    ));
-    out.push_str(&render_update_or_create_method(
-        &update_ident,
-        &insert_ident,
-        &model_title,
-        &query_ident,
-        &pk,
-    ));
-    out.push_str(&render_increment_method(
-        &col_ident,
-        &table,
-        has_soft_delete,
-        skip_profiler,
-    ));
-    out.push_str(&render_decrement_method(&col_ident));
-
-    out.push_str(&render_count_method(
-        has_soft_delete,
-        &col_ident,
-        &table,
-        skip_profiler,
-    ));
-
-    out.push_str(&render_pluck_ids_method(
-        &parent_pk_ty,
-        &pk,
-        has_soft_delete,
-        &col_ident,
-        &table,
-        skip_profiler,
-    ));
-    out.push_str(&render_small_terminal_methods(
-        &query_ident,
-        &model_title,
-        &col_ident,
-        &pk_col_variant,
-        has_created_at,
-    ));
-    out.push_str(&render_scalar_aggregate_method(
-        "sum",
-        "Option<f64>",
-        "SUM({}::DOUBLE PRECISION)",
-        has_soft_delete,
-        &col_ident,
-        &table,
-        skip_profiler,
-    ));
-
-    out.push_str(&render_with_counts_method(
-        &model_title,
-        &record_ident,
-        &has_many_rels,
-        &pk,
-    ));
-    out.push_str(&render_scalar_aggregate_method(
-        "avg",
-        "Option<f64>",
-        "AVG({}::DOUBLE PRECISION)",
-        has_soft_delete,
-        &col_ident,
-        &table,
-        skip_profiler,
-    ));
-    out.push_str(&render_scalar_aggregate_method(
-        "min_val",
-        "Option<i64>",
-        "MIN({})",
-        has_soft_delete,
-        &col_ident,
-        &table,
-        skip_profiler,
-    ));
-    out.push_str(&render_scalar_aggregate_method(
-        "max_val",
-        "Option<i64>",
-        "MAX({})",
-        has_soft_delete,
-        &col_ident,
-        &table,
-        skip_profiler,
-    ));
-
-    out.push_str(&render_paginate_method(
-        &model_title,
-        &row_ident,
-        has_soft_delete,
-        &col_ident,
-        &table,
-        &model_snake,
-        &pk,
-        &parent_pk_ty,
-        &relations,
-        &localized_fields,
-        has_meta,
-        has_attachments,
-        skip_profiler,
-    ));
-
-    out.push_str(&render_to_sql_method(has_soft_delete, &col_ident, &table));
-    out.push_str(&render_into_where_parts_method(&col_ident, has_soft_delete));
-    out.push_str(&render_delete_method(
-        &table,
-        &model_snake,
-        &col_ident,
-        has_soft_delete,
-        emit_hooks,
-        &row_ident,
-        &to_snake(&pk),
-        skip_profiler,
-    ));
-    if has_soft_delete {
-        out.push_str(&render_restore_method(&table, &col_ident, skip_profiler));
-    }
-    writeln!(out, "}}\n").unwrap();
-
-    let query_terminal_methods_section = out;
+    // Query inner type (XxxQueryInner) is no longer generated.
+    // InnerQuery<'db> = QueryState<'db> — all SQL builder and terminal method logic
+    // is in the QueryModel trait impl and QueryState methods in core_db::common::model_api.
+    let query_struct_section = String::new();
+    let query_builder_methods_section = String::new();
+    let query_terminal_methods_section = String::new();
     let unsafe_query_section = String::new();
     let mut query_context = TemplateContext::new();
     query_context
@@ -5508,12 +5771,9 @@ fn render_model(
     let query_section = render_template("models/query.rs.tpl", &query_context).unwrap();
     let mut out = String::new();
 
-    // Insert builder (DB columns + localized setters)
+    // Insert builder — wraps CreateState for SQL, adds model-specific extension fields
     writeln!(out, "pub struct {insert_ident}<'db> {{").unwrap();
-    writeln!(out, "    db: DbConn<'db>,").unwrap();
-    writeln!(out, "    base_url: Option<String>,").unwrap();
-    writeln!(out, "    cols: Vec<{col_ident}>,").unwrap();
-    writeln!(out, "    binds: Vec<BindValue>,").unwrap();
+    writeln!(out, "    pub(crate) state: core_db::common::model_api::CreateState<'db>,").unwrap();
     if !localized_fields.is_empty() {
         writeln!(
             out,
@@ -5536,8 +5796,6 @@ fn render_model(
         )
         .unwrap();
     }
-    writeln!(out, "    conflict_action: Option<&'static str>,").unwrap();
-    writeln!(out, "    conflict_cols: Vec<{col_ident}>,").unwrap();
     writeln!(out, "}}\n").unwrap();
 
     writeln!(out, "impl<'db> {insert_ident}<'db> {{").unwrap();
@@ -5547,10 +5805,7 @@ fn render_model(
     )
     .unwrap();
     writeln!(out, "        Self {{").unwrap();
-    writeln!(out, "            db,").unwrap();
-    writeln!(out, "            base_url,").unwrap();
-    writeln!(out, "            cols: vec![],").unwrap();
-    writeln!(out, "            binds: vec![],").unwrap();
+    writeln!(out, "            state: core_db::common::model_api::CreateState::new(db, base_url, \"{table}\"),").unwrap();
     if !localized_fields.is_empty() {
         writeln!(out, "            translations: HashMap::new(),").unwrap();
     }
@@ -5561,8 +5816,6 @@ fn render_model(
         writeln!(out, "            attachments_single: HashMap::new(),").unwrap();
         writeln!(out, "            attachments_multi: HashMap::new(),").unwrap();
     }
-    writeln!(out, "            conflict_action: None,").unwrap();
-    writeln!(out, "            conflict_cols: vec![],").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
 
@@ -5589,8 +5842,7 @@ fn render_model(
         "    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[{col_ident}]) -> Self {{"
     )
     .unwrap();
-    writeln!(out, "        self.conflict_action = Some(\"DO NOTHING\");").unwrap();
-    writeln!(out, "        self.conflict_cols = conflict_cols.to_vec();").unwrap();
+    writeln!(out, "        self.state = self.state.on_conflict_do_nothing(&conflict_cols.iter().map(|c| c.as_sql()).collect::<Vec<_>>());").unwrap();
     writeln!(out, "        self").unwrap();
     writeln!(out, "    }}").unwrap();
 
@@ -5600,8 +5852,7 @@ fn render_model(
         "    pub fn on_conflict_update(mut self, conflict_cols: &[{col_ident}]) -> Self {{"
     )
     .unwrap();
-    writeln!(out, "        self.conflict_action = Some(\"DO UPDATE\");").unwrap();
-    writeln!(out, "        self.conflict_cols = conflict_cols.to_vec();").unwrap();
+    writeln!(out, "        self.state = self.state.on_conflict_update(&conflict_cols.iter().map(|c| c.as_sql()).collect::<Vec<_>>());").unwrap();
     writeln!(out, "        self").unwrap();
     writeln!(out, "    }}").unwrap();
 
@@ -5617,16 +5868,16 @@ fn render_model(
     .unwrap();
     writeln!(
         out,
-        "        for (col, bind) in self.cols.iter().zip(self.binds.iter()) {{"
+        "        for (col_name, bind) in self.state.col_names.iter().zip(self.state.binds.iter()) {{"
     )
     .unwrap();
-    writeln!(out, "            match col {{").unwrap();
+    writeln!(out, "            match *col_name {{").unwrap();
     for f in &db_fields {
         let decode_expr = render_bind_decode_expr(&f.ty, "bind", &enum_specs);
         writeln!(
             out,
-            "                {col_ident}::{} => {{",
-            to_title_case(&f.name)
+            "                \"{}\" => {{",
+            f.name
         )
         .unwrap();
         writeln!(out, "                    let value = {decode_expr};").unwrap();
@@ -5638,6 +5889,7 @@ fn render_model(
         .unwrap();
         writeln!(out, "                }}").unwrap();
     }
+    writeln!(out, "                _ => {{}}").unwrap();
     writeln!(out, "            }}").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "        Ok(input)").unwrap();
@@ -5685,7 +5937,7 @@ fn render_model(
         writeln!(out, "            }}").unwrap();
         writeln!(out, "        }}").unwrap();
     }
-    writeln!(out, "        let db_conn = self.db.clone();").unwrap();
+    writeln!(out, "        let db_conn = self.state.db.clone();").unwrap();
     writeln!(out, "        match db_conn {{").unwrap();
     writeln!(out, "            DbConn::Pool(pool) => {{").unwrap();
     writeln!(out, "                let tx = pool.begin().await?;").unwrap();
@@ -5802,21 +6054,18 @@ fn render_model(
     writeln!(out).unwrap();
     writeln!(
         out,
-        "    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<({record_ident}, {row_ident})> {{"
+        "    async fn save_with_db<'tx>(mut self, db: DbConn<'tx>) -> Result<({record_ident}, {row_ident})> {{"
     )
     .unwrap();
-    writeln!(out, "        let mut cols = self.cols;").unwrap();
-    writeln!(out, "        let mut binds = self.binds;").unwrap();
     if use_snowflake_id {
         writeln!(
             out,
-            "        if !cols.iter().any(|c| matches!(c, {col_ident}::{pk_col_variant})) {{"
+            "        if !self.state.col_names.contains(&\"{pk}\") {{"
         )
         .unwrap();
-        writeln!(out, "            cols.push({col_ident}::{pk_col_variant});").unwrap();
         writeln!(
             out,
-            "            binds.push(generate_snowflake_i64().into());"
+            "            self.state = self.state.set_col(\"{pk}\", generate_snowflake_i64().into());"
         )
         .unwrap();
         writeln!(out, "        }}").unwrap();
@@ -5824,79 +6073,38 @@ fn render_model(
     if has_created_at {
         writeln!(
             out,
-            "        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, {col_ident}::CreatedAt)) {{"
+            "        if HAS_CREATED_AT && !self.state.col_names.contains(&\"created_at\") {{"
         )
         .unwrap();
         writeln!(
             out,
-            "            let now = time::OffsetDateTime::now_utc();"
+            "            self.state = self.state.set_col(\"created_at\", time::OffsetDateTime::now_utc().into());"
         )
         .unwrap();
-        writeln!(out, "            cols.push({col_ident}::CreatedAt);").unwrap();
-        writeln!(out, "            binds.push(now.into());").unwrap();
         writeln!(out, "        }}").unwrap();
     }
     if has_updated_at {
         writeln!(
             out,
-            "        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, {col_ident}::UpdatedAt)) {{"
+            "        if HAS_UPDATED_AT && !self.state.col_names.contains(&\"updated_at\") {{"
         )
         .unwrap();
         writeln!(
             out,
-            "            let now = time::OffsetDateTime::now_utc();"
+            "            self.state = self.state.set_col(\"updated_at\", time::OffsetDateTime::now_utc().into());"
         )
         .unwrap();
-        writeln!(out, "            cols.push({col_ident}::UpdatedAt);").unwrap();
-        writeln!(out, "            binds.push(now.into());").unwrap();
         writeln!(out, "        }}").unwrap();
     }
-    writeln!(out, "        if cols.is_empty() {{").unwrap();
+    writeln!(out, "        if self.state.col_names.is_empty() {{").unwrap();
     writeln!(
         out,
         "            anyhow::bail!(\"insert: no columns set\");"
     )
     .unwrap();
     writeln!(out, "        }}").unwrap();
-    writeln!(
-        out,
-        "        let col_sql: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let placeholders: Vec<String> = (1..=binds.len()).map(|i| format!(\"${{}}\", i)).collect();"
-    )
-    .unwrap();
-    writeln!(out, "        let mut sql = format!(\"INSERT INTO {{}} ({{}}) VALUES ({{}})\", \"{table}\", col_sql.join(\", \"), placeholders.join(\", \"));").unwrap();
-    writeln!(out, "        if let Some(action) = self.conflict_action {{").unwrap();
-    writeln!(out, "            if !self.conflict_cols.is_empty() {{").unwrap();
-    writeln!(out, "                let conflict_col_sql: Vec<&'static str> = self.conflict_cols.iter().map(|c| c.as_sql()).collect();").unwrap();
-    writeln!(out, "                sql.push_str(&format!(\" ON CONFLICT ({{}}) {{}}\", conflict_col_sql.join(\", \"), action));").unwrap();
-    writeln!(out, "                if action == \"DO UPDATE\" {{").unwrap();
-    writeln!(out, "                    let set_clauses: Vec<String> = col_sql.iter().zip(placeholders.iter())").unwrap();
-    writeln!(
-        out,
-        "                        .filter(|(col, _)| !conflict_col_sql.contains(col))"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                        .map(|(col, ph)| format!(\"{{}} = {{}}\", col, ph))"
-    )
-    .unwrap();
-    writeln!(out, "                        .collect();").unwrap();
-    writeln!(out, "                    if !set_clauses.is_empty() {{").unwrap();
-    writeln!(
-        out,
-        "                        sql.push_str(&format!(\" SET {{}}\", set_clauses.join(\", \")));"
-    )
-    .unwrap();
-    writeln!(out, "                    }}").unwrap();
-    writeln!(out, "                }}").unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        sql.push_str(\" RETURNING *\");").unwrap();
+    writeln!(out, "        let base_url = self.state.base_url.clone();").unwrap();
+    writeln!(out, "        let (sql, binds) = self.state.build_insert_sql();").unwrap();
     writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
     out.push_str(&render_profiler_start(skip_profiler));
     writeln!(
@@ -6000,23 +6208,23 @@ fn render_model(
         )
         .unwrap();
         match has_attachments {
-            true => writeln!(out, "        let record = hydrate_record(row.clone(), &localized, &meta_map, &attachments, self.base_url.as_deref());").unwrap(),
-            false => writeln!(out, "        let record = hydrate_record(row.clone(), &localized, &meta_map, self.base_url.as_deref());").unwrap(),
+            true => writeln!(out, "        let record = hydrate_record(row.clone(), &localized, &meta_map, &attachments, base_url.as_deref());").unwrap(),
+            false => writeln!(out, "        let record = hydrate_record(row.clone(), &localized, &meta_map, base_url.as_deref());").unwrap(),
         }
     } else {
         match has_attachments {
             true => writeln!(
                 out,
-                "        let record = hydrate_record(row.clone(), &localized, &attachments, self.base_url.as_deref());"
+                "        let record = hydrate_record(row.clone(), &localized, &attachments, base_url.as_deref());"
             )
             .unwrap(),
             false => {
                 if localized_fields.is_empty() {
-                    writeln!(out, "        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());").unwrap();
+                    writeln!(out, "        let record = hydrate_record(row.clone(), &LocalizedMap::default(), base_url.as_deref());").unwrap();
                 } else {
                     writeln!(
                         out,
-                        "        let record = hydrate_record(row.clone(), &localized, self.base_url.as_deref());"
+                        "        let record = hydrate_record(row.clone(), &localized, base_url.as_deref());"
                     )
                     .unwrap();
                 }
@@ -6050,13 +6258,9 @@ fn render_model(
     let insert_section = render_template("models/insert.rs.tpl", &insert_context).unwrap();
     let mut out = String::new();
 
-    // Update builder (DB columns only)
+    // Update builder — wraps PatchState for SQL, adds model-specific extension fields
     writeln!(out, "pub struct {update_ident}<'db> {{").unwrap();
-    writeln!(out, "    db: DbConn<'db>,").unwrap();
-    writeln!(out, "    base_url: Option<String>,").unwrap();
-    writeln!(out, "    sets: Vec<({col_ident}, BindValue, SetMode)>,").unwrap();
-    writeln!(out, "    where_sql: Vec<String>,").unwrap();
-    writeln!(out, "    binds: Vec<BindValue>,").unwrap();
+    writeln!(out, "    pub(crate) state: core_db::common::model_api::PatchState<'db>,").unwrap();
     if !localized_fields.is_empty() {
         writeln!(
             out,
@@ -6094,11 +6298,7 @@ fn render_model(
     )
     .unwrap();
     writeln!(out, "        Self {{").unwrap();
-    writeln!(out, "            db,").unwrap();
-    writeln!(out, "            base_url,").unwrap();
-    writeln!(out, "            sets: vec![],").unwrap();
-    writeln!(out, "            where_sql: vec![],").unwrap();
-    writeln!(out, "            binds: vec![],").unwrap();
+    writeln!(out, "            state: core_db::common::model_api::PatchState::new(db, base_url, \"{table}\"),").unwrap();
     if !localized_fields.is_empty() {
         writeln!(out, "            translations: HashMap::new(),").unwrap();
     }
@@ -6138,14 +6338,14 @@ fn render_model(
             typ = f.ty
         )
         .unwrap();
-        writeln!(out, "        let idx = self.binds.len() + 1;").unwrap();
+        writeln!(out, "        let idx = self.state.where_binds.len() + 1;").unwrap();
         writeln!(
             out,
-            "        self.where_sql.push(format!(\"{{}} {{}} ${{}}\", {col_ident}::{}.as_sql(), op.as_sql(), idx));",
+            "        self.state.where_sql.push(format!(\"{{}} {{}} ${{}}\", {col_ident}::{}.as_sql(), op.as_sql(), idx));",
             to_title_case(&f.name)
         )
         .unwrap();
-        writeln!(out, "        self.binds.push(val.into());").unwrap();
+        writeln!(out, "        self.state.where_binds.push(val.into());").unwrap();
         writeln!(out, "        self").unwrap();
         writeln!(out, "    }}").unwrap();
     }
@@ -6155,13 +6355,13 @@ fn render_model(
         "    pub fn where_col<T: Into<BindValue>>(mut self, col: {col_ident}, op: Op, val: T) -> Self {{"
     )
     .unwrap();
-    writeln!(out, "        let idx = self.binds.len() + 1;").unwrap();
+    writeln!(out, "        let idx = self.state.where_binds.len() + 1;").unwrap();
     writeln!(
         out,
-        "        self.where_sql.push(format!(\"{{}} {{}} ${{}}\", col.as_sql(), op.as_sql(), idx));"
+        "        self.state.where_sql.push(format!(\"{{}} {{}} ${{}}\", col.as_sql(), op.as_sql(), idx));"
     )
     .unwrap();
-    writeln!(out, "        self.binds.push(val.into());").unwrap();
+    writeln!(out, "        self.state.where_binds.push(val.into());").unwrap();
     writeln!(out, "        self").unwrap();
     writeln!(out, "    }}").unwrap();
 
@@ -6176,14 +6376,14 @@ fn render_model(
         "        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
     )
     .unwrap();
-    writeln!(out, "        let mut idx = self.binds.len() + 1;").unwrap();
+    writeln!(out, "        let mut idx = self.state.where_binds.len() + 1;").unwrap();
     writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
     writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
     writeln!(out, "            clause.replace_range(pos..pos + 1, &ph);").unwrap();
     writeln!(out, "            idx += 1;").unwrap();
     writeln!(out, "        }}").unwrap();
-    writeln!(out, "        self.where_sql.push(clause);").unwrap();
-    writeln!(out, "        self.binds.extend(incoming);").unwrap();
+    writeln!(out, "        self.state.where_sql.push(clause);").unwrap();
+    writeln!(out, "        self.state.where_binds.extend(incoming);").unwrap();
     writeln!(out, "        self").unwrap();
     writeln!(out, "    }}").unwrap();
 
@@ -6197,14 +6397,14 @@ fn render_model(
         "        let mut changes = {update_changes_struct_ident}::default();"
     )
     .unwrap();
-    writeln!(out, "        for (col, bind, mode) in &self.sets {{").unwrap();
-    writeln!(out, "            match col {{").unwrap();
+    writeln!(out, "        for ((col, bind), mode) in self.state.set_cols.iter().zip(self.state.set_binds.iter()).zip(self.state.set_modes.iter()) {{").unwrap();
+    writeln!(out, "            match *col {{").unwrap();
     for f in &db_fields {
         let decode_expr = render_bind_decode_expr(&f.ty, "bind", &enum_specs);
         writeln!(
             out,
-            "                {col_ident}::{} => {{",
-            to_title_case(&f.name)
+            "                \"{}\" => {{",
+            f.name
         )
         .unwrap();
         writeln!(out, "                    let value = {decode_expr};").unwrap();
@@ -6232,6 +6432,7 @@ fn render_model(
         writeln!(out, "                    }});").unwrap();
         writeln!(out, "                }}").unwrap();
     }
+    writeln!(out, "                _ => {{}}").unwrap();
     writeln!(out, "            }}").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "        Ok(changes)").unwrap();
@@ -6243,12 +6444,12 @@ fn render_model(
     writeln!(out, "    pub async fn save(self) -> Result<u64> {{").unwrap();
     writeln!(
         out,
-        "        if self.sets.is_empty() {{ anyhow::bail!(\"update: no columns set\"); }}"
+        "        if self.state.set_cols.is_empty() {{ anyhow::bail!(\"update: no columns set\"); }}"
     )
     .unwrap();
     writeln!(
         out,
-        "        if self.where_sql.is_empty() {{ anyhow::bail!(\"update: no conditions set\"); }}"
+        "        if self.state.where_sql.is_empty() {{ anyhow::bail!(\"update: no conditions set\"); }}"
     )
     .unwrap();
     if emit_hooks {
@@ -6262,7 +6463,7 @@ fn render_model(
         writeln!(out, "            None").unwrap();
         writeln!(out, "        }};").unwrap();
     }
-    writeln!(out, "        let db_conn = self.db.clone();").unwrap();
+    writeln!(out, "        let db_conn = self.state.db.clone();").unwrap();
     writeln!(out, "        match db_conn {{").unwrap();
     writeln!(out, "            DbConn::Pool(pool) => {{").unwrap();
     writeln!(out, "                let tx = pool.begin().await?;").unwrap();
@@ -6322,23 +6523,21 @@ fn render_model(
     .unwrap();
     writeln!(
         out,
-        "        let mut cols = Vec::new();\n        let mut set_binds = Vec::new();\n        let mut set_modes = Vec::new();\n        for (col, bind, mode) in self.sets {{ cols.push(col); set_binds.push(bind); set_modes.push(mode); }}"
+        "        let mut state = self.state;"
     )
     .unwrap();
     if has_updated_at {
-        writeln!(out, "        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, {col_ident}::UpdatedAt)) {{").unwrap();
+        writeln!(out, "        if HAS_UPDATED_AT && !state.set_cols.contains(&{col_ident}::UpdatedAt.as_sql()) {{").unwrap();
         writeln!(
             out,
             "            let now = time::OffsetDateTime::now_utc();"
         )
         .unwrap();
-        writeln!(out, "            cols.push({col_ident}::UpdatedAt);").unwrap();
-        writeln!(out, "            set_binds.push(now.into());").unwrap();
-        writeln!(out, "            set_modes.push(SetMode::Assign);").unwrap();
+        writeln!(out, "            state = state.assign_col({col_ident}::UpdatedAt.as_sql(), now.into());").unwrap();
         writeln!(out, "        }}").unwrap();
     }
     writeln!(out, "        // find target ids for localized updates").unwrap();
-    writeln!(out, "        let select_sql = format!(\"SELECT {pk} FROM {table} WHERE {{}}\", self.where_sql.join(\" AND \"));").unwrap();
+    writeln!(out, "        let select_sql = format!(\"SELECT {pk} FROM {table} WHERE {{}}\", state.where_sql.join(\" AND \"));").unwrap();
     writeln!(
         out,
         "        let mut select_q = sqlx::query_scalar::<_, {parent_pk_ty}>(&select_sql);"
@@ -6346,7 +6545,7 @@ fn render_model(
     .unwrap();
     writeln!(
         out,
-        "        for b in &self.binds {{ select_q = bind_scalar(select_q, b.clone()); }}"
+        "        for b in &state.where_binds {{ select_q = bind_scalar(select_q, b.clone()); }}"
     )
     .unwrap();
     writeln!(
@@ -6420,58 +6619,8 @@ fn render_model(
         writeln!(out, "            }}").unwrap();
         writeln!(out, "        }}").unwrap();
     }
-    writeln!(out, "        let mut parts: Vec<String> = Vec::new();").unwrap();
-    writeln!(
-        out,
-        "        for (i, (c, mode)) in cols.iter().zip(set_modes.iter()).enumerate() {{"
-    )
-    .unwrap();
-    writeln!(out, "            let col = c.as_sql();").unwrap();
-    writeln!(out, "            let part = match mode {{").unwrap();
-    writeln!(
-        out,
-        "                SetMode::Assign => format!(\"{{}} = ${{}}\", col, i + 1),"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                SetMode::Increment => format!(\"{{}} = {{}} + ${{}}\", col, col, i + 1),"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                SetMode::Decrement => format!(\"{{}} = {{}} - ${{}}\", col, col, i + 1),"
-    )
-    .unwrap();
-    writeln!(out, "            }};").unwrap();
-    writeln!(out, "            parts.push(part);").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        let offset = parts.len();").unwrap();
-    writeln!(out, "        let mut where_sql = self.where_sql;").unwrap();
-    writeln!(out, "        let binds = self.binds;").unwrap();
-    writeln!(
-        out,
-        "        let mut renumbered = Vec::with_capacity(where_sql.len());"
-    )
-    .unwrap();
-    writeln!(out, "        for clause in where_sql.drain(..) {{").unwrap();
-    writeln!(
-        out,
-        "            renumbered.push(renumber_placeholders(&clause, offset + 1));"
-    )
-    .unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        where_sql = renumbered;").unwrap();
-    writeln!(
-        out,
-        "        let mut sql = String::from(\"UPDATE {table} SET \");"
-    )
-    .unwrap();
-    writeln!(out, "        sql.push_str(&parts.join(\", \"));").unwrap();
-    writeln!(out, "        if !where_sql.is_empty() {{").unwrap();
-    writeln!(out, "            sql.push_str(\" WHERE \");").unwrap();
-    writeln!(out, "            sql.push_str(&where_sql.join(\" AND \"));").unwrap();
-    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        let (sql, all_binds) = state.build_update_sql();").unwrap();
+    writeln!(out, "        let set_binds = &state.set_binds;").unwrap();
     writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
     // touch parent timestamps
     if !touch_targets.is_empty() {
@@ -6522,16 +6671,11 @@ fn render_model(
         }
         writeln!(out, "        }}").unwrap();
     }
-    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ set_binds.iter().chain(binds.iter()).map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
+    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ all_binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
     out.push_str(&render_profiler_start(skip_profiler));
     writeln!(
         out,
-        "        for b in &set_binds {{ q = bind_query(q, b.clone()); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        for b in &binds {{ q = bind_query(q, b.clone()); }}"
+        "        for b in &all_binds {{ q = bind_query(q, b.clone()); }}"
     )
     .unwrap();
     writeln!(out, "        let res = db.execute(q).await?;").unwrap();
@@ -8138,19 +8282,35 @@ fn render_model(
         "    fn query_all<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {{"
     )
     .unwrap();
-    writeln!(out, "        Box::pin(async move {{ {query_ident}::from_state(state).get().await }})").unwrap();
+    writeln!(out, "        Box::pin(async move {{").unwrap();
+    out.push_str(&render_query_all_body(
+        &model_title,
+        &row_ident,
+        has_soft_delete,
+        &table,
+        &model_snake,
+        &pk,
+        &parent_pk_ty,
+        &relations,
+        &localized_fields,
+        has_meta,
+        has_attachments,
+        skip_profiler,
+    ));
+    writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
+    // query_first: limit(1) + query_all
     writeln!(
         out,
         "    fn query_first<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {{"
     )
     .unwrap();
-    writeln!(
-        out,
-        "        Box::pin(async move {{ {query_ident}::from_state(state).first().await }})"
-    )
-    .unwrap();
+    writeln!(out, "        Box::pin(async move {{").unwrap();
+    writeln!(out, "            let mut v = Self::query_all(state.limit(1)).await?;").unwrap();
+    writeln!(out, "            Ok(v.pop())").unwrap();
+    writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
+    // query_find: where_col_str + query_first
     writeln!(
         out,
         "    fn query_find<'db>(state: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {{"
@@ -8158,48 +8318,60 @@ fn render_model(
     .unwrap();
     writeln!(
         out,
-        "        Box::pin(async move {{ {query_ident}::from_state(state).find(id).await }})"
+        "        Box::pin(async move {{ Self::query_first(state.where_col_str(\"{pk}\", Op::Eq, id.into())).await }})"
     )
     .unwrap();
     writeln!(out, "    }}").unwrap();
+    // query_count: use to_count_sql
     writeln!(
         out,
         "    fn query_count<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {{"
     )
     .unwrap();
-    writeln!(
-        out,
-        "        Box::pin(async move {{ {query_ident}::from_state(state).count().await }})"
-    )
-    .unwrap();
+    writeln!(out, "        Box::pin(async move {{").unwrap();
+    out.push_str(&render_query_count_body(has_soft_delete, &table, skip_profiler));
+    writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
+    // query_delete: inline with observer hooks and soft-delete
     writeln!(
         out,
         "    fn query_delete<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {{"
     )
     .unwrap();
-    writeln!(
-        out,
-        "        Box::pin(async move {{ {query_ident}::from_state(state).delete().await }})"
-    )
-    .unwrap();
+    writeln!(out, "        Box::pin(async move {{").unwrap();
+    out.push_str(&render_query_delete_body(
+        &table,
+        &model_snake,
+        &col_ident,
+        has_soft_delete,
+        emit_hooks,
+        &row_ident,
+        &to_snake(&pk),
+        skip_profiler,
+    ));
+    writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
+    // query_paginate: inline using to_count_sql + to_select_sql
     writeln!(
         out,
         "    fn query_paginate<'db>(state: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {{"
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
-    writeln!(
-        out,
-        "            let page = {query_ident}::from_state(state).paginate(page, per_page).await?;"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            Ok(core_db::common::model_api::Page {{ data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page }})"
-    )
-    .unwrap();
+    out.push_str(&render_query_paginate_body(
+        &model_title,
+        &row_ident,
+        has_soft_delete,
+        &table,
+        &model_snake,
+        &pk,
+        &parent_pk_ty,
+        &relations,
+        &localized_fields,
+        has_meta,
+        has_attachments,
+        skip_profiler,
+    ));
     writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
@@ -8459,6 +8631,16 @@ fn render_model(
             writeln!(out, "    }}").unwrap();
             writeln!(out, "}}\n").unwrap();
 
+            let link_clause = match rel.kind {
+                RelationKind::HasMany => format!(
+                    "{}.{} = {}.{}",
+                    rel.target_table, rel.foreign_key, table, rel.local_key
+                ),
+                RelationKind::BelongsTo => format!(
+                    "{}.{} = {}.{}",
+                    rel.target_table, rel.target_pk, table, rel.foreign_key
+                ),
+            };
             writeln!(
                 out,
                 "impl core_db::common::model_api::WhereHasRelation<{model_title}Model> for {rel_ty} {{"
@@ -8467,7 +8649,7 @@ fn render_model(
             writeln!(out, "    type Target = {target_model_title}Model;").unwrap();
             writeln!(
                 out,
-                "    fn where_has<'db, F>(_relation: Self, state: {model_query_ty}, scope: F) -> {model_query_ty}"
+                "    fn where_has<'db, F>(_relation: Self, mut state: {model_query_ty}, scope: F) -> {model_query_ty}"
             )
             .unwrap();
             writeln!(out, "    where").unwrap();
@@ -8477,11 +8659,42 @@ fn render_model(
             )
             .unwrap();
             writeln!(out, "    {{").unwrap();
-            writeln!(out, "        {query_ident}::from_state(state).where_has_{rel_snake}(scope).into_state()").unwrap();
+            writeln!(out, "        let start_idx = state.binds.len() + 1;").unwrap();
+            writeln!(
+                out,
+                "        let scoped = scope({target_model_title}Model::query_with_base_url(state.db.clone(), None));"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        sub_where.insert(0, \"{link_clause}\".to_string());"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        let mut clause = String::from(\"EXISTS (SELECT 1 FROM {rel_table} WHERE \");",
+                rel_table = rel.target_table
+            )
+            .unwrap();
+            writeln!(out, "        clause.push_str(&sub_where.join(\" AND \"));").unwrap();
+            writeln!(out, "        clause.push(')');").unwrap();
+            writeln!(
+                out,
+                "        let clause = renumber_placeholders(&clause, start_idx);"
+            )
+            .unwrap();
+            writeln!(out, "        state.where_sql.push(clause);").unwrap();
+            writeln!(out, "        state.binds.extend(sub_binds);").unwrap();
+            writeln!(out, "        state").unwrap();
             writeln!(out, "    }}").unwrap();
             writeln!(
                 out,
-                "    fn or_where_has<'db, F>(_relation: Self, state: {model_query_ty}, scope: F) -> {model_query_ty}"
+                "    fn or_where_has<'db, F>(_relation: Self, mut state: {model_query_ty}, scope: F) -> {model_query_ty}"
             )
             .unwrap();
             writeln!(out, "    where").unwrap();
@@ -8491,7 +8704,42 @@ fn render_model(
             )
             .unwrap();
             writeln!(out, "    {{").unwrap();
-            writeln!(out, "        {query_ident}::from_state(state).or_where_has_{rel_snake}(scope).into_state()").unwrap();
+            writeln!(out, "        let start_idx = state.binds.len() + 1;").unwrap();
+            writeln!(
+                out,
+                "        let scoped = scope({target_model_title}Model::query_with_base_url(state.db.clone(), None));"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        sub_where.insert(0, \"{link_clause}\".to_string());"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        let mut clause = String::from(\"EXISTS (SELECT 1 FROM {rel_table} WHERE \");",
+                rel_table = rel.target_table
+            )
+            .unwrap();
+            writeln!(out, "        clause.push_str(&sub_where.join(\" AND \"));").unwrap();
+            writeln!(out, "        clause.push(')');").unwrap();
+            writeln!(
+                out,
+                "        let clause = renumber_placeholders(&clause, start_idx);"
+            )
+            .unwrap();
+            writeln!(out, "        if let Some(last) = state.where_sql.pop() {{").unwrap();
+            writeln!(out, "            state.where_sql.push(format!(\"({{}} OR {{}})\", last, clause));").unwrap();
+            writeln!(out, "        }} else {{").unwrap();
+            writeln!(out, "            state.where_sql.push(clause);").unwrap();
+            writeln!(out, "        }}").unwrap();
+            writeln!(out, "        state.binds.extend(sub_binds);").unwrap();
+            writeln!(out, "        state").unwrap();
             writeln!(out, "    }}").unwrap();
             writeln!(out, "}}\n").unwrap();
 

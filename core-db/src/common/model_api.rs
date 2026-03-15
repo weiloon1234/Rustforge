@@ -9,7 +9,7 @@ use crate::common::sql::{BindValue, DbConn, Op, OrderDir, SetMode};
 pub type BoxModelFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
 pub trait ModelDef: Sized + 'static {
-    type Pk: Clone + Send + Sync + 'static;
+    type Pk: Clone + Send + Sync + Into<BindValue> + 'static;
     type Record: Clone + Send + Sync + 'static;
     type Create: Send + 'static;
     type Changes: Send + 'static;
@@ -1318,13 +1318,13 @@ impl<'db> QueryState<'db> {
 // ---------------------------------------------------------------------------
 
 pub struct CreateState<'db> {
-    pub(crate) db: DbConn<'db>,
-    pub(crate) base_url: Option<String>,
-    pub(crate) table: &'static str,
-    pub(crate) col_names: Vec<&'static str>,
-    pub(crate) binds: Vec<BindValue>,
-    pub(crate) conflict_action: Option<&'static str>,
-    pub(crate) conflict_cols: Vec<&'static str>,
+    pub db: DbConn<'db>,
+    pub base_url: Option<String>,
+    pub table: &'static str,
+    pub col_names: Vec<&'static str>,
+    pub binds: Vec<BindValue>,
+    pub conflict_action: Option<&'static str>,
+    pub conflict_cols: Vec<&'static str>,
 }
 
 impl<'db> CreateState<'db> {
@@ -1399,14 +1399,14 @@ impl<'db> CreateState<'db> {
 // ---------------------------------------------------------------------------
 
 pub struct PatchState<'db> {
-    pub(crate) db: DbConn<'db>,
-    pub(crate) base_url: Option<String>,
-    pub(crate) table: &'static str,
-    pub(crate) set_cols: Vec<&'static str>,
-    pub(crate) set_binds: Vec<BindValue>,
-    pub(crate) set_modes: Vec<SetMode>,
-    pub(crate) where_sql: Vec<String>,
-    pub(crate) where_binds: Vec<BindValue>,
+    pub db: DbConn<'db>,
+    pub base_url: Option<String>,
+    pub table: &'static str,
+    pub set_cols: Vec<&'static str>,
+    pub set_binds: Vec<BindValue>,
+    pub set_modes: Vec<SetMode>,
+    pub where_sql: Vec<String>,
+    pub where_binds: Vec<BindValue>,
 }
 
 impl<'db> PatchState<'db> {

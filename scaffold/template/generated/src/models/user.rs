@@ -11,7 +11,7 @@ use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query};
+use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query, QueryState};
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
 const HAS_CREATED_AT: bool = true;
@@ -315,6 +315,12 @@ pub struct UserQueryInner<'db> {
 impl<'db> UserQueryInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self { db, base_url, select_sql: Some("id, uuid, username, name, email, locale, password, country_iso2, contact_number, introducer_user_id, ban, credit_1, credit_2, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
+    }
+    pub fn from_state(state: QueryState<'db>) -> Self {
+        Self { db: state.db, base_url: state.base_url, select_sql: state.select_sql, from_sql: state.from_sql, count_sql: state.count_sql, distinct: state.distinct, distinct_on: state.distinct_on, lock_sql: state.lock_sql, join_sql: state.join_sql, join_binds: state.join_binds, where_sql: state.where_sql, order_sql: state.order_sql, group_by_sql: state.group_by_sql, having_sql: state.having_sql, having_binds: state.having_binds, offset: state.offset, limit: state.limit, binds: state.binds }
+    }
+    pub fn into_state(self) -> QueryState<'db> {
+        QueryState { db: self.db, base_url: self.base_url, select_sql: self.select_sql, from_sql: self.from_sql, count_sql: self.count_sql, distinct: self.distinct, distinct_on: self.distinct_on, lock_sql: self.lock_sql, join_sql: self.join_sql, join_binds: self.join_binds, where_sql: self.where_sql, order_sql: self.order_sql, group_by_sql: self.group_by_sql, having_sql: self.having_sql, having_binds: self.having_binds, offset: self.offset, limit: self.limit, binds: self.binds, with_deleted: false, only_deleted: false }
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
         let idx = self.binds.len() + 1;
@@ -3485,7 +3491,7 @@ impl UserModel {
         Patch::new_with_base_url(db, base_url)
     }
     pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<UserRecord>> {
-        UserQueryInner::new(db.into(), None).find(id).await
+        Query::<UserModel>::new(db).find(id).await
     }
 }
 
@@ -3496,78 +3502,79 @@ impl ModelDef for UserModel {
     type Changes = UserChanges;
     const TABLE: &'static str = UserModel::TABLE;
     const MODEL_KEY: &'static str = UserModel::MODEL_KEY;
+    const PK_COL: &'static str = "id";
 }
 
 impl core_db::common::model_api::QueryModel for UserModel {
-    type InnerQuery<'db> = UserQueryInner<'db>;
+    type InnerQuery<'db> = QueryState<'db>;
     fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
-        UserQueryInner::new(db, base_url)
+        QueryState::new(db, base_url, "id, uuid, username, name, email, locale, password, country_iso2, contact_number, introducer_user_id, ban, credit_1, credit_2, created_at, updated_at")
     }
-    fn query_all<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
-        Box::pin(async move { query.get().await })
+    fn query_all<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { UserQueryInner::from_state(state).get().await })
     }
-    fn query_first<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
-        Box::pin(async move { query.first().await })
+    fn query_first<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { UserQueryInner::from_state(state).first().await })
     }
-    fn query_find<'db>(query: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
-        Box::pin(async move { query.find(id).await })
+    fn query_find<'db>(state: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { UserQueryInner::from_state(state).find(id).await })
     }
-    fn query_count<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
-        Box::pin(async move { query.count().await })
+    fn query_count<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move { UserQueryInner::from_state(state).count().await })
     }
-    fn query_delete<'db>(query: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
-        Box::pin(async move { query.delete().await })
+    fn query_delete<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { UserQueryInner::from_state(state).delete().await })
     }
-    fn query_paginate<'db>(query: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+    fn query_paginate<'db>(state: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
         Box::pin(async move {
-            let page = query.paginate(page, per_page).await?;
+            let page = UserQueryInner::from_state(state).paginate(page, per_page).await?;
             Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
         })
     }
-    fn query_limit<'db>(query: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
-        query.limit(limit)
+    fn query_limit<'db>(state: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
+        state.limit(limit)
     }
-    fn query_offset<'db>(query: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
-        query.offset(offset)
+    fn query_offset<'db>(state: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
+        state.offset(offset)
     }
-    fn query_for_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
-        query.for_update()
+    fn query_for_update<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        state.for_update()
     }
-    fn query_for_update_skip_locked<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
-        query.for_update_skip_locked()
+    fn query_for_update_skip_locked<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        state.for_update_skip_locked()
     }
-    fn query_for_no_key_update<'db>(query: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
-        query.for_no_key_update()
+    fn query_for_no_key_update<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
+        state.for_no_key_update()
     }
-    fn query_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    fn query_where_group<'db, F>(state: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
     where
         F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
     {
-        query.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+        state.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
     }
-    fn query_or_where_group<'db, F>(query: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
+    fn query_or_where_group<'db, F>(state: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
     where
         F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
     {
-        query.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
+        state.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
     }
 }
 
 impl core_db::common::model_api::UnsafeQueryModel for UserModel {
-    fn query_where_raw<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
-        query.where_raw(clause, binds)
+    fn query_where_raw<'db>(state: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        state.where_raw(clause, binds)
     }
-    fn query_where_exists<'db>(query: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
-        query.where_exists(clause, binds)
+    fn query_where_exists<'db>(state: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        state.where_exists_raw(clause, binds)
     }
-    fn query_order_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
-        query.order_by_raw(expr)
+    fn query_order_raw<'db>(state: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        state.order_raw(expr)
     }
-    fn query_select_raw<'db>(query: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
-        query.select_raw(expr)
+    fn query_select_raw<'db>(state: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
+        state.select_raw(expr)
     }
-    fn query_join_raw<'db>(query: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
-        query.inner_join_raw(table, on_clause, binds)
+    fn query_join_raw<'db>(state: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
+        state.join_raw("INNER JOIN", table, on_clause, binds)
     }
 }
 
@@ -3786,16 +3793,16 @@ impl<T> core_db::common::model_api::CreateConflictField<UserModel> for Column<Us
 }
 
 impl core_db::common::model_api::PatchModel for UserModel {
-    type InnerQuery<'db> = UserQueryInner<'db>;
+    type InnerQuery<'db> = QueryState<'db>;
     type InnerPatch<'db> = UserPatchInner<'db>;
     fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
         UserPatchInner::new(db, base_url)
     }
-    fn patch_from_query<'db>(mut query: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
-        let db = query.db.clone();
-        let base_url = query.base_url.clone();
-        query.select_sql = Some(UserDbCol::Id.as_sql().to_string());
-        let (scope_sql, binds) = query.to_sql();
+    fn patch_from_query<'db>(mut state: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+        let db = state.db.clone();
+        let base_url = state.base_url.clone();
+        state.select_sql = Some(UserDbCol::Id.as_sql().to_string());
+        let (scope_sql, binds) = state.to_sql();
         let mut builder = UserPatchInner::new(db, base_url);
         builder.where_sql.push(format!("{} IN ({})", UserDbCol::Id.as_sql(), scope_sql));
         builder.binds = binds;
@@ -4032,23 +4039,23 @@ impl core_db::common::model_api::PatchNumericField<UserModel> for Column<UserMod
 
 impl core_db::common::model_api::QueryField<UserModel> for UserDbCol {
     type Value = BindValue;
-    fn where_col<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<UserModel>>::Value) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        query.where_col(field, op, value)
+    fn where_col<'db>(field: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<UserModel>>::Value) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        state.where_col_str(field.as_sql(), op, value)
     }
-    fn or_where_col<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<UserModel>>::Value) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        query.or_where_col(field, op, value)
+    fn or_where_col<'db>(field: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<UserModel>>::Value) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        state.or_where_col_str(field.as_sql(), op, value)
     }
-    fn where_in<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<UserModel>>::Value]) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        query.where_in(field, values)
+    fn where_in<'db>(field: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<UserModel>>::Value]) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        state.where_in_str(field.as_sql(), values)
     }
-    fn order_by<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        query.order_by(field, dir)
+    fn order_by<'db>(field: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        state.order_by_str(field.as_sql(), dir)
     }
-    fn where_null<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        query.where_null(field)
+    fn where_null<'db>(field: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        state.where_null_str(field.as_sql())
     }
-    fn where_not_null<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        query.where_not_null(field)
+    fn where_not_null<'db>(field: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        state.where_not_null_str(field.as_sql())
     }
 }
 
@@ -4057,51 +4064,52 @@ where
     T: Clone + Into<BindValue>,
 {
     type Value = T;
-    fn where_col<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn where_col<'db>(field: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
         let col = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        query.where_col(col, op, value)
+        state.where_col_str(col.as_sql(), op, value.into())
     }
-    fn or_where_col<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn or_where_col<'db>(field: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
         let col = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        query.or_where_col(col, op, value)
+        state.or_where_col_str(col.as_sql(), op, value.into())
     }
-    fn where_in<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn where_in<'db>(field: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
         let col = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        query.where_in(col, values)
+        let bind_values: Vec<BindValue> = values.iter().map(|v| v.clone().into()).collect();
+        state.where_in_str(col.as_sql(), &bind_values)
     }
-    fn order_by<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn order_by<'db>(field: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
         let col = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        query.order_by(col, dir)
+        state.order_by_str(col.as_sql(), dir)
     }
-    fn where_null<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn where_null<'db>(field: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
         let col = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        query.where_null(col)
+        state.where_null_str(col.as_sql())
     }
-    fn where_not_null<'db>(field: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn where_not_null<'db>(field: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
         let col = resolve_user_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        query.where_not_null(col)
+        state.where_not_null_str(col.as_sql())
     }
 }
 
 impl core_db::common::model_api::IncludeRelation<UserModel> for OneRelation<UserModel, UserRow, 0> {
-    fn include<'db>(_relation: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        query
+    fn include<'db>(_relation: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        state
     }
 }
 
 impl core_db::common::model_api::WhereHasRelation<UserModel> for OneRelation<UserModel, UserRow, 0> {
     type Target = UserModel;
-    fn where_has<'db, F>(_relation: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn where_has<'db, F>(_relation: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        query.where_has_introducer(scope)
+        UserQueryInner::from_state(state).where_has_introducer(scope).into_state()
     }
-    fn or_where_has<'db, F>(_relation: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn or_where_has<'db, F>(_relation: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        query.or_where_has_introducer(scope)
+        UserQueryInner::from_state(state).or_where_has_introducer(scope).into_state()
     }
 }
 
@@ -4113,24 +4121,24 @@ impl core_db::common::model_api::RecordOneRelation<UserModel> for OneRelation<Us
 }
 
 impl core_db::common::model_api::IncludeRelation<UserModel> for ManyRelation<UserModel, UserRow, 1> {
-    fn include<'db>(_relation: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        query
+    fn include<'db>(_relation: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+        state
     }
 }
 
 impl core_db::common::model_api::WhereHasRelation<UserModel> for ManyRelation<UserModel, UserRow, 1> {
     type Target = UserModel;
-    fn where_has<'db, F>(_relation: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn where_has<'db, F>(_relation: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        query.where_has_downlines(scope)
+        UserQueryInner::from_state(state).where_has_downlines(scope).into_state()
     }
-    fn or_where_has<'db, F>(_relation: Self, query: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn or_where_has<'db, F>(_relation: Self, state: <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <UserModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        query.or_where_has_downlines(scope)
+        UserQueryInner::from_state(state).or_where_has_downlines(scope).into_state()
     }
 }
 

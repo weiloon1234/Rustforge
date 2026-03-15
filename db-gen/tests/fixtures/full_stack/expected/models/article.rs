@@ -198,1037 +198,40 @@ async fn load_author<'db>(db: DbConn<'db>, parents: &[ArticleRow]) -> Result<Has
         Ok(out)
     }
 
-#[derive(Clone)]
-pub struct ArticleQueryInner<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-    select_sql: Option<String>,
-    from_sql: Option<String>,
-    count_sql: Option<String>,
-    distinct: bool,
-    distinct_on: Option<String>,
-    lock_sql: Option<&'static str>,
-    join_sql: Vec<String>,
-    join_binds: Vec<BindValue>,
-    where_sql: Vec<String>,
-    order_sql: Vec<String>,
-    group_by_sql: Vec<String>,
-    having_sql: Vec<String>,
-    having_binds: Vec<BindValue>,
-    offset: Option<i64>,
-    limit: Option<i64>,
-    binds: Vec<BindValue>,
-}
-
-
-
-impl<'db> ArticleQueryInner<'db> {
-    pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, author_id, status, is_system".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
-    }
-    pub fn from_state(state: QueryState<'db>) -> Self {
-        Self { db: state.db, base_url: state.base_url, select_sql: state.select_sql, from_sql: state.from_sql, count_sql: state.count_sql, distinct: state.distinct, distinct_on: state.distinct_on, lock_sql: state.lock_sql, join_sql: state.join_sql, join_binds: state.join_binds, where_sql: state.where_sql, order_sql: state.order_sql, group_by_sql: state.group_by_sql, having_sql: state.having_sql, having_binds: state.having_binds, offset: state.offset, limit: state.limit, binds: state.binds }
-    }
-    pub fn into_state(self) -> QueryState<'db> {
-        QueryState { db: self.db, base_url: self.base_url, select_sql: self.select_sql, from_sql: self.from_sql, count_sql: self.count_sql, distinct: self.distinct, distinct_on: self.distinct_on, lock_sql: self.lock_sql, join_sql: self.join_sql, join_binds: self.join_binds, where_sql: self.where_sql, order_sql: self.order_sql, group_by_sql: self.group_by_sql, having_sql: self.having_sql, having_binds: self.having_binds, offset: self.offset, limit: self.limit, binds: self.binds, with_deleted: false, only_deleted: false }
-    }
-    pub fn where_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::Id.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::Id.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_author_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::AuthorId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_author_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::AuthorId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_status(mut self, op: Op, val: ArticleStatus) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::Status.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_status_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::Status.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_is_system(mut self, op: Op, val: ArticleSystemFlag) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::IsSystem.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_is_system_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::IsSystem.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(ArticleDbCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: ArticleDbCol, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    fn where_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = clause.into();
-        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos + 1, &ph);
-            idx += 1;
-        }
-        self.where_sql.push(clause);
-        self.binds.extend(incoming);
-        self
-    }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: ArticleDbCol, vals: &[T]) -> Self {
-        if vals.is_empty() {
-            self.where_sql.push("1=0".to_string());
-            return self;
-        }
-        let start = self.binds.len() + 1;
-        let mut placeholders = Vec::with_capacity(vals.len());
-        for (i, v) in vals.iter().enumerate() {
-            placeholders.push(format!("${}", start + i));
-            self.binds.push(v.clone().into());
-        }
-        let clause = format!("{} IN ({})", col.as_sql(), placeholders.join(", "));
-        self.where_sql.push(clause);
-        self
-    }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: ArticleDbCol, vals: &[T]) -> Self {
-        if vals.is_empty() { return self; }
-        let start = self.binds.len() + 1;
-        let mut placeholders = Vec::with_capacity(vals.len());
-        for (i, v) in vals.iter().enumerate() {
-            placeholders.push(format!("${}", start + i));
-            self.binds.push(v.clone().into());
-        }
-        let clause = format!("{} NOT IN ({})", col.as_sql(), placeholders.join(", "));
-        self.where_sql.push(clause);
-        self
-    }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: ArticleDbCol, low: T, high: T) -> Self {
-        let idx1 = self.binds.len() + 1;
-        let idx2 = idx1 + 1;
-        self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
-        self.binds.push(low.into());
-        self.binds.push(high.into());
-        self
-    }
-    pub fn where_null(mut self, col: ArticleDbCol) -> Self {
-        self.where_sql.push(format!("{} IS NULL", col.as_sql()));
-        self
-    }
-    pub fn where_not_null(mut self, col: ArticleDbCol) -> Self {
-        self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
-        self
-    }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: ArticleDbCol, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
-        if let Some(last) = self.where_sql.pop() {
-            self.where_sql.push(format!("({} OR {})", last, clause));
-        } else {
-            self.where_sql.push(clause);
-        }
-        self.binds.push(val.into());
-        self
-    }
-    fn or_where_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = clause.into();
-        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos + 1, &ph);
-            idx += 1;
-        }
-        if let Some(last) = self.where_sql.pop() {
-            self.where_sql.push(format!("({} OR {})", last, clause));
-        } else {
-            self.where_sql.push(clause);
-        }
-        self.binds.extend(incoming);
-        self
-    }
-    pub fn where_group(self, f: impl FnOnce(Self) -> Self) -> Self {
-        let start_where = self.where_sql.len();
-        let grouped = f(self);
-        let mut result = grouped;
-        if result.where_sql.len() > start_where {
-            let group_clauses: Vec<String> = result.where_sql.drain(start_where..).collect();
-            let grouped_sql = format!("({})", group_clauses.join(" AND "));
-            result.where_sql.push(grouped_sql);
-        }
-        result
-    }
-    pub fn or_where_group(self, f: impl FnOnce(Self) -> Self) -> Self {
-        let start_where = self.where_sql.len();
-        let grouped = f(self);
-        let mut result = grouped;
-        if result.where_sql.len() > start_where {
-            let group_clauses: Vec<String> = result.where_sql.drain(start_where..).collect();
-            let grouped_sql = format!("({})", group_clauses.join(" AND "));
-            if let Some(last) = result.where_sql.pop() {
-                result.where_sql.push(format!("({} OR {})", last, grouped_sql));
-            } else {
-                result.where_sql.push(grouped_sql);
-            }
-        }
-        result
-    }
-    pub fn select_cols(mut self, cols: &[ArticleDbCol]) -> Self {
-        if cols.is_empty() {
-            self.select_sql = Some("id, author_id, status, is_system".to_string());
-        } else {
-            let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, author_id, status, is_system".split(',').map(|s| s.trim().to_string()).collect();
-            for s in &list { seen.insert(s.clone()); }
-            for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
-            self.select_sql = Some(list.join(", "));
-        }
-        self
-    }
-    pub fn add_select_cols(mut self, cols: &[ArticleDbCol]) -> Self {
-        let mut seen = std::collections::BTreeSet::new();
-        let mut list: Vec<String> = match self.select_sql.take() {
-            Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, author_id, status, is_system".split(',').map(|s| s.trim().to_string()).collect(),
-        };
-        for s in &list { seen.insert(s.clone()); }
-        for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
-        self.select_sql = Some(list.join(", "));
-        self
-    }
-    fn select_raw(mut self, sql: impl Into<String>) -> Self {
-        let s = sql.into();
-        if s.is_empty() {
-            self.select_sql = Some("id, author_id, status, is_system".to_string());
-        } else {
-            self.select_sql = Some(format!("id, author_id, status, is_system, {}", s));
-        }
-        self
-    }
-    fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
-        let s = sql.into();
-        if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, author_id, status, is_system".to_string());
-        if !base.is_empty() { base.push_str(", "); }
-        base.push_str(&s);
-        self.select_sql = Some(base);
-        self
-    }
-    fn inner_join_raw<T: Into<BindValue>>(mut self, table: impl Into<String>, on_clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = format!("INNER JOIN {} ON {}", table.into(), on_clause.into());
-        let mut incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.join_binds.len() + self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos+1, &ph);
-            idx += 1;
-        }
-        self.join_sql.push(clause);
-        self.join_binds.append(&mut incoming);
-        self
-    }
-    fn left_join_raw<T: Into<BindValue>>(mut self, table: impl Into<String>, on_clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = format!("LEFT JOIN {} ON {}", table.into(), on_clause.into());
-        let mut incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.join_binds.len() + self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos+1, &ph);
-            idx += 1;
-        }
-        self.join_sql.push(clause);
-        self.join_binds.append(&mut incoming);
-        self
-    }
-    fn right_join_raw<T: Into<BindValue>>(mut self, table: impl Into<String>, on_clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = format!("RIGHT JOIN {} ON {}", table.into(), on_clause.into());
-        let mut incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.join_binds.len() + self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos+1, &ph);
-            idx += 1;
-        }
-        self.join_sql.push(clause);
-        self.join_binds.append(&mut incoming);
-        self
-    }
-    fn full_join_raw<T: Into<BindValue>>(mut self, table: impl Into<String>, on_clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = format!("FULL OUTER JOIN {} ON {}", table.into(), on_clause.into());
-        let mut incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.join_binds.len() + self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos+1, &ph);
-            idx += 1;
-        }
-        self.join_sql.push(clause);
-        self.join_binds.append(&mut incoming);
-        self
-    }
-    pub fn order_by(mut self, col: ArticleDbCol, dir: OrderDir) -> Self {
-        self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
-        self
-    }
-    pub fn order_by_nulls_first(mut self, col: ArticleDbCol, dir: OrderDir) -> Self {
-        self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
-        self
-    }
-    pub fn order_by_nulls_last(mut self, col: ArticleDbCol, dir: OrderDir) -> Self {
-        self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
-        self
-    }
-    pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[ArticleDbCol]) -> Self {
-        if cols.is_empty() { return self; }
-        let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
-        self.distinct_on = Some(list.join(", "));
-        self
-    }
-    pub fn select(mut self, cols: &[ArticleDbCol]) -> Self {
-        let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
-        self.select_sql = Some(names.join(", "));
-        self
-    }
-    fn join(mut self, table: &str, first: &str, op: &str, second: &str) -> Self {
-        self.join_sql.push(format!("JOIN {} ON {} {} {}", table, first, op, second));
-        self
-    }
-    fn left_join(mut self, table: &str, first: &str, op: &str, second: &str) -> Self {
-        self.join_sql.push(format!("LEFT JOIN {} ON {} {} {}", table, first, op, second));
-        self
-    }
-    fn right_join(mut self, table: &str, first: &str, op: &str, second: &str) -> Self {
-        self.join_sql.push(format!("RIGHT JOIN {} ON {} {} {}", table, first, op, second));
-        self
-    }
-    fn from_raw(mut self, sql: &str) -> Self {
-        self.from_sql = Some(sql.to_string());
-        self
-    }
-    fn count_sql(mut self, sql: &str) -> Self {
-        self.count_sql = Some(sql.to_string());
-        self
-    }
-    fn where_exists<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = clause.into();
-        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos + 1, &ph);
-            idx += 1;
-        }
-        self.where_sql.push(format!("EXISTS ({})", clause));
-        self.binds.extend(incoming);
-        self
-    }
-    fn select_subquery(mut self, alias: &str, sql: &str) -> Self {
-        let current = self.select_sql.get_or_insert_with(|| "*".to_string());
-        current.push_str(&format!(", ({}) AS {}", sql, alias));
-        self
-    }
-    pub fn for_update(mut self) -> Self { self.lock_sql = Some("FOR UPDATE"); self }
-    pub fn for_update_skip_locked(mut self) -> Self { self.lock_sql = Some("FOR UPDATE SKIP LOCKED"); self }
-    pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
-    pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
-    pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[ArticleDbCol]) -> Self {
-        for c in cols {
-            self.group_by_sql.push(c.as_sql().to_string());
-        }
-        self
-    }
-    pub fn having_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = clause.into();
-        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.having_binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos + 1, &ph);
-            idx += 1;
-        }
-        self.having_sql.push(clause);
-        self.having_binds.extend(incoming);
-        self
-    }
-    pub fn limit(mut self, n: i64) -> Self {
-        self.limit = Some(n);
-        self
-    }
-    pub fn offset(mut self, n: i64) -> Self {
-        self.offset = Some(n);
-        self
-    }
-    pub fn where_has_author(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = articles.author_id".to_string());
-        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        self.where_sql.push(clause);
-        self.binds.extend(sub_binds);
-        self
-    }
-    pub fn where_doesnt_have_author(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = articles.author_id".to_string());
-        let mut clause = String::from("NOT EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        self.where_sql.push(clause);
-        self.binds.extend(sub_binds);
-        self
-    }
-    pub fn or_where_has_author(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = articles.author_id".to_string());
-        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        if let Some(last) = self.where_sql.pop() {
-            self.where_sql.push(format!("({} OR {})", last, clause));
-        } else {
-            self.where_sql.push(clause);
-        }
-        self.binds.extend(sub_binds);
-        self
-    }
-
-
-pub async fn get_as<T>(self) -> Result<Vec<T>>
-    where
-        T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Unpin + 'static,
-    {
-        let Self { db, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds, .. } = self;
-        let mut where_sql = where_sql;
-        let select_clause = match (distinct, distinct_on.as_ref()) {
-            (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
-            (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
-            (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
-        };
-        let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let mut sql = format!("SELECT {} {}{}", select_clause, from_clause, where_clause);
-        if !group_by_sql.is_empty() {
-            sql.push_str(" GROUP BY ");
-            sql.push_str(&group_by_sql.join(", "));
-        }
-        if !having_sql.is_empty() {
-            sql.push_str(" HAVING ");
-            sql.push_str(&having_sql.join(" AND "));
-        }
-        if !order_sql.is_empty() {
-            sql.push_str(" ORDER BY ");
-            sql.push_str(&order_sql.join(", "));
-        }
-        if let Some(off) = offset {
-            sql.push_str(" OFFSET ");
-            sql.push_str(&off.to_string());
-        }
-        if let Some(l) = limit {
-            sql.push_str(" LIMIT ");
-            sql.push_str(&l.to_string());
-        }
-        if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut q = sqlx::query_as::<_, T>(&sql);
-        for b in binds { q = bind(q, b); }
-        for b in join_binds { q = bind(q, b); }
-        for b in having_binds { q = bind(q, b); }
-        Ok(db.fetch_all(q).await?)
-    }
-    pub async fn get(self) -> Result<Vec<ArticleRecord>> {
-        let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
-        let mut where_sql = where_sql;
-        let select_clause = match (distinct, distinct_on.as_ref()) {
-            (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
-            (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
-            (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
-        };
-        let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
-        let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
-        if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
-        if !where_sql.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&where_sql.join(" AND "));
-        }
-        if !group_by_sql.is_empty() {
-            sql.push_str(" GROUP BY ");
-            sql.push_str(&group_by_sql.join(", "));
-        }
-        if !having_sql.is_empty() {
-            sql.push_str(" HAVING ");
-            sql.push_str(&having_sql.join(" AND "));
-        }
-        if !order_sql.is_empty() {
-            sql.push_str(" ORDER BY ");
-            sql.push_str(&order_sql.join(", "));
-        }
-        if let Some(off) = offset {
-            sql.push_str(" OFFSET ");
-            sql.push_str(&off.to_string());
-        }
-        if let Some(l) = limit {
-            sql.push_str(" LIMIT ");
-            sql.push_str(&l.to_string());
-        }
-        if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).chain(having_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_as::<_, ArticleRow>(&sql);
-        for b in binds {
-            q = bind(q, b);
-        }
-        for b in join_binds { q = bind(q, b); }
-        for b in having_binds { q = bind(q, b); }
-        let rows = db.fetch_all(q).await?;
-        record_profiled_query("articles", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let author = load_author(db.clone(), &rows).await?;
-        let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
-        let localized = localized::load_article_localized(db.clone(), &ids).await?;
-        let meta_map = localized::load_article_meta(db.clone(), &ids).await?;
-        let attachments = localized::load_article_attachments(db.clone(), &ids).await?;
-        let mut out_vec = Vec::with_capacity(rows.len());
-        for r in rows {
-            let key = r.id.clone();
-            let mut record = hydrate_record(r.clone(), &localized, &meta_map, &attachments, base_url.as_deref());
-            record.author = author.get(&key).cloned().unwrap_or(None);
-            out_vec.push(record);
-        }
-        Ok(out_vec)
-    }
-
-    pub async fn first(self) -> Result<Option<ArticleRecord>> {
-        let mut v = self.limit(1).get().await?;
-        Ok(v.pop())
-    }
-
-    pub async fn first_or_fail(self) -> Result<ArticleRecord> {
-        self.first().await?.ok_or_else(|| anyhow::anyhow!("articles: record not found"))
-    }
-
-    pub async fn find(self, id: i64) -> Result<Option<ArticleRecord>> {
-        self.where_id(Op::Eq, id).first().await
-    }
-    pub async fn find_or_fail(self, id: i64) -> Result<ArticleRecord> {
-        self.find(id).await?.ok_or_else(|| anyhow::anyhow!("articles: record not found"))
-    }
-    pub async fn first_or_create(self, create: impl FnOnce(ArticleCreateInner<'db>) -> ArticleCreateInner<'db>) -> Result<ArticleRecord> {
-        let db = self.db.clone();
-        let base_url = self.base_url.clone();
-        if let Some(existing) = self.first().await? {
-            return Ok(existing);
-        }
-        let insert_builder = create(ArticleCreateInner::new(db.clone(), base_url.clone()));
-        let view = insert_builder.save().await?;
-        ArticleQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
-    }
-
-    pub async fn update_or_create(
-        self,
-        on_update: impl FnOnce(ArticlePatchInner<'db>) -> ArticlePatchInner<'db>,
-        on_create: impl FnOnce(ArticleCreateInner<'db>) -> ArticleCreateInner<'db>,
-    ) -> Result<ArticleRecord> {
-        let db = self.db.clone();
-        let base_url = self.base_url.clone();
-        let where_sql = self.where_sql.clone();
-        let binds = self.binds.clone();
-        if let Some(existing) = self.first().await? {
-            let mut update_builder = ArticlePatchInner::new(db.clone(), base_url.clone());
-            update_builder.where_sql = where_sql;
-            update_builder.binds = binds;
-            let update_builder = on_update(update_builder);
-            update_builder.save().await?;
-            return ArticleQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
-        }
-        let insert_builder = on_create(ArticleCreateInner::new(db.clone(), base_url.clone()));
-        let view = insert_builder.save().await?;
-        ArticleQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
-    }
-
-    pub async fn increment(self, col: ArticleDbCol, amount: i64) -> Result<u64> {
-        let db = self.db.clone();
-        let mut where_sql = self.where_sql;
-        let binds = self.binds;
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("UPDATE articles SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query(&sql);
-        for b in binds { q = bind_query(q, b); }
-        let res = db.execute(q).await?;
-        record_profiled_query("articles", "UPDATE", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(res.rows_affected())
-    }
-
-    pub async fn decrement(self, col: ArticleDbCol, amount: i64) -> Result<u64> {
-        self.increment(col, -amount).await
-    }
-
-    pub async fn count(self) -> Result<i64> {
-        let Self { db, from_sql, count_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
-        let mut where_sql = where_sql;
-        let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let count_expr = count_sql.unwrap_or_else(|| "COUNT(*)".to_string());
-        let sql = format!("SELECT {} {}{}", count_expr, from_clause, where_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_scalar::<_, i64>(&sql);
-        for b in binds { q = bind_scalar(q, b); }
-        for b in join_binds { q = bind_scalar(q, b); }
-        let count = db.fetch_scalar(q).await?;
-        record_profiled_query("articles", "COUNT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(count)
-    }
-
-    pub async fn pluck_ids(self) -> Result<Vec<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds, order_sql, limit, offset  , .. } = self;
-        let mut where_sql = where_sql;
-        let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let order_clause = if order_sql.is_empty() { String::new() } else { format!(" ORDER BY {}", order_sql.join(", ")) };
-        let limit_clause = limit.map(|n| format!(" LIMIT {}", n)).unwrap_or_default();
-        let offset_clause = offset.map(|n| format!(" OFFSET {}", n)).unwrap_or_default();
-        let sql = format!("SELECT id {}{}{}{}{}", from_clause, where_clause, order_clause, limit_clause, offset_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_scalar::<_, i64>(&sql);
-        for b in binds { q = bind_scalar(q, b); }
-        for b in join_binds { q = bind_scalar(q, b); }
-        let ids = db.fetch_all_scalar(q).await?;
-        record_profiled_query("articles", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(ids)
-    }
-
-    pub async fn exists(self) -> Result<bool> {
-        Ok(self.count().await? > 0)
-    }
-
-    pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
-    where
-        F: FnMut(Vec<ArticleRecord>) -> Fut,
-        Fut: std::future::Future<Output = Result<bool>>,
-    {
-        let mut page = 0i64;
-        let db = self.db.clone();
-        loop {
-            let mut query = ArticleQueryInner::new(db.clone(), self.base_url.clone());
-            query.where_sql = self.where_sql.clone();
-            query.binds = self.binds.clone();
-            query.order_sql = self.order_sql.clone();
-            let rows = query.limit(size).offset(page * size).get().await?;
-            if rows.is_empty() { break; }
-            let should_continue = callback(rows).await?;
-            if !should_continue { break; }
-            page += 1;
-        }
-        Ok(())
-    }
-
-    pub fn latest(self) -> Self {
-        self.order_by(ArticleDbCol::Id, OrderDir::Desc)
-    }
-
-    pub fn oldest(self) -> Self {
-        self.order_by(ArticleDbCol::Id, OrderDir::Asc)
-    }
-
-    pub fn take(self, n: i64) -> Self {
-        self.limit(n)
-    }
-
-    pub fn skip(self, n: i64) -> Self {
-        self.offset(n)
-    }
-
-    pub async fn sole(self) -> Result<ArticleRecord> {
-        let mut rows = self.limit(2).get().await?;
-        match rows.len() {
-            0 => anyhow::bail!("sole: no record found"),
-            1 => Ok(rows.remove(0)),
-            _ => anyhow::bail!("sole: multiple records found"),
-        }
-    }
-
-    fn order_by_raw(mut self, sql: impl Into<String>) -> Self {
-        self.order_sql.push(sql.into());
-        self
-    }
-
-    fn group_by_raw(mut self, sql: impl Into<String>) -> Self {
-        self.group_by_sql.push(sql.into());
-        self
-    }
-
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&ArticleRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
-    where
-        K: Eq + std::hash::Hash,
-    {
-        let rows = self.get().await?;
-        Ok(rows.into_iter().map(|r| extract(&r)).collect())
-    }
-
-    pub async fn sum(self, col: ArticleDbCol) -> Result<Option<f64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
-        let mut where_sql = where_sql;
-        let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("SELECT SUM({}::DOUBLE PRECISION) {}{}", col.as_sql(), from_clause, where_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_scalar::<_, Option<f64>>(&sql);
-        for b in binds { q = bind_scalar(q, b); }
-        for b in join_binds { q = bind_scalar(q, b); }
-        let result = db.fetch_scalar(q).await?;
-        record_profiled_query("articles", "SUM", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(result)
-    }
-
-    pub async fn avg(self, col: ArticleDbCol) -> Result<Option<f64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
-        let mut where_sql = where_sql;
-        let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("SELECT AVG({}::DOUBLE PRECISION) {}{}", col.as_sql(), from_clause, where_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_scalar::<_, Option<f64>>(&sql);
-        for b in binds { q = bind_scalar(q, b); }
-        for b in join_binds { q = bind_scalar(q, b); }
-        let result = db.fetch_scalar(q).await?;
-        record_profiled_query("articles", "AVG", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(result)
-    }
-
-    pub async fn min_val(self, col: ArticleDbCol) -> Result<Option<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
-        let mut where_sql = where_sql;
-        let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("SELECT MIN({}) {}{}", col.as_sql(), from_clause, where_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_scalar::<_, Option<i64>>(&sql);
-        for b in binds { q = bind_scalar(q, b); }
-        for b in join_binds { q = bind_scalar(q, b); }
-        let result = db.fetch_scalar(q).await?;
-        record_profiled_query("articles", "MIN_VAL", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(result)
-    }
-
-    pub async fn max_val(self, col: ArticleDbCol) -> Result<Option<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
-        let mut where_sql = where_sql;
-        let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("SELECT MAX({}) {}{}", col.as_sql(), from_clause, where_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_scalar::<_, Option<i64>>(&sql);
-        for b in binds { q = bind_scalar(q, b); }
-        for b in join_binds { q = bind_scalar(q, b); }
-        let result = db.fetch_scalar(q).await?;
-        record_profiled_query("articles", "MAX_VAL", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(result)
-    }
-
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<ArticleRecord>> {
-        let page = if page < 1 { 1 } else { page };
-        let per_page = resolve_per_page(per_page);
-        let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
-        let mut where_sql = where_sql;
-        let select_clause = match (distinct, distinct_on.as_ref()) {
-            (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
-            (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
-            (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
-        };
-        let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let count_expr = count_sql.unwrap_or_else(|| "COUNT(*)".to_string());
-        let count_sql = if distinct || distinct_on.is_some() {
-            format!("SELECT COUNT(*) FROM (SELECT {} {}{}) AS sub", select_clause, from_clause, where_clause)
-        } else {
-            format!("SELECT {} {}{}", count_expr, from_clause, where_clause)
-        };
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
-        for b in binds.iter().cloned() { count_q = bind_scalar(count_q, b); }
-        for b in join_binds.iter().cloned() { count_q = bind_scalar(count_q, b); }
-        let total: i64 = db.fetch_scalar(count_q).await?;
-        record_profiled_query("articles", "COUNT", &count_sql, &__profiler_binds, __profiler_start.elapsed());
-        let last_page = ((total + per_page - 1) / per_page).max(1);
-        let current_page = page.min(last_page);
-        let offset_val = (current_page - 1) * per_page;
-        let mut sql = format!("SELECT {} {}{}", select_clause, from_clause, where_clause);
-        if !order_sql.is_empty() {
-            sql.push_str(" ORDER BY ");
-            sql.push_str(&order_sql.join(", "));
-        }
-        sql.push_str(&format!(" OFFSET {}", offset_val));
-        sql.push_str(&format!(" LIMIT {}", per_page));
-        if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_as::<_, ArticleRow>(&sql);
-        for b in binds.iter().cloned() { q = bind(q, b); }
-        for b in join_binds { q = bind(q, b); }
-        let rows = db.fetch_all(q).await?;
-        record_profiled_query("articles", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let author = load_author(db.clone(), &rows).await?;
-        let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
-        let localized = localized::load_article_localized(db, &ids).await?;
-        let meta_map = localized::load_article_meta(db, &ids).await?;
-        let attachments = localized::load_article_attachments(db, &ids).await?;
-        let mut data = Vec::with_capacity(rows.len());
-        for row in rows {
-            let key = row.id.clone();
-            let mut record = hydrate_record(row.clone(), &localized, &meta_map, &attachments, base_url.as_deref());
-            record.author = author.get(&key).cloned().unwrap_or(None);
-            data.push(record);
-        }
-        Ok(Page { data, total, per_page, current_page, last_page })
-    }
-    pub fn to_sql(&self) -> (String, Vec<BindValue>) {
-        let select_sql = self.select_sql.clone();
-        let from_sql = self.from_sql.clone();
-        let distinct = self.distinct;
-        let distinct_on = self.distinct_on.clone();
-        let lock_sql = self.lock_sql;
-        let join_sql = self.join_sql.clone();
-        let join_binds = self.join_binds.clone();
-        let mut where_sql = self.where_sql.clone();
-        let order_sql = self.order_sql.clone();
-        let group_by_sql = self.group_by_sql.clone();
-        let having_sql = self.having_sql.clone();
-        let having_binds = self.having_binds.clone();
-        let offset = self.offset;
-        let limit = self.limit;
-        let binds = self.binds.clone();
-        let select_clause = match (distinct, distinct_on.as_ref()) {
-            (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
-            (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
-            (_, Some(col)) => format!("DISTINCT ON ({}) {}", col, select_sql.unwrap_or_else(|| "*".to_string())),
-        };
-        let table_name = from_sql.unwrap_or_else(|| "articles".to_string());
-        let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
-        if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
-        if !where_sql.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&where_sql.join(" AND "));
-        }
-        if !group_by_sql.is_empty() {
-            sql.push_str(" GROUP BY ");
-            sql.push_str(&group_by_sql.join(", "));
-        }
-        if !having_sql.is_empty() {
-            sql.push_str(" HAVING ");
-            sql.push_str(&having_sql.join(" AND "));
-        }
-        if !order_sql.is_empty() {
-            sql.push_str(" ORDER BY ");
-            sql.push_str(&order_sql.join(", "));
-        }
-        if let Some(off) = offset {
-            sql.push_str(" OFFSET ");
-            sql.push_str(&off.to_string());
-        }
-        if let Some(l) = limit {
-            sql.push_str(" LIMIT ");
-            sql.push_str(&l.to_string());
-        }
-        if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut all_binds = binds;
-        all_binds.extend(join_binds);
-        all_binds.extend(having_binds);
-        (sql, all_binds)
-    }
-
-    pub fn into_where_parts(self) -> (Vec<String>, Vec<BindValue>) {
-        let Self { where_sql, binds, .. } = self;
-        let mut where_sql = where_sql;
-        (where_sql, binds)
-    }
-    pub async fn delete(self) -> Result<u64> {
-        if self.limit.is_some() {
-            anyhow::bail!("delete() does not support limit; add where clauses");
-        }
-        let Self { db, where_sql, binds, .. } = self;
-        if where_sql.is_empty() { anyhow::bail!("delete(): no conditions set"); }
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __observer_active = try_get_observer().is_some();
-        let __old_rows: Vec<ArticleRow> = if __observer_active {
-            let select_sql = format!("SELECT * FROM articles WHERE {}", where_sql.join(" AND "));
-            let mut fq = sqlx::query_as::<_, ArticleRow>(&select_sql);
-            for b in &binds { fq = bind(fq, b.clone()); }
-            let rows: Vec<ArticleRow> = db.fetch_all(fq).await.unwrap_or_default();
-            rows
-        } else {
-            Vec::new()
-        };
-        if !__old_rows.is_empty() {
-            if let Some(observer) = try_get_observer() {
-                for old_row in &__old_rows {
-                    let old_data = serde_json::to_value(old_row)?;
-                    let event = ModelEvent { model: "article", table: "articles", record_key: Some(format!("{}", old_row.id)) };
-                    observer.on_deleting(&event, &old_data).await?;
-                }
-            }
-        }
-        let mut sql = String::from("DELETE FROM articles");
-        if !where_sql.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&where_sql.join(" AND "));
-        }
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query(&sql);
-        for b in binds { q = bind_query(q, b); }
-        let res = db.execute(q).await?;
-        record_profiled_query("articles", "DELETE", &sql, &__profiler_binds, __profiler_start.elapsed());
-        if !__old_rows.is_empty() && res.rows_affected() > 0 {
-            if let Some(observer) = try_get_observer() {
-                for old_row in &__old_rows {
-                    let event = ModelEvent { model: "article", table: "articles", record_key: Some(format!("{}", old_row.id)) };
-                    match serde_json::to_value(old_row) {
-                        Ok(old_data) => {
-                            if let Err(err) = observer.on_deleted(&event, &old_data).await {
-                                log_observer_error("deleted", "article", &err);
-                            }
-                        }
-                        Err(err) => log_observer_error("deleted", "article", &err),
-                    }
-                }
-            }
-        }
-        Ok(res.rows_affected())
-    }
-}
-
-
-
-
 pub struct ArticleCreateInner<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-    cols: Vec<ArticleDbCol>,
-    binds: Vec<BindValue>,
+    pub(crate) state: core_db::common::model_api::CreateState<'db>,
     translations: HashMap<&'static str, HashMap<String, String>>,
     meta: HashMap<String, JsonValue>,
     attachments_single: HashMap<&'static str, AttachmentInput>,
     attachments_multi: HashMap<&'static str, Vec<AttachmentInput>>,
-    conflict_action: Option<&'static str>,
-    conflict_cols: Vec<ArticleDbCol>,
 }
 
 impl<'db> ArticleCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
-            db,
-            base_url,
-            cols: vec![],
-            binds: vec![],
+            state: core_db::common::model_api::CreateState::new(db, base_url, "articles"),
             translations: HashMap::new(),
             meta: HashMap::new(),
             attachments_single: HashMap::new(),
             attachments_multi: HashMap::new(),
-            conflict_action: None,
-            conflict_cols: vec![],
         }
     }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(ArticleDbCol::Id);
-        self.binds.push(val.into());
+        self.state = self.state.set_col("id", val.into());
         self
     }
     pub fn set_author_id(mut self, val: i64) -> Self {
-        self.cols.push(ArticleDbCol::AuthorId);
-        self.binds.push(val.into());
+        self.state = self.state.set_col("author_id", val.into());
         self
     }
     pub fn set_status(mut self, val: ArticleStatus) -> Self {
-        self.cols.push(ArticleDbCol::Status);
-        self.binds.push(val.into());
+        self.state = self.state.set_col("status", val.into());
         self
     }
     pub fn set_is_system(mut self, val: ArticleSystemFlag) -> Self {
-        self.cols.push(ArticleDbCol::IsSystem);
-        self.binds.push(val.into());
+        self.state = self.state.set_col("is_system", val.into());
         self
     }
     pub fn set_title_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
@@ -1266,34 +269,32 @@ pub fn set_id(mut self, val: i64) -> Self {
         self
     }
     pub fn on_conflict_do_nothing(mut self, conflict_cols: &[ArticleDbCol]) -> Self {
-        self.conflict_action = Some("DO NOTHING");
-        self.conflict_cols = conflict_cols.to_vec();
+        self.state = self.state.on_conflict_do_nothing(&conflict_cols.iter().map(|c| c.as_sql()).collect::<Vec<_>>());
         self
     }
     pub fn on_conflict_update(mut self, conflict_cols: &[ArticleDbCol]) -> Self {
-        self.conflict_action = Some("DO UPDATE");
-        self.conflict_cols = conflict_cols.to_vec();
+        self.state = self.state.on_conflict_update(&conflict_cols.iter().map(|c| c.as_sql()).collect::<Vec<_>>());
         self
     }
     fn to_create_input(&self) -> Result<ArticleCreate> {
         let mut input = ArticleCreate::default();
-        for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
-            match col {
-                ArticleDbCol::Id => {
+        for (col_name, bind) in self.state.col_names.iter().zip(self.state.binds.iter()) {
+            match *col_name {
+                "id" => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                ArticleDbCol::AuthorId => {
+                "author_id" => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.author_id = FieldInput::Set(value);
                 }
-                ArticleDbCol::Status => {
+                "status" => {
                     let value = match bind {
                 BindValue::String(value) => ArticleStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleStatus'", value))?,
@@ -1306,7 +307,7 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.status = FieldInput::Set(value);
                 }
-                ArticleDbCol::IsSystem => {
+                "is_system" => {
                     let value = match bind {
                 BindValue::String(value) => ArticleSystemFlag::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleSystemFlag'", value))?,
@@ -1319,6 +320,7 @@ pub fn set_id(mut self, val: i64) -> Self {
             };
                     input.is_system = FieldInput::Set(value);
                 }
+                _ => {}
             }
         }
         Ok(input)
@@ -1338,7 +340,7 @@ pub async fn save(self) -> Result<ArticleRecord> {
                 observer.on_creating(&event, &data).await?;
             }
         }
-        let db_conn = self.db.clone();
+        let db_conn = self.state.db.clone();
         match db_conn {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
@@ -1382,35 +384,15 @@ pub async fn save(self) -> Result<ArticleRecord> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(ArticleRecord, ArticleRow)> {
-        let mut cols = self.cols;
-        let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, ArticleDbCol::Id)) {
-            cols.push(ArticleDbCol::Id);
-            binds.push(generate_snowflake_i64().into());
+    async fn save_with_db<'tx>(mut self, db: DbConn<'tx>) -> Result<(ArticleRecord, ArticleRow)> {
+        if !self.state.col_names.contains(&"id") {
+            self.state = self.state.set_col("id", generate_snowflake_i64().into());
         }
-        if cols.is_empty() {
+        if self.state.col_names.is_empty() {
             anyhow::bail!("insert: no columns set");
         }
-        let col_sql: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
-        let placeholders: Vec<String> = (1..=binds.len()).map(|i| format!("${}", i)).collect();
-        let mut sql = format!("INSERT INTO {} ({}) VALUES ({})", "articles", col_sql.join(", "), placeholders.join(", "));
-        if let Some(action) = self.conflict_action {
-            if !self.conflict_cols.is_empty() {
-                let conflict_col_sql: Vec<&'static str> = self.conflict_cols.iter().map(|c| c.as_sql()).collect();
-                sql.push_str(&format!(" ON CONFLICT ({}) {}", conflict_col_sql.join(", "), action));
-                if action == "DO UPDATE" {
-                    let set_clauses: Vec<String> = col_sql.iter().zip(placeholders.iter())
-                        .filter(|(col, _)| !conflict_col_sql.contains(col))
-                        .map(|(col, ph)| format!("{} = {}", col, ph))
-                        .collect();
-                    if !set_clauses.is_empty() {
-                        sql.push_str(&format!(" SET {}", set_clauses.join(", ")));
-                    }
-                }
-            }
-        }
-        sql.push_str(" RETURNING *");
+        let base_url = self.state.base_url.clone();
+        let (sql, binds) = self.state.build_insert_sql();
         let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
         let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_as::<_, ArticleRow>(&sql);
@@ -1445,17 +427,13 @@ pub async fn save(self) -> Result<ArticleRecord> {
         let localized = localized::load_article_localized(db, &[row.id]).await?;
         let attachments = localized::load_article_attachments(db, &[row.id]).await?;
         let meta_map = localized::load_article_meta(db, &[row.id]).await?;
-        let record = hydrate_record(row.clone(), &localized, &meta_map, &attachments, self.base_url.as_deref());
+        let record = hydrate_record(row.clone(), &localized, &meta_map, &attachments, base_url.as_deref());
         Ok((record, row))
     }
 }
 
 pub struct ArticlePatchInner<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-    sets: Vec<(ArticleDbCol, BindValue, SetMode)>,
-    where_sql: Vec<String>,
-    binds: Vec<BindValue>,
+    pub(crate) state: core_db::common::model_api::PatchState<'db>,
     translations: HashMap<&'static str, HashMap<String, String>>,
     meta: HashMap<String, JsonValue>,
     attachments_single: HashMap<&'static str, AttachmentInput>,
@@ -1467,11 +445,7 @@ pub struct ArticlePatchInner<'db> {
 impl<'db> ArticlePatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
-            db,
-            base_url,
-            sets: vec![],
-            where_sql: vec![],
-            binds: vec![],
+            state: core_db::common::model_api::PatchState::new(db, base_url, "articles"),
             translations: HashMap::new(),
             meta: HashMap::new(),
             attachments_single: HashMap::new(),
@@ -1483,35 +457,35 @@ impl<'db> ArticlePatchInner<'db> {
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((ArticleDbCol::Id, val.into(), SetMode::Assign));
+        self.state = self.state.assign_col(ArticleDbCol::Id.as_sql(), val.into());
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((ArticleDbCol::Id, val.into(), SetMode::Increment));
+        self.state = self.state.increment_col(ArticleDbCol::Id.as_sql(), val.into());
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((ArticleDbCol::Id, val.into(), SetMode::Decrement));
+        self.state = self.state.decrement_col(ArticleDbCol::Id.as_sql(), val.into());
         self
     }
     pub fn set_author_id(mut self, val: i64) -> Self {
-        self.sets.push((ArticleDbCol::AuthorId, val.into(), SetMode::Assign));
+        self.state = self.state.assign_col(ArticleDbCol::AuthorId.as_sql(), val.into());
         self
     }
     pub fn increment_author_id(mut self, val: i64) -> Self {
-        self.sets.push((ArticleDbCol::AuthorId, val.into(), SetMode::Increment));
+        self.state = self.state.increment_col(ArticleDbCol::AuthorId.as_sql(), val.into());
         self
     }
     pub fn decrement_author_id(mut self, val: i64) -> Self {
-        self.sets.push((ArticleDbCol::AuthorId, val.into(), SetMode::Decrement));
+        self.state = self.state.decrement_col(ArticleDbCol::AuthorId.as_sql(), val.into());
         self
     }
     pub fn set_status(mut self, val: ArticleStatus) -> Self {
-        self.sets.push((ArticleDbCol::Status, val.into(), SetMode::Assign));
+        self.state = self.state.assign_col(ArticleDbCol::Status.as_sql(), val.into());
         self
     }
     pub fn set_is_system(mut self, val: ArticleSystemFlag) -> Self {
-        self.sets.push((ArticleDbCol::IsSystem, val.into(), SetMode::Assign));
+        self.state = self.state.assign_col(ArticleDbCol::IsSystem.as_sql(), val.into());
         self
     }
     pub fn set_title_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
@@ -1553,53 +527,53 @@ pub fn set_id(mut self, val: i64) -> Self {
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::Id.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", ArticleDbCol::Id.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     pub fn where_author_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::AuthorId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", ArticleDbCol::AuthorId.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     pub fn where_status(mut self, op: Op, val: ArticleStatus) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::Status.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", ArticleDbCol::Status.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     pub fn where_is_system(mut self, op: Op, val: ArticleSystemFlag) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", ArticleDbCol::IsSystem.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", ArticleDbCol::IsSystem.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     pub fn where_col<T: Into<BindValue>>(mut self, col: ArticleDbCol, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     fn where_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
         let mut clause = clause.into();
         let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.binds.len() + 1;
+        let mut idx = self.state.where_binds.len() + 1;
         while let Some(pos) = clause.find('?') {
             let ph = format!("${}", idx);
             clause.replace_range(pos..pos + 1, &ph);
             idx += 1;
         }
-        self.where_sql.push(clause);
-        self.binds.extend(incoming);
+        self.state.where_sql.push(clause);
+        self.state.where_binds.extend(incoming);
         self
     }
     fn to_update_changes(&self) -> Result<ArticleChanges> {
         let mut changes = ArticleChanges::default();
-        for (col, bind, mode) in &self.sets {
-            match col {
-                ArticleDbCol::Id => {
+        for ((col, bind), mode) in self.state.set_cols.iter().zip(self.state.set_binds.iter()).zip(self.state.set_modes.iter()) {
+            match *col {
+                "id" => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1610,7 +584,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                ArticleDbCol::AuthorId => {
+                "author_id" => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1621,7 +595,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                ArticleDbCol::Status => {
+                "status" => {
                     let value = match bind {
                 BindValue::String(value) => ArticleStatus::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleStatus'", value))?,
@@ -1638,7 +612,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                ArticleDbCol::IsSystem => {
+                "is_system" => {
                     let value = match bind {
                 BindValue::String(value) => ArticleSystemFlag::from_storage(value)
                     .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleSystemFlag'", value))?,
@@ -1655,6 +629,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
+                _ => {}
             }
         }
         Ok(changes)
@@ -1662,14 +637,14 @@ pub fn set_id(mut self, val: i64) -> Self {
 
 
 pub async fn save(self) -> Result<u64> {
-        if self.sets.is_empty() { anyhow::bail!("update: no columns set"); }
-        if self.where_sql.is_empty() { anyhow::bail!("update: no conditions set"); }
+        if self.state.set_cols.is_empty() { anyhow::bail!("update: no columns set"); }
+        if self.state.where_sql.is_empty() { anyhow::bail!("update: no conditions set"); }
         let observer_changes = if try_get_observer().is_some() {
             Some(self.to_update_changes()?)
         } else {
             None
         };
-        let db_conn = self.db.clone();
+        let db_conn = self.state.db.clone();
         match db_conn {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
@@ -1689,14 +664,11 @@ pub async fn save(self) -> Result<u64> {
     }
 
     async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<ArticleChanges>) -> Result<u64> {
-        let mut cols = Vec::new();
-        let mut set_binds = Vec::new();
-        let mut set_modes = Vec::new();
-        for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
+        let mut state = self.state;
         // find target ids for localized updates
-        let select_sql = format!("SELECT id FROM articles WHERE {}", self.where_sql.join(" AND "));
+        let select_sql = format!("SELECT id FROM articles WHERE {}", state.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
-        for b in &self.binds { select_q = bind_scalar(select_q, b.clone()); }
+        for b in &state.where_binds { select_q = bind_scalar(select_q, b.clone()); }
         let target_ids = db.fetch_all_scalar(select_q).await?;
         let __observer_active = try_get_observer().is_some();
         let __old_rows: Vec<ArticleRow> = if __observer_active && !target_ids.is_empty() {
@@ -1721,35 +693,12 @@ pub async fn save(self) -> Result<u64> {
                 }
             }
         }
-        let mut parts: Vec<String> = Vec::new();
-        for (i, (c, mode)) in cols.iter().zip(set_modes.iter()).enumerate() {
-            let col = c.as_sql();
-            let part = match mode {
-                SetMode::Assign => format!("{} = ${}", col, i + 1),
-                SetMode::Increment => format!("{} = {} + ${}", col, col, i + 1),
-                SetMode::Decrement => format!("{} = {} - ${}", col, col, i + 1),
-            };
-            parts.push(part);
-        }
-        let offset = parts.len();
-        let mut where_sql = self.where_sql;
-        let binds = self.binds;
-        let mut renumbered = Vec::with_capacity(where_sql.len());
-        for clause in where_sql.drain(..) {
-            renumbered.push(renumber_placeholders(&clause, offset + 1));
-        }
-        where_sql = renumbered;
-        let mut sql = String::from("UPDATE articles SET ");
-        sql.push_str(&parts.join(", "));
-        if !where_sql.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&where_sql.join(" AND "));
-        }
+        let (sql, all_binds) = state.build_update_sql();
+        let set_binds = &state.set_binds;
         let mut q = sqlx::query(&sql);
-        let __profiler_binds = if is_sql_profiler_enabled() { set_binds.iter().chain(binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+        let __profiler_binds = if is_sql_profiler_enabled() { all_binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
         let __profiler_start = std::time::Instant::now();
-        for b in &set_binds { q = bind_query(q, b.clone()); }
-        for b in &binds { q = bind_query(q, b.clone()); }
+        for b in &all_binds { q = bind_query(q, b.clone()); }
         let res = db.execute(q).await?;
         record_profiled_query("articles", "UPDATE", &sql, &__profiler_binds, __profiler_start.elapsed());
         if res.rows_affected() > 0 && !self.translations.is_empty() && !target_ids.is_empty() {
@@ -2212,24 +1161,145 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
         QueryState::new(db, base_url, "id, author_id, status, is_system")
     }
     fn query_all<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
-        Box::pin(async move { ArticleQueryInner::from_state(state).get().await })
+        Box::pin(async move {
+            let (sql, binds) = state.to_select_sql("articles", HAS_SOFT_DELETE, "");
+            let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+            let __profiler_start = std::time::Instant::now();
+            let mut q = sqlx::query_as::<_, ArticleRow>(&sql);
+            for b in binds { q = bind(q, b); }
+            let rows = state.db.fetch_all(q).await?;
+            record_profiled_query("articles", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
+            let db = state.db.clone();
+            let author = load_author(db.clone(), &rows).await?;
+            let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
+            let localized = localized::load_article_localized(db.clone(), &ids).await?;
+            let meta_map = localized::load_article_meta(db.clone(), &ids).await?;
+            let attachments = localized::load_article_attachments(db.clone(), &ids).await?;
+            let mut out_vec = Vec::with_capacity(rows.len());
+            for r in rows {
+                let key = r.id.clone();
+                let mut record = hydrate_record(r.clone(), &localized, &meta_map, &attachments, state.base_url.as_deref());
+                record.author = author.get(&key).cloned().unwrap_or(None);
+                out_vec.push(record);
+            }
+            Ok(out_vec)
+        })
     }
     fn query_first<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
-        Box::pin(async move { ArticleQueryInner::from_state(state).first().await })
+        Box::pin(async move {
+            let mut v = Self::query_all(state.limit(1)).await?;
+            Ok(v.pop())
+        })
     }
     fn query_find<'db>(state: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
-        Box::pin(async move { ArticleQueryInner::from_state(state).find(id).await })
+        Box::pin(async move { Self::query_first(state.where_col_str("id", Op::Eq, id.into())).await })
     }
     fn query_count<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
-        Box::pin(async move { ArticleQueryInner::from_state(state).count().await })
+        Box::pin(async move {
+            let (sql, binds) = state.to_count_sql("articles", HAS_SOFT_DELETE, "");
+            let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+            let __profiler_start = std::time::Instant::now();
+            let mut q = sqlx::query_scalar::<_, i64>(&sql);
+            for b in binds { q = bind_scalar(q, b); }
+            let count = state.db.fetch_scalar(q).await?;
+            record_profiled_query("articles", "COUNT", &sql, &__profiler_binds, __profiler_start.elapsed());
+            Ok(count)
+        })
     }
     fn query_delete<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
-        Box::pin(async move { ArticleQueryInner::from_state(state).delete().await })
+        Box::pin(async move {
+            if state.limit.is_some() {
+                anyhow::bail!("delete() does not support limit; add where clauses");
+            }
+            let db = state.db;
+            let mut where_sql = state.where_sql;
+            let binds = state.binds;
+            if where_sql.is_empty() { anyhow::bail!("delete(): no conditions set"); }
+            let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+            let __observer_active = try_get_observer().is_some();
+            let __old_rows: Vec<ArticleRow> = if __observer_active {
+                let select_sql = format!("SELECT * FROM articles WHERE {}", where_sql.join(" AND "));
+                let mut fq = sqlx::query_as::<_, ArticleRow>(&select_sql);
+                for b in &binds { fq = bind(fq, b.clone()); }
+                let rows: Vec<ArticleRow> = db.fetch_all(fq).await.unwrap_or_default();
+                rows
+            } else {
+                Vec::new()
+            };
+            if !__old_rows.is_empty() {
+                if let Some(observer) = try_get_observer() {
+                    for old_row in &__old_rows {
+                        let old_data = serde_json::to_value(old_row)?;
+                        let event = ModelEvent { model: "article", table: "articles", record_key: Some(format!("{}", old_row.id)) };
+                        observer.on_deleting(&event, &old_data).await?;
+                    }
+                }
+            }
+            let mut sql = String::from("DELETE FROM articles");
+            if !where_sql.is_empty() {
+                sql.push_str(" WHERE ");
+                sql.push_str(&where_sql.join(" AND "));
+            }
+            let __profiler_start = std::time::Instant::now();
+            let mut q = sqlx::query(&sql);
+            for b in binds { q = bind_query(q, b); }
+            let res = db.execute(q).await?;
+            record_profiled_query("articles", "DELETE", &sql, &__profiler_binds, __profiler_start.elapsed());
+            if !__old_rows.is_empty() && res.rows_affected() > 0 {
+                if let Some(observer) = try_get_observer() {
+                    for old_row in &__old_rows {
+                        let event = ModelEvent { model: "article", table: "articles", record_key: Some(format!("{}", old_row.id)) };
+                        match serde_json::to_value(old_row) {
+                            Ok(old_data) => {
+                                if let Err(err) = observer.on_deleted(&event, &old_data).await {
+                                    log_observer_error("deleted", "article", &err);
+                                }
+                            }
+                            Err(err) => log_observer_error("deleted", "article", &err),
+                        }
+                    }
+                }
+            }
+            Ok(res.rows_affected())
+        })
     }
     fn query_paginate<'db>(state: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
         Box::pin(async move {
-            let page = ArticleQueryInner::from_state(state).paginate(page, per_page).await?;
-            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+            let page = if page < 1 { 1 } else { page };
+            let per_page = resolve_per_page(per_page);
+            let (count_sql, count_binds) = state.to_count_sql("articles", HAS_SOFT_DELETE, "");
+            let __profiler_binds = if is_sql_profiler_enabled() { count_binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+            let __profiler_start = std::time::Instant::now();
+            let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
+            for b in count_binds { count_q = bind_scalar(count_q, b); }
+            let total: i64 = state.db.fetch_scalar(count_q).await?;
+            record_profiled_query("articles", "COUNT", &count_sql, &__profiler_binds, __profiler_start.elapsed());
+            let last_page = ((total + per_page - 1) / per_page).max(1);
+            let current_page = page.min(last_page);
+            let offset_val = (current_page - 1) * per_page;
+            let mut state = state;
+            state.offset = Some(offset_val);
+            state.limit = Some(per_page);
+            let (sql, binds) = state.to_select_sql("articles", HAS_SOFT_DELETE, "");
+            let __profiler_start = std::time::Instant::now();
+            let mut q = sqlx::query_as::<_, ArticleRow>(&sql);
+            for b in binds { q = bind(q, b); }
+            let rows = state.db.fetch_all(q).await?;
+            record_profiled_query("articles", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
+            let db = state.db.clone();
+            let author = load_author(db.clone(), &rows).await?;
+            let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
+            let localized = localized::load_article_localized(db.clone(), &ids).await?;
+            let meta_map = localized::load_article_meta(db.clone(), &ids).await?;
+            let attachments = localized::load_article_attachments(db.clone(), &ids).await?;
+            let mut data = Vec::with_capacity(rows.len());
+            for r in rows {
+                let key = r.id.clone();
+                let mut record = hydrate_record(r.clone(), &localized, &meta_map, &attachments, state.base_url.as_deref());
+                record.author = author.get(&key).cloned().unwrap_or(None);
+                data.push(record);
+            }
+            Ok(core_db::common::model_api::Page { data, total, per_page, current_page, last_page })
         })
     }
     fn query_limit<'db>(state: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
@@ -2286,10 +1356,10 @@ impl core_db::common::model_api::CreateModel for ArticleModel {
     }
     fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
         Box::pin(async move {
-            let db = builder.db.clone();
-            let base_url = builder.base_url.clone();
+            let db = builder.state.db.clone();
+            let base_url = builder.state.base_url.clone();
             let created = builder.save().await?;
-            ArticleQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("articles: created record not found"))
+            Query::<ArticleModel>::new_with_base_url(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("articles: created record not found"))
         })
     }
 }
@@ -2299,23 +1369,19 @@ impl core_db::common::model_api::CreateField<ArticleModel> for ArticleDbCol {
     fn set<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
         match field {
             ArticleDbCol::Id => {
-                builder.cols.push(field);
-                builder.binds.push(value);
+                builder.state = builder.state.set_col(field.as_sql(), value);
                 Ok(builder)
             }
             ArticleDbCol::AuthorId => {
-                builder.cols.push(field);
-                builder.binds.push(value);
+                builder.state = builder.state.set_col(field.as_sql(), value);
                 Ok(builder)
             }
             ArticleDbCol::Status => {
-                builder.cols.push(field);
-                builder.binds.push(value);
+                builder.state = builder.state.set_col(field.as_sql(), value);
                 Ok(builder)
             }
             ArticleDbCol::IsSystem => {
-                builder.cols.push(field);
-                builder.binds.push(value);
+                builder.state = builder.state.set_col(field.as_sql(), value);
                 Ok(builder)
             }
         }
@@ -2332,23 +1398,19 @@ where
         let value = value.into();
         match field {
             ArticleDbCol::Id => {
-                builder.cols.push(field);
-                builder.binds.push(value);
+                builder.state = builder.state.set_col(field.as_sql(), value);
                 Ok(builder)
             }
             ArticleDbCol::AuthorId => {
-                builder.cols.push(field);
-                builder.binds.push(value);
+                builder.state = builder.state.set_col(field.as_sql(), value);
                 Ok(builder)
             }
             ArticleDbCol::Status => {
-                builder.cols.push(field);
-                builder.binds.push(value);
+                builder.state = builder.state.set_col(field.as_sql(), value);
                 Ok(builder)
             }
             ArticleDbCol::IsSystem => {
-                builder.cols.push(field);
-                builder.binds.push(value);
+                builder.state = builder.state.set_col(field.as_sql(), value);
                 Ok(builder)
             }
         }
@@ -2387,8 +1449,8 @@ impl core_db::common::model_api::PatchModel for ArticleModel {
         state.select_sql = Some(ArticleDbCol::Id.as_sql().to_string());
         let (scope_sql, binds) = state.to_sql();
         let mut builder = ArticlePatchInner::new(db, base_url);
-        builder.where_sql.push(format!("{} IN ({})", ArticleDbCol::Id.as_sql(), scope_sql));
-        builder.binds = binds;
+        builder.state.where_sql.push(format!("{} IN ({})", ArticleDbCol::Id.as_sql(), scope_sql));
+        builder.state.where_binds = binds;
         builder
     }
     fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
@@ -2396,22 +1458,24 @@ impl core_db::common::model_api::PatchModel for ArticleModel {
     }
     fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
         Box::pin(async move {
-            if builder.where_sql.is_empty() {
+            if builder.state.where_sql.is_empty() {
                 anyhow::bail!("update: no conditions set");
             }
-            let db = builder.db.clone();
-            let base_url = builder.base_url.clone();
+            let db = builder.state.db.clone();
+            let base_url = builder.state.base_url.clone();
             let mut select_sql = format!("SELECT {} FROM articles", ArticleDbCol::Id.as_sql());
-            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            select_sql.push_str(&format!(" WHERE {}", builder.state.where_sql.join(" AND ")));
             let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
-            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            for bind_value in &builder.state.where_binds { select_q = bind_scalar(select_q, bind_value.clone()); }
             let target_ids = db.fetch_all_scalar(select_q).await?;
             builder.save().await?;
             if target_ids.is_empty() {
                 return Ok(Vec::new());
             }
-            let mut query = ArticleQueryInner::new(db, base_url);
-            query.where_in(ArticleDbCol::Id, &target_ids).get().await
+            let mut query = Query::<ArticleModel>::new_with_base_url(db, base_url);
+            let binds: Vec<BindValue> = target_ids.iter().cloned().map(Into::into).collect();
+            let state = query.into_inner().where_in_str(ArticleDbCol::Id.as_sql(), &binds);
+            <Self as core_db::common::model_api::QueryModel>::query_all(state).await
         })
     }
 }
@@ -2421,19 +1485,19 @@ impl core_db::common::model_api::PatchAssignField<ArticleModel> for ArticleDbCol
     fn assign<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
         match field {
             ArticleDbCol::Id => {
-                builder.sets.push((field, value, SetMode::Assign));
+                builder.state = builder.state.assign_col(field.as_sql(), value);
                 Ok(builder)
             }
             ArticleDbCol::AuthorId => {
-                builder.sets.push((field, value, SetMode::Assign));
+                builder.state = builder.state.assign_col(field.as_sql(), value);
                 Ok(builder)
             }
             ArticleDbCol::Status => {
-                builder.sets.push((field, value, SetMode::Assign));
+                builder.state = builder.state.assign_col(field.as_sql(), value);
                 Ok(builder)
             }
             ArticleDbCol::IsSystem => {
-                builder.sets.push((field, value, SetMode::Assign));
+                builder.state = builder.state.assign_col(field.as_sql(), value);
                 Ok(builder)
             }
         }
@@ -2446,23 +1510,23 @@ where
 {
     type Value = T;
     fn assign<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
-        let field = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        let resolved = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
         let value = value.into();
-        match field {
+        match resolved {
             ArticleDbCol::Id => {
-                builder.sets.push((field, value, SetMode::Assign));
+                builder.state = builder.state.assign_col(resolved.as_sql(), value);
                 Ok(builder)
             }
             ArticleDbCol::AuthorId => {
-                builder.sets.push((field, value, SetMode::Assign));
+                builder.state = builder.state.assign_col(resolved.as_sql(), value);
                 Ok(builder)
             }
             ArticleDbCol::Status => {
-                builder.sets.push((field, value, SetMode::Assign));
+                builder.state = builder.state.assign_col(resolved.as_sql(), value);
                 Ok(builder)
             }
             ArticleDbCol::IsSystem => {
-                builder.sets.push((field, value, SetMode::Assign));
+                builder.state = builder.state.assign_col(resolved.as_sql(), value);
                 Ok(builder)
             }
         }
@@ -2472,15 +1536,15 @@ where
 impl core_db::common::model_api::PatchNumericField<ArticleModel> for ArticleDbCol {
     fn increment<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
         match field {
-            ArticleDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
-            ArticleDbCol::AuthorId => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            ArticleDbCol::Id => { builder.state = builder.state.increment_col(field.as_sql(), value); Ok(builder) }
+            ArticleDbCol::AuthorId => { builder.state = builder.state.increment_col(field.as_sql(), value); Ok(builder) }
             _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
         }
     }
     fn decrement<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
         match field {
-            ArticleDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
-            ArticleDbCol::AuthorId => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            ArticleDbCol::Id => { builder.state = builder.state.decrement_col(field.as_sql(), value); Ok(builder) }
+            ArticleDbCol::AuthorId => { builder.state = builder.state.decrement_col(field.as_sql(), value); Ok(builder) }
             _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
         }
     }
@@ -2488,19 +1552,19 @@ impl core_db::common::model_api::PatchNumericField<ArticleModel> for ArticleDbCo
 
 impl core_db::common::model_api::PatchNumericField<ArticleModel> for Column<ArticleModel, i64> {
     fn increment<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
-        let field = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        match field {
-            ArticleDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
-            ArticleDbCol::AuthorId => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
-            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
+        let resolved = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match resolved {
+            ArticleDbCol::Id => { builder.state = builder.state.increment_col(resolved.as_sql(), value.into()); Ok(builder) }
+            ArticleDbCol::AuthorId => { builder.state = builder.state.increment_col(resolved.as_sql(), value.into()); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support increment", resolved.as_sql()),
         }
     }
     fn decrement<'db>(field: Self, mut builder: <ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<ArticleModel>>::Value) -> anyhow::Result<<ArticleModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
-        let field = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        match field {
-            ArticleDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
-            ArticleDbCol::AuthorId => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
-            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
+        let resolved = resolve_article_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
+        match resolved {
+            ArticleDbCol::Id => { builder.state = builder.state.decrement_col(resolved.as_sql(), value.into()); Ok(builder) }
+            ArticleDbCol::AuthorId => { builder.state = builder.state.decrement_col(resolved.as_sql(), value.into()); Ok(builder) }
+            _ => anyhow::bail!("column '{}' does not support decrement", resolved.as_sql()),
         }
     }
 }
@@ -2567,17 +1631,41 @@ impl core_db::common::model_api::IncludeRelation<ArticleModel> for OneRelation<A
 
 impl core_db::common::model_api::WhereHasRelation<ArticleModel> for OneRelation<ArticleModel, UserRow, 0> {
     type Target = UserModel;
-    fn where_has<'db, F>(_relation: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn where_has<'db, F>(_relation: Self, mut state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        ArticleQueryInner::from_state(state).where_has_author(scope).into_state()
+        let start_idx = state.binds.len() + 1;
+        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), None));
+        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
+        sub_where.insert(0, "users.id = articles.author_id".to_string());
+        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
+        clause.push_str(&sub_where.join(" AND "));
+        clause.push(')');
+        let clause = renumber_placeholders(&clause, start_idx);
+        state.where_sql.push(clause);
+        state.binds.extend(sub_binds);
+        state
     }
-    fn or_where_has<'db, F>(_relation: Self, state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn or_where_has<'db, F>(_relation: Self, mut state: <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <ArticleModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        ArticleQueryInner::from_state(state).or_where_has_author(scope).into_state()
+        let start_idx = state.binds.len() + 1;
+        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), None));
+        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
+        sub_where.insert(0, "users.id = articles.author_id".to_string());
+        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
+        clause.push_str(&sub_where.join(" AND "));
+        clause.push(')');
+        let clause = renumber_placeholders(&clause, start_idx);
+        if let Some(last) = state.where_sql.pop() {
+            state.where_sql.push(format!("({} OR {})", last, clause));
+        } else {
+            state.where_sql.push(clause);
+        }
+        state.binds.extend(sub_binds);
+        state
     }
 }
 
