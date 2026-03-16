@@ -2345,6 +2345,7 @@ fn render_model(
         record_fields.push(format!("    pub {}: {},", f.name, f.ty));
     }
     for enum_field in &enum_explained_fields {
+        record_fields.push("    #[serde(default)]".to_string());
         if enum_field.optional {
             record_fields.push(format!(
                 "    pub {}: Option<String>,",
@@ -2355,23 +2356,30 @@ fn render_model(
         }
     }
     for f in &localized_fields {
+        record_fields.push("    #[serde(default)]".to_string());
         record_fields.push(format!("    pub {}: Option<String>,", f));
+        record_fields.push("    #[serde(default)]".to_string());
         record_fields.push(format!(
             "    pub {f}_translations: Option<localized::LocalizedText>,"
         ));
     }
     for a in &single_attachments {
+        record_fields.push("    #[serde(default)]".to_string());
         record_fields.push(format!("    pub {}: Option<Attachment>,", a.name));
+        record_fields.push("    #[serde(default)]".to_string());
         record_fields.push(format!(
             "    pub {name}_url: Option<String>,",
             name = a.name
         ));
     }
     for a in &multi_attachments {
+        record_fields.push("    #[serde(default)]".to_string());
         record_fields.push(format!("    pub {}: Vec<Attachment>,", a.name));
+        record_fields.push("    #[serde(default)]".to_string());
         record_fields.push(format!("    pub {name}_urls: Vec<String>,", name = a.name));
     }
     if has_meta {
+        record_fields.push("    #[serde(default)]".to_string());
         record_fields
             .push("    pub meta: std::collections::HashMap<String, JsonValue>,".to_string());
     }
@@ -2379,6 +2387,7 @@ fn render_model(
         let rel_field = to_snake(&rel.name);
         let target_title = to_title_case(&rel.target_model);
         let target_row = format!("{}Row", target_title);
+        record_fields.push("    #[serde(default)]".to_string());
         match rel.kind {
             RelationKind::HasMany => {
                 record_fields.push(format!("    pub {rel_field}: Vec<{target_row}>,"));
