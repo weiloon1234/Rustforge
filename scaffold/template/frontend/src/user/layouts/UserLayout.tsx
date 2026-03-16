@@ -26,6 +26,8 @@ export default function UserLayout() {
   const account = useAuthStore((s) => s.account);
   const connect = useRealtimeStore((s) => s.connect);
   const disconnect = useRealtimeStore((s) => s.disconnect);
+  const subscribe = useRealtimeStore((s) => s.subscribe);
+  const wsStatus = useRealtimeStore((s) => s.status);
 
   useEffect(() => {
     void userLocalePersistence.syncFromAccount(account);
@@ -39,6 +41,13 @@ export default function UserLayout() {
       disconnect();
     };
   }, [connect, disconnect]);
+
+  // Subscribe to user channel once connected
+  useEffect(() => {
+    if (wsStatus === "connected") {
+      subscribe("user");
+    }
+  }, [wsStatus, subscribe]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
