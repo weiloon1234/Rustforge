@@ -2336,6 +2336,9 @@ fn render_model(
 
     let mut record_fields: Vec<String> = Vec::new();
     for f in &db_fields {
+        if let Some(attr) = f.serde_attr {
+            record_fields.push(format!("    {attr}"));
+        }
         if f.ty.contains("OffsetDateTime") {
             record_fields.push("    #[schemars(with = \"String\")]".to_string());
         }

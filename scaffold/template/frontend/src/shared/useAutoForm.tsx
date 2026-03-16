@@ -535,7 +535,7 @@ export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, con
         continue;
       }
       if (field.type === "checkbox") {
-        payload[field.name] = value ? "1" : "0";
+        payload[field.name] = value === "1";
         continue;
       }
 
