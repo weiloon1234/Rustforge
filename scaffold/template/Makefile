@@ -30,9 +30,8 @@ help:
 	@echo "  make route-list"
 	@echo "  make migrate-pump"
 	@echo "  make migrate-run"
-	@echo "  make deploy              # Build release + restart supervisor"
+	@echo "  make deploy              # Git pull + build + migrate + restart"
 	@echo "  make server-install"
-	@echo "  make server-update"
 	@echo "  make assets-publish ASSETS_ARGS='--from frontend/dist --clean'"
 	@echo "  make framework-docs-build"
 	@echo "  make check"
@@ -118,33 +117,11 @@ migrate-run:
 
 .PHONY: deploy
 deploy:
-	cargo build --release --workspace
-	@SLUG="$${SUPERVISOR_PROJECT_SLUG:-}"; \
-	if [ -z "$$SLUG" ]; then \
-		echo "SUPERVISOR_PROJECT_SLUG not set in .env — skip supervisor restart"; \
-	elif command -v supervisorctl >/dev/null 2>&1; then \
-		CONF="/etc/supervisor/conf.d/$$SLUG.conf"; \
-		if [ -f "$$CONF" ]; then \
-			programs=$$(grep -oE '^\[program:[^]]+\]' "$$CONF" | sed -E 's/^\[program:([^]]+)\]$$/\1/'); \
-			for p in $$programs; do \
-				echo "Restarting $$p..."; \
-				supervisorctl restart "$$p" 2>/dev/null || sudo supervisorctl restart "$$p" || true; \
-			done; \
-		else \
-			echo "Supervisor config not found: $$CONF"; \
-		fi; \
-	else \
-		echo "supervisorctl not found — skip restart"; \
-	fi
-	@echo "Deploy complete."
+	./scripts/deploy.sh
 
 .PHONY: server-install
 server-install:
 	sudo ./scripts/install-ubuntu.sh
-
-.PHONY: server-update
-server-update:
-	./scripts/update.sh
 
 .PHONY: assets-publish
 assets-publish:

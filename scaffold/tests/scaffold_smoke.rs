@@ -121,7 +121,7 @@ fn scaffold_smoke_generation_and_force_behaviour() {
             "bin/worker",
             "bin/console",
             "scripts/install-ubuntu.sh",
-            "scripts/update.sh",
+            "scripts/deploy.sh",
         ] {
             let path = out_dir.join(rel);
             let mode = fs::metadata(&path)

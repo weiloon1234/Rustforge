@@ -120,11 +120,11 @@ sudo ./scripts/install-ubuntu.sh   # or: make server-install
 
 Idempotent installer that configures: isolated Linux user, SSH access, `.env` values, nginx, Supervisor programs, and optional Let's Encrypt certificates.
 
-### Updates
+### Deploy
 
 ```bash
-./scripts/update.sh                       # or: make server-update
-RUN_MIGRATIONS=false ./scripts/update.sh  # skip migrations
+make deploy                              # git pull + build + migrate + restart
+RUN_MIGRATIONS=false make deploy         # skip migrations
 ```
 
 Pulls latest code, compiles release binaries, builds frontend, runs migrations, and restarts Supervisor programs.
