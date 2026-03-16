@@ -22,6 +22,16 @@ import { useAuthStore } from "@admin/stores/auth";
 import { api } from "@admin/api";
 import type { LocaleCode } from "@shared/types/platform";
 import { adminLocalePersistence } from "@admin/locale";
+import { useRealtimeStore } from "@admin/stores/realtime";
+import type { RealtimeStatus } from "@shared/createRealtimeStore";
+
+const wsStatusConfig: Record<RealtimeStatus, { color: string; label: string }> = {
+  disconnected: { color: "bg-red-500", label: "Offline" },
+  connecting: { color: "bg-yellow-500", label: "Connecting" },
+  authenticating: { color: "bg-yellow-500", label: "Authenticating" },
+  connected: { color: "bg-green-500", label: "Live" },
+  reconnecting: { color: "bg-orange-500", label: "Reconnecting" },
+};
 
 function ProfileModal({
   account,
@@ -303,6 +313,8 @@ export default function Header({
   };
 
   const accountName = account?.name ?? t("Admin");
+  const wsStatus = useRealtimeStore((s) => s.status);
+  const wsInfo = wsStatusConfig[wsStatus];
 
   return (
     <header className="rf-header">
@@ -318,6 +330,11 @@ export default function Header({
       </Button>
 
       <div className="flex-1" />
+
+      <div className="flex items-center gap-1.5 px-2 text-xs text-muted" title={t(wsInfo.label)}>
+        <span className={`inline-block h-2 w-2 rounded-full ${wsInfo.color}`} />
+        <span>{t(wsInfo.label)}</span>
+      </div>
 
       <div ref={dropdownRef} className="relative">
         <Button

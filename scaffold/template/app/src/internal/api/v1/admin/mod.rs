@@ -14,6 +14,7 @@ mod country;
 mod crypto_network;
 mod deposit;
 mod developer_logs;
+mod notification;
 mod receipt_upload;
 mod hierarchy;
 mod introducer_change;
@@ -48,6 +49,7 @@ fn guarded_router(state: AppApiState) -> ApiRouter {
         .nest("/crypto_networks", crypto_network::router(state.clone()))
         .nest("/company_bank_accounts", company_bank_account::router(state.clone()))
         .nest("/company_crypto_accounts", company_crypto_account::router(state.clone()))
+        .nest("/notifications", notification::router(state.clone()))
         .nest("/deposits", deposit::router(state.clone()))
         .nest("/withdrawals", withdrawal::router(state.clone()))
         .nest("/developer/logs", developer_logs::router(state.clone()))

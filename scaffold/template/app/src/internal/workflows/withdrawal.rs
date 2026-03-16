@@ -150,5 +150,7 @@ pub async fn review_withdrawal(
         }
     }
 
+    crate::internal::workflows::notification::dispatch_admin_notification_counts(state).await;
+
     detail(state, withdrawal_id).await
 }

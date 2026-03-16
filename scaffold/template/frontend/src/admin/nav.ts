@@ -86,11 +86,13 @@ export const navigation: NavItem[] = [
         label: "Deposits",
         path: "/finance/deposits",
         permissions: [PERMISSION.DEPOSIT_READ, PERMISSION.DEPOSIT_MANAGE],
+        notificationKey: "deposit",
       },
       {
         label: "Withdrawals",
         path: "/finance/withdrawals",
         permissions: [PERMISSION.WITHDRAWAL_READ, PERMISSION.WITHDRAWAL_MANAGE],
+        notificationKey: "withdrawal",
       },
       {
         label: "Banks",

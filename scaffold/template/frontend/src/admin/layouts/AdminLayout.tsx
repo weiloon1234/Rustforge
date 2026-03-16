@@ -5,6 +5,9 @@ import Header from "@admin/components/Header";
 import { ModalOutlet } from "@shared/components";
 import { useAuthStore } from "@admin/stores/auth";
 import { adminLocalePersistence } from "@admin/locale";
+import { useRealtimeStore } from "@admin/stores/realtime";
+import { useNotificationStore } from "@admin/stores/notifications";
+import { api } from "@admin/api";
 
 const STORAGE_KEY = "admin-sidebar-collapsed";
 const MOBILE_BREAKPOINT = 768;
@@ -27,6 +30,48 @@ export default function AdminLayout() {
   });
   const [mobileOpen, setMobileOpen] = useState(false);
   const account = useAuthStore((s) => s.account);
+
+  const connect = useRealtimeStore((s) => s.connect);
+  const disconnect = useRealtimeStore((s) => s.disconnect);
+  const subscribe = useRealtimeStore((s) => s.subscribe);
+  const wsStatus = useRealtimeStore((s) => s.status);
+  const on = useRealtimeStore((s) => s.on);
+
+  // Connect WebSocket (StrictMode-safe)
+  useEffect(() => {
+    const timer = setTimeout(() => connect(), 50);
+    return () => {
+      clearTimeout(timer);
+      disconnect();
+    };
+  }, [connect, disconnect]);
+
+  // Subscribe to admin channel once connected
+  useEffect(() => {
+    if (wsStatus === "connected") {
+      subscribe("admin");
+    }
+  }, [wsStatus, subscribe]);
+
+  // Listen for notification_counts events
+  useEffect(() => {
+    const unsub = on("notification_counts", (data) => {
+      const counts = data as Record<string, number>;
+      useNotificationStore.getState().setCounts(counts);
+    });
+    return unsub;
+  }, [on]);
+
+  // Fetch initial notification counts on mount
+  useEffect(() => {
+    api.get("notifications/counts")
+      .then((res) => {
+        useNotificationStore.getState().setCounts(res.data.data);
+      })
+      .catch(() => {
+        // Silent fail for initial count fetch
+      });
+  }, []);
 
   useEffect(() => {
     if (!isMobile) localStorage.setItem(STORAGE_KEY, String(collapsed));

@@ -124,5 +124,7 @@ pub async fn review_deposit(
         }
     }
 
+    crate::internal::workflows::notification::dispatch_admin_notification_counts(state).await;
+
     detail(state, deposit_id).await
 }

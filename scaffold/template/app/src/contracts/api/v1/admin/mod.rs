@@ -8,6 +8,7 @@ pub mod country;
 pub mod crypto_network;
 pub mod deposit;
 pub mod developer_logs;
+pub mod notification;
 pub mod hierarchy;
 pub mod introducer_change;
 pub mod tiptap_upload;

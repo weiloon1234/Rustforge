@@ -25,6 +25,16 @@ enabled = true
 guard = ""
 presence_enabled = false
 
+[realtime.channels.user]
+enabled = true
+guard = "user"
+presence_enabled = true
+
+[realtime.channels.admin]
+enabled = true
+guard = "admin"
+presence_enabled = false
+
 # ── Finance ───────────────────────────────────────────────
 # Fee settings for deposits and withdrawals.
 # These are reference values — actual calculation is in Rust config structs.

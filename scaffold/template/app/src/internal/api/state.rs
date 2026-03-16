@@ -4,6 +4,7 @@ use bootstrap::boot::BootContext;
 use core_config::DataTableUnknownFilterMode as ConfigUnknownFilterMode;
 use core_datatable::{DataTableAsyncExportManager, DataTableRegistry, DataTableUnknownFilterMode};
 use core_db::infra::storage::Storage;
+use core_realtime::RealtimePublisher;
 use core_web::datatable::DataTableEmailExportManager;
 
 #[derive(Clone)]
@@ -22,6 +23,7 @@ pub struct AppApiState {
     pub app_timezone: String,
     pub i18n_default_locale: String,
     pub i18n_supported_locales: Vec<String>,
+    pub realtime: RealtimePublisher,
 }
 
 impl AppApiState {
@@ -59,6 +61,10 @@ impl AppApiState {
                 .iter()
                 .map(|locale| (*locale).to_string())
                 .collect(),
+            realtime: RealtimePublisher::from_realtime_settings(
+                &ctx.settings.redis.url,
+                &ctx.settings.realtime,
+            )?,
         })
     }
 }
