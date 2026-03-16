@@ -14,7 +14,9 @@ import {
   formatDateTime,
   useAutoForm,
   useModalStore,
+  type AutoFormDefaultValue,
 } from "@shared/components";
+import type { DataTableCellContext } from "@shared/components/DataTable";
 
 function normalizeErrorMessage(error: unknown, fallback: string): string {
   const maybe = error as { response?: { data?: { message?: string } } };
@@ -67,7 +69,7 @@ function CryptoNetworkForm({
       },
       { name: "sort_order", type: "number", label: t("Sort Order") },
     ],
-    defaults: defaults ?? { status: "1", sort_order: 0 },
+    defaults: (defaults ?? { status: "1", sort_order: 0 }) as Record<string, AutoFormDefaultValue>,
     onSuccess: () => {
       close();
       alertSuccess({ title: t("Success"), message: networkId ? t("Crypto network updated") : t("Crypto network created") });
@@ -164,12 +166,12 @@ export default function CryptoNetworksPage() {
               key: "actions" as keyof CryptoNetworkDatatableRow,
               label: t("Actions"),
               sortable: false,
-              render: (row: CryptoNetworkDatatableRow, _: number, refresh: () => void) => (
+              render: (row: CryptoNetworkDatatableRow, ctx: DataTableCellContext<CryptoNetworkDatatableRow>) => (
                 <div className="flex items-center gap-1">
-                  <Button type="button" onClick={() => openFormModal(row, refresh)} variant="plain" size="sm" iconOnly title={t("Edit")}>
+                  <Button type="button" onClick={() => openFormModal(row, ctx.refresh)} variant="plain" size="sm" iconOnly title={t("Edit")}>
                     <Pencil size={16} />
                   </Button>
-                  <Button type="button" onClick={() => handleDelete(row, refresh)} variant="plain" size="sm" iconOnly title={t("Delete")}>
+                  <Button type="button" onClick={() => handleDelete(row, ctx.refresh)} variant="plain" size="sm" iconOnly title={t("Delete")}>
                     <Trash2 size={16} />
                   </Button>
                 </div>

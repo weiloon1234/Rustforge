@@ -7,7 +7,6 @@ import type {
   CryptoNetworkStatus,
   DepositMethod,
   DepositStatus,
-  OwnerType,
   UserBanStatus,
   WithdrawalMethod,
   WithdrawalStatus,
@@ -40,7 +39,7 @@ export const WITHDRAWAL_STATUS_I18N: Record<WithdrawalStatus, string> = {
   "4": "enum.withdrawal_status.rejected",
 };
 
-export const OWNER_TYPE_I18N: Record<OwnerType, string> = {
+export const OWNER_TYPE_I18N: Record<string, string> = {
   "1": "enum.owner_type.user",
   "2": "enum.owner_type.merchant",
   "3": "enum.owner_type.agent",

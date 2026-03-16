@@ -14,7 +14,9 @@ import {
   formatDateTime,
   useAutoForm,
   useModalStore,
+  type AutoFormDefaultValue,
 } from "@shared/components";
+import type { DataTableCellContext } from "@shared/components/DataTable";
 
 function normalizeErrorMessage(error: unknown, fallback: string): string {
   const maybe = error as { response?: { data?: { message?: string } } };
@@ -66,7 +68,7 @@ function CompanyCryptoAccountForm({
       },
       { name: "sort_order", type: "number", label: t("Sort Order") },
     ],
-    defaults: defaults ?? { status: "1", sort_order: 0, conversion_rate: "1.0" },
+    defaults: (defaults ?? { status: "1", sort_order: 0, conversion_rate: "1.0" }) as Record<string, AutoFormDefaultValue>,
     onSuccess: () => {
       close();
       alertSuccess({
@@ -167,12 +169,12 @@ export default function CompanyCryptoAccountsPage() {
               key: "actions" as keyof CompanyCryptoAccountDatatableRow,
               label: t("Actions"),
               sortable: false,
-              render: (row: CompanyCryptoAccountDatatableRow, _: number, refresh: () => void) => (
+              render: (row: CompanyCryptoAccountDatatableRow, ctx: DataTableCellContext<CompanyCryptoAccountDatatableRow>) => (
                 <div className="flex items-center gap-1">
-                  <Button type="button" onClick={() => openFormModal(row, refresh)} variant="plain" size="sm" iconOnly title={t("Edit")}>
+                  <Button type="button" onClick={() => openFormModal(row, ctx.refresh)} variant="plain" size="sm" iconOnly title={t("Edit")}>
                     <Pencil size={16} />
                   </Button>
-                  <Button type="button" onClick={() => handleDelete(row, refresh)} variant="plain" size="sm" iconOnly title={t("Delete")}>
+                  <Button type="button" onClick={() => handleDelete(row, ctx.refresh)} variant="plain" size="sm" iconOnly title={t("Delete")}>
                     <Trash2 size={16} />
                   </Button>
                 </div>

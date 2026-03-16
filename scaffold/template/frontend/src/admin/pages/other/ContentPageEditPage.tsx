@@ -13,7 +13,7 @@ import {
   alertSuccess,
   attachmentUrl,
 } from "@shared/components";
-import { useAutoForm } from "@shared/useAutoForm";
+import { useAutoForm, type AutoFormDefaultValue } from "@shared/useAutoForm";
 
 const CONTENT_PAGE_SYSTEM_YES = CONTENT_PAGE_SYSTEM_FLAG._1;
 
@@ -95,8 +95,8 @@ export default function ContentPageEditPage() {
         type: "localized",
         children: [
           { name: "title", type: "text", label: t("Title"), required: true, disabled: isSystem },
-          { name: "content", type: "tiptap", label: t("Content"), required: true, editorPreset: "full", imageFolder: "uploads/content_page" },
-          { name: "cover", type: "file", label: t("Cover"), accept: "image/*", notes: t("Optional localized cover image") },
+          { name: "content", type: "tiptap", label: t("Content"), required: true, editorPreset: "full", imageFolder: "uploads/content_page" } as any,
+          { name: "cover", type: "file", label: t("Cover"), accept: "image/*", notes: t("Optional localized cover image") } as any,
         ],
       },
     ],
@@ -105,7 +105,7 @@ export default function ContentPageEditPage() {
       title: contentPage.title ?? {},
       content: contentPage.content ?? {},
       cover: coverDefaults,
-    } : undefined,
+    } as unknown as Record<string, AutoFormDefaultValue> : undefined,
     onSuccess: () => {
       alertSuccess({ title: t("Success"), message: t("Page updated") });
       navigate("/other/content-pages");

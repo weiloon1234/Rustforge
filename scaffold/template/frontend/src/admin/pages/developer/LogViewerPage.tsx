@@ -202,7 +202,7 @@ export default function LogViewerPage() {
           onChange={(e) => setSelectedFile(e.target.value)}
           options={files.map((f) => ({
             value: f.filename,
-            label: `${f.filename} (${formatBytes(f.size_bytes)})`,
+            label: `${f.filename} (${formatBytes(Number(f.size_bytes))})`,
           }))}
           placeholder={files.length === 0 ? t("No log files") : undefined}
           containerClassName="!mb-0 sm:min-w-[16rem] sm:max-w-[24rem]"
@@ -262,7 +262,7 @@ export default function LogViewerPage() {
       {selectedMeta && (
         <div className="flex gap-4 text-xs text-muted">
           <span>
-            {t("Size")}: {formatBytes(selectedMeta.size_bytes)}
+            {t("Size")}: {formatBytes(Number(selectedMeta.size_bytes))}
           </span>
           <span>
             {t("Lines")}: {content.split("\n").length.toLocaleString()}

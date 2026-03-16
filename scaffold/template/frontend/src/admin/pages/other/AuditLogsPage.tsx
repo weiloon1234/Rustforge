@@ -104,7 +104,7 @@ export default function AuditLogsPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">
                 {t("Record ID")}
               </p>
-              <p className="font-mono text-xs">{log.record_id}</p>
+              <p className="font-mono text-xs">{log.record_key}</p>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">
@@ -177,7 +177,7 @@ export default function AuditLogsPage() {
           key: "record_id",
           label: t("Record ID"),
           cellClassName: "font-mono text-xs",
-          render: (log) => log.record_id,
+          render: (log) => log.record_key,
         },
         {
           key: "admin_username",

@@ -68,7 +68,7 @@ export default function SqlProfilerQueriesPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">
                 {t("Duration")}
               </p>
-              <p>{formatDuration(row.duration_us)}</p>
+              <p>{formatDuration(Number(row.duration_us))}</p>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-muted">
@@ -168,8 +168,8 @@ export default function SqlProfilerQueriesPage() {
           label: t("Duration"),
           cellClassName: "tabular-nums",
           render: (row) => (
-            <span className={`font-medium ${durationBadgeClass(row.duration_us)}`}>
-              {formatDuration(row.duration_us)}
+            <span className={`font-medium ${durationBadgeClass(Number(row.duration_us))}`}>
+              {formatDuration(Number(row.duration_us))}
             </span>
           ),
         },

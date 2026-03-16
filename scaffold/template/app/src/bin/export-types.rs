@@ -354,7 +354,9 @@ fn assemble(f: &TsFile, shared_type_registry: &BTreeMap<String, String>) -> Stri
         if i > 0 {
             out.push('\n');
         }
-        out.push_str(def);
+        // Strip ts-rs self-referencing imports (e.g. `import type { Foo } from "./Foo"`)
+        // since all types are bundled into the same file.
+        out.push_str(&strip_local_imports(def));
         out.push('\n');
     }
     out
@@ -640,6 +642,20 @@ fn shared_import_lines(
         ));
     }
     lines
+}
+
+/// Remove `import type { ... } from "./..."` lines that ts-rs emits for
+/// cross-type references. When multiple types are bundled into one file,
+/// these self-imports are invalid — the referenced types are already present.
+fn strip_local_imports(definition: &str) -> String {
+    definition
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !(trimmed.starts_with("import type ") && trimmed.contains("from \"./"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn write_file(path: &Path, content: &str) {

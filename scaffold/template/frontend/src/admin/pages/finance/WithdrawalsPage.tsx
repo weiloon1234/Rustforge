@@ -14,6 +14,7 @@ import {
   formatDateTime,
   moneyFormat,
 } from "@shared/components";
+import type { DataTableCellContext } from "@shared/components/DataTable";
 import { api } from "@admin/api";
 
 function normalizeErrorMessage(error: unknown, fallback: string): string {
@@ -178,9 +179,9 @@ export default function WithdrawalsPage() {
       content: (
         <div>
           <div className="mb-4 grid grid-cols-2 gap-2 text-sm">
-            <div><span className="text-muted">{t("Amount")}:</span> {moneyFormat(row.amount)}</div>
-            <div><span className="text-muted">{t("Fee")}:</span> {moneyFormat(row.fee)}</div>
-            <div><span className="text-muted">{t("Net Amount")}:</span> {moneyFormat(row.net_amount)}</div>
+            <div><span className="text-muted">{t("Amount")}:</span> {moneyFormat(parseFloat(row.amount))}</div>
+            <div><span className="text-muted">{t("Fee")}:</span> {moneyFormat(parseFloat(row.fee))}</div>
+            <div><span className="text-muted">{t("Net Amount")}:</span> {moneyFormat(parseFloat(row.net_amount))}</div>
             <div><span className="text-muted">{t("Credit Type")}:</span> {t(CREDIT_TYPE_I18N[row.credit_type] ?? row.credit_type)}</div>
           </div>
           <ReviewWithdrawalForm
@@ -266,19 +267,19 @@ export default function WithdrawalsPage() {
           key: "amount",
           label: t("Amount"),
           cellClassName: "tabular-nums",
-          render: (row) => moneyFormat(row.amount),
+          render: (row) => moneyFormat(parseFloat(row.amount)),
         },
         {
           key: "fee",
           label: t("Fee"),
           cellClassName: "tabular-nums text-muted",
-          render: (row) => moneyFormat(row.fee),
+          render: (row) => moneyFormat(parseFloat(row.fee)),
         },
         {
           key: "net_amount",
           label: t("Net"),
           cellClassName: "tabular-nums",
-          render: (row) => moneyFormat(row.net_amount),
+          render: (row) => moneyFormat(parseFloat(row.net_amount)),
         },
         {
           key: "status",
@@ -313,15 +314,15 @@ export default function WithdrawalsPage() {
                 key: "actions" as keyof WithdrawalDatatableRow,
                 label: t("Actions"),
                 sortable: false,
-                render: (row: WithdrawalDatatableRow, _: number, refresh: () => void) => {
+                render: (row: WithdrawalDatatableRow, ctx: DataTableCellContext<WithdrawalDatatableRow>) => {
                   // Only show actions for Pending or Processing
                   if (row.status !== "1" && row.status !== "2") return null;
                   return (
                     <div className="flex gap-1">
-                      <Button size="xs" variant="primary" onClick={() => openReviewModal(row, refresh)}>
+                      <Button size="xs" variant="primary" onClick={() => openReviewModal(row, ctx.refresh)}>
                         {t("Review")}
                       </Button>
-                      <Button size="xs" variant="secondary" onClick={() => openUploadReceiptModal(row, refresh)}>
+                      <Button size="xs" variant="secondary" onClick={() => openUploadReceiptModal(row, ctx.refresh)}>
                         {t("Receipt")}
                       </Button>
                     </div>

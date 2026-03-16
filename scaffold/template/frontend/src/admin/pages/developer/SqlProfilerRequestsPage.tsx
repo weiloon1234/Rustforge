@@ -74,7 +74,7 @@ function buildBoundQuery(sql: string, binds: string): string {
     const isQuoted = val.startsWith("'") && val.endsWith("'");
     const isBare = /^-?\d+(\.\d+)?$/.test(val) || val === "true" || val === "false" || val === "NULL";
     const replacement = isQuoted || isBare ? val : `'${val}'`;
-    result = result.replaceAll(`$${i}`, replacement);
+    result = result.split(`$${i}`).join(replacement);
   }
   return result;
 }
