@@ -1,5 +1,5 @@
 use core_db::common::{
-    auth::hash::{hash_password, verify_password},
+    auth::hash::verify_password,
     sql::{DbConn, Op},
 };
 use core_i18n::t;
@@ -174,11 +174,10 @@ pub async fn password_update(
         return Err(AppError::Unauthorized(t("Current password is incorrect")));
     }
 
-    let password_hash = hash_password(&req.password).map_err(AppError::from)?;
     let affected = AdminModel::query(DbConn::pool(&state.db))
         .where_col(AdminCol::ID, Op::Eq, admin_id)
         .patch()
-        .assign(AdminCol::PASSWORD, password_hash)
+        .assign(AdminCol::PASSWORD, req.password.to_string())
         .map_err(AppError::from)?
         .save()
         .await

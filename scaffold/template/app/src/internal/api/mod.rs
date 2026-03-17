@@ -68,6 +68,12 @@ pub async fn build_router(ctx: BootContext) -> anyhow::Result<Router> {
             .route("/admin/{*path}", axum_get(admin_dev));
     }
 
+    // Static audio assets: serve from frontend/public/audio/ in dev mode
+    let frontend_audio = std::path::PathBuf::from("frontend/public/audio");
+    if frontend_audio.is_dir() {
+        router = router.nest_service("/audio", ServeDir::new(&frontend_audio));
+    }
+
     // User SPA: everything else → public/index.html (existing logic)
     if let Some(static_router) = core_web::static_assets::static_assets_router(&public_path) {
         router = router.merge(static_router);

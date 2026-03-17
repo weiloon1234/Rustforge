@@ -1,5 +1,4 @@
 use core_db::common::{
-    auth::hash::hash_password,
     sql::{generate_snowflake_i64, DbConn, Op},
 };
 use core_i18n::t;
@@ -28,7 +27,6 @@ pub async fn create(
     req: CreateAdminInput,
 ) -> Result<AdminRecord, AppError> {
     let username = req.username.trim().to_ascii_lowercase();
-    let password_hash = hash_password(&req.password).map_err(AppError::from)?;
 
     let abilities = ensure_assignable_permissions(auth, &req.abilities)?;
 
@@ -43,7 +41,7 @@ pub async fn create(
         .map_err(AppError::from)?
         .set(AdminCol::ABILITIES, permissions_to_json(&abilities))
         .map_err(AppError::from)?
-        .set(AdminCol::PASSWORD, password_hash)
+        .set(AdminCol::PASSWORD, req.password.to_string())
         .map_err(AppError::from)?;
 
     if let Some(email) = req.email.as_deref().and_then(normalize_email_value) {
@@ -90,8 +88,7 @@ pub async fn update(
     }
 
     if let Some(password) = req.password {
-        let password_hash = hash_password(&password).map_err(AppError::from)?;
-        update = update.and_then(|patch| patch.assign(AdminCol::PASSWORD, password_hash));
+        update = update.and_then(|patch| patch.assign(AdminCol::PASSWORD, password));
         touched = true;
     }
 

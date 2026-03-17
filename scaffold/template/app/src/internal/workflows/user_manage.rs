@@ -1,5 +1,4 @@
 use core_db::common::{
-    auth::hash::hash_password,
     sql::{generate_snowflake_i64, DbConn, Op},
 };
 use core_i18n::t;
@@ -24,7 +23,6 @@ pub async fn detail(state: &AppApiState, id: i64) -> Result<UserRecord, AppError
 pub async fn create(state: &AppApiState, req: CreateUserInput) -> Result<UserRecord, AppError> {
     let username = req.username.trim().to_ascii_lowercase();
     let uuid = generate_unique_uuid(state).await?;
-    let password_hash = hash_password(&req.password).map_err(AppError::from)?;
 
     let mut insert = UserModel::create(DbConn::pool(&state.db))
         .set(UserCol::ID, generate_snowflake_i64())
@@ -35,7 +33,7 @@ pub async fn create(state: &AppApiState, req: CreateUserInput) -> Result<UserRec
         .map_err(AppError::from)?
         .set(UserCol::BAN, UserBanStatus::No)
         .map_err(AppError::from)?
-        .set(UserCol::PASSWORD, password_hash)
+        .set(UserCol::PASSWORD, req.password.to_string())
         .map_err(AppError::from)?;
 
     if let Some(ref introducer_username) = req.introducer_username {
@@ -166,8 +164,7 @@ pub async fn update(
     }
 
     if let Some(password) = req.password {
-        let password_hash = hash_password(&password).map_err(AppError::from)?;
-        update = update.and_then(|patch| patch.assign(UserCol::PASSWORD, password_hash));
+        update = update.and_then(|patch| patch.assign(UserCol::PASSWORD, password));
         touched = true;
     }
 

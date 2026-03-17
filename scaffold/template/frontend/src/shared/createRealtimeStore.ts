@@ -121,7 +121,7 @@ export function createRealtimeStore(config: RealtimeConfig) {
           case "event": {
             const eventName = msg.event as string;
             if (eventName) {
-              emit(eventName, msg.data);
+              emit(eventName, msg.payload);
             }
             break;
           }

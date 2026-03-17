@@ -141,6 +141,11 @@ env_bool_to_yes_no() {
     esac
 }
 
+generate_password() {
+    local length="${1:-24}"
+    tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "${length}"
+}
+
 if [[ ! -f /etc/os-release ]]; then
     echo "Cannot detect OS. /etc/os-release is missing."
     exit 1
@@ -216,8 +221,29 @@ SERVER_PORT="$(prompt "SERVER_PORT" "${server_port_default:-3000}")"
 REALTIME_PORT="$(prompt "REALTIME_PORT" "${realtime_port_default:-3010}")"
 
 db_default="$(read_env_value "${ENV_FILE}" "DATABASE_URL")"
+SETUP_POSTGRES="no"
+DB_NAME=""
+DB_USER=""
+DB_PASSWORD=""
+
+if [[ -n "${db_default}" ]]; then
+    DATABASE_URL="$(prompt "DATABASE_URL" "${db_default}")"
+elif command -v psql >/dev/null 2>&1; then
+    DATABASE_URL="$(prompt "DATABASE_URL" "postgres://postgres:postgres@127.0.0.1:5432/${PROJECT_SLUG}")"
+else
+    echo
+    echo "PostgreSQL is not installed. It will be installed and configured automatically."
+    DB_NAME="$(prompt "PostgreSQL database name" "${PROJECT_SLUG}")"
+    DB_USER="$(prompt "PostgreSQL username" "${PROJECT_SLUG}")"
+    DB_PASSWORD="$(generate_password 24)"
+    DATABASE_URL="postgres://${DB_USER}:${DB_PASSWORD}@127.0.0.1:5432/${DB_NAME}"
+    SETUP_POSTGRES="yes"
+    echo "  Generated DB password : ${DB_PASSWORD}"
+    echo "  DATABASE_URL          : ${DATABASE_URL}"
+    echo
+fi
+
 redis_default="$(read_env_value "${ENV_FILE}" "REDIS_URL")"
-DATABASE_URL="$(prompt "DATABASE_URL" "${db_default:-postgres://postgres:postgres@127.0.0.1:5432/${PROJECT_SLUG}}")"
 REDIS_URL="$(prompt "REDIS_URL" "${redis_default:-redis://127.0.0.1:6379/0}")"
 
 existing_https="$(env_bool_to_yes_no "$(read_env_value "${ENV_FILE}" "ENABLE_HTTPS")" "yes")"
@@ -255,6 +281,34 @@ echo
 if [[ "$(prompt_yes_no "Proceed with installation?" "yes")" != "yes" ]]; then
     echo "Cancelled."
     exit 0
+fi
+
+if ! command -v psql >/dev/null 2>&1; then
+    echo "Installing PostgreSQL..."
+    ensure_packages postgresql postgresql-contrib
+    systemctl enable --now postgresql
+fi
+
+if [[ "${SETUP_POSTGRES}" == "yes" ]]; then
+    echo "Creating PostgreSQL user '${DB_USER}' and database '${DB_NAME}'..."
+    sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1 \
+        || sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';"
+    sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 \
+        || sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"
+    echo
+    echo "============================================"
+    echo "  PostgreSQL credentials (save these!):"
+    echo "    Database : ${DB_NAME}"
+    echo "    Username : ${DB_USER}"
+    echo "    Password : ${DB_PASSWORD}"
+    echo "============================================"
+    echo
+fi
+
+if ! command -v redis-cli >/dev/null 2>&1; then
+    echo "Installing Redis..."
+    ensure_packages redis-server
+    systemctl enable --now redis-server
 fi
 
 if ! command -v nginx >/dev/null 2>&1; then
@@ -327,14 +381,16 @@ server {
 
     client_max_body_size 20m;
 
-    location /ws/ {
-        proxy_pass http://127.0.0.1:${REALTIME_PORT}/;
+    location /ws {
+        proxy_pass http://127.0.0.1:${REALTIME_PORT};
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host \$host;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
     }
 
     location / {
@@ -362,21 +418,24 @@ fi
 
 if [[ "${ENABLE_SUPERVISOR}" == "yes" ]]; then
     SUPERVISOR_CONF_PATH="/etc/supervisor/conf.d/${PROJECT_SLUG}.conf"
-    api_command="./bin/api-server"
-    ws_command="./bin/websocket-server"
-    worker_command="./bin/worker"
     if [[ -x "${PROJECT_DIR}/target/release/api-server" ]]; then
-        api_command="./target/release/api-server"
+        api_command="${PROJECT_DIR}/target/release/api-server"
+    else
+        api_command="${PROJECT_DIR}/bin/api-server"
     fi
     if [[ -x "${PROJECT_DIR}/target/release/websocket-server" ]]; then
-        ws_command="./target/release/websocket-server"
+        ws_command="${PROJECT_DIR}/target/release/websocket-server"
+    else
+        ws_command="${PROJECT_DIR}/bin/websocket-server"
     fi
     if [[ -x "${PROJECT_DIR}/target/release/worker" ]]; then
-        worker_command="./target/release/worker"
+        worker_command="${PROJECT_DIR}/target/release/worker"
+    else
+        worker_command="${PROJECT_DIR}/bin/worker"
     fi
 
-    supervisor_content="$(cat <<EOF
-[program:${PROJECT_SLUG}-api]
+    supervisor_content=""
+    supervisor_content+="[program:${PROJECT_SLUG}-api]
 directory=${PROJECT_DIR}
 command=${api_command}
 autostart=true
@@ -388,12 +447,10 @@ stopasgroup=true
 killasgroup=true
 stdout_logfile=/var/log/${PROJECT_SLUG}-api.log
 stderr_logfile=/var/log/${PROJECT_SLUG}-api.err.log
-
-EOF
-)"
+"
 
     if [[ "${ENABLE_WS}" == "yes" ]]; then
-        supervisor_content+=$(cat <<EOF
+        supervisor_content+="
 [program:${PROJECT_SLUG}-ws]
 directory=${PROJECT_DIR}
 command=${ws_command}
@@ -406,13 +463,11 @@ stopasgroup=true
 killasgroup=true
 stdout_logfile=/var/log/${PROJECT_SLUG}-ws.log
 stderr_logfile=/var/log/${PROJECT_SLUG}-ws.err.log
-
-EOF
-)
+"
     fi
 
     if [[ "${ENABLE_WORKER}" == "yes" ]]; then
-        supervisor_content+=$(cat <<EOF
+        supervisor_content+="
 [program:${PROJECT_SLUG}-worker]
 directory=${PROJECT_DIR}
 command=${worker_command}
@@ -425,9 +480,7 @@ stopasgroup=true
 killasgroup=true
 stdout_logfile=/var/log/${PROJECT_SLUG}-worker.log
 stderr_logfile=/var/log/${PROJECT_SLUG}-worker.err.log
-
-EOF
-)
+"
     fi
 
     write_file_if_changed "${SUPERVISOR_CONF_PATH}" "0644" "${supervisor_content}" || true

@@ -72,8 +72,7 @@ export default defineConfig({
     },
   },
   experimental: {
-    renderBuiltUrl(filename, { hostType }) {
-      if (hostType === "html") return filename;
+    renderBuiltUrl(filename) {
       return "/admin/" + filename;
     },
   },

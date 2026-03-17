@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:user": "vite build --config vite.config.user.ts",
     "build:admin": "vite build --config vite.config.admin.ts",
-    "build": "rm -rf ../public && npm run build:admin && npm run build:user",
+    "build": "rm -rf ../public && npm run build:admin && mv ../public/admin/admin.html ../public/admin/index.html && npm run build:user && mv ../public/user.html ../public/index.html",
     "preview:user": "vite preview --config vite.config.user.ts",
     "preview:admin": "vite preview --config vite.config.admin.ts"
   },
@@ -39,6 +39,7 @@
     "react-dom": "^19.0.0",
     "react-i18next": "^15.0.0",
     "react-router-dom": "^7.0.0",
+    "sonner": "^2.0.7",
     "sweetalert2": "^11.0.0",
     "zustand": "^5.0.0"
   },

@@ -1,5 +1,5 @@
 use core_db::common::{
-    auth::hash::{hash_password, verify_password},
+    auth::hash::verify_password,
     sql::{generate_snowflake_i64, DbConn, Op},
 };
 use core_i18n::t;
@@ -57,7 +57,6 @@ pub async fn register(
 ) -> Result<(UserRecord, IssuedTokenPair), AppError> {
     let id = generate_snowflake_i64();
     let uuid = generate_unique_uuid(state).await?;
-    let password_hash = hash_password(&req.password).map_err(AppError::from)?;
 
     let introducer_user_id = if let Some(ref referral_code) = req.referral_code {
         let introducer = UserModel::query(DbConn::pool(&state.db))
@@ -78,7 +77,7 @@ pub async fn register(
         .map_err(AppError::from)?
         .set(UserCol::USERNAME, req.username.to_string())
         .map_err(AppError::from)?
-        .set(UserCol::PASSWORD, password_hash)
+        .set(UserCol::PASSWORD, req.password.to_string())
         .map_err(AppError::from)?;
 
     if let Some(name) = &req.name {
@@ -271,11 +270,10 @@ pub async fn password_update(
         return Err(AppError::Unauthorized(t("Current password is incorrect")));
     }
 
-    let password_hash = hash_password(&req.password).map_err(AppError::from)?;
     let affected = UserModel::query(DbConn::pool(&state.db))
         .where_col(UserCol::ID, Op::Eq, user_id)
         .patch()
-        .assign(UserCol::PASSWORD, password_hash)
+        .assign(UserCol::PASSWORD, req.password.to_string())
         .map_err(AppError::from)?
         .save()
         .await
