@@ -131,6 +131,16 @@ bool_value() {
     fi
 }
 
+env_bool_to_yes_no() {
+    local val="$1"
+    local fallback="${2:-yes}"
+    case "${val}" in
+        true)  printf "yes" ;;
+        false) printf "no" ;;
+        *)     printf "%s" "${fallback}" ;;
+    esac
+}
+
 if [[ ! -f /etc/os-release ]]; then
     echo "Cannot detect OS. /etc/os-release is missing."
     exit 1
@@ -178,8 +188,12 @@ fi
 
 existing_app_name="$(read_env_value "${ENV_FILE}" "APP_NAME")"
 APP_NAME="$(prompt "APP_NAME" "${existing_app_name:-$(basename "${PROJECT_DIR}")}")"
-PROJECT_SLUG="$(prompt "Project slug (used for nginx/supervisor file names)" "$(slugify "${APP_NAME}")")"
-DOMAIN="$(prompt "Domain (example: api.example.com)" "example.com")"
+
+existing_slug="$(read_env_value "${ENV_FILE}" "SUPERVISOR_PROJECT_SLUG")"
+PROJECT_SLUG="$(prompt "Project slug (used for nginx/supervisor file names)" "${existing_slug:-$(slugify "${APP_NAME}")}")"
+
+existing_domain="$(read_env_value "${ENV_FILE}" "DOMAIN")"
+DOMAIN="$(prompt "Domain (example: api.example.com)" "${existing_domain:-example.com}")"
 
 PROJECT_USER="$(stat -c '%U' "${PROJECT_DIR}")"
 if [[ -z "${PROJECT_USER}" ]] || [[ "${PROJECT_USER}" == "root" ]]; then
@@ -206,15 +220,22 @@ redis_default="$(read_env_value "${ENV_FILE}" "REDIS_URL")"
 DATABASE_URL="$(prompt "DATABASE_URL" "${db_default:-postgres://postgres:postgres@127.0.0.1:5432/${PROJECT_SLUG}}")"
 REDIS_URL="$(prompt "REDIS_URL" "${redis_default:-redis://127.0.0.1:6379/0}")"
 
-ENABLE_HTTPS="$(prompt_yes_no "Enable HTTPS with Let's Encrypt" "yes")"
+existing_https="$(env_bool_to_yes_no "$(read_env_value "${ENV_FILE}" "ENABLE_HTTPS")" "yes")"
+ENABLE_HTTPS="$(prompt_yes_no "Enable HTTPS with Let's Encrypt" "${existing_https}")"
 LETSENCRYPT_EMAIL=""
 if [[ "${ENABLE_HTTPS}" == "yes" ]]; then
-    LETSENCRYPT_EMAIL="$(prompt "Let's Encrypt email" "admin@${DOMAIN}")"
+    existing_le_email="$(read_env_value "${ENV_FILE}" "LETSENCRYPT_EMAIL")"
+    LETSENCRYPT_EMAIL="$(prompt "Let's Encrypt email" "${existing_le_email:-admin@${DOMAIN}}")"
 fi
 
-ENABLE_SUPERVISOR="$(prompt_yes_no "Enable Supervisor process management" "yes")"
-ENABLE_WS="$(prompt_yes_no "Manage websocket-server process" "yes")"
-ENABLE_WORKER="$(prompt_yes_no "Manage worker process" "yes")"
+existing_supervisor="$(env_bool_to_yes_no "$(read_env_value "${ENV_FILE}" "ENABLE_SUPERVISOR")" "yes")"
+ENABLE_SUPERVISOR="$(prompt_yes_no "Enable Supervisor process management" "${existing_supervisor}")"
+
+existing_ws="$(env_bool_to_yes_no "$(read_env_value "${ENV_FILE}" "REALTIME_ENABLED")" "yes")"
+ENABLE_WS="$(prompt_yes_no "Manage websocket-server process" "${existing_ws}")"
+
+existing_worker="$(env_bool_to_yes_no "$(read_env_value "${ENV_FILE}" "RUN_WORKER")" "yes")"
+ENABLE_WORKER="$(prompt_yes_no "Manage worker process" "${existing_worker}")"
 
 BUILD_RELEASE="$(prompt_yes_no "Build release binaries now" "yes")"
 RUN_MIGRATIONS="$(prompt_yes_no "Run ./console migrate run now" "yes")"
@@ -252,15 +273,13 @@ if [[ "${ENABLE_HTTPS}" == "yes" ]]; then
     ensure_packages certbot python3-certbot-nginx cron
 fi
 
+if ! run_as_user "${PROJECT_USER}" "command -v cargo" >/dev/null 2>&1; then
+    echo "Installing Rust toolchain for ${PROJECT_USER}..."
+    ensure_packages curl ca-certificates build-essential pkg-config libssl-dev
+    run_as_user "${PROJECT_USER}" "curl https://sh.rustup.rs -sSf | sh -s -- -y"
+fi
+
 if [[ "${BUILD_RELEASE}" == "yes" ]]; then
-    if ! command -v cargo >/dev/null 2>&1; then
-        if [[ "$(prompt_yes_no "cargo is missing. Install Rust toolchain for ${PROJECT_USER}?" "yes")" != "yes" ]]; then
-            echo "cargo is required to build binaries."
-            exit 1
-        fi
-        ensure_packages curl ca-certificates build-essential pkg-config libssl-dev
-        run_as_user "${PROJECT_USER}" "curl https://sh.rustup.rs -sSf | sh -s -- -y"
-    fi
     run_as_user "${PROJECT_USER}" "source \"\$HOME/.cargo/env\" >/dev/null 2>&1 || true; cd \"\$PROJECT_DIR\" && cargo build --release --workspace"
 fi
 
@@ -269,6 +288,7 @@ upsert_env "${ENV_FILE}" "APP_ENV" "${APP_ENV}"
 upsert_env "${ENV_FILE}" "APP_DEBUG" "$(bool_value "${APP_DEBUG}")"
 upsert_env "${ENV_FILE}" "PROJECT_USER" "${PROJECT_USER}"
 upsert_env "${ENV_FILE}" "SUPERVISOR_PROJECT_SLUG" "${PROJECT_SLUG}"
+upsert_env "${ENV_FILE}" "DOMAIN" "${DOMAIN}"
 upsert_env "${ENV_FILE}" "SERVER_HOST" "127.0.0.1"
 upsert_env "${ENV_FILE}" "SERVER_PORT" "${SERVER_PORT}"
 upsert_env "${ENV_FILE}" "REALTIME_HOST" "127.0.0.1"
@@ -277,6 +297,11 @@ upsert_env "${ENV_FILE}" "REALTIME_ENABLED" "$(bool_value "${ENABLE_WS}")"
 upsert_env "${ENV_FILE}" "DATABASE_URL" "${DATABASE_URL}"
 upsert_env "${ENV_FILE}" "REDIS_URL" "${REDIS_URL}"
 upsert_env "${ENV_FILE}" "RUN_WORKER" "$(bool_value "${ENABLE_WORKER}")"
+upsert_env "${ENV_FILE}" "ENABLE_HTTPS" "$(bool_value "${ENABLE_HTTPS}")"
+upsert_env "${ENV_FILE}" "ENABLE_SUPERVISOR" "$(bool_value "${ENABLE_SUPERVISOR}")"
+if [[ -n "${LETSENCRYPT_EMAIL}" ]]; then
+    upsert_env "${ENV_FILE}" "LETSENCRYPT_EMAIL" "${LETSENCRYPT_EMAIL}"
+fi
 
 if [[ "${RUN_MIGRATIONS}" == "yes" ]]; then
     run_as_user "${PROJECT_USER}" "cd \"\$PROJECT_DIR\" && ./console migrate run"

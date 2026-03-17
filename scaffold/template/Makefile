@@ -30,8 +30,8 @@ help:
 	@echo "  make route-list"
 	@echo "  make migrate-pump"
 	@echo "  make migrate-run"
-	@echo "  make deploy              # Git pull + build + migrate + restart"
 	@echo "  make server-install"
+	@echo "  make server-update"
 	@echo "  make assets-publish ASSETS_ARGS='--from frontend/dist --clean'"
 	@echo "  make framework-docs-build"
 	@echo "  make check"
@@ -115,13 +115,13 @@ migrate-pump:
 migrate-run:
 	./console migrate run
 
-.PHONY: deploy
-deploy:
-	./scripts/deploy.sh
-
 .PHONY: server-install
 server-install:
 	sudo ./scripts/install-ubuntu.sh
+
+.PHONY: server-update
+server-update:
+	./scripts/update.sh
 
 .PHONY: assets-publish
 assets-publish:
@@ -150,3 +150,7 @@ gen-types:
 gen:
 	cargo build -p generated
 	$(MAKE) gen-types
+
+.PHONY: release
+release:
+	cargo build --release --workspace
