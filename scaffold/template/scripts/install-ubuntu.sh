@@ -42,18 +42,6 @@ slugify() {
     printf "%s" "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\{2,\}/-/g; s/^-//; s/-$//'
 }
 
-normalize_username() {
-    local value
-    value="$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g; s/^-*//; s/-*$//')"
-    if [[ -z "${value}" ]]; then
-        value="appuser"
-    fi
-    if [[ "${value}" =~ ^[0-9] ]]; then
-        value="u${value}"
-    fi
-    printf "%s" "${value}"
-}
-
 read_env_value() {
     local file="$1"
     local key="$2"
@@ -143,16 +131,6 @@ bool_value() {
     fi
 }
 
-append_ssh_key_if_missing() {
-    local file="$1"
-    local key="$2"
-    [[ -z "${key}" ]] && return
-    touch "${file}"
-    if ! grep -Fxq "${key}" "${file}"; then
-        printf "%s\n" "${key}" >> "${file}"
-    fi
-}
-
 if [[ ! -f /etc/os-release ]]; then
     echo "Cannot detect OS. /etc/os-release is missing."
     exit 1
@@ -203,27 +181,12 @@ APP_NAME="$(prompt "APP_NAME" "${existing_app_name:-$(basename "${PROJECT_DIR}")
 PROJECT_SLUG="$(prompt "Project slug (used for nginx/supervisor file names)" "$(slugify "${APP_NAME}")")"
 DOMAIN="$(prompt "Domain (example: api.example.com)" "example.com")"
 
-existing_project_user="$(read_env_value "${ENV_FILE}" "PROJECT_USER")"
-default_project_user="$(normalize_username "${existing_project_user:-$PROJECT_SLUG}")"
-PROJECT_USER="$(normalize_username "$(prompt "Isolated Linux user for this project" "${default_project_user}")")"
-
-SSH_AUTH_MODE="$(prompt "SSH auth for isolated user (copy-root-key/manual-key/generate-password)" "copy-root-key")"
-SSH_AUTH_MODE="$(printf "%s" "${SSH_AUTH_MODE}" | tr '[:upper:]' '[:lower:]')"
-case "${SSH_AUTH_MODE}" in
-    copy-root-key | manual-key | generate-password) ;;
-    *)
-        echo "Invalid SSH auth mode: ${SSH_AUTH_MODE}"
-        exit 1
-        ;;
-esac
-MANUAL_SSH_KEY=""
-if [[ "${SSH_AUTH_MODE}" == "manual-key" ]]; then
-    MANUAL_SSH_KEY="$(prompt "Paste public SSH key for ${PROJECT_USER}")"
-    if [[ -z "${MANUAL_SSH_KEY}" ]]; then
-        echo "Public SSH key is required for manual-key mode."
-        exit 1
-    fi
+PROJECT_USER="$(stat -c '%U' "${PROJECT_DIR}")"
+if [[ -z "${PROJECT_USER}" ]] || [[ "${PROJECT_USER}" == "root" ]]; then
+    echo "Project directory is owned by root. Please chown it to your deploy user first."
+    exit 1
 fi
+echo "Detected project owner: ${PROJECT_USER}"
 
 existing_env="$(read_env_value "${ENV_FILE}" "APP_ENV")"
 APP_ENV="$(prompt "APP_ENV" "${existing_env:-production}")"
@@ -260,7 +223,6 @@ echo
 echo "Summary:"
 echo "  Project dir      : ${PROJECT_DIR}"
 echo "  Project user     : ${PROJECT_USER}"
-echo "  SSH auth mode    : ${SSH_AUTH_MODE}"
 echo "  Domain           : ${DOMAIN}"
 echo "  APP_ENV          : ${APP_ENV}"
 echo "  Supervisor slug  : ${PROJECT_SLUG}"
@@ -273,50 +235,6 @@ if [[ "$(prompt_yes_no "Proceed with installation?" "yes")" != "yes" ]]; then
     echo "Cancelled."
     exit 0
 fi
-
-USER_CREATED="no"
-GENERATED_PASSWORD=""
-if ! id -u "${PROJECT_USER}" >/dev/null 2>&1; then
-    useradd -m -s /bin/bash "${PROJECT_USER}"
-    USER_CREATED="yes"
-    echo "Created isolated user: ${PROJECT_USER}"
-fi
-
-project_home="$(getent passwd "${PROJECT_USER}" | cut -d: -f6)"
-if [[ -z "${project_home}" ]]; then
-    echo "Failed to resolve home directory for ${PROJECT_USER}."
-    exit 1
-fi
-
-mkdir -p "${project_home}/.ssh"
-touch "${project_home}/.ssh/authorized_keys"
-chmod 700 "${project_home}/.ssh"
-chmod 600 "${project_home}/.ssh/authorized_keys"
-
-if [[ "${SSH_AUTH_MODE}" == "copy-root-key" ]]; then
-    if [[ -f /root/.ssh/authorized_keys ]]; then
-        while IFS= read -r line; do
-            append_ssh_key_if_missing "${project_home}/.ssh/authorized_keys" "${line}"
-        done </root/.ssh/authorized_keys
-    else
-        echo "Warning: /root/.ssh/authorized_keys not found. No key copied."
-    fi
-elif [[ "${SSH_AUTH_MODE}" == "manual-key" ]]; then
-    append_ssh_key_if_missing "${project_home}/.ssh/authorized_keys" "${MANUAL_SSH_KEY}"
-fi
-
-if [[ "${SSH_AUTH_MODE}" == "generate-password" ]]; then
-    if [[ "${USER_CREATED}" == "yes" || "$(prompt_yes_no "User exists. Rotate password for ${PROJECT_USER}?" "no")" == "yes" ]]; then
-        ensure_packages openssl
-        GENERATED_PASSWORD="$(openssl rand -base64 18 | tr -d '=+/' | cut -c1-20)"
-        echo "${PROJECT_USER}:${GENERATED_PASSWORD}" | chpasswd
-    fi
-else
-    passwd -l "${PROJECT_USER}" >/dev/null 2>&1 || true
-fi
-
-chown -R "${PROJECT_USER}:${PROJECT_USER}" "${project_home}/.ssh"
-chown -R "${PROJECT_USER}:${PROJECT_USER}" "${PROJECT_DIR}"
 
 if ! command -v nginx >/dev/null 2>&1; then
     if [[ "$(prompt_yes_no "nginx is not installed. Install nginx now?" "yes")" != "yes" ]]; then
@@ -497,9 +415,5 @@ echo "Nginx site : ${NGINX_CONF_PATH}"
 echo "Env file   : ${ENV_FILE}"
 if [[ "${ENABLE_SUPERVISOR}" == "yes" ]]; then
     echo "Supervisor : /etc/supervisor/conf.d/${PROJECT_SLUG}.conf"
-fi
-if [[ -n "${GENERATED_PASSWORD}" ]]; then
-    echo "SSH login  : ${PROJECT_USER}"
-    echo "Password   : ${GENERATED_PASSWORD}"
 fi
 echo "Try: https://${DOMAIN} (or http://${DOMAIN} when HTTPS is disabled)"
