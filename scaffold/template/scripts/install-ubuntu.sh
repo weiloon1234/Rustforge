@@ -279,6 +279,15 @@ if ! run_as_user "${PROJECT_USER}" "command -v cargo" >/dev/null 2>&1; then
     run_as_user "${PROJECT_USER}" "curl https://sh.rustup.rs -sSf | sh -s -- -y"
 fi
 
+if ! command -v node >/dev/null 2>&1; then
+    echo "Node.js is not installed. It is required for frontend builds (npm)."
+    if [[ "$(prompt_yes_no "Install Node.js 22.x via NodeSource?" "yes")" == "yes" ]]; then
+        ensure_packages curl ca-certificates gnupg
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+        apt-get install -y nodejs
+    fi
+fi
+
 if [[ "${BUILD_RELEASE}" == "yes" ]]; then
     run_as_user "${PROJECT_USER}" "source \"\$HOME/.cargo/env\" >/dev/null 2>&1 || true; cd \"\$PROJECT_DIR\" && cargo build --release --workspace"
 fi
