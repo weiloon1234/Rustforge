@@ -34,7 +34,7 @@ function LoginLocaleSelector() {
   };
 
   return (
-    <div className="w-full rounded-2xl border border-border/70 bg-background/55 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:max-w-[220px]">
+    <div className="w-full rounded-2xl border border-border/70 bg-background/55 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:max-w-55">
       <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">
         {t("Language")}
       </p>
@@ -104,7 +104,7 @@ export default function LoginPage() {
       <div className="pointer-events-none absolute -left-12 bottom-6 h-64 w-64 rounded-full bg-sky-500/10 blur-3xl" />
 
       <div className="relative mx-auto flex min-h-[calc(100vh-3rem)] max-w-5xl items-center justify-center">
-        <div className="w-full max-w-[540px] overflow-hidden rounded-[28px] border border-border/70 bg-surface/85 shadow-[0_30px_90px_rgba(2,8,23,0.55)] backdrop-blur">
+        <div className="w-full max-w-135 overflow-hidden rounded-[28px] border border-border/70 bg-surface/85 shadow-[0_30px_90px_rgba(2,8,23,0.55)] backdrop-blur">
           <div className="border-b border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0))] p-6 sm:p-8">
             <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
               <div className="max-w-xs">
