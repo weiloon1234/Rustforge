@@ -44,15 +44,16 @@ fn main() {
         .expect("Failed to gen localized");
 
     let root_lib = out_dir.join("lib.rs");
-    let mut f = std::fs::File::create(&root_lib).expect("Failed to create root lib.rs");
-    use std::io::Write;
-    writeln!(f, "#![allow(dead_code)]").unwrap();
-    writeln!(f, "// AUTO-GENERATED FILE — DO NOT EDIT").unwrap();
-    writeln!(f, "pub mod models;").unwrap();
-    writeln!(f, "pub mod guards;").unwrap();
-    writeln!(f, "pub mod permissions;").unwrap();
-    writeln!(f, "pub mod localized;").unwrap();
-    writeln!(f, "pub use localized::*;").unwrap();
-    writeln!(f, "pub mod ts_exports;").unwrap();
-    writeln!(f, "pub mod generated {{ pub use crate::*; }}").unwrap();
+    let lib_content = "\
+#![allow(dead_code)]
+// AUTO-GENERATED FILE — DO NOT EDIT
+pub mod models;
+pub mod guards;
+pub mod permissions;
+pub mod localized;
+pub use localized::*;
+pub mod ts_exports;
+pub mod generated { pub use crate::*; }
+";
+    db_gen::write_if_changed(&root_lib, lib_content).expect("Failed to write root lib.rs");
 }

@@ -1924,7 +1924,7 @@ pub fn generate_models_with_options(
         let file_stem = to_snake(name);
         let model_title = to_title_case(&file_stem);
         let code = render_model(name, cfg, schema, cfgs, options);
-        fs::write(out_dir.join(format!("{file_stem}.rs")), code)?;
+        crate::write_if_changed(&out_dir.join(format!("{file_stem}.rs")), code)?;
 
         let pk = cfg.pk.clone().unwrap_or_else(|| "id".to_string());
         let fields = parse_fields(cfg, &pk);
@@ -1957,14 +1957,14 @@ pub fn generate_models_with_options(
         )?;
     }
 
-    fs::write(out_dir.join("common.rs"), generate_common())?;
+    crate::write_if_changed(&out_dir.join("common.rs"), generate_common())?;
     let mut mod_context = TemplateContext::new();
     mod_context.insert(
         "model_module_exports",
         model_module_exports.trim_end().to_string(),
     )?;
-    fs::write(
-        out_dir.join("mod.rs"),
+    crate::write_if_changed(
+        &out_dir.join("mod.rs"),
         render_template("models/mod.rs.tpl", &mod_context)?,
     )?;
     Ok(())

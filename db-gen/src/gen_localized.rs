@@ -3,7 +3,6 @@ use crate::schema::{parse_attachments, to_owner_type, to_snake, to_title_case, S
 use crate::template::{render_template, TemplateContext};
 use std::collections::BTreeSet;
 use std::error::Error;
-use std::fs;
 
 pub fn generate_localized(
     locales: &Locales,
@@ -62,7 +61,7 @@ pub fn generate_localized(
     )?;
 
     let rendered = render_template("localized/file.rs.tpl", &context)?;
-    fs::write(out_dir.join("localized.rs"), rendered)?;
+    crate::write_if_changed(&out_dir.join("localized.rs"), rendered)?;
     Ok(())
 }
 

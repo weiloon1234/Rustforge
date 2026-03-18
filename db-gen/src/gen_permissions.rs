@@ -38,7 +38,7 @@ pub fn generate_permissions(
     context.insert("meta_body", render_meta_body(&variants)?)?;
 
     let rendered = render_template("permissions/file.rs.tpl", &context)?;
-    fs::write(out_file, rendered)?;
+    crate::write_if_changed(out_file, rendered)?;
     Ok(())
 }
 

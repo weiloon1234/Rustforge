@@ -17,7 +17,7 @@ pub fn generate_datatable_skeletons(schema: &Schema, out_dir: &Path) -> Result<(
 
     let mod_path = out_dir.join("mod.rs");
     if !mod_path.exists() {
-        fs::write(&mod_path, "include!(\"mod.generated.rs\");\n")?;
+        crate::write_if_changed(&mod_path, "include!(\"mod.generated.rs\");\n")?;
     }
 
     let module_exports = render_module_exports(&models)?;
@@ -26,7 +26,7 @@ pub fn generate_datatable_skeletons(schema: &Schema, out_dir: &Path) -> Result<(
     mod_context.insert("module_exports", module_exports)?;
     mod_context.insert("register_all_calls", register_all_calls)?;
     let generated = render_template("datatables/mod.generated.rs.tpl", &mod_context)?;
-    fs::write(out_dir.join("mod.generated.rs"), generated)?;
+    crate::write_if_changed(&out_dir.join("mod.generated.rs"), generated)?;
 
     for model in &models {
         let file_path = out_dir.join(format!("{}.rs", model.snake));
@@ -38,7 +38,7 @@ pub fn generate_datatable_skeletons(schema: &Schema, out_dir: &Path) -> Result<(
         model_context.insert("model_title", model.title.clone())?;
         model_context.insert("model_snake", model.snake.clone())?;
         let rendered = render_template("datatables/model.rs.tpl", &model_context)?;
-        fs::write(file_path, rendered)?;
+        crate::write_if_changed(&file_path, rendered)?;
     }
 
     Ok(())

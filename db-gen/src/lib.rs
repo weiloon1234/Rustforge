@@ -19,6 +19,20 @@ pub use gen_localized::generate_localized;
 pub use gen_models::{generate_models, generate_models_with_options, GenerateModelsOptions};
 pub use gen_permissions::generate_permissions;
 pub use permissions::load_permissions;
+/// Write file only when content differs — prevents spurious `git status` noise
+/// from code generation that produces identical output.
+pub fn write_if_changed(path: &std::path::Path, content: impl AsRef<[u8]>) -> std::io::Result<()> {
+    let content = content.as_ref();
+    if path.exists() {
+        if let Ok(existing) = std::fs::read(path) {
+            if existing == content {
+                return Ok(());
+            }
+        }
+    }
+    std::fs::write(path, content)
+}
+
 pub use schema::{
     framework_model_source_paths_from_core_db, load_framework, load_framework_from_paths,
     load_framework_from_sources, load_with_framework, load_with_framework_from_paths,

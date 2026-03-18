@@ -28,7 +28,7 @@ pub fn generate_auth(
     for guard in &guard_specs {
         let context = build_guard_context(guard)?;
         let rendered = render_template("auth/guard.rs.tpl", &context)?;
-        fs::write(out_dir.join(format!("{}.rs", guard.file_stem)), rendered)?;
+        crate::write_if_changed(&out_dir.join(format!("{}.rs", guard.file_stem)), rendered)?;
     }
 
     let mut mod_context = TemplateContext::new();
@@ -38,7 +38,7 @@ pub fn generate_auth(
         render_authenticate_any_guard_section(&guard_specs)?,
     )?;
     let rendered = render_template("auth/mod.rs.tpl", &mod_context)?;
-    fs::write(out_dir.join("mod.rs"), rendered)?;
+    crate::write_if_changed(&out_dir.join("mod.rs"), rendered)?;
     Ok(())
 }
 

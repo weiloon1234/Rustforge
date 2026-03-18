@@ -476,7 +476,7 @@ pub fn generate_enums_with_options(
     let rendered = render_template("enums/file.rs.tpl", &context)?;
 
     let enums_file = out_dir.join("enums.rs");
-    std::fs::write(&enums_file, rendered)?;
+    crate::write_if_changed(&enums_file, rendered)?;
     println!("Generated {} enums to {:?}", enum_specs.len(), enums_file);
     Ok(())
 }

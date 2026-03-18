@@ -15,6 +15,9 @@ node_modules/
 **/node_modules/
 frontend/dist/
 
+# Generated code — rebuilt by cargo build via generated/build.rs
+generated/src/
+
 # Keep the directory, ignore generated static files by default.
 public/*
 !public/.gitkeep
