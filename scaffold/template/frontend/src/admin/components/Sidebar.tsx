@@ -47,12 +47,19 @@ function NavLink({
   active,
   collapsed,
 }: {
-  item: { label: string; path: string; icon?: NavItem["icon"]; notificationKey?: string };
+  item: {
+    label: string;
+    path: string;
+    icon?: NavItem["icon"];
+    notificationKey?: string;
+  };
   active: boolean;
   collapsed: boolean;
 }) {
   const { t } = useTranslation();
-  const count = useNotificationStore((s) => s.getCount(item.notificationKey ?? ""));
+  const count = useNotificationStore((s) =>
+    s.getCount(item.notificationKey ?? ""),
+  );
   const Icon = item.icon;
 
   return (
@@ -89,20 +96,21 @@ function ParentNav({
   const { t } = useTranslation();
   const location = useLocation();
   const [open, setOpen] = useState(false);
-  const getCount = useNotificationStore((s) => s.getCount);
-
-  const visibleChildren = (item.children ?? []).filter((c) =>
-    hasAccess(account, c.permissions) &&
-    hasAdminTypeAccess(adminType, c.admin_types),
+  const visibleChildren = (item.children ?? []).filter(
+    (c) =>
+      hasAccess(account, c.permissions) &&
+      hasAdminTypeAccess(adminType, c.admin_types),
   );
 
-  const totalCount = visibleChildren.reduce(
-    (sum, c) => sum + getCount(c.notificationKey ?? ""),
-    0,
+  const totalCount = useNotificationStore((s) =>
+    visibleChildren.reduce(
+      (sum, c) => sum + s.getCount(c.notificationKey ?? ""),
+      0,
+    ),
   );
 
-  const isChildActive = visibleChildren.some(
-    (c) => isPathActive(c.path, location.pathname),
+  const isChildActive = visibleChildren.some((c) =>
+    isPathActive(c.path, location.pathname),
   );
 
   useEffect(() => {
@@ -182,7 +190,9 @@ export default function Sidebar({ collapsed }: { collapsed: boolean }) {
   });
 
   return (
-    <aside className={`rf-sidebar ${collapsed ? "rf-sidebar-collapsed" : "rf-sidebar-expanded"}`}>
+    <aside
+      className={`rf-sidebar ${collapsed ? "rf-sidebar-collapsed" : "rf-sidebar-expanded"}`}
+    >
       <nav className="flex flex-col gap-1 p-3">
         {visibleItems.map((item) => {
           if (item.children) {

@@ -68,10 +68,16 @@ pub async fn build_router(ctx: BootContext) -> anyhow::Result<Router> {
             .route("/admin/{*path}", axum_get(admin_dev));
     }
 
-    // Static audio assets: serve from frontend/public/audio/ in dev mode
-    let frontend_audio = std::path::PathBuf::from("frontend/public/audio");
-    if frontend_audio.is_dir() {
-        router = router.nest_service("/audio", ServeDir::new(&frontend_audio));
+    // Dev-mode static assets: auto-register each subdirectory of frontend/public/
+    // so any folder added there (audio, banners, etc.) is served without manual route entries.
+    // In production this is handled by core_web::static_assets::static_assets_router above.
+    if let Ok(entries) = std::fs::read_dir("frontend/public") {
+        for entry in entries.flatten() {
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                let mount = format!("/{}", entry.file_name().to_string_lossy());
+                router = router.nest_service(&mount, ServeDir::new(entry.path()));
+            }
+        }
     }
 
     // User SPA: everything else → public/index.html (existing logic)
