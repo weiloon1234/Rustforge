@@ -37,7 +37,7 @@ type InputFieldType =
   | "time";
 type RichEditorFieldType = "tapbit" | "tiptap";
 type AutoFormBodyType = "auto" | "json" | "multipart";
-type AutoFormDefaultValue = string | number | boolean | null | undefined | File | File[] | FilePreviewItem | FilePreviewItem[];
+type AutoFormDefaultValue = string | number | boolean | null | undefined | File | File[] | FilePreviewItem | FilePreviewItem[] | Record<string, unknown>;
 
 // Shared props across all field types
 type FieldBase = { span?: 1 | 2; required?: boolean; notes?: string; disabled?: boolean; localized?: boolean };
@@ -65,6 +65,7 @@ type ContactField = FieldBase & {
   type: "contact";
   label?: string;
   virtual?: boolean;
+  localized?: boolean;
   countryName?: string;
   phoneName?: string;
 };
@@ -77,6 +78,11 @@ type LocalizedGroupField = {
   type: "localized";
   children: LocalizedChildField[];
   span?: 1 | 2;
+  name?: string;
+  label?: string;
+  required?: boolean;
+  disabled?: boolean;
+  notes?: string;
 };
 
 // FieldDef<T>: intersection distributes over both unions → full type-safe field definitions
@@ -488,7 +494,8 @@ export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, con
 
       // Pattern 1: localized: true on individual field
       if (isLocalizable(field)) {
-        if (field.type === "file" || field.type === "files") {
+        const ft = field.type as string;
+        if (ft === "file" || ft === "files") {
           const localeValues: Record<string, unknown> = {};
           for (const locale of availableLocales) {
             const fileKey = `${field.name}.${locale}`;

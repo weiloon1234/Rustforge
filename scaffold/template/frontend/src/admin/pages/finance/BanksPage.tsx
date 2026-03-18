@@ -170,7 +170,7 @@ export default function BanksPage() {
               key: "actions" as keyof BankDatatableRow,
               label: t("Actions"),
               sortable: false,
-              render: (row: BankDatatableRow, ctx: DataTableCellContext<BankDatatableRow>) => (
+              render: (row: BankDatatableRow, _ctx: DataTableCellContext<BankDatatableRow>) => (
                 <div className="flex items-center gap-1">
                   <Button type="button" onClick={() => openFormModal(row)} variant="plain" size="sm" iconOnly title={t("Edit")}>
                     <Pencil size={16} />

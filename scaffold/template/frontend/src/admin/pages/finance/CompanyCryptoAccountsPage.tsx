@@ -175,7 +175,7 @@ export default function CompanyCryptoAccountsPage() {
               key: "actions" as keyof CompanyCryptoAccountDatatableRow,
               label: t("Actions"),
               sortable: false,
-              render: (row: CompanyCryptoAccountDatatableRow, ctx: DataTableCellContext<CompanyCryptoAccountDatatableRow>) => (
+              render: (row: CompanyCryptoAccountDatatableRow, _ctx: DataTableCellContext<CompanyCryptoAccountDatatableRow>) => (
                 <div className="flex items-center gap-1">
                   <Button type="button" onClick={() => openFormModal(row)} variant="plain" size="sm" iconOnly title={t("Edit")}>
                     <Pencil size={16} />

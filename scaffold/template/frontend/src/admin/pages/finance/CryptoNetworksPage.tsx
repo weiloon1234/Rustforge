@@ -162,7 +162,7 @@ export default function CryptoNetworksPage() {
               key: "actions" as keyof CryptoNetworkDatatableRow,
               label: t("Actions"),
               sortable: false,
-              render: (row: CryptoNetworkDatatableRow, ctx: DataTableCellContext<CryptoNetworkDatatableRow>) => (
+              render: (row: CryptoNetworkDatatableRow, _ctx: DataTableCellContext<CryptoNetworkDatatableRow>) => (
                 <div className="flex items-center gap-1">
                   <Button type="button" onClick={() => openFormModal(row)} variant="plain" size="sm" iconOnly title={t("Edit")}>
                     <Pencil size={16} />
