@@ -51,6 +51,7 @@ impl DataTableScopedContract for AdminCompanyBankAccountDataTableContract {
                     label: "Keyword".to_string(),
                     placeholder: Some("Search account name/number".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -60,6 +61,7 @@ impl DataTableScopedContract for AdminCompanyBankAccountDataTableContract {
                     label: "Bank ID".to_string(),
                     placeholder: Some("Bank ID".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -69,6 +71,7 @@ impl DataTableScopedContract for AdminCompanyBankAccountDataTableContract {
                     label: "Status".to_string(),
                     placeholder: Some("All".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(CompanyBankAccountStatus::datatable_filter_options()),
                 },
             ],

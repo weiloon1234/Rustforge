@@ -67,6 +67,7 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
                     label: "Keyword".to_string(),
                     placeholder: Some("Search name/username/email".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -76,6 +77,7 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
                     label: "Email".to_string(),
                     placeholder: Some("Contains".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
             ],
@@ -86,6 +88,7 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
                 label: "Username".to_string(),
                 placeholder: Some("Contains".to_string()),
                 description: None,
+                secondary_filter_key: None,
                 options: None,
             }],
             vec![DataTableFilterFieldDto {
@@ -95,6 +98,7 @@ impl DataTableScopedContract for AdminAdminDataTableContract {
                 label: "Admin Type".to_string(),
                 placeholder: Some("Choose type".to_string()),
                 description: None,
+                secondary_filter_key: None,
                 options: Some(AdminType::datatable_filter_options()),
             }],
         ]

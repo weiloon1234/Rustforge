@@ -55,6 +55,7 @@ impl DataTableScopedContract for AdminAuditLogDataTableContract {
                     label: "Keyword".to_string(),
                     placeholder: Some("Search old/new data JSON".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -64,6 +65,7 @@ impl DataTableScopedContract for AdminAuditLogDataTableContract {
                     label: "Model".to_string(),
                     placeholder: Some("All models".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(vec![
                         DataTableFilterOptionDto {
                             value: "admin".to_string(),
@@ -100,6 +102,7 @@ impl DataTableScopedContract for AdminAuditLogDataTableContract {
                     label: "Action".to_string(),
                     placeholder: Some("All actions".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(AuditAction::datatable_filter_options()),
                 },
                 DataTableFilterFieldDto {
@@ -109,6 +112,7 @@ impl DataTableScopedContract for AdminAuditLogDataTableContract {
                     label: "Record Key".to_string(),
                     placeholder: Some("Exact match".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
             ],
@@ -120,6 +124,7 @@ impl DataTableScopedContract for AdminAuditLogDataTableContract {
                     label: "From".to_string(),
                     placeholder: None,
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -129,6 +134,7 @@ impl DataTableScopedContract for AdminAuditLogDataTableContract {
                     label: "To".to_string(),
                     placeholder: None,
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
             ],

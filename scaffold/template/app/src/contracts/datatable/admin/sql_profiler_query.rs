@@ -48,6 +48,7 @@ impl DataTableScopedContract for AdminSqlProfilerQueryDataTableContract {
                     label: "Request ID".to_string(),
                     placeholder: Some("UUID".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -57,6 +58,7 @@ impl DataTableScopedContract for AdminSqlProfilerQueryDataTableContract {
                     label: "Table".to_string(),
                     placeholder: Some("Contains".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
             ],
@@ -68,6 +70,7 @@ impl DataTableScopedContract for AdminSqlProfilerQueryDataTableContract {
                     label: "Operation".to_string(),
                     placeholder: Some("All operations".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(operation_filter_options()),
                 },
                 DataTableFilterFieldDto {
@@ -77,6 +80,7 @@ impl DataTableScopedContract for AdminSqlProfilerQueryDataTableContract {
                     label: "Min Duration (µs)".to_string(),
                     placeholder: Some("e.g. 1000".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -86,6 +90,7 @@ impl DataTableScopedContract for AdminSqlProfilerQueryDataTableContract {
                     label: "Max Duration (µs)".to_string(),
                     placeholder: Some("e.g. 50000".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
             ],

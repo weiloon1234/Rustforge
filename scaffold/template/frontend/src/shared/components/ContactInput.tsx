@@ -16,6 +16,7 @@ export interface ContactInputProps {
   onChange: (value: ContactInputValue) => void;
   countries?: CountryRuntime[];
   label?: string;
+  showLabel?: boolean;
   countryName?: string;
   phoneName?: string;
   disabled?: boolean;
@@ -42,6 +43,7 @@ export function ContactInput({
   onChange,
   countries,
   label,
+  showLabel = true,
   countryName: _countryName,
   phoneName: _phoneName,
   disabled = false,
@@ -146,13 +148,9 @@ export function ContactInput({
 
   return (
     <div className={`rf-field ${containerClassName ?? ""}`} ref={containerRef}>
-      {label !== undefined && label !== null ? (
+      {showLabel && (
         <label className={`rf-label ${isRequired ? "rf-label-required" : ""}`}>
-          {label}
-        </label>
-      ) : (
-        <label className={`rf-label ${isRequired ? "rf-label-required" : ""}`}>
-          {t("Phone Number")}
+          {label !== undefined && label !== null ? label : t("Phone Number")}
         </label>
       )}
 

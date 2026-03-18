@@ -16,7 +16,6 @@ import type { ApiResponse } from "@shared/types";
 import {
   Button,
   DataTable,
-  TextInput,
   useAutoForm,
   useModalStore,
   alertConfirm,
@@ -24,6 +23,7 @@ import {
   alertError,
   formatDateTime,
 } from "@shared/components";
+import { formatFullPhoneNumber } from "@shared/countryRuntime";
 import type { DataTablePostCallEvent } from "@shared/components";
 import { useAuthStore } from "@admin/stores/auth";
 import { api } from "@admin/api";
@@ -267,18 +267,19 @@ function EditUserForm({
 
   return (
     <form id={formId} onSubmit={submit}>
-      <div className="rf-field">
-        <TextInput
-          label={t("Introducer")}
-          value={introducerUsername}
-          disabled
-        />
-      </div>
-      <div className="rf-field">
-        <TextInput label={t("Credit 1")} value={user.credit_1 ?? "0"} disabled />
-      </div>
-      <div className="rf-field">
-        <TextInput label={t("Credit 2")} value={user.credit_2 ?? "0"} disabled />
+      <div className="mb-4 grid grid-cols-2 gap-3 rounded-lg border border-border bg-surface/50 px-3 py-3 text-sm">
+        <div>
+          <p className="text-xs text-muted">{t("Introducer")}</p>
+          <p className="mt-0.5 font-medium">{introducerUsername}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted">{t("Credit 1")}</p>
+          <p className="mt-0.5 font-medium tabular-nums">{user.credit_1 ?? "0"}</p>
+        </div>
+        <div className="col-span-2">
+          <p className="text-xs text-muted">{t("Credit 2")}</p>
+          <p className="mt-0.5 font-medium tabular-nums">{user.credit_2 ?? "0"}</p>
+        </div>
       </div>
       {form}
     </form>
@@ -643,6 +644,12 @@ export default function ManageUsersPage() {
           render: (user) => user.email ?? "\u2014",
         },
         {
+          key: "contact_number",
+          label: t("Contact Number"),
+          cellClassName: "tabular-nums text-muted",
+          render: (user) => formatFullPhoneNumber(user.country_iso2, user.contact_number) ?? "\u2014",
+        },
+        {
           key: "name",
           label: t("Name"),
           render: (user) => user.name ?? "\u2014",
@@ -651,12 +658,6 @@ export default function ManageUsersPage() {
           key: "ban",
           label: t("Ban Status"),
           render: (user) => <BanBadge status={user.ban} />,
-        },
-        {
-          key: "country_iso2",
-          label: t("Country ISO2"),
-          cellClassName: "text-muted",
-          render: (user) => user.country_iso2 ?? "\u2014",
         },
         {
           key: "credit_1",

@@ -202,6 +202,7 @@ pub enum DataTableFilterFieldType {
     Date,
     Datetime,
     Boolean,
+    ContactInput,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -220,6 +221,7 @@ pub struct DataTableFilterFieldDto {
     pub label: String,
     pub placeholder: Option<String>,
     pub description: Option<String>,
+    pub secondary_filter_key: Option<String>,
     pub options: Option<Vec<DataTableFilterOptionDto>>,
 }
 
@@ -1212,6 +1214,7 @@ fn inject_default_created_at_range(
             label: "Created At From".to_string(),
             placeholder: Some("Start datetime".to_string()),
             description: None,
+            secondary_filter_key: None,
             options: None,
         });
     }
@@ -1224,6 +1227,7 @@ fn inject_default_created_at_range(
             label: "Created At To".to_string(),
             placeholder: Some("End datetime".to_string()),
             description: None,
+            secondary_filter_key: None,
             options: None,
         });
     }

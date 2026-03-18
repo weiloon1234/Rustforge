@@ -46,6 +46,7 @@ impl DataTableScopedContract for AdminContentPageDataTableContract {
                 label: "Tag".to_string(),
                 placeholder: Some("Contains".to_string()),
                 description: None,
+                secondary_filter_key: None,
                 options: None,
             },
             DataTableFilterFieldDto {
@@ -55,6 +56,7 @@ impl DataTableScopedContract for AdminContentPageDataTableContract {
                 label: "System".to_string(),
                 placeholder: Some("All".to_string()),
                 description: None,
+                secondary_filter_key: None,
                 options: Some(generated::models::ContentPageSystemFlag::datatable_filter_options()),
             },
         ]]

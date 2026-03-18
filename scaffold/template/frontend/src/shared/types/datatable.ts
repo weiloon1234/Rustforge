@@ -32,7 +32,8 @@ export type DataTableFilterFieldType =
   | "date"
   | "datetime"
   | "time"
-  | "boolean";
+  | "boolean"
+  | "contact_input";
 
 export interface DataTableFilterOptionDto {
   label: string;
@@ -46,6 +47,7 @@ export interface DataTableFilterFieldDto {
   label: string;
   placeholder?: string;
   description?: string;
+  secondary_filter_key?: string;
   options?: DataTableFilterOptionDto[];
 }
 

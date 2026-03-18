@@ -24,6 +24,7 @@ import {
 import type { AxiosInstance } from "axios";
 import { useModalStore } from "@shared/useModalStore";
 import { TextInput } from "@shared/components/TextInput";
+import { ContactInput } from "@shared/components/ContactInput";
 import { Select } from "@shared/components/Select";
 import { Button } from "@shared/components/Button";
 import { Checkbox } from "@shared/components/Checkbox";
@@ -265,9 +266,11 @@ function flattenFilterKeys(
     if (Array.isArray(row)) {
       for (const field of row) {
         keys.add(field.filter_key);
+        if (field.secondary_filter_key) keys.add(field.secondary_filter_key);
       }
     } else {
       keys.add(row.filter_key);
+      if (row.secondary_filter_key) keys.add(row.secondary_filter_key);
     }
   }
   return Array.from(keys);
@@ -412,11 +415,15 @@ function FilterField({
   value,
   onChange,
   onEnter,
+  values,
+  onChangeMulti,
 }: {
   field: DataTableFilterFieldDto;
   value: string;
   onChange: (v: string) => void;
   onEnter: () => void;
+  values?: Record<string, string>;
+  onChangeMulti?: (updates: Record<string, string>) => void;
 }) {
   const { t } = useTranslation();
   const translatedPlaceholder = field.placeholder ? t(field.placeholder) : "";
@@ -425,6 +432,26 @@ function FilterField({
   };
 
   switch (field.type) {
+    case "contact_input": {
+      const secondaryKey = field.secondary_filter_key ?? "";
+      return (
+        <ContactInput
+          showLabel={false}
+          containerClassName="mb-0"
+          value={{
+            country_iso2: values?.[secondaryKey] ?? "",
+            phone_number: value,
+          }}
+          onChange={(v) => {
+            if (v.phone_number === "") {
+              onChangeMulti?.({ [field.filter_key]: "", [secondaryKey]: "" });
+            } else {
+              onChangeMulti?.({ [field.filter_key]: v.phone_number, [secondaryKey]: v.country_iso2 });
+            }
+          }}
+        />
+      );
+    }
     case "select":
       return (
         <Select
@@ -1039,6 +1066,8 @@ export function DataTable<T>({
                         value={filterValues[field.filter_key] ?? ""}
                         onChange={(v) => updateFilter(field.filter_key, v)}
                         onEnter={applyFilters}
+                        values={filterValues}
+                        onChangeMulti={(updates) => setFilterValues((prev) => ({ ...prev, ...updates }))}
                       />
                     </div>
                   ))}
@@ -1057,6 +1086,8 @@ export function DataTable<T>({
                   value={filterValues[field.filter_key] ?? ""}
                   onChange={(v) => updateFilter(field.filter_key, v)}
                   onEnter={applyFilters}
+                  values={filterValues}
+                  onChangeMulti={(updates) => setFilterValues((prev) => ({ ...prev, ...updates }))}
                 />
               </div>
             );

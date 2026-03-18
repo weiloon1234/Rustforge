@@ -67,6 +67,7 @@ impl DataTableScopedContract for AdminDepositDataTableContract {
                     label: "Keyword".to_string(),
                     placeholder: Some("Search owner username".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -76,6 +77,7 @@ impl DataTableScopedContract for AdminDepositDataTableContract {
                     label: "Owner Type".to_string(),
                     placeholder: Some("All".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(OwnerType::datatable_filter_options()),
                 },
                 DataTableFilterFieldDto {
@@ -85,6 +87,7 @@ impl DataTableScopedContract for AdminDepositDataTableContract {
                     label: "Credit Type".to_string(),
                     placeholder: Some("All".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(CreditType::datatable_filter_options()),
                 },
             ],
@@ -96,6 +99,7 @@ impl DataTableScopedContract for AdminDepositDataTableContract {
                     label: "Deposit Method".to_string(),
                     placeholder: Some("All".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(DepositMethod::datatable_filter_options()),
                 },
                 DataTableFilterFieldDto {
@@ -105,6 +109,7 @@ impl DataTableScopedContract for AdminDepositDataTableContract {
                     label: "Status".to_string(),
                     placeholder: Some("All".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(DepositStatus::datatable_filter_options()),
                 },
                 DataTableFilterFieldDto {
@@ -114,6 +119,7 @@ impl DataTableScopedContract for AdminDepositDataTableContract {
                     label: "Created At From".to_string(),
                     placeholder: Some("Start datetime".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -123,6 +129,7 @@ impl DataTableScopedContract for AdminDepositDataTableContract {
                     label: "Created At To".to_string(),
                     placeholder: Some("End datetime".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
             ],

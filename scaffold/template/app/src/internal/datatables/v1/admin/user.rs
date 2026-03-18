@@ -51,6 +51,14 @@ impl UserDataTableHooks for UserDataTableAppHooks {
     ) -> anyhow::Result<Option<Query<'db, UserModel>>> {
         match filter_key {
             "q" => Ok(Some(apply_keyword_filter(query, value))),
+            "f-eq-contact_country_iso2" => {
+                let t = value.trim();
+                if t.is_empty() {
+                    Ok(Some(query))
+                } else {
+                    Ok(Some(query.where_col(UserCol::COUNTRY_ISO2, Op::Eq, t.to_uppercase())))
+                }
+            }
             _ => Ok(None),
         }
     }
@@ -123,8 +131,11 @@ fn apply_summary_filters<'db>(
             "f-like-username" => {
                 query = query.where_col(UserCol::USERNAME, Op::Like, format!("%{trimmed}%"));
             }
-            "f-like-country_iso2" => {
-                query = query.where_col(UserCol::COUNTRY_ISO2, Op::Like, format!("%{trimmed}%"));
+            "f-like-contact_number" => {
+                query = query.where_col(UserCol::CONTACT_NUMBER, Op::Like, format!("%{trimmed}%"));
+            }
+            "f-eq-contact_country_iso2" => {
+                query = query.where_col(UserCol::COUNTRY_ISO2, Op::Eq, trimmed.to_uppercase());
             }
             "f-ban" => {
                 if let Some(ban) = parse_user_ban_status(trimmed) {

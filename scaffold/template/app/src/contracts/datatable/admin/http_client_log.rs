@@ -52,6 +52,7 @@ impl DataTableScopedContract for AdminHttpClientLogDataTableContract {
                     label: "URL".to_string(),
                     placeholder: Some("Contains".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -61,6 +62,7 @@ impl DataTableScopedContract for AdminHttpClientLogDataTableContract {
                     label: "Method".to_string(),
                     placeholder: Some("All methods".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(method_filter_options()),
                 },
             ],
@@ -72,6 +74,7 @@ impl DataTableScopedContract for AdminHttpClientLogDataTableContract {
                     label: "Status Code".to_string(),
                     placeholder: Some("e.g. 200".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -81,6 +84,7 @@ impl DataTableScopedContract for AdminHttpClientLogDataTableContract {
                     label: "Min Duration (ms)".to_string(),
                     placeholder: Some("e.g. 50".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -90,6 +94,7 @@ impl DataTableScopedContract for AdminHttpClientLogDataTableContract {
                     label: "Max Duration (ms)".to_string(),
                     placeholder: Some("e.g. 3000".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
             ],

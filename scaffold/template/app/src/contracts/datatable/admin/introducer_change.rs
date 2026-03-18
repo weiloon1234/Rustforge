@@ -52,6 +52,7 @@ impl DataTableScopedContract for AdminIntroducerChangeDataTableContract {
                 label: "Keyword".to_string(),
                 placeholder: Some("Search username".to_string()),
                 description: None,
+                secondary_filter_key: None,
                 options: None,
             }],
             vec![
@@ -62,6 +63,7 @@ impl DataTableScopedContract for AdminIntroducerChangeDataTableContract {
                     label: "Created At From".to_string(),
                     placeholder: Some("Start datetime".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -71,6 +73,7 @@ impl DataTableScopedContract for AdminIntroducerChangeDataTableContract {
                     label: "Created At To".to_string(),
                     placeholder: Some("End datetime".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
             ],

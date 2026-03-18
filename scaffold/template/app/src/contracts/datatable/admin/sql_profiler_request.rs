@@ -46,6 +46,7 @@ impl DataTableScopedContract for AdminSqlProfilerRequestDataTableContract {
                     label: "Request ID".to_string(),
                     placeholder: Some("UUID".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -55,6 +56,7 @@ impl DataTableScopedContract for AdminSqlProfilerRequestDataTableContract {
                     label: "Path".to_string(),
                     placeholder: Some("Contains".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -64,6 +66,7 @@ impl DataTableScopedContract for AdminSqlProfilerRequestDataTableContract {
                     label: "Method".to_string(),
                     placeholder: Some("All methods".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(method_filter_options()),
                 },
             ],
@@ -75,6 +78,7 @@ impl DataTableScopedContract for AdminSqlProfilerRequestDataTableContract {
                     label: "Min Queries".to_string(),
                     placeholder: Some("e.g. 5".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -84,6 +88,7 @@ impl DataTableScopedContract for AdminSqlProfilerRequestDataTableContract {
                     label: "Min Duration (ms)".to_string(),
                     placeholder: Some("e.g. 100".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -93,6 +98,7 @@ impl DataTableScopedContract for AdminSqlProfilerRequestDataTableContract {
                     label: "Max Duration (ms)".to_string(),
                     placeholder: Some("e.g. 5000".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
             ],

@@ -49,6 +49,7 @@ impl DataTableScopedContract for AdminCryptoNetworkDataTableContract {
                     label: "Keyword".to_string(),
                     placeholder: Some("Search name/symbol".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -58,6 +59,7 @@ impl DataTableScopedContract for AdminCryptoNetworkDataTableContract {
                     label: "Status".to_string(),
                     placeholder: Some("All".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(CryptoNetworkStatus::datatable_filter_options()),
                 },
             ],

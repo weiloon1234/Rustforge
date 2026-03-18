@@ -49,6 +49,7 @@ impl DataTableScopedContract for AdminCountryDataTableContract {
                 label: "Keyword".to_string(),
                 placeholder: Some("Search name/iso/calling code".to_string()),
                 description: None,
+                secondary_filter_key: None,
                 options: None,
             }],
             vec![
@@ -59,6 +60,7 @@ impl DataTableScopedContract for AdminCountryDataTableContract {
                     label: "Status".to_string(),
                     placeholder: Some("All".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(status_filter_options()),
                 },
                 DataTableFilterFieldDto {
@@ -68,6 +70,7 @@ impl DataTableScopedContract for AdminCountryDataTableContract {
                     label: "Region".to_string(),
                     placeholder: Some("Contains".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
             ],

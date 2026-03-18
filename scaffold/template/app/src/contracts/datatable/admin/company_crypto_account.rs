@@ -52,6 +52,7 @@ impl DataTableScopedContract for AdminCompanyCryptoAccountDataTableContract {
                     label: "Keyword".to_string(),
                     placeholder: Some("Search wallet address".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -61,6 +62,7 @@ impl DataTableScopedContract for AdminCompanyCryptoAccountDataTableContract {
                     label: "Crypto Network ID".to_string(),
                     placeholder: Some("Network ID".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -70,6 +72,7 @@ impl DataTableScopedContract for AdminCompanyCryptoAccountDataTableContract {
                     label: "Status".to_string(),
                     placeholder: Some("All".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(CompanyCryptoAccountStatus::datatable_filter_options()),
                 },
             ],

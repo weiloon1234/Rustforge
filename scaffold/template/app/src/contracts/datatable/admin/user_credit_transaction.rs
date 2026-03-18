@@ -60,6 +60,7 @@ impl DataTableScopedContract for AdminUserCreditTransactionDataTableContract {
                     label: "Keyword".to_string(),
                     placeholder: Some("Search username".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -69,6 +70,7 @@ impl DataTableScopedContract for AdminUserCreditTransactionDataTableContract {
                     label: "Credit Type".to_string(),
                     placeholder: Some("All".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(CreditType::datatable_filter_options()),
                 },
             ],
@@ -80,6 +82,7 @@ impl DataTableScopedContract for AdminUserCreditTransactionDataTableContract {
                     label: "Transaction Type".to_string(),
                     placeholder: Some("All".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(CreditTransactionType::datatable_filter_options()),
                 },
                 DataTableFilterFieldDto {
@@ -89,6 +92,7 @@ impl DataTableScopedContract for AdminUserCreditTransactionDataTableContract {
                     label: "Created At From".to_string(),
                     placeholder: Some("Start datetime".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -98,6 +102,7 @@ impl DataTableScopedContract for AdminUserCreditTransactionDataTableContract {
                     label: "Created At To".to_string(),
                     placeholder: Some("End datetime".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
             ],
