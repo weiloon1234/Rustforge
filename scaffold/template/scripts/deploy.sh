@@ -49,7 +49,7 @@ run_supervisorctl() {
     return 1
 }
 
-if [[ ! -d "${PROJECT_DIR}" || ! -f "${PROJECT_DIR}/Cargo.toml" ]]; then
+if [[ ! -d "${PROJECT_DIR}" ]]; then
     echo "Invalid project directory: ${PROJECT_DIR}"
     exit 1
 fi
@@ -70,14 +70,20 @@ if [[ -d "${PROJECT_DIR}/.git" ]]; then
     run_as_project_user "cd \"${PROJECT_DIR}\" && git checkout -- generated/src/ 2>/dev/null || true && git pull --ff-only"
 fi
 
-# 2. Build release binaries
-echo "==> cargo build --release"
-run_as_project_user "source \"\$HOME/.cargo/env\" >/dev/null 2>&1 || true; cd \"${PROJECT_DIR}\" && cargo build --release --workspace"
+# 2. Build release binaries (skip if no Rust toolchain — deploy-repo mode)
+if run_as_project_user "command -v cargo >/dev/null 2>&1"; then
+    echo "==> cargo build --release"
+    run_as_project_user "source \"\$HOME/.cargo/env\" >/dev/null 2>&1 || true; cd \"${PROJECT_DIR}\" && cargo build --release --workspace"
+else
+    echo "==> Skipping Rust build (no cargo — deploy-repo mode)"
+fi
 
-# 3. Build frontend (if present)
-if [[ -f "${PROJECT_DIR}/frontend/package.json" ]]; then
+# 3. Build frontend (skip if no Node toolchain — deploy-repo mode)
+if command -v npm >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/frontend/package.json" ]]; then
     echo "==> frontend build"
     run_as_project_user "cd \"${PROJECT_DIR}\" && npm --prefix frontend install && npm --prefix frontend run build"
+else
+    echo "==> Skipping frontend build (no npm or no frontend/ — deploy-repo mode)"
 fi
 
 # 4. Run migrations

@@ -76,6 +76,7 @@ scripts/                Server install & update scripts
 | `make run-api` | Run API server (release) |
 | `make run-ws` | Run WebSocket server |
 | `make run-worker` | Run background worker |
+| `make deploy` | Tag and trigger CI/CD release to production |
 
 ### Frontend architecture
 
@@ -110,24 +111,137 @@ Both dev servers proxy `/api` to the Rust API on port 3000.
 ./console db seed --name AdminBootstrap   # run one seeder (suffix optional: AdminBootstrapSeeder also works)
 ```
 
-## Production Deployment
+## Deployment
 
-### Ubuntu Server Install
+Production uses a **build-only deployment** workflow. Source code never reaches the production server — only pre-compiled artifacts.
+
+### How it works
+
+1. Developer runs `make deploy` on their machine
+2. A timestamp-based git tag is created and pushed (e.g., `v2026.03.18.153000`)
+3. GitHub Actions builds Rust binaries + React frontend on `ubuntu-24.04`
+4. Artifacts are packaged into `release.zip` and pushed to a separate deploy repository
+5. Production server polls that repo every 5 minutes and auto-deploys
+
+No Rust, Node, or npm is needed on the production server.
+
+### Initial Setup (one-time)
+
+#### 1. Create the deploy repository
+
+Create a private, empty repository for your deploy artifacts (e.g., `YOUR_ORG/YOUR_PROJECT-deploy`).
+
+Update `.github/workflows/deploy.yml` to point to your deploy repository.
+
+#### 2. Create a GitHub PAT
+
+Create a fine-grained Personal Access Token at https://github.com/settings/tokens?type=beta:
+- Repository access: Only select your deploy repository
+- Permissions -> Repository permissions -> Contents: **Read and write**
+
+#### 3. Add secrets to the source repo
+
+In your source repo Settings -> Secrets and variables -> Actions, add these secrets:
+
+| Secret | Description |
+|--------|-------------|
+| `DEPLOY_REPO_TOKEN` | The GitHub PAT from step 2 |
+| `VITE_APP_NAME` | App display name |
+| `VITE_S3_URL` | Public S3/CDN base URL for file access |
+
+Add any other `VITE_*` variables your frontend needs. These are injected as environment variables during the frontend build in GitHub Actions. Vite embeds them into the JS bundle at build time — they are not available at runtime from `.env`. Update the `env:` block in `.github/workflows/deploy.yml` to match.
+
+#### 4. First deploy
 
 ```bash
-sudo ./scripts/install-ubuntu.sh   # or: make server-install
+make deploy
 ```
 
-Idempotent installer that configures: isolated Linux user, SSH access, `.env` values, nginx, Supervisor programs, and optional Let's Encrypt certificates.
+Monitor the GitHub Actions tab. Once it succeeds, `release.zip`, `VERSION`, and `SHA256SUMS` will appear in your deploy repository.
 
-### Deploy
+### Production Server Setup
+
+#### 1. Generate a deploy key
+
+On the production server:
 
 ```bash
-make deploy                              # git pull + build + migrate + restart
-RUN_MIGRATIONS=false make deploy         # skip migrations
+ssh-keygen -t ed25519 -C "deploy-key" -f ~/.ssh/deploy_key -N ""
+cat ~/.ssh/deploy_key.pub
 ```
 
-Pulls latest code, compiles release binaries, builds frontend, runs migrations, and restarts Supervisor programs.
+Add the public key as a **read-only deploy key** in your deploy repository -> Settings -> Deploy keys.
+
+#### 2. Configure SSH to use the deploy key
+
+```bash
+cat >> ~/.ssh/config << 'EOF'
+Host github.com-deploy
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/deploy_key
+    IdentitiesOnly yes
+EOF
+```
+
+#### 3. Clone the deploy repo and extract
+
+```bash
+git clone git@github.com-deploy:YOUR_ORG/YOUR_PROJECT-deploy.git /opt/your-project-deploy
+mkdir -p /opt/your-project
+cd /opt/your-project-deploy
+unzip release.zip -d /opt/your-project
+```
+
+#### 4. Run the installer
+
+```bash
+sudo /opt/your-project/scripts/install.sh
+```
+
+This will prompt for configuration (domain, database, ports, etc.) and set up:
+- PostgreSQL, Redis, Nginx, Let's Encrypt
+- Supervisor processes (api-server, websocket-server, worker, deploy-poll)
+- `.env` file with all settings
+
+#### 5. Verify
+
+```bash
+supervisorctl status
+```
+
+You should see all processes running, including the deploy-poll process.
+
+### Deploying Updates
+
+```bash
+make deploy
+```
+
+The production server will detect the new version within 5 minutes, pull it, run migrations, and restart services automatically.
+
+### Rollback
+
+To rollback to the previous version, revert the last commit in your deploy repository and push:
+
+```bash
+cd /path/to/your-project-deploy
+git revert HEAD --no-edit
+git push
+```
+
+The deploy-poll script detects the version mismatch and re-deploys the reverted release.
+
+### Manual Deploy (legacy)
+
+For servers with the source code and build toolchain installed:
+
+```bash
+./scripts/deploy.sh
+RUN_MIGRATIONS=false ./scripts/deploy.sh  # skip migrations
+```
+
+This script auto-detects whether Rust/Node are available and skips build steps if not.
 
 ## Key Concepts
 

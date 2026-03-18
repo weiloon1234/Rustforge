@@ -1,0 +1,145 @@
+name: Build and Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build Rust release binaries
+        run: cargo build --release -p app --bin api-server --bin websocket-server --bin worker --bin console
+
+      - name: Build frontend
+        env:
+          VITE_APP_NAME: ${{ secrets.VITE_APP_NAME }}
+          VITE_S3_URL: ${{ secrets.VITE_S3_URL }}
+          # Add any other VITE_* variables your frontend needs at build time.
+          # These are baked into the JS bundle during build — they must be
+          # available as GitHub Actions secrets, not runtime .env values.
+        run: npm --prefix frontend run build
+
+      - name: Get version from tag
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Package release.zip
+        run: |
+          STAGING="staging"
+          mkdir -p "${STAGING}/bin"
+          mkdir -p "${STAGING}/target/release"
+          mkdir -p "${STAGING}/app/src/seeds"
+          mkdir -p "${STAGING}/scripts"
+
+          # Wrapper scripts
+          cp bin/api-server bin/websocket-server bin/worker bin/console "${STAGING}/bin/"
+
+          # Compiled binaries
+          cp target/release/api-server target/release/websocket-server target/release/worker target/release/console "${STAGING}/target/release/"
+
+          # Runtime config
+          cp app/configs.toml "${STAGING}/app/configs.toml"
+
+          # Seeder source files
+          cp -r app/src/seeds/* "${STAGING}/app/src/seeds/"
+
+          # Built frontend + static assets
+          cp -r public "${STAGING}/public"
+
+          # Migrations
+          cp -r migrations "${STAGING}/migrations"
+
+          # Translations
+          cp -r i18n "${STAGING}/i18n"
+
+          # Scripts (install-ubuntu.sh ships as install.sh in the release)
+          cp scripts/install-ubuntu.sh "${STAGING}/scripts/install.sh"
+          cp scripts/deploy-poll.sh "${STAGING}/scripts/deploy-poll.sh"
+          chmod +x "${STAGING}/scripts/install.sh" "${STAGING}/scripts/deploy-poll.sh"
+
+          # Console wrapper (root-level)
+          cp console "${STAGING}/console"
+          chmod +x "${STAGING}/console"
+
+          # Env example
+          cp .env.example "${STAGING}/.env.example"
+
+          # Version file
+          echo "${{ steps.version.outputs.tag }}" > "${STAGING}/VERSION"
+
+          # Create zip
+          cd "${STAGING}"
+          zip -r ../release.zip .
+          cd ..
+
+      - name: Generate checksums
+        run: sha256sum release.zip > SHA256SUMS
+
+      - name: Push to deploy repository
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          VERSION_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git clone "https://x-access-token:${DEPLOY_TOKEN}@github.com/YOUR_ORG/YOUR_PROJECT-deploy.git" deploy-repo
+          cd deploy-repo
+
+          # Remove old artifacts (keep .git and README)
+          find . -maxdepth 1 -not -name '.git' -not -name 'README.md' -not -name '.' -exec rm -rf {} +
+
+          # Copy new artifacts
+          cp ../release.zip .
+          cp ../SHA256SUMS .
+          echo "${VERSION_TAG}" > VERSION
+
+          # Create README if not exists
+          if [ ! -f README.md ]; then
+            printf '%s\n' \
+              "# your-project-deploy" \
+              "" \
+              "Build-only deployment repository. Contains compiled release artifacts." \
+              "" \
+              "Do not edit manually. Contents are published by GitHub Actions from the source repository." \
+              "" \
+              "## Files" \
+              "" \
+              "- release.zip: Deployable package (binaries, frontend, migrations, scripts)" \
+              "- VERSION: Current version tag" \
+              "- SHA256SUMS: Checksum for release.zip integrity verification" \
+              > README.md
+          fi
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "Release ${VERSION_TAG}" || echo "No changes to commit"
+          git push

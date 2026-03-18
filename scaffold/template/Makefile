@@ -37,6 +37,7 @@ help:
 	@echo "  make check"
 	@echo "  make gen"
 	@echo "  make gen-types            # Regenerate frontend TS types from Rust contracts"
+	@echo "  make deploy              # Tag and trigger CI/CD release"
 
 .PHONY: install-tools
 install-tools:
@@ -152,3 +153,21 @@ gen:
 .PHONY: release
 release:
 	cargo build --release --workspace
+
+.PHONY: deploy
+deploy:
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Error: Working directory is not clean. Commit or stash changes first."; \
+		exit 1; \
+	fi
+	@BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ "$$BRANCH" != "main" ]; then \
+		echo "Error: Must be on main branch (currently on $$BRANCH)"; \
+		exit 1; \
+	fi
+	git pull origin main
+	@VERSION="v$$(date -u +%Y.%m.%d.%H%M%S)"; \
+	echo "Creating release tag: $$VERSION"; \
+	git tag -a "$$VERSION" -m "Release $$VERSION"; \
+	git push origin "$$VERSION"; \
+	echo "Tag $$VERSION pushed. GitHub Actions will build and deploy."

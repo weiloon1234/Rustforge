@@ -173,12 +173,12 @@ if [[ ! -d "${PROJECT_DIR}" ]]; then
     echo "Project directory does not exist: ${PROJECT_DIR}"
     exit 1
 fi
-if [[ ! -f "${PROJECT_DIR}/Cargo.toml" ]]; then
-    echo "Cargo.toml not found in ${PROJECT_DIR}."
+if [[ ! -f "${PROJECT_DIR}/VERSION" ]]; then
+    echo "VERSION file not found in ${PROJECT_DIR}. Is this a valid deploy extraction?"
     exit 1
 fi
 if [[ ! -f "${PROJECT_DIR}/bin/api-server" ]]; then
-    echo "Expected starter bin scripts under ${PROJECT_DIR}/bin."
+    echo "Expected bin scripts under ${PROJECT_DIR}/bin."
     exit 1
 fi
 
@@ -199,6 +199,9 @@ PROJECT_SLUG="$(prompt "Project slug (used for nginx/supervisor file names)" "${
 
 existing_domain="$(read_env_value "${ENV_FILE}" "DOMAIN")"
 DOMAIN="$(prompt "Domain (example: api.example.com)" "${existing_domain:-example.com}")"
+
+existing_deploy_repo="$(read_env_value "${ENV_FILE}" "DEPLOY_REPO_DIR")"
+DEPLOY_REPO_DIR="$(prompt "Deploy repo clone directory" "${existing_deploy_repo:-/opt/${PROJECT_SLUG}-deploy}")"
 
 PROJECT_USER="$(stat -c '%U' "${PROJECT_DIR}")"
 if [[ -z "${PROJECT_USER}" ]] || [[ "${PROJECT_USER}" == "root" ]]; then
@@ -263,8 +266,7 @@ ENABLE_WS="$(prompt_yes_no "Manage websocket-server process" "${existing_ws}")"
 existing_worker="$(env_bool_to_yes_no "$(read_env_value "${ENV_FILE}" "RUN_WORKER")" "yes")"
 ENABLE_WORKER="$(prompt_yes_no "Manage worker process" "${existing_worker}")"
 
-BUILD_RELEASE="$(prompt_yes_no "Build release binaries now" "yes")"
-RUN_MIGRATIONS="$(prompt_yes_no "Run ./console migrate run now" "yes")"
+ENABLE_DEPLOY_POLL="$(prompt_yes_no "Enable auto-deploy poller (deploy-poll)" "yes")"
 
 echo
 echo "Summary:"
@@ -277,6 +279,7 @@ echo "  HTTPS            : ${ENABLE_HTTPS}"
 echo "  Supervisor       : ${ENABLE_SUPERVISOR}"
 echo "  Websocket proc   : ${ENABLE_WS}"
 echo "  Worker proc      : ${ENABLE_WORKER}"
+echo "  Deploy poller    : ${ENABLE_DEPLOY_POLL}"
 echo
 if [[ "$(prompt_yes_no "Proceed with installation?" "yes")" != "yes" ]]; then
     echo "Cancelled."
@@ -323,27 +326,36 @@ if [[ "${ENABLE_SUPERVISOR}" == "yes" ]]; then
     ensure_packages supervisor
 fi
 
+ensure_packages rsync unzip
+
 if [[ "${ENABLE_HTTPS}" == "yes" ]]; then
     ensure_packages certbot python3-certbot-nginx cron
 fi
 
-if ! run_as_user "${PROJECT_USER}" "command -v cargo" >/dev/null 2>&1; then
-    echo "Installing Rust toolchain for ${PROJECT_USER}..."
-    ensure_packages curl ca-certificates build-essential pkg-config libssl-dev
-    run_as_user "${PROJECT_USER}" "curl https://sh.rustup.rs -sSf | sh -s -- -y"
+# Clone deploy repo if not already present
+if [[ ! -d "${DEPLOY_REPO_DIR}" ]]; then
+    echo "Cloning deploy repository to ${DEPLOY_REPO_DIR}..."
+    echo "IMPORTANT: Set up a deploy key for your deploy repository first."
+    echo "  See: https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys"
+    git clone git@github.com:YOUR_ORG/YOUR_PROJECT-deploy.git "${DEPLOY_REPO_DIR}"
+    chown -R "${PROJECT_USER}:${PROJECT_USER}" "${DEPLOY_REPO_DIR}"
 fi
 
-if ! command -v node >/dev/null 2>&1; then
-    echo "Node.js is not installed. It is required for frontend builds (npm)."
-    if [[ "$(prompt_yes_no "Install Node.js 22.x via NodeSource?" "yes")" == "yes" ]]; then
-        ensure_packages curl ca-certificates gnupg
-        curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-        apt-get install -y nodejs
+# Extract initial release if VERSION not yet in project dir
+if [[ -f "${DEPLOY_REPO_DIR}/release.zip" ]]; then
+    echo "Extracting initial release..."
+    cd "${DEPLOY_REPO_DIR}"
+    if sha256sum -c SHA256SUMS; then
+        staging="$(mktemp -d)"
+        unzip -q release.zip -d "${staging}"
+        rsync -a --exclude='.env' --exclude='logs/' --exclude='.git/' "${staging}/" "${PROJECT_DIR}/"
+        rm -rf "${staging}"
+        chown -R "${PROJECT_USER}:${PROJECT_USER}" "${PROJECT_DIR}"
+        chmod +x "${PROJECT_DIR}/target/release/"* "${PROJECT_DIR}/bin/"* "${PROJECT_DIR}/console" "${PROJECT_DIR}/scripts/"*.sh 2>/dev/null || true
+        echo "Release extracted to ${PROJECT_DIR}"
+    else
+        echo "WARNING: Checksum verification failed for release.zip. Skipping extraction."
     fi
-fi
-
-if [[ "${BUILD_RELEASE}" == "yes" ]]; then
-    run_as_user "${PROJECT_USER}" "source \"\$HOME/.cargo/env\" >/dev/null 2>&1 || true; cd \"\$PROJECT_DIR\" && cargo build --release --workspace"
 fi
 
 upsert_env "${ENV_FILE}" "APP_NAME" "${APP_NAME}"
@@ -365,10 +377,7 @@ upsert_env "${ENV_FILE}" "ENABLE_SUPERVISOR" "$(bool_value "${ENABLE_SUPERVISOR}
 if [[ -n "${LETSENCRYPT_EMAIL}" ]]; then
     upsert_env "${ENV_FILE}" "LETSENCRYPT_EMAIL" "${LETSENCRYPT_EMAIL}"
 fi
-
-if [[ "${RUN_MIGRATIONS}" == "yes" ]]; then
-    run_as_user "${PROJECT_USER}" "cd \"\$PROJECT_DIR\" && ./console migrate run"
-fi
+upsert_env "${ENV_FILE}" "DEPLOY_REPO_DIR" "${DEPLOY_REPO_DIR}"
 
 NGINX_CONF_PATH="/etc/nginx/sites-available/${PROJECT_SLUG}.conf"
 NGINX_LINK_PATH="/etc/nginx/sites-enabled/${PROJECT_SLUG}.conf"
@@ -483,6 +492,23 @@ stderr_logfile=/var/log/${PROJECT_SLUG}-worker.err.log
 "
     fi
 
+    if [[ "${ENABLE_DEPLOY_POLL}" == "yes" ]]; then
+        supervisor_content+="
+[program:${PROJECT_SLUG}-deploy-poll]
+directory=${PROJECT_DIR}
+command=${PROJECT_DIR}/scripts/deploy-poll.sh
+autostart=true
+autorestart=true
+startsecs=5
+user=${PROJECT_USER}
+stopsignal=TERM
+stopasgroup=true
+killasgroup=true
+stdout_logfile=/var/log/${PROJECT_SLUG}-deploy-poll.log
+stderr_logfile=/var/log/${PROJECT_SLUG}-deploy-poll.err.log
+"
+    fi
+
     write_file_if_changed "${SUPERVISOR_CONF_PATH}" "0644" "${supervisor_content}" || true
     systemctl enable --now supervisor
     supervisorctl reread
@@ -494,6 +520,9 @@ stderr_logfile=/var/log/${PROJECT_SLUG}-worker.err.log
     if [[ "${ENABLE_WORKER}" == "yes" ]]; then
         supervisorctl restart "${PROJECT_SLUG}-worker" || supervisorctl start "${PROJECT_SLUG}-worker"
     fi
+    if [[ "${ENABLE_DEPLOY_POLL}" == "yes" ]]; then
+        supervisorctl restart "${PROJECT_SLUG}-deploy-poll" || supervisorctl start "${PROJECT_SLUG}-deploy-poll"
+    fi
 fi
 
 echo
@@ -502,5 +531,8 @@ echo "Nginx site : ${NGINX_CONF_PATH}"
 echo "Env file   : ${ENV_FILE}"
 if [[ "${ENABLE_SUPERVISOR}" == "yes" ]]; then
     echo "Supervisor : /etc/supervisor/conf.d/${PROJECT_SLUG}.conf"
+    if [[ -n "${DEPLOY_REPO_DIR:-}" ]]; then
+        echo "Deploy repo : ${DEPLOY_REPO_DIR}"
+    fi
 fi
 echo "Try: https://${DOMAIN} (or http://${DOMAIN} when HTTPS is disabled)"
