@@ -37,18 +37,16 @@ const STATUS_LABELS: Record<string, string> = {
 function BankForm({
   bankId,
   defaults,
-  onSaved,
   formId,
   onBusyChange,
 }: {
   bankId?: string;
   defaults?: Record<string, unknown>;
-  onSaved: () => void;
   formId: string;
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
 
   const countryOptions = useMemo(
     () => availableCountries().map((c) => ({ value: c.iso2, label: `${c.flag_emoji ?? ""} ${c.name} (${c.iso2})`.trim() })),
@@ -78,9 +76,8 @@ function BankForm({
     ],
     defaults: (defaults ?? { status: "1", sort_order: 0 }) as Record<string, AutoFormDefaultValue>,
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({ title: t("Success"), message: bankId ? t("Bank updated") : t("Bank created") });
-      onSaved();
     },
     onError: (error) => {
       alertError({ title: t("Error"), message: normalizeErrorMessage(error, t("Failed to save bank.")) });
@@ -98,8 +95,7 @@ export default function BanksPage() {
   const account = useAuthStore((s) => s.account);
   const canManage = useAuthStore.hasPermission(PERMISSION.BANK_MANAGE, account);
 
-  const openFormModal = (row: BankDatatableRow | null, refresh: () => void) => {
-    refreshRef.current = refresh;
+  const openFormModal = (row: BankDatatableRow | null) => {
     const isEdit = !!row;
     const formId = `bank-form-${Date.now()}`;
     let modalId = "";
@@ -126,7 +122,6 @@ export default function BanksPage() {
             status: String(row.status),
             sort_order: row.sort_order,
           } : undefined}
-          onSaved={() => refreshRef.current?.()}
           formId={formId}
           onBusyChange={(busy) => {
             if (!modalId) return;
@@ -138,7 +133,7 @@ export default function BanksPage() {
     });
   };
 
-  const handleDelete = async (row: BankDatatableRow, refresh: () => void) => {
+  const handleDelete = async (row: BankDatatableRow) => {
     await alertConfirm({
       title: t("Delete Bank"),
       message: t("Are you sure you want to delete bank :name?", { name: row.name }),
@@ -148,7 +143,7 @@ export default function BanksPage() {
         try {
           await api.delete(`banks/${row.id}`);
           alertSuccess({ title: t("Success"), message: t("Bank deleted") });
-          refresh();
+          refreshRef.current?.();
         } catch (error) {
           alertError({ title: t("Error"), message: normalizeErrorMessage(error, t("Failed to delete bank.")) });
         }
@@ -161,13 +156,14 @@ export default function BanksPage() {
       url="datatable/bank/query"
       title={t("Banks")}
       subtitle={t("Manage bank list")}
-      headerActions={
-        canManage ? (
-          <Button size="sm" variant="primary" onClick={() => openFormModal(null, () => refreshRef.current?.())}>
+      headerActions={canManage ? (refresh) => {
+        refreshRef.current = refresh;
+        return (
+          <Button size="sm" variant="primary" onClick={() => openFormModal(null)}>
             <Plus size={16} className="mr-1" /> {t("Create")}
           </Button>
-        ) : undefined
-      }
+        );
+      } : undefined}
       columns={[
         ...(canManage
           ? [{
@@ -176,17 +172,16 @@ export default function BanksPage() {
               sortable: false,
               render: (row: BankDatatableRow, ctx: DataTableCellContext<BankDatatableRow>) => (
                 <div className="flex items-center gap-1">
-                  <Button type="button" onClick={() => openFormModal(row, ctx.refresh)} variant="plain" size="sm" iconOnly title={t("Edit")}>
+                  <Button type="button" onClick={() => openFormModal(row)} variant="plain" size="sm" iconOnly title={t("Edit")}>
                     <Pencil size={16} />
                   </Button>
-                  <Button type="button" onClick={() => handleDelete(row, ctx.refresh)} variant="plain" size="sm" iconOnly title={t("Delete")}>
+                  <Button type="button" onClick={() => handleDelete(row)} variant="plain" size="sm" iconOnly title={t("Delete")}>
                     <Trash2 size={16} />
                   </Button>
                 </div>
               ),
             }]
           : []),
-        { key: "id", label: t("ID"), cellClassName: "tabular-nums text-muted" },
         { key: "country_iso2", label: t("Country") },
         { key: "name", label: t("Name"), cellClassName: "font-medium" },
         { key: "code", label: t("Code"), render: (row: BankDatatableRow) => row.code ?? "\u2014" },

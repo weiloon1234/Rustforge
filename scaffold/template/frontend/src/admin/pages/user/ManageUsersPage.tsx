@@ -16,7 +16,6 @@ import type { ApiResponse } from "@shared/types";
 import {
   Button,
   DataTable,
-  type DataTableCellContext,
   TextInput,
   useAutoForm,
   useModalStore,
@@ -120,16 +119,14 @@ function CreditTransactionsModal({
 }
 
 function CreateUserForm({
-  onCreated,
   formId,
   onBusyChange,
 }: {
-  onCreated: () => void;
   formId: string;
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
 
   const { submit, busy, form } = useAutoForm(api, {
     url: "users",
@@ -173,9 +170,8 @@ function CreateUserForm({
       },
     ],
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({ title: t("Success"), message: t("User created") });
-      onCreated();
     },
     onError: (error) => {
       alertError({
@@ -199,18 +195,16 @@ function CreateUserForm({
 function EditUserForm({
   user,
   introducerUsername,
-  onUpdated,
   formId,
   onBusyChange,
 }: {
   user: UserDatatableRow;
   introducerUsername: string;
-  onUpdated: () => void;
   formId: string;
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
 
   const { submit, busy, form } = useAutoForm(api, {
     url: `users/${user.id}`,
@@ -256,9 +250,8 @@ function EditUserForm({
       contact_number: user.contact_number ?? "",
     },
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({ title: t("Success"), message: t("User updated") });
-      onUpdated();
     },
     onError: (error) => {
       alertError({
@@ -411,7 +404,9 @@ export default function ManageUsersPage() {
       });
   };
 
-  const handleCreate = (refresh: () => void) => {
+  const refreshRef = useRef<(() => void) | null>(null);
+
+  const handleCreate = () => {
     const formId = `user-create-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let modalId = "";
     const renderFooter = (busy: boolean) => (
@@ -434,7 +429,6 @@ export default function ManageUsersPage() {
       size: "lg",
       content: (
         <CreateUserForm
-          onCreated={refresh}
           formId={formId}
           onBusyChange={(busy) => {
             if (!modalId) return;
@@ -448,7 +442,7 @@ export default function ManageUsersPage() {
     });
   };
 
-  const handleEdit = (user: UserDatatableRow, refresh: () => void) => {
+  const handleEdit = (user: UserDatatableRow) => {
     const formId = `user-edit-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let modalId = "";
 
@@ -478,7 +472,6 @@ export default function ManageUsersPage() {
         <EditUserForm
           user={user}
           introducerUsername={introducerUsername}
-          onUpdated={refresh}
           formId={formId}
           onBusyChange={(busy) => {
             if (!modalId) return;
@@ -494,7 +487,6 @@ export default function ManageUsersPage() {
 
   const handleBan = async (
     user: UserDatatableRow,
-    refresh: () => void,
   ) => {
     const isBanned = user.ban === USER_BAN_STATUS._1;
     const newStatus: UserBanStatus = isBanned ? USER_BAN_STATUS._0 : USER_BAN_STATUS._1;
@@ -520,7 +512,7 @@ export default function ManageUsersPage() {
               title: t("Success"),
               message: isBanned ? t("User unbanned") : t("User banned"),
             });
-            refresh();
+            refreshRef.current?.();
           } catch (error) {
             alertError({
               title: t("Error"),
@@ -541,16 +533,19 @@ export default function ManageUsersPage() {
       subtitle={t("Manage user accounts")}
       headerActions={
         canManage
-          ? (refresh) => (
-              <Button
-                onClick={() => handleCreate(refresh)}
-                variant="primary"
-                size="sm"
-              >
-                <Plus size={16} />
-                {t("Create User")}
-              </Button>
-            )
+          ? (refresh) => {
+              refreshRef.current = refresh;
+              return (
+                <Button
+                  onClick={() => handleCreate()}
+                  variant="primary"
+                  size="sm"
+                >
+                  <Plus size={16} />
+                  {t("Create User")}
+                </Button>
+              );
+            }
           : undefined
       }
       headerContent={
@@ -598,14 +593,13 @@ export default function ManageUsersPage() {
                 sortable: false,
                 render: (
                   user: UserDatatableRow,
-                  ctx: DataTableCellContext<UserDatatableRow>,
                 ) => {
                   const isBanned = user.ban === USER_BAN_STATUS._1;
                   const banning = banningUserId === user.id;
                   return (
                     <div className="flex gap-1">
                       <Button
-                        onClick={() => handleEdit(user, ctx.refresh)}
+                        onClick={() => handleEdit(user)}
                         variant="plain"
                         size="sm"
                         iconOnly
@@ -615,7 +609,7 @@ export default function ManageUsersPage() {
                         <Pencil size={16} />
                       </Button>
                       <Button
-                        onClick={() => handleBan(user, ctx.refresh)}
+                        onClick={() => handleBan(user)}
                         variant="plain"
                         size="sm"
                         iconOnly

@@ -1,7 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { CompanyBankAccountDatatableRow } from "@admin/types";
+import type { CompanyBankAccountDatatableRow, BankOutput } from "@admin/types";
 import { PERMISSION } from "@admin/types";
 import { api } from "@admin/api";
 import { useAuthStore } from "@admin/stores/auth";
@@ -17,6 +17,7 @@ import {
   type AutoFormDefaultValue,
 } from "@shared/components";
 import type { DataTableCellContext } from "@shared/components/DataTable";
+import type { ApiResponse } from "@shared/types";
 
 function normalizeErrorMessage(error: unknown, fallback: string): string {
   const maybe = error as { response?: { data?: { message?: string } } };
@@ -36,24 +37,31 @@ const STATUS_LABELS: Record<string, string> = {
 function CompanyBankAccountForm({
   accountId,
   defaults,
-  onSaved,
   formId,
   onBusyChange,
 }: {
   accountId?: string;
   defaults?: Record<string, unknown>;
-  onSaved: () => void;
   formId: string;
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
+  const [bankOptions, setBankOptions] = useState<{ value: string; label: string }[]>([]);
+
+  useEffect(() => {
+    api.get<ApiResponse<BankOutput[]>>("banks/options").then((res) => {
+      setBankOptions(
+        res.data.data.map((b) => ({ value: String(b.id), label: b.name }))
+      );
+    });
+  }, []);
 
   const { submit, busy, form } = useAutoForm(api, {
     url: accountId ? `company_bank_accounts/${accountId}` : "company_bank_accounts",
     method: accountId ? "put" : "post",
     fields: [
-      { name: "bank_id", type: "text", label: t("Bank ID"), required: true },
+      { name: "bank_id", type: "select", label: t("Bank"), required: true, options: bankOptions, placeholder: t("Select bank") },
       { name: "account_name", type: "text", label: t("Account Name"), required: true },
       { name: "account_number", type: "text", label: t("Account Number"), required: true },
       {
@@ -70,12 +78,11 @@ function CompanyBankAccountForm({
     ],
     defaults: (defaults ?? { status: "1", sort_order: 0 }) as Record<string, AutoFormDefaultValue>,
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({
         title: t("Success"),
         message: accountId ? t("Company bank account updated") : t("Company bank account created"),
       });
-      onSaved();
     },
     onError: (error) => {
       alertError({ title: t("Error"), message: normalizeErrorMessage(error, t("Failed to save company bank account.")) });
@@ -93,8 +100,7 @@ export default function CompanyBankAccountsPage() {
   const account = useAuthStore((s) => s.account);
   const canManage = useAuthStore.hasPermission(PERMISSION.COMPANY_BANK_ACCOUNT_MANAGE, account);
 
-  const openFormModal = (row: CompanyBankAccountDatatableRow | null, refresh: () => void) => {
-    refreshRef.current = refresh;
+  const openFormModal = (row: CompanyBankAccountDatatableRow | null) => {
     const isEdit = !!row;
     const formId = `cba-form-${Date.now()}`;
     let modalId = "";
@@ -121,7 +127,6 @@ export default function CompanyBankAccountsPage() {
             status: String(row.status),
             sort_order: row.sort_order,
           } : undefined}
-          onSaved={() => refreshRef.current?.()}
           formId={formId}
           onBusyChange={(busy) => {
             if (!modalId) return;
@@ -133,7 +138,7 @@ export default function CompanyBankAccountsPage() {
     });
   };
 
-  const handleDelete = async (row: CompanyBankAccountDatatableRow, refresh: () => void) => {
+  const handleDelete = async (row: CompanyBankAccountDatatableRow) => {
     await alertConfirm({
       title: t("Delete Company Bank Account"),
       message: t("Are you sure you want to delete account :name?", { name: row.account_name }),
@@ -143,7 +148,7 @@ export default function CompanyBankAccountsPage() {
         try {
           await api.delete(`company_bank_accounts/${row.id}`);
           alertSuccess({ title: t("Success"), message: t("Company bank account deleted") });
-          refresh();
+          refreshRef.current?.();
         } catch (error) {
           alertError({ title: t("Error"), message: normalizeErrorMessage(error, t("Failed to delete company bank account.")) });
         }
@@ -156,13 +161,14 @@ export default function CompanyBankAccountsPage() {
       url="datatable/company_bank_account/query"
       title={t("Company Bank Accounts")}
       subtitle={t("Manage company bank accounts for fiat deposits")}
-      headerActions={
-        canManage ? (
-          <Button size="sm" variant="primary" onClick={() => openFormModal(null, () => refreshRef.current?.())}>
+      headerActions={canManage ? (refresh) => {
+        refreshRef.current = refresh;
+        return (
+          <Button size="sm" variant="primary" onClick={() => openFormModal(null)}>
             <Plus size={16} className="mr-1" /> {t("Create")}
           </Button>
-        ) : undefined
-      }
+        );
+      } : undefined}
       columns={[
         ...(canManage
           ? [{
@@ -171,17 +177,16 @@ export default function CompanyBankAccountsPage() {
               sortable: false,
               render: (row: CompanyBankAccountDatatableRow, ctx: DataTableCellContext<CompanyBankAccountDatatableRow>) => (
                 <div className="flex items-center gap-1">
-                  <Button type="button" onClick={() => openFormModal(row, ctx.refresh)} variant="plain" size="sm" iconOnly title={t("Edit")}>
+                  <Button type="button" onClick={() => openFormModal(row)} variant="plain" size="sm" iconOnly title={t("Edit")}>
                     <Pencil size={16} />
                   </Button>
-                  <Button type="button" onClick={() => handleDelete(row, ctx.refresh)} variant="plain" size="sm" iconOnly title={t("Delete")}>
+                  <Button type="button" onClick={() => handleDelete(row)} variant="plain" size="sm" iconOnly title={t("Delete")}>
                     <Trash2 size={16} />
                   </Button>
                 </div>
               ),
             }]
           : []),
-        { key: "id", label: t("ID"), cellClassName: "tabular-nums text-muted" },
         { key: "bank_name", label: t("Bank"), render: (row: CompanyBankAccountDatatableRow) => row.bank_name ?? row.bank_id },
         { key: "account_name", label: t("Account Name"), cellClassName: "font-medium" },
         { key: "account_number", label: t("Account Number") },

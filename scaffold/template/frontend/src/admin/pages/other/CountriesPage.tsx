@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Pencil, Star } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { CountryDatatableRow } from "@admin/types";
@@ -33,17 +33,15 @@ function normalizeErrorMessage(error: unknown, fallback: string): string {
 
 function EditCountryStatusForm({
   row,
-  onUpdated,
   formId,
   onBusyChange,
 }: {
   row: CountryDatatableRow;
-  onUpdated: () => void;
   formId: string;
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
 
   const { submit, busy, form } = useAutoForm(api, {
     url: `countries/${row.iso2}/status`,
@@ -73,9 +71,8 @@ function EditCountryStatusForm({
       status: row.status,
     },
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({ title: t("Success"), message: t("Country status updated") });
-      onUpdated();
     },
     onError: (error) => {
       alertError({
@@ -104,7 +101,9 @@ export default function CountriesPage() {
     account,
   );
 
-  const handleSetDefault = async (row: CountryDatatableRow, refresh: () => void) => {
+  const refreshRef = useRef<(() => void) | null>(null);
+
+  const handleSetDefault = async (row: CountryDatatableRow) => {
     await alertConfirm({
       title: t("Set Default"),
       message: t("Are you sure you want to set :name as the default country?", {
@@ -116,7 +115,7 @@ export default function CountriesPage() {
         try {
           await api.patch(`countries/${row.iso2}/default`);
           alertSuccess({ title: t("Success"), message: t("Country default updated") });
-          refresh();
+          refreshRef.current?.();
         } catch (error) {
           alertError({
             title: t("Error"),
@@ -127,7 +126,7 @@ export default function CountriesPage() {
     });
   };
 
-  const openEditModal = (row: CountryDatatableRow, refresh: () => void) => {
+  const openEditModal = (row: CountryDatatableRow) => {
     const formId = `country-status-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let modalId = "";
     const renderFooter = (busy: boolean) => (
@@ -151,7 +150,6 @@ export default function CountriesPage() {
       content: (
         <EditCountryStatusForm
           row={row}
-          onUpdated={refresh}
           formId={formId}
           onBusyChange={(busy) => {
             if (!modalId) return;
@@ -168,17 +166,21 @@ export default function CountriesPage() {
       url="datatable/country/query"
       title={t("Countries")}
       subtitle={t("Manage country availability")}
+      headerActions={(refresh) => {
+        refreshRef.current = refresh;
+        return null;
+      }}
       columns={[
         {
           key: "actions",
           label: t("Actions"),
           sortable: false,
-          render: (row, ctx) =>
+          render: (row) =>
             canManage ? (
               <div className="flex items-center gap-1">
                 <Button
                   type="button"
-                  onClick={() => openEditModal(row, ctx.refresh)}
+                  onClick={() => openEditModal(row)}
                   variant="plain"
                   size="sm"
                   iconOnly
@@ -189,7 +191,7 @@ export default function CountriesPage() {
                 {!row.is_default && (
                   <Button
                     type="button"
-                    onClick={() => handleSetDefault(row, ctx.refresh)}
+                    onClick={() => handleSetDefault(row)}
                     variant="plain"
                     size="sm"
                     iconOnly

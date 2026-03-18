@@ -1,15 +1,26 @@
-use core_db::common::sql::{DbConn, Op};
+use core_db::common::sql::{DbConn, Op, OrderDir};
 use core_db::platform::attachments::types::AttachmentInput;
 use core_i18n::t;
 use core_web::error::AppError;
 use generated::localized;
-use generated::models::{CryptoNetworkCol, CryptoNetworkModel, CryptoNetworkRecord};
+use generated::models::{
+    CryptoNetworkCol, CryptoNetworkModel, CryptoNetworkRecord, CryptoNetworkStatus,
+};
 use time::OffsetDateTime;
 
 use crate::{
     contracts::api::v1::admin::crypto_network::AdminCryptoNetworkInput,
     internal::api::state::AppApiState,
 };
+
+pub async fn list_options(state: &AppApiState) -> Result<Vec<CryptoNetworkRecord>, AppError> {
+    CryptoNetworkModel::query(DbConn::pool(&state.db))
+        .where_col(CryptoNetworkCol::STATUS, Op::Eq, CryptoNetworkStatus::Enabled)
+        .order_by(CryptoNetworkCol::SORT_ORDER, OrderDir::Asc)
+        .all()
+        .await
+        .map_err(AppError::from)
+}
 
 pub async fn detail(state: &AppApiState, id: i64) -> Result<CryptoNetworkRecord, AppError> {
     CryptoNetworkModel::find(DbConn::pool(&state.db), id)
@@ -43,7 +54,7 @@ pub async fn create(
 
     if let Some(logo) = logo.as_ref() {
         localized::replace_single_attachment(
-            conn,
+            conn.clone(),
             localized::CRYPTO_NETWORK_OWNER_TYPE,
             row.id,
             "logo",
@@ -53,6 +64,7 @@ pub async fn create(
         .map_err(AppError::from)?;
     }
 
+    drop(conn);
     scope.commit().await.map_err(AppError::from)?;
 
     detail(state, row.id).await
@@ -88,7 +100,7 @@ pub async fn update(
 
     if let Some(logo) = logo.as_ref() {
         localized::replace_single_attachment(
-            conn,
+            conn.clone(),
             localized::CRYPTO_NETWORK_OWNER_TYPE,
             id,
             "logo",
@@ -98,6 +110,7 @@ pub async fn update(
         .map_err(AppError::from)?;
     }
 
+    drop(conn);
     scope.commit().await.map_err(AppError::from)?;
 
     detail(state, id).await

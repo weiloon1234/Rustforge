@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import type { UserCreditTransactionDatatableRow } from "@admin/types";
@@ -21,16 +21,14 @@ function normalizeErrorMessage(error: unknown, fallback: string): string {
 }
 
 function AdjustCreditForm({
-  onCreated,
   formId,
   onBusyChange,
 }: {
-  onCreated: () => void;
   formId: string;
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
 
   const { submit, busy, form } = useAutoForm(api, {
     url: "users/credits/adjust",
@@ -46,9 +44,8 @@ function AdjustCreditForm({
         : []),
     ],
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({ title: t("Success"), message: t("Credit adjusted") });
-      onCreated();
     },
     onError: (error) => {
       alertError({
@@ -67,10 +64,8 @@ function AdjustCreditForm({
 
 export default function AdjustCreditsPage() {
   const { t } = useTranslation();
-  const refreshRef = useRef<(() => void) | null>(null);
 
-  const handleAdjust = (refresh: () => void) => {
-    refreshRef.current = refresh;
+  const handleAdjust = () => {
     const formId = `credit-adjust-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let modalId = "";
     const renderFooter = (busy: boolean) => (
@@ -93,9 +88,6 @@ export default function AdjustCreditsPage() {
       size: "lg",
       content: (
         <AdjustCreditForm
-          onCreated={() => {
-            refreshRef.current?.();
-          }}
           formId={formId}
           onBusyChange={(busy) => {
             if (!modalId) return;
@@ -114,16 +106,16 @@ export default function AdjustCreditsPage() {
       url="datatable/user_credit_transaction/query"
       title={t("Adjust Credits")}
       subtitle={t("Manage credit adjustments")}
-      headerActions={(refresh) => (
+      headerActions={
         <Button
-          onClick={() => handleAdjust(refresh)}
+          onClick={() => handleAdjust()}
           variant="primary"
           size="sm"
         >
           <Plus size={16} />
           {t("Adjust Credit")}
         </Button>
-      )}
+      }
       columns={[
         {
           key: "user_username",

@@ -15,7 +15,6 @@ import type { ApiResponse } from "@shared/types";
 import {
   Button,
   DataTable,
-  type DataTableCellContext,
   useAutoForm,
   useModalStore,
   alertConfirm,
@@ -144,18 +143,16 @@ function PermissionSummary({ admin }: { admin: AdminDatatableRow }) {
 }
 
 function CreateAdminForm({
-  onCreated,
   formId,
   availablePermissions,
   onBusyChange,
 }: {
-  onCreated: () => void;
   formId: string;
   availablePermissions: readonly PermissionMeta[];
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
 
   const { submit, busy, form } = useAutoForm(api, {
     url: "admins",
@@ -201,9 +198,8 @@ function CreateAdminForm({
       }] : []),
     ],
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({ title: t("Success"), message: t("Admin created") });
-      onCreated();
     },
     onError: (error) => {
       alertError({
@@ -226,19 +222,17 @@ function CreateAdminForm({
 
 function EditAdminForm({
   admin,
-  onUpdated,
   formId,
   availablePermissions,
   onBusyChange,
 }: {
   admin: AdminDatatableRow;
-  onUpdated: () => void;
   formId: string;
   availablePermissions: readonly PermissionMeta[];
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
   const isNormalAdmin = admin.admin_type === ADMIN_TYPE.ADMIN;
   const currentPermissions = admin.abilities.filter(
     (value): value is Permission => PERMISSIONS.includes(value as Permission),
@@ -306,9 +300,8 @@ function EditAdminForm({
       } : {}),
     },
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({ title: t("Success"), message: t("Admin updated") });
-      onUpdated();
     },
     onError: (error) => {
       alertError({
@@ -405,7 +398,9 @@ export default function AdminsPage() {
       });
   };
 
-  const handleCreate = (refresh: () => void) => {
+  const refreshRef = useRef<(() => void) | null>(null);
+
+  const handleCreate = () => {
     const formId = `admin-create-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let modalId = "";
     const renderFooter = (busy: boolean) => (
@@ -428,7 +423,6 @@ export default function AdminsPage() {
       size: "lg",
       content: (
         <CreateAdminForm
-          onCreated={refresh}
           formId={formId}
           availablePermissions={assignableAdminPermissions}
           onBusyChange={(busy) => {
@@ -443,7 +437,7 @@ export default function AdminsPage() {
     });
   };
 
-  const handleEdit = (admin: AdminDatatableRow, refresh: () => void) => {
+  const handleEdit = (admin: AdminDatatableRow) => {
     const formId = `admin-edit-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let modalId = "";
     const renderFooter = (busy: boolean) => (
@@ -467,7 +461,6 @@ export default function AdminsPage() {
       content: (
         <EditAdminForm
           admin={admin}
-          onUpdated={refresh}
           formId={formId}
           availablePermissions={assignableAdminPermissions}
           onBusyChange={(busy) => {
@@ -484,7 +477,6 @@ export default function AdminsPage() {
 
   const handleDelete = async (
     admin: AdminDatatableRow,
-    refresh: () => void,
   ) => {
     await alertConfirm({
       title: t("Delete Admin"),
@@ -501,7 +493,7 @@ export default function AdminsPage() {
               `admins/${admin.id}`,
             );
             alertSuccess({ title: t("Deleted"), message: t("Admin deleted") });
-            refresh();
+            refreshRef.current?.();
           } catch {
             alertError({
               title: t("Error"),
@@ -522,16 +514,19 @@ export default function AdminsPage() {
       subtitle={t("Manage administrator accounts")}
       headerActions={
         canManageAdmins
-          ? (refresh) => (
-              <Button
-                onClick={() => handleCreate(refresh)}
-                variant="primary"
-                size="sm"
-              >
-                <Plus size={16} />
-                {t("Create Admin")}
-              </Button>
-            )
+          ? (refresh) => {
+              refreshRef.current = refresh;
+              return (
+                <Button
+                  onClick={() => handleCreate()}
+                  variant="primary"
+                  size="sm"
+                >
+                  <Plus size={16} />
+                  {t("Create Admin")}
+                </Button>
+              );
+            }
           : undefined
       }
       headerContent={
@@ -567,7 +562,6 @@ export default function AdminsPage() {
                 sortable: false,
                 render: (
                   admin: AdminDatatableRow,
-                  ctx: DataTableCellContext<AdminDatatableRow>,
                 ) => {
                   const deleting = deletingAdminId === admin.id;
                   const isSelf = account?.id === admin.id;
@@ -575,7 +569,7 @@ export default function AdminsPage() {
                     <div className="flex gap-1">
                       {!isSelf && (
                         <Button
-                          onClick={() => handleEdit(admin, ctx.refresh)}
+                          onClick={() => handleEdit(admin)}
                           variant="plain"
                           size="sm"
                           iconOnly
@@ -587,7 +581,7 @@ export default function AdminsPage() {
                       )}
                       {!isSelf && admin.admin_type === ADMIN_TYPE.ADMIN && (
                         <Button
-                          onClick={() => handleDelete(admin, ctx.refresh)}
+                          onClick={() => handleDelete(admin)}
                           variant="plain"
                           size="sm"
                           iconOnly

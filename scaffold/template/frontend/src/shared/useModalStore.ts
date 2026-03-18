@@ -22,9 +22,11 @@ export interface ModalEntry extends Required<Pick<ModalOptions, "id" | "title" |
 
 interface ModalState {
   stack: ModalEntry[];
+  refreshSignal: number;
   open: (options: ModalOptions) => string;
   update: (id: string, patch: Partial<ModalEntry>) => void;
   close: (id?: string) => void;
+  closeWithRefresh: (id?: string) => void;
   closeAll: () => void;
 }
 
@@ -32,6 +34,7 @@ let counter = 0;
 
 export const useModalStore = create<ModalState>()((set, get) => ({
   stack: [],
+  refreshSignal: 0,
 
   open: (options) => {
     const id = options.id ?? `modal-${++counter}`;
@@ -70,6 +73,11 @@ export const useModalStore = create<ModalState>()((set, get) => ({
     if (next.length === 0) {
       document.body.style.overflow = "";
     }
+  },
+
+  closeWithRefresh: (id) => {
+    get().close(id);
+    set((state) => ({ refreshSignal: state.refreshSignal + 1 }));
   },
 
   closeAll: () => {

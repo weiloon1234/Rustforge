@@ -22,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 import type { AxiosInstance } from "axios";
+import { useModalStore } from "@shared/useModalStore";
 import { TextInput } from "@shared/components/TextInput";
 import { Select } from "@shared/components/Select";
 import { Button } from "@shared/components/Button";
@@ -746,6 +747,16 @@ export function DataTable<T>({
       ),
     [fetchData, page, perPage, sortColumn, sortDirection],
   );
+
+  const refreshSignal = useModalStore((s) => s.refreshSignal);
+  const refreshSignalRef = useRef(refreshSignal);
+
+  useEffect(() => {
+    if (refreshSignalRef.current !== refreshSignal) {
+      refreshSignalRef.current = refreshSignal;
+      refresh();
+    }
+  }, [refreshSignal, refresh]);
 
   const handleExport = useCallback(async () => {
     if (!canExport || !exportCsvUrl || exporting) return;

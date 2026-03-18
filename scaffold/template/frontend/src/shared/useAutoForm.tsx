@@ -544,6 +544,15 @@ export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, con
         continue;
       }
 
+      // Coerce numeric field types to actual numbers for correct JSON serialization
+      if ((field.type === "number" || field.type === "money" || field.type === "atm") && value.trim() !== "") {
+        const num = Number(value);
+        if (!isNaN(num)) {
+          payload[field.name] = num;
+          continue;
+        }
+      }
+
       payload[field.name] = value;
     }
 

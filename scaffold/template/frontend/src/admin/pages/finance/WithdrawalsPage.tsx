@@ -14,7 +14,7 @@ import {
   formatDateTime,
   moneyFormat,
 } from "@shared/components";
-import type { DataTableCellContext } from "@shared/components/DataTable";
+
 import { api } from "@admin/api";
 
 function normalizeErrorMessage(error: unknown, fallback: string): string {
@@ -39,18 +39,16 @@ const STATUS_LABELS: Record<string, string> = {
 function ReviewWithdrawalForm({
   withdrawalId,
   currentStatus,
-  onReviewed,
   formId,
   onBusyChange,
 }: {
   withdrawalId: string;
   currentStatus: string;
-  onReviewed: () => void;
   formId: string;
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
 
   // Build available actions based on current status
   const actionOptions = [];
@@ -84,9 +82,8 @@ function ReviewWithdrawalForm({
       },
     ],
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({ title: t("Success"), message: t("Withdrawal reviewed") });
-      onReviewed();
     },
     onError: (error) => {
       alertError({
@@ -107,17 +104,15 @@ function ReviewWithdrawalForm({
 
 function UploadReceiptForm({
   entityId,
-  onUploaded,
   formId,
   onBusyChange,
 }: {
   entityId: string;
-  onUploaded: () => void;
   formId: string;
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
 
   const { submit, busy, form } = useAutoForm(api, {
     url: `withdrawals/${entityId}/upload-receipt`,
@@ -132,9 +127,8 @@ function UploadReceiptForm({
       },
     ],
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({ title: t("Success"), message: t("Receipt uploaded") });
-      onUploaded();
     },
     onError: (error) => {
       alertError({
@@ -155,12 +149,10 @@ function UploadReceiptForm({
 
 export default function WithdrawalsPage() {
   const { t } = useTranslation();
-  const refreshRef = useRef<(() => void) | null>(null);
   const account = useAuthStore((s) => s.account);
   const canManage = useAuthStore.hasPermission(PERMISSION.WITHDRAWAL_MANAGE, account);
 
-  const openReviewModal = (row: WithdrawalDatatableRow, refresh: () => void) => {
-    refreshRef.current = refresh;
+  const openReviewModal = (row: WithdrawalDatatableRow) => {
     const formId = `withdrawal-review-${Date.now()}`;
     let modalId = "";
     const renderFooter = (busy: boolean) => (
@@ -187,7 +179,6 @@ export default function WithdrawalsPage() {
           <ReviewWithdrawalForm
             withdrawalId={row.id}
             currentStatus={row.status}
-            onReviewed={() => refreshRef.current?.()}
             formId={formId}
             onBusyChange={(busy) => {
               if (!modalId) return;
@@ -200,8 +191,7 @@ export default function WithdrawalsPage() {
     });
   };
 
-  const openUploadReceiptModal = (row: WithdrawalDatatableRow, refresh: () => void) => {
-    refreshRef.current = refresh;
+  const openUploadReceiptModal = (row: WithdrawalDatatableRow) => {
     const formId = `withdrawal-receipt-${Date.now()}`;
     let modalId = "";
     const renderFooter = (busy: boolean) => (
@@ -220,7 +210,6 @@ export default function WithdrawalsPage() {
       content: (
         <UploadReceiptForm
           entityId={row.id}
-          onUploaded={() => refreshRef.current?.()}
           formId={formId}
           onBusyChange={(busy) => {
             if (!modalId) return;
@@ -314,15 +303,15 @@ export default function WithdrawalsPage() {
                 key: "actions" as keyof WithdrawalDatatableRow,
                 label: t("Actions"),
                 sortable: false,
-                render: (row: WithdrawalDatatableRow, ctx: DataTableCellContext<WithdrawalDatatableRow>) => {
+                render: (row: WithdrawalDatatableRow) => {
                   // Only show actions for Pending or Processing
                   if (row.status !== "1" && row.status !== "2") return null;
                   return (
                     <div className="flex gap-1">
-                      <Button size="xs" variant="primary" onClick={() => openReviewModal(row, ctx.refresh)}>
+                      <Button size="xs" variant="primary" onClick={() => openReviewModal(row)}>
                         {t("Review")}
                       </Button>
-                      <Button size="xs" variant="secondary" onClick={() => openUploadReceiptModal(row, ctx.refresh)}>
+                      <Button size="xs" variant="secondary" onClick={() => openUploadReceiptModal(row)}>
                         {t("Receipt")}
                       </Button>
                     </div>

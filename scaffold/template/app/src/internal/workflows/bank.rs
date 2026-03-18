@@ -1,15 +1,24 @@
-use core_db::common::sql::{DbConn, Op};
+use core_db::common::sql::{DbConn, Op, OrderDir};
 use core_db::platform::attachments::types::AttachmentInput;
 use core_i18n::t;
 use core_web::error::AppError;
 use generated::localized;
-use generated::models::{BankCol, BankModel, BankRecord, CountryCol, CountryModel};
+use generated::models::{BankCol, BankModel, BankRecord, BankStatus, CountryCol, CountryModel};
 use time::OffsetDateTime;
 
 use crate::{
     contracts::api::v1::admin::bank::AdminBankInput,
     internal::api::state::AppApiState,
 };
+
+pub async fn list_options(state: &AppApiState) -> Result<Vec<BankRecord>, AppError> {
+    BankModel::query(DbConn::pool(&state.db))
+        .where_col(BankCol::STATUS, Op::Eq, BankStatus::Enabled)
+        .order_by(BankCol::SORT_ORDER, OrderDir::Asc)
+        .all()
+        .await
+        .map_err(AppError::from)
+}
 
 pub async fn detail(state: &AppApiState, id: i64) -> Result<BankRecord, AppError> {
     BankModel::find(DbConn::pool(&state.db), id)
@@ -53,11 +62,12 @@ pub async fn create(
         .map_err(AppError::from)?;
 
     if let Some(logo) = logo.as_ref() {
-        localized::replace_single_attachment(conn, localized::BANK_OWNER_TYPE, row.id, "logo", logo)
+        localized::replace_single_attachment(conn.clone(), localized::BANK_OWNER_TYPE, row.id, "logo", logo)
             .await
             .map_err(AppError::from)?;
     }
 
+    drop(conn);
     scope.commit().await.map_err(AppError::from)?;
 
     detail(state, row.id).await
@@ -103,11 +113,12 @@ pub async fn update(
     }
 
     if let Some(logo) = logo.as_ref() {
-        localized::replace_single_attachment(conn, localized::BANK_OWNER_TYPE, id, "logo", logo)
+        localized::replace_single_attachment(conn.clone(), localized::BANK_OWNER_TYPE, id, "logo", logo)
             .await
             .map_err(AppError::from)?;
     }
 
+    drop(conn);
     scope.commit().await.map_err(AppError::from)?;
 
     detail(state, id).await

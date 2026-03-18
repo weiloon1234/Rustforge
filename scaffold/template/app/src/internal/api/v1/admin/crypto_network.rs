@@ -36,6 +36,19 @@ pub fn router(state: AppApiState) -> ApiRouter {
             ),
         )
         .api_route(
+            "/options",
+            with_permission_check_get_with(
+                list_options,
+                AdminGuard,
+                PermissionMode::Any,
+                [
+                    Permission::CryptoNetworkRead.as_str(),
+                    Permission::CryptoNetworkManage.as_str(),
+                ],
+                |op| op.summary("List crypto network options").tag("Admin Crypto Networks"),
+            ),
+        )
+        .api_route(
             "/{id}",
             with_permission_check_get_with(
                 detail,
@@ -167,6 +180,15 @@ fn network_output(network: &generated::models::CryptoNetworkRecord) -> CryptoNet
         created_at: network.created_at,
         updated_at: network.updated_at,
     }
+}
+
+async fn list_options(
+    State(state): State<AppApiState>,
+    _auth: AuthUser<AdminGuard>,
+) -> Result<ApiResponse<Vec<CryptoNetworkOutput>>, AppError> {
+    let networks = workflow::list_options(&state).await?;
+    let out: Vec<CryptoNetworkOutput> = networks.iter().map(network_output).collect();
+    Ok(ApiResponse::success(out, &t("Crypto network options")))
 }
 
 async fn create(

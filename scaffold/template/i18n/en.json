@@ -77,5 +77,29 @@
   "Total Credit 1": "Total Cash Point",
   "Total Credit 2": "Total Reward Point",
   "Adjust Credits": "User Credit Manage",
-  "Manage credit adjustments": "Manage user credits"
+  "Manage credit adjustments": "Manage user credits",
+
+  "enum.credit_transaction_type.crash_bet": "Crash Game Bet",
+  "enum.credit_transaction_type.crash_win": "Crash Game Win",
+  "enum.credit_transaction_type.crash_refund": "Crash Game Refund",
+
+  "crash_round.read": "Read Crash Rounds",
+  "crash_round.manage": "Manage Crash Rounds",
+  "crash_bet.read": "Read Crash Bets",
+  "crash_bet.manage": "Manage Crash Bets",
+  "enum.crash_round_status.preparing": "Preparing",
+  "enum.crash_round_status.countdown": "Countdown",
+  "enum.crash_round_status.running": "Running",
+  "enum.crash_round_status.crashed": "Crashed",
+  "enum.crash_round_status.settled": "Settled",
+  "enum.crash_bet_status.active": "Active",
+  "enum.crash_bet_status.cashed_out": "Cashed Out",
+  "enum.crash_bet_status.busted": "Busted",
+  "enum.crash_bet_status.refunded": "Refunded",
+
+  "ws.disconnected": "Disconnected",
+  "ws.connecting": "Connecting",
+  "ws.authenticating": "Authenticating",
+  "ws.connected": "Connected",
+  "ws.reconnecting": "Reconnecting"
 }

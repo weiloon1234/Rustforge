@@ -1,5 +1,5 @@
 import { Pencil, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { AdminContentPageDeleteOutput, ContentPageDatatableRow, ContentPageSystemFlag } from "@admin/types";
@@ -36,8 +36,9 @@ export default function ContentPagesPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [deletingPageId, setDeletingPageId] = useState<string | null>(null);
+  const refreshRef = useRef<(() => void) | null>(null);
 
-  const handleDelete = async (row: ContentPageDatatableRow, refresh: () => void) => {
+  const handleDelete = async (row: ContentPageDatatableRow) => {
     if (row.is_system === CONTENT_PAGE_SYSTEM_YES) {
       return;
     }
@@ -55,7 +56,7 @@ export default function ContentPagesPage() {
             `content_page/${row.id}`,
           );
           alertSuccess({ title: t("Deleted"), message: t("Page deleted") });
-          refresh();
+          refreshRef.current?.();
         } catch (err) {
           alertError({
             title: t("Error"),
@@ -73,12 +74,16 @@ export default function ContentPagesPage() {
       url="datatable/content_page/query"
       title={t("Pages")}
       subtitle={t("Manage policy pages")}
+      headerActions={(refresh) => {
+        refreshRef.current = refresh;
+        return null;
+      }}
       columns={[
         {
           key: "actions",
           label: t("Actions"),
           sortable: false,
-          render: (row, ctx) => {
+          render: (row) => {
             const deleting = deletingPageId === row.id;
             return (
               <div className="flex gap-1">
@@ -96,7 +101,7 @@ export default function ContentPagesPage() {
                 {row.is_system !== CONTENT_PAGE_SYSTEM_YES && (
                   <Button
                     type="button"
-                    onClick={() => handleDelete(row, ctx.refresh)}
+                    onClick={() => handleDelete(row)}
                     variant="plain"
                     size="sm"
                     iconOnly

@@ -14,7 +14,7 @@ import {
   formatDateTime,
   moneyFormat,
 } from "@shared/components";
-import type { DataTableCellContext } from "@shared/components/DataTable";
+
 import { api } from "@admin/api";
 
 function normalizeErrorMessage(error: unknown, fallback: string): string {
@@ -36,17 +36,15 @@ const STATUS_LABELS: Record<string, string> = {
 
 function ReviewDepositForm({
   depositId,
-  onReviewed,
   formId,
   onBusyChange,
 }: {
   depositId: string;
-  onReviewed: () => void;
   formId: string;
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
 
   const { submit, busy, form } = useAutoForm(api, {
     url: `deposits/${depositId}/review`,
@@ -71,9 +69,8 @@ function ReviewDepositForm({
       },
     ],
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({ title: t("Success"), message: t("Deposit reviewed") });
-      onReviewed();
     },
     onError: (error) => {
       alertError({
@@ -96,18 +93,16 @@ function ReviewDepositForm({
 function UploadReceiptForm({
   entityType,
   entityId,
-  onUploaded,
   formId,
   onBusyChange,
 }: {
   entityType: "deposits" | "withdrawals";
   entityId: string;
-  onUploaded: () => void;
   formId: string;
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
 
   const { submit, busy, form } = useAutoForm(api, {
     url: `${entityType}/${entityId}/upload-receipt`,
@@ -122,9 +117,8 @@ function UploadReceiptForm({
       },
     ],
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({ title: t("Success"), message: t("Receipt uploaded") });
-      onUploaded();
     },
     onError: (error) => {
       alertError({
@@ -145,12 +139,10 @@ function UploadReceiptForm({
 
 export default function DepositsPage() {
   const { t } = useTranslation();
-  const refreshRef = useRef<(() => void) | null>(null);
   const account = useAuthStore((s) => s.account);
   const canManage = useAuthStore.hasPermission(PERMISSION.DEPOSIT_MANAGE, account);
 
-  const openReviewModal = (row: DepositDatatableRow, refresh: () => void) => {
-    refreshRef.current = refresh;
+  const openReviewModal = (row: DepositDatatableRow) => {
     const formId = `deposit-review-${Date.now()}`;
     let modalId = "";
     const renderFooter = (busy: boolean) => (
@@ -176,7 +168,6 @@ export default function DepositsPage() {
           </div>
           <ReviewDepositForm
             depositId={row.id}
-            onReviewed={() => refreshRef.current?.()}
             formId={formId}
             onBusyChange={(busy) => {
               if (!modalId) return;
@@ -189,8 +180,7 @@ export default function DepositsPage() {
     });
   };
 
-  const openUploadReceiptModal = (row: DepositDatatableRow, refresh: () => void) => {
-    refreshRef.current = refresh;
+  const openUploadReceiptModal = (row: DepositDatatableRow) => {
     const formId = `deposit-receipt-${Date.now()}`;
     let modalId = "";
     const renderFooter = (busy: boolean) => (
@@ -210,7 +200,6 @@ export default function DepositsPage() {
         <UploadReceiptForm
           entityType="deposits"
           entityId={row.id}
-          onUploaded={() => refreshRef.current?.()}
           formId={formId}
           onBusyChange={(busy) => {
             if (!modalId) return;
@@ -304,14 +293,14 @@ export default function DepositsPage() {
                 key: "actions" as keyof DepositDatatableRow,
                 label: t("Actions"),
                 sortable: false,
-                render: (row: DepositDatatableRow, ctx: DataTableCellContext<DepositDatatableRow>) => {
+                render: (row: DepositDatatableRow) => {
                   if (row.status !== "1") return null; // Only Pending
                   return (
                     <div className="flex gap-1">
-                      <Button size="xs" variant="primary" onClick={() => openReviewModal(row, ctx.refresh)}>
+                      <Button size="xs" variant="primary" onClick={() => openReviewModal(row)}>
                         {t("Review")}
                       </Button>
-                      <Button size="xs" variant="secondary" onClick={() => openUploadReceiptModal(row, ctx.refresh)}>
+                      <Button size="xs" variant="secondary" onClick={() => openUploadReceiptModal(row)}>
                         {t("Receipt")}
                       </Button>
                     </div>

@@ -17,17 +17,95 @@ import { useAutoForm, type AutoFormDefaultValue } from "@shared/useAutoForm";
 
 const CONTENT_PAGE_SYSTEM_YES = CONTENT_PAGE_SYSTEM_FLAG._1;
 
-export default function ContentPageEditPage() {
+function ContentPageForm({
+  pageId,
+  contentPage,
+}: {
+  pageId: string;
+  contentPage: AdminContentPageOutput;
+}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const params = useParams<{ id: string }>();
-  const pageId = params.id ?? "";
   const availableLocales = useLocaleStore((s) => s.availableLocales);
   const defaultLocale = useLocaleStore((s) => s.defaultLocale);
   const locales = useMemo(
     () => (availableLocales.length > 0 ? availableLocales : [defaultLocale]),
     [availableLocales, defaultLocale],
   );
+
+  const isSystem = contentPage.is_system === CONTENT_PAGE_SYSTEM_YES;
+
+  const coverDefaults = useMemo(() => {
+    const result: Record<string, { name: string; url: string }> = {};
+    for (const locale of locales) {
+      const path = (contentPage.cover[locale] ?? "").trim();
+      if (path) {
+        result[locale] = {
+          name: path,
+          url: (contentPage.cover_url[locale] ?? "").trim() || attachmentUrl(path),
+        };
+      }
+    }
+    return result;
+  }, [contentPage, locales]);
+
+  const { submit, busy: saving, form, errors } = useAutoForm(api, {
+    url: `content_page/${pageId}`,
+    method: "patch",
+    bodyType: "multipart",
+    tiptapImageUpload: uploadAdminTiptapImage,
+    fields: [
+      { name: "tag", type: "text", label: t("Tag"), required: true, disabled: isSystem },
+      {
+        type: "localized",
+        children: [
+          { name: "title", type: "text", label: t("Title"), required: true, disabled: isSystem },
+          { name: "content", type: "tiptap", label: t("Content"), required: true, editorPreset: "full", imageFolder: "uploads/content_page" } as any,
+          { name: "cover", type: "file", label: t("Cover"), accept: "image/*", notes: t("Optional localized cover image") } as any,
+        ],
+      },
+    ],
+    defaults: {
+      tag: contentPage.tag ?? "",
+      title: contentPage.title ?? {},
+      content: contentPage.content ?? {},
+      cover: coverDefaults,
+    } as unknown as Record<string, AutoFormDefaultValue>,
+    onSuccess: () => {
+      alertSuccess({ title: t("Success"), message: t("Page updated") });
+      navigate("/other/content-pages");
+    },
+  });
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      {errors.general && (
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+          {errors.general}
+        </p>
+      )}
+
+      {form}
+
+      <div className="sticky bottom-0 z-10 flex justify-end rounded-lg border border-border bg-background/95 px-4 py-3 backdrop-blur">
+        <Button
+          type="submit"
+          busy={saving}
+          variant="primary"
+          size="sm"
+        >
+          <Save size={16} />
+          {saving ? t("Saving…") : t("Save")}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+export default function ContentPageEditPage() {
+  const { t } = useTranslation();
+  const params = useParams<{ id: string }>();
+  const pageId = params.id ?? "";
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -67,51 +145,6 @@ export default function ContentPageEditPage() {
     return () => { active = false; };
   }, [pageId, t]);
 
-  const isSystem = contentPage?.is_system === CONTENT_PAGE_SYSTEM_YES;
-
-  const coverDefaults = useMemo(() => {
-    if (!contentPage) return {};
-    const result: Record<string, { name: string; url: string }> = {};
-    for (const locale of locales) {
-      const path = (contentPage.cover[locale] ?? "").trim();
-      if (path) {
-        result[locale] = {
-          name: path,
-          url: (contentPage.cover_url[locale] ?? "").trim() || attachmentUrl(path),
-        };
-      }
-    }
-    return result;
-  }, [contentPage, locales]);
-
-  const { submit, busy: saving, form, errors } = useAutoForm(api, {
-    url: `content_page/${pageId}`,
-    method: "patch",
-    bodyType: "multipart",
-    tiptapImageUpload: uploadAdminTiptapImage,
-    fields: [
-      { name: "tag", type: "text", label: t("Tag"), required: true, disabled: isSystem },
-      {
-        type: "localized",
-        children: [
-          { name: "title", type: "text", label: t("Title"), required: true, disabled: isSystem },
-          { name: "content", type: "tiptap", label: t("Content"), required: true, editorPreset: "full", imageFolder: "uploads/content_page" } as any,
-          { name: "cover", type: "file", label: t("Cover"), accept: "image/*", notes: t("Optional localized cover image") } as any,
-        ],
-      },
-    ],
-    defaults: contentPage ? {
-      tag: contentPage.tag ?? "",
-      title: contentPage.title ?? {},
-      content: contentPage.content ?? {},
-      cover: coverDefaults,
-    } as unknown as Record<string, AutoFormDefaultValue> : undefined,
-    onSuccess: () => {
-      alertSuccess({ title: t("Success"), message: t("Page updated") });
-      navigate("/other/content-pages");
-    },
-  });
-
   return (
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -136,27 +169,7 @@ export default function ContentPageEditPage() {
       )}
 
       {!loading && contentPage && (
-        <form onSubmit={submit} className="space-y-4">
-          {errors.general && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-              {errors.general}
-            </p>
-          )}
-
-          {form}
-
-          <div className="sticky bottom-0 z-10 flex justify-end rounded-lg border border-border bg-background/95 px-4 py-3 backdrop-blur">
-            <Button
-              type="submit"
-              busy={saving}
-              variant="primary"
-              size="sm"
-            >
-              <Save size={16} />
-              {saving ? t("Saving…") : t("Save")}
-            </Button>
-          </div>
-        </form>
+        <ContentPageForm key={pageId} pageId={pageId} contentPage={contentPage} />
       )}
     </section>
   );

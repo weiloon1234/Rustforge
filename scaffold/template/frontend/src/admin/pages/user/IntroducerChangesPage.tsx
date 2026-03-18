@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import type {
@@ -29,16 +29,14 @@ function canChangeIntroducer(account: AdminMeOutput | null): boolean {
 }
 
 function ChangeIntroducerForm({
-  onCreated,
   formId,
   onBusyChange,
 }: {
-  onCreated: () => void;
   formId: string;
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
 
   const { submit, busy, form } = useAutoForm(api, {
     url: "introducer_changes",
@@ -66,9 +64,8 @@ function ChangeIntroducerForm({
       },
     ],
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({ title: t("Success"), message: t("Introducer changed") });
-      onCreated();
     },
     onError: (error) => {
       alertError({
@@ -94,10 +91,7 @@ export default function IntroducerChangesPage() {
   const account = useAuthStore((state) => state.account);
   const canChange = canChangeIntroducer(account);
 
-  const refreshRef = useRef<(() => void) | null>(null);
-
-  const handleCreate = (refresh: () => void) => {
-    refreshRef.current = refresh;
+  const handleCreate = () => {
     const formId = `introducer-change-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let modalId = "";
     const renderFooter = (busy: boolean) => (
@@ -120,9 +114,6 @@ export default function IntroducerChangesPage() {
       size: "lg",
       content: (
         <ChangeIntroducerForm
-          onCreated={() => {
-            refreshRef.current?.();
-          }}
           formId={formId}
           onBusyChange={(busy) => {
             if (!modalId) return;
@@ -143,9 +134,9 @@ export default function IntroducerChangesPage() {
       subtitle={t("View introducer change logs")}
       headerActions={
         canChange
-          ? (refresh) => (
+          ? (
               <Button
-                onClick={() => handleCreate(refresh)}
+                onClick={() => handleCreate()}
                 variant="primary"
                 size="sm"
               >

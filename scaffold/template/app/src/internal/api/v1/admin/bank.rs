@@ -36,6 +36,16 @@ pub fn router(state: AppApiState) -> ApiRouter {
             ),
         )
         .api_route(
+            "/options",
+            with_permission_check_get_with(
+                list_options,
+                AdminGuard,
+                PermissionMode::Any,
+                [Permission::BankRead.as_str(), Permission::BankManage.as_str()],
+                |op| op.summary("List bank options").tag("Admin Banks"),
+            ),
+        )
+        .api_route(
             "/{id}",
             with_permission_check_get_with(
                 detail,
@@ -168,6 +178,15 @@ fn bank_output(bank: &generated::models::BankRecord) -> BankOutput {
         created_at: bank.created_at,
         updated_at: bank.updated_at,
     }
+}
+
+async fn list_options(
+    State(state): State<AppApiState>,
+    _auth: AuthUser<AdminGuard>,
+) -> Result<ApiResponse<Vec<BankOutput>>, AppError> {
+    let banks = workflow::list_options(&state).await?;
+    let out: Vec<BankOutput> = banks.iter().map(bank_output).collect();
+    Ok(ApiResponse::success(out, &t("Bank options")))
 }
 
 async fn create(

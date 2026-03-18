@@ -36,18 +36,16 @@ const STATUS_LABELS: Record<string, string> = {
 function CryptoNetworkForm({
   networkId,
   defaults,
-  onSaved,
   formId,
   onBusyChange,
 }: {
   networkId?: string;
   defaults?: Record<string, unknown>;
-  onSaved: () => void;
   formId: string;
   onBusyChange: (busy: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const close = useModalStore((s) => s.close);
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
 
   const { submit, busy, form } = useAutoForm(api, {
     url: networkId ? `crypto_networks/${networkId}` : "crypto_networks",
@@ -71,9 +69,8 @@ function CryptoNetworkForm({
     ],
     defaults: (defaults ?? { status: "1", sort_order: 0 }) as Record<string, AutoFormDefaultValue>,
     onSuccess: () => {
-      close();
+      closeWithRefresh();
       alertSuccess({ title: t("Success"), message: networkId ? t("Crypto network updated") : t("Crypto network created") });
-      onSaved();
     },
     onError: (error) => {
       alertError({ title: t("Error"), message: normalizeErrorMessage(error, t("Failed to save crypto network.")) });
@@ -91,8 +88,7 @@ export default function CryptoNetworksPage() {
   const account = useAuthStore((s) => s.account);
   const canManage = useAuthStore.hasPermission(PERMISSION.CRYPTO_NETWORK_MANAGE, account);
 
-  const openFormModal = (row: CryptoNetworkDatatableRow | null, refresh: () => void) => {
-    refreshRef.current = refresh;
+  const openFormModal = (row: CryptoNetworkDatatableRow | null) => {
     const isEdit = !!row;
     const formId = `crypto-network-form-${Date.now()}`;
     let modalId = "";
@@ -118,7 +114,6 @@ export default function CryptoNetworksPage() {
             status: String(row.status),
             sort_order: row.sort_order,
           } : undefined}
-          onSaved={() => refreshRef.current?.()}
           formId={formId}
           onBusyChange={(busy) => {
             if (!modalId) return;
@@ -130,7 +125,7 @@ export default function CryptoNetworksPage() {
     });
   };
 
-  const handleDelete = async (row: CryptoNetworkDatatableRow, refresh: () => void) => {
+  const handleDelete = async (row: CryptoNetworkDatatableRow) => {
     await alertConfirm({
       title: t("Delete Crypto Network"),
       message: t("Are you sure you want to delete :name?", { name: row.name }),
@@ -140,7 +135,7 @@ export default function CryptoNetworksPage() {
         try {
           await api.delete(`crypto_networks/${row.id}`);
           alertSuccess({ title: t("Success"), message: t("Crypto network deleted") });
-          refresh();
+          refreshRef.current?.();
         } catch (error) {
           alertError({ title: t("Error"), message: normalizeErrorMessage(error, t("Failed to delete crypto network.")) });
         }
@@ -153,13 +148,14 @@ export default function CryptoNetworksPage() {
       url="datatable/crypto_network/query"
       title={t("Crypto Networks")}
       subtitle={t("Manage crypto network list")}
-      headerActions={
-        canManage ? (
-          <Button size="sm" variant="primary" onClick={() => openFormModal(null, () => refreshRef.current?.())}>
+      headerActions={canManage ? (refresh) => {
+        refreshRef.current = refresh;
+        return (
+          <Button size="sm" variant="primary" onClick={() => openFormModal(null)}>
             <Plus size={16} className="mr-1" /> {t("Create")}
           </Button>
-        ) : undefined
-      }
+        );
+      } : undefined}
       columns={[
         ...(canManage
           ? [{
@@ -168,17 +164,16 @@ export default function CryptoNetworksPage() {
               sortable: false,
               render: (row: CryptoNetworkDatatableRow, ctx: DataTableCellContext<CryptoNetworkDatatableRow>) => (
                 <div className="flex items-center gap-1">
-                  <Button type="button" onClick={() => openFormModal(row, ctx.refresh)} variant="plain" size="sm" iconOnly title={t("Edit")}>
+                  <Button type="button" onClick={() => openFormModal(row)} variant="plain" size="sm" iconOnly title={t("Edit")}>
                     <Pencil size={16} />
                   </Button>
-                  <Button type="button" onClick={() => handleDelete(row, ctx.refresh)} variant="plain" size="sm" iconOnly title={t("Delete")}>
+                  <Button type="button" onClick={() => handleDelete(row)} variant="plain" size="sm" iconOnly title={t("Delete")}>
                     <Trash2 size={16} />
                   </Button>
                 </div>
               ),
             }]
           : []),
-        { key: "id", label: t("ID"), cellClassName: "tabular-nums text-muted" },
         { key: "name", label: t("Name"), cellClassName: "font-medium" },
         { key: "symbol", label: t("Symbol") },
         {
