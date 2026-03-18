@@ -13,6 +13,16 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Decimal(pub rust_decimal::Decimal);
 
+impl Decimal {
+    pub const ZERO: Self = Self(rust_decimal::Decimal::ZERO);
+    pub const ONE: Self = Self(rust_decimal::Decimal::ONE);
+    pub const TWO: Self = Self(rust_decimal::Decimal::TWO);
+    pub const TEN: Self = Self(rust_decimal::Decimal::TEN);
+    pub const ONE_HUNDRED: Self = Self(rust_decimal::Decimal::ONE_HUNDRED);
+    pub const ONE_THOUSAND: Self = Self(rust_decimal::Decimal::ONE_THOUSAND);
+    pub const NEGATIVE_ONE: Self = Self(rust_decimal::Decimal::NEGATIVE_ONE);
+}
+
 impl Deref for Decimal {
     type Target = rust_decimal::Decimal;
 
