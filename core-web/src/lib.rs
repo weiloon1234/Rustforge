@@ -4,6 +4,8 @@ pub mod auth;
 pub mod authz;
 pub mod contracts;
 pub mod datatable;
+pub mod datetime;
+pub mod decimal;
 pub mod extract;
 pub mod ids;
 pub mod logging;
@@ -17,4 +19,6 @@ pub mod static_assets;
 pub mod ts_exports;
 pub mod utils;
 
+pub use datetime::DateTime;
+pub use decimal::Decimal;
 pub use patch::Patch;

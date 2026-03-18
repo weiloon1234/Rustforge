@@ -1,4 +1,5 @@
 use core_web::ids::SnowflakeId;
+use core_web::{DateTime, Decimal};
 use generated::models::CompanyCryptoAccountStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -10,9 +11,7 @@ use validator::Validate;
 pub struct AdminCompanyCryptoAccountInput {
     pub crypto_network_id: SnowflakeId,
     pub wallet_address: String,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub conversion_rate: rust_decimal::Decimal,
+    pub conversion_rate: Decimal,
     pub status: CompanyCryptoAccountStatus,
     #[serde(default)]
     pub sort_order: Option<i32>,
@@ -25,15 +24,9 @@ pub struct CompanyCryptoAccountOutput {
     pub crypto_network_id: SnowflakeId,
     pub crypto_network_name: Option<String>,
     pub wallet_address: String,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub conversion_rate: rust_decimal::Decimal,
+    pub conversion_rate: Decimal,
     pub status: CompanyCryptoAccountStatus,
     pub sort_order: i32,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub updated_at: time::OffsetDateTime,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
 }

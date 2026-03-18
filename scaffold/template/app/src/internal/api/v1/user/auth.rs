@@ -329,14 +329,14 @@ fn to_auth_output(
             UserAuthOutput {
                 token_type: "Bearer".to_string(),
                 access_token: tokens.access_token,
-                access_expires_at: tokens.access_expires_at,
+                access_expires_at: tokens.access_expires_at.map(Into::into),
                 refresh_token: None,
             }
         }
         AuthClientType::Mobile => UserAuthOutput {
             token_type: "Bearer".to_string(),
             access_token: tokens.access_token,
-            access_expires_at: tokens.access_expires_at,
+            access_expires_at: tokens.access_expires_at.map(Into::into),
             refresh_token: Some(tokens.refresh_token),
         },
     }

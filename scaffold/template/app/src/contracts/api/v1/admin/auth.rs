@@ -2,6 +2,7 @@ use crate::contracts::types::username::UsernameString;
 use core_web::auth::AuthClientType;
 use core_web::contracts::rustforge_contract;
 use core_web::ids::SnowflakeId;
+use core_web::DateTime;
 use core_web::Patch;
 use generated::models::AdminType;
 use schemars::JsonSchema;
@@ -80,9 +81,7 @@ pub struct AdminPasswordUpdateInput {
 pub struct AdminAuthOutput {
     pub token_type: String,
     pub access_token: String,
-    #[schemars(with = "Option<String>")]
-    #[ts(type = "string | null")]
-    pub access_expires_at: Option<time::OffsetDateTime>,
+    pub access_expires_at: Option<DateTime>,
     pub refresh_token: Option<String>,
     #[serde(default)]
     pub scopes: Vec<String>,

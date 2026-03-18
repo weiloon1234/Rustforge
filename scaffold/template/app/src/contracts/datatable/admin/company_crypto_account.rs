@@ -3,6 +3,7 @@ use core_web::datatable::{
     DataTableGenericQueryRequest, DataTableScopedContract,
 };
 use core_web::ids::SnowflakeId;
+use core_web::Decimal;
 use generated::models::CompanyCryptoAccountStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -18,9 +19,7 @@ pub struct CompanyCryptoAccountDatatableRow {
     pub crypto_network_id: SnowflakeId,
     pub crypto_network_name: Option<String>,
     pub wallet_address: String,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub conversion_rate: rust_decimal::Decimal,
+    pub conversion_rate: Decimal,
     pub status: CompanyCryptoAccountStatus,
     pub status_label: String,
     pub sort_order: i32,

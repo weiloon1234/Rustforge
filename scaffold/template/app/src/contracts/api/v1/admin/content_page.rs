@@ -1,4 +1,5 @@
 use core_web::ids::SnowflakeId;
+use core_web::DateTime;
 use generated::localized::LocalizedInput;
 use generated::models::ContentPageSystemFlag;
 use schemars::JsonSchema;
@@ -53,12 +54,8 @@ pub struct AdminContentPageOutput {
     pub content: generated::LocalizedText,
     pub cover: generated::LocalizedText,
     pub cover_url: generated::LocalizedText,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub updated_at: time::OffsetDateTime,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
@@ -71,12 +68,8 @@ pub struct AdminContentPageUpdateOutput {
     pub content: generated::LocalizedText,
     pub cover: generated::LocalizedText,
     pub cover_url: generated::LocalizedText,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub updated_at: time::OffsetDateTime,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
@@ -97,8 +90,8 @@ impl From<generated::models::ContentPageRecord> for AdminContentPageOutput {
             content: value.content_translations.unwrap_or_default(),
             cover_url,
             cover,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
+            created_at: value.created_at.into(),
+            updated_at: value.updated_at.into(),
         }
     }
 }
@@ -115,8 +108,8 @@ impl From<generated::models::ContentPageRecord> for AdminContentPageUpdateOutput
             content: value.content_translations.unwrap_or_default(),
             cover_url,
             cover,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
+            created_at: value.created_at.into(),
+            updated_at: value.updated_at.into(),
         }
     }
 }

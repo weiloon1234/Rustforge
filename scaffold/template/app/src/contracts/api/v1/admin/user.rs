@@ -1,6 +1,7 @@
 use crate::contracts::types::username::UsernameString;
 use core_web::contracts::rustforge_contract;
 use core_web::ids::SnowflakeId;
+use core_web::DateTime;
 use core_web::Patch;
 use generated::models::UserBanStatus;
 use schemars::JsonSchema;
@@ -83,12 +84,8 @@ pub struct UserManageOutput {
     pub country_iso2: Option<String>,
     pub contact_number: Option<String>,
     pub ban: UserBanStatus,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub updated_at: time::OffsetDateTime,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
 }
 
 impl From<generated::models::UserRecord> for UserManageOutput {
@@ -103,8 +100,8 @@ impl From<generated::models::UserRecord> for UserManageOutput {
             country_iso2: value.country_iso2,
             contact_number: value.contact_number,
             ban: value.ban,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
+            created_at: value.created_at.into(),
+            updated_at: value.updated_at.into(),
         }
     }
 }

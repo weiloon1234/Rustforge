@@ -175,8 +175,8 @@ fn bank_output(bank: &generated::models::BankRecord) -> BankOutput {
         logo_url: bank.logo_url.clone(),
         status: bank.status,
         sort_order: bank.sort_order,
-        created_at: bank.created_at,
-        updated_at: bank.updated_at,
+        created_at: bank.created_at.into(),
+        updated_at: bank.updated_at.into(),
     }
 }
 

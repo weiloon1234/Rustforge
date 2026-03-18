@@ -196,8 +196,8 @@ pub async fn build_user_summary_output(
         total_user_count: total_filtered,
         total_filtered,
         banned_count,
-        total_credit_1,
-        total_credit_2,
+        total_credit_1: total_credit_1.into(),
+        total_credit_2: total_credit_2.into(),
     })
 }
 

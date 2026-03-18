@@ -84,8 +84,8 @@ async fn create(
             account_number: account.account_number.clone(),
             status: account.status,
             sort_order: account.sort_order,
-            created_at: account.created_at,
-            updated_at: account.updated_at,
+            created_at: account.created_at.into(),
+            updated_at: account.updated_at.into(),
         },
         &t("Company bank account created"),
     ))
@@ -107,8 +107,8 @@ async fn detail(
             account_number: account.account_number.clone(),
             status: account.status,
             sort_order: account.sort_order,
-            created_at: account.created_at,
-            updated_at: account.updated_at,
+            created_at: account.created_at.into(),
+            updated_at: account.updated_at.into(),
         },
         &t("Company bank account detail"),
     ))
@@ -131,8 +131,8 @@ async fn update(
             account_number: account.account_number.clone(),
             status: account.status,
             sort_order: account.sort_order,
-            created_at: account.created_at,
-            updated_at: account.updated_at,
+            created_at: account.created_at.into(),
+            updated_at: account.updated_at.into(),
         },
         &t("Company bank account updated"),
     ))

@@ -255,7 +255,7 @@ fn to_auth_output(
             AdminAuthOutput {
                 token_type: "Bearer".to_string(),
                 access_token: tokens.access_token,
-                access_expires_at: tokens.access_expires_at,
+                access_expires_at: tokens.access_expires_at.map(Into::into),
                 refresh_token: None,
                 scopes: tokens.abilities,
             }
@@ -263,7 +263,7 @@ fn to_auth_output(
         AuthClientType::Mobile => AdminAuthOutput {
             token_type: "Bearer".to_string(),
             access_token: tokens.access_token,
-            access_expires_at: tokens.access_expires_at,
+            access_expires_at: tokens.access_expires_at.map(Into::into),
             refresh_token: Some(tokens.refresh_token),
             scopes: tokens.abilities,
         },

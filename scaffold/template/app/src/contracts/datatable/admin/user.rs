@@ -3,6 +3,7 @@ use core_web::datatable::{
     DataTableGenericQueryRequest, DataTableScopedContract,
 };
 use core_web::ids::SnowflakeId;
+use core_web::Decimal;
 use generated::models::UserBanStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -23,12 +24,8 @@ pub struct UserDatatableRow {
     pub country_iso2: Option<String>,
     pub contact_number: Option<String>,
     pub ban: UserBanStatus,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub credit_1: rust_decimal::Decimal,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub credit_2: rust_decimal::Decimal,
+    pub credit_1: Decimal,
+    pub credit_2: Decimal,
     pub introducer_user_id: Option<SnowflakeId>,
     pub created_at: String,
     pub updated_at: String,
@@ -43,12 +40,8 @@ pub struct UserDatatableSummaryOutput {
     pub total_filtered: i64,
     #[ts(type = "number")]
     pub banned_count: i64,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub total_credit_1: rust_decimal::Decimal,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub total_credit_2: rust_decimal::Decimal,
+    pub total_credit_1: Decimal,
+    pub total_credit_2: Decimal,
 }
 
 #[derive(Debug, Clone, Default)]

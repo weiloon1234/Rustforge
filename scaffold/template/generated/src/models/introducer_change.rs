@@ -11,7 +11,7 @@ use core_db::common::pagination::resolve_per_page;
 use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::localized::types::LocalizedMap;
 use crate::generated::models::common::{FieldChange, FieldInput, Page, log_observer_error, renumber_placeholders};
-use core_db::common::model_api::{Column, Create, ManyRelation, ModelDef, OneRelation, Patch, Query, QueryState};
+use core_db::common::model_api::{ColExpr, Column, Create, CreateState, ManyRelation, ModelDef, OneRelation, Patch, PatchState, Query, QueryState};
 use crate::generated::models::user::{UserDbCol, UserModel, UserRow, UserRel};
 use crate::generated::models::admin::{AdminDbCol, AdminModel, AdminRow};
 use core_db::common::model_observer::{ModelEvent, try_get_observer};
@@ -69,13 +69,19 @@ pub struct IntroducerChangeRecord {
     pub to_user_id: i64,
     pub admin_id: i64,
     pub remark: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
     #[schemars(with = "String")]
     pub created_at: time::OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
     #[schemars(with = "String")]
     pub updated_at: time::OffsetDateTime,
+    #[serde(default)]
     pub user: Option<UserRow>,
+    #[serde(default)]
     pub from_user: Option<UserRow>,
+    #[serde(default)]
     pub to_user: Option<UserRow>,
+    #[serde(default)]
     pub admin: Option<AdminRow>,
 }
 
@@ -272,1306 +278,124 @@ async fn load_admin<'db>(db: DbConn<'db>, parents: &[IntroducerChangeRow]) -> Re
         Ok(out)
     }
 
-#[derive(Clone)]
-pub struct IntroducerChangeQueryInner<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-    select_sql: Option<String>,
-    from_sql: Option<String>,
-    count_sql: Option<String>,
-    distinct: bool,
-    distinct_on: Option<String>,
-    lock_sql: Option<&'static str>,
-    join_sql: Vec<String>,
-    join_binds: Vec<BindValue>,
-    where_sql: Vec<String>,
-    order_sql: Vec<String>,
-    group_by_sql: Vec<String>,
-    having_sql: Vec<String>,
-    having_binds: Vec<BindValue>,
-    offset: Option<i64>,
-    limit: Option<i64>,
-    binds: Vec<BindValue>,
-}
-
-
-
-impl<'db> IntroducerChangeQueryInner<'db> {
-    pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self { db, base_url, select_sql: Some("id, user_id, from_user_id, to_user_id, admin_id, remark, created_at, updated_at".to_string()), from_sql: None, count_sql: None, distinct: false, distinct_on: None, lock_sql: None, join_sql: vec![], join_binds: vec![], where_sql: vec![], order_sql: vec![], group_by_sql: vec![], having_sql: vec![], having_binds: vec![], offset: None, limit: None, binds: vec![] }
-    }
-    pub fn from_state(state: QueryState<'db>) -> Self {
-        Self { db: state.db, base_url: state.base_url, select_sql: state.select_sql, from_sql: state.from_sql, count_sql: state.count_sql, distinct: state.distinct, distinct_on: state.distinct_on, lock_sql: state.lock_sql, join_sql: state.join_sql, join_binds: state.join_binds, where_sql: state.where_sql, order_sql: state.order_sql, group_by_sql: state.group_by_sql, having_sql: state.having_sql, having_binds: state.having_binds, offset: state.offset, limit: state.limit, binds: state.binds }
-    }
-    pub fn into_state(self) -> QueryState<'db> {
-        QueryState { db: self.db, base_url: self.base_url, select_sql: self.select_sql, from_sql: self.from_sql, count_sql: self.count_sql, distinct: self.distinct, distinct_on: self.distinct_on, lock_sql: self.lock_sql, join_sql: self.join_sql, join_binds: self.join_binds, where_sql: self.where_sql, order_sql: self.order_sql, group_by_sql: self.group_by_sql, having_sql: self.having_sql, having_binds: self.having_binds, offset: self.offset, limit: self.limit, binds: self.binds, with_deleted: false, only_deleted: false }
-    }
-    pub fn where_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::Id.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::Id.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_user_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::UserId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_user_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::UserId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_from_user_id(mut self, op: Op, val: Option<i64>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::FromUserId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_from_user_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::FromUserId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_to_user_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::ToUserId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_to_user_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::ToUserId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_admin_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::AdminId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_admin_id_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::AdminId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_remark(mut self, op: Op, val: Option<String>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::Remark.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_remark_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::Remark.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_created_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_updated_at_raw<T: Into<BindValue>>(mut self, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    pub fn where_key(self, id: i64) -> Self { self.where_id(Op::Eq, id) }
-    pub fn where_key_in<T: Clone + Into<BindValue>>(self, vals: &[T]) -> Self { self.where_in(IntroducerChangeDbCol::Id, vals) }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: IntroducerChangeDbCol, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
-        self
-    }
-    fn where_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = clause.into();
-        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos + 1, &ph);
-            idx += 1;
-        }
-        self.where_sql.push(clause);
-        self.binds.extend(incoming);
-        self
-    }
-    pub fn where_in<T: Clone + Into<BindValue>>(mut self, col: IntroducerChangeDbCol, vals: &[T]) -> Self {
-        if vals.is_empty() {
-            self.where_sql.push("1=0".to_string());
-            return self;
-        }
-        let start = self.binds.len() + 1;
-        let mut placeholders = Vec::with_capacity(vals.len());
-        for (i, v) in vals.iter().enumerate() {
-            placeholders.push(format!("${}", start + i));
-            self.binds.push(v.clone().into());
-        }
-        let clause = format!("{} IN ({})", col.as_sql(), placeholders.join(", "));
-        self.where_sql.push(clause);
-        self
-    }
-    pub fn where_not_in<T: Clone + Into<BindValue>>(mut self, col: IntroducerChangeDbCol, vals: &[T]) -> Self {
-        if vals.is_empty() { return self; }
-        let start = self.binds.len() + 1;
-        let mut placeholders = Vec::with_capacity(vals.len());
-        for (i, v) in vals.iter().enumerate() {
-            placeholders.push(format!("${}", start + i));
-            self.binds.push(v.clone().into());
-        }
-        let clause = format!("{} NOT IN ({})", col.as_sql(), placeholders.join(", "));
-        self.where_sql.push(clause);
-        self
-    }
-    pub fn where_between<T: Into<BindValue>>(mut self, col: IntroducerChangeDbCol, low: T, high: T) -> Self {
-        let idx1 = self.binds.len() + 1;
-        let idx2 = idx1 + 1;
-        self.where_sql.push(format!("{} BETWEEN ${} AND ${}", col.as_sql(), idx1, idx2));
-        self.binds.push(low.into());
-        self.binds.push(high.into());
-        self
-    }
-    pub fn where_null(mut self, col: IntroducerChangeDbCol) -> Self {
-        self.where_sql.push(format!("{} IS NULL", col.as_sql()));
-        self
-    }
-    pub fn where_not_null(mut self, col: IntroducerChangeDbCol) -> Self {
-        self.where_sql.push(format!("{} IS NOT NULL", col.as_sql()));
-        self
-    }
-    pub fn or_where_col<T: Into<BindValue>>(mut self, col: IntroducerChangeDbCol, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        let clause = format!("{} {} ${}", col.as_sql(), op.as_sql(), idx);
-        if let Some(last) = self.where_sql.pop() {
-            self.where_sql.push(format!("({} OR {})", last, clause));
-        } else {
-            self.where_sql.push(clause);
-        }
-        self.binds.push(val.into());
-        self
-    }
-    fn or_where_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = clause.into();
-        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos + 1, &ph);
-            idx += 1;
-        }
-        if let Some(last) = self.where_sql.pop() {
-            self.where_sql.push(format!("({} OR {})", last, clause));
-        } else {
-            self.where_sql.push(clause);
-        }
-        self.binds.extend(incoming);
-        self
-    }
-    pub fn where_group(self, f: impl FnOnce(Self) -> Self) -> Self {
-        let start_where = self.where_sql.len();
-        let grouped = f(self);
-        let mut result = grouped;
-        if result.where_sql.len() > start_where {
-            let group_clauses: Vec<String> = result.where_sql.drain(start_where..).collect();
-            let grouped_sql = format!("({})", group_clauses.join(" AND "));
-            result.where_sql.push(grouped_sql);
-        }
-        result
-    }
-    pub fn or_where_group(self, f: impl FnOnce(Self) -> Self) -> Self {
-        let start_where = self.where_sql.len();
-        let grouped = f(self);
-        let mut result = grouped;
-        if result.where_sql.len() > start_where {
-            let group_clauses: Vec<String> = result.where_sql.drain(start_where..).collect();
-            let grouped_sql = format!("({})", group_clauses.join(" AND "));
-            if let Some(last) = result.where_sql.pop() {
-                result.where_sql.push(format!("({} OR {})", last, grouped_sql));
-            } else {
-                result.where_sql.push(grouped_sql);
-            }
-        }
-        result
-    }
-    pub fn select_cols(mut self, cols: &[IntroducerChangeDbCol]) -> Self {
-        if cols.is_empty() {
-            self.select_sql = Some("id, user_id, from_user_id, to_user_id, admin_id, remark, created_at, updated_at".to_string());
-        } else {
-            let mut seen = std::collections::BTreeSet::new();
-            let mut list: Vec<String> = "id, user_id, from_user_id, to_user_id, admin_id, remark, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect();
-            for s in &list { seen.insert(s.clone()); }
-            for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
-            self.select_sql = Some(list.join(", "));
-        }
-        self
-    }
-    pub fn add_select_cols(mut self, cols: &[IntroducerChangeDbCol]) -> Self {
-        let mut seen = std::collections::BTreeSet::new();
-        let mut list: Vec<String> = match self.select_sql.take() {
-            Some(s) if !s.is_empty() => s.split(',').map(|s| s.trim().to_string()).collect(),
-            _ => "id, user_id, from_user_id, to_user_id, admin_id, remark, created_at, updated_at".split(',').map(|s| s.trim().to_string()).collect(),
-        };
-        for s in &list { seen.insert(s.clone()); }
-        for c in cols { let s = c.as_sql().to_string(); if seen.insert(s.clone()) { list.push(s); } }
-        self.select_sql = Some(list.join(", "));
-        self
-    }
-    fn select_raw(mut self, sql: impl Into<String>) -> Self {
-        let s = sql.into();
-        if s.is_empty() {
-            self.select_sql = Some("id, user_id, from_user_id, to_user_id, admin_id, remark, created_at, updated_at".to_string());
-        } else {
-            self.select_sql = Some(format!("id, user_id, from_user_id, to_user_id, admin_id, remark, created_at, updated_at, {}", s));
-        }
-        self
-    }
-    fn add_select_raw(mut self, sql: impl Into<String>) -> Self {
-        let s = sql.into();
-        if s.is_empty() { return self; }
-        let mut base = self.select_sql.take().unwrap_or_else(|| "id, user_id, from_user_id, to_user_id, admin_id, remark, created_at, updated_at".to_string());
-        if !base.is_empty() { base.push_str(", "); }
-        base.push_str(&s);
-        self.select_sql = Some(base);
-        self
-    }
-    fn inner_join_raw<T: Into<BindValue>>(mut self, table: impl Into<String>, on_clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = format!("INNER JOIN {} ON {}", table.into(), on_clause.into());
-        let mut incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.join_binds.len() + self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos+1, &ph);
-            idx += 1;
-        }
-        self.join_sql.push(clause);
-        self.join_binds.append(&mut incoming);
-        self
-    }
-    fn left_join_raw<T: Into<BindValue>>(mut self, table: impl Into<String>, on_clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = format!("LEFT JOIN {} ON {}", table.into(), on_clause.into());
-        let mut incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.join_binds.len() + self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos+1, &ph);
-            idx += 1;
-        }
-        self.join_sql.push(clause);
-        self.join_binds.append(&mut incoming);
-        self
-    }
-    fn right_join_raw<T: Into<BindValue>>(mut self, table: impl Into<String>, on_clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = format!("RIGHT JOIN {} ON {}", table.into(), on_clause.into());
-        let mut incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.join_binds.len() + self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos+1, &ph);
-            idx += 1;
-        }
-        self.join_sql.push(clause);
-        self.join_binds.append(&mut incoming);
-        self
-    }
-    fn full_join_raw<T: Into<BindValue>>(mut self, table: impl Into<String>, on_clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = format!("FULL OUTER JOIN {} ON {}", table.into(), on_clause.into());
-        let mut incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.join_binds.len() + self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos+1, &ph);
-            idx += 1;
-        }
-        self.join_sql.push(clause);
-        self.join_binds.append(&mut incoming);
-        self
-    }
-    pub fn order_by(mut self, col: IntroducerChangeDbCol, dir: OrderDir) -> Self {
-        self.order_sql.push(format!("{} {}", col.as_sql(), dir.as_sql()));
-        self
-    }
-    pub fn order_by_nulls_first(mut self, col: IntroducerChangeDbCol, dir: OrderDir) -> Self {
-        self.order_sql.push(format!("{} {} NULLS FIRST", col.as_sql(), dir.as_sql()));
-        self
-    }
-    pub fn order_by_nulls_last(mut self, col: IntroducerChangeDbCol, dir: OrderDir) -> Self {
-        self.order_sql.push(format!("{} {} NULLS LAST", col.as_sql(), dir.as_sql()));
-        self
-    }
-    pub fn distinct(mut self) -> Self { self.distinct = true; self }
-    pub fn distinct_on(mut self, cols: &[IntroducerChangeDbCol]) -> Self {
-        if cols.is_empty() { return self; }
-        let list: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
-        self.distinct_on = Some(list.join(", "));
-        self
-    }
-    pub fn select(mut self, cols: &[IntroducerChangeDbCol]) -> Self {
-        let names: Vec<&str> = cols.iter().map(|c| c.as_sql()).collect();
-        self.select_sql = Some(names.join(", "));
-        self
-    }
-    fn join(mut self, table: &str, first: &str, op: &str, second: &str) -> Self {
-        self.join_sql.push(format!("JOIN {} ON {} {} {}", table, first, op, second));
-        self
-    }
-    fn left_join(mut self, table: &str, first: &str, op: &str, second: &str) -> Self {
-        self.join_sql.push(format!("LEFT JOIN {} ON {} {} {}", table, first, op, second));
-        self
-    }
-    fn right_join(mut self, table: &str, first: &str, op: &str, second: &str) -> Self {
-        self.join_sql.push(format!("RIGHT JOIN {} ON {} {} {}", table, first, op, second));
-        self
-    }
-    fn from_raw(mut self, sql: &str) -> Self {
-        self.from_sql = Some(sql.to_string());
-        self
-    }
-    fn count_sql(mut self, sql: &str) -> Self {
-        self.count_sql = Some(sql.to_string());
-        self
-    }
-    fn where_exists<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = clause.into();
-        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos + 1, &ph);
-            idx += 1;
-        }
-        self.where_sql.push(format!("EXISTS ({})", clause));
-        self.binds.extend(incoming);
-        self
-    }
-    fn select_subquery(mut self, alias: &str, sql: &str) -> Self {
-        let current = self.select_sql.get_or_insert_with(|| "*".to_string());
-        current.push_str(&format!(", ({}) AS {}", sql, alias));
-        self
-    }
-    pub fn for_update(mut self) -> Self { self.lock_sql = Some("FOR UPDATE"); self }
-    pub fn for_update_skip_locked(mut self) -> Self { self.lock_sql = Some("FOR UPDATE SKIP LOCKED"); self }
-    pub fn for_no_key_update(mut self) -> Self { self.lock_sql = Some("FOR NO KEY UPDATE"); self }
-    pub fn for_share(mut self) -> Self { self.lock_sql = Some("FOR SHARE"); self }
-    pub fn for_key_share(mut self) -> Self { self.lock_sql = Some("FOR KEY SHARE"); self }
-    pub fn group_by(mut self, cols: &[IntroducerChangeDbCol]) -> Self {
-        for c in cols {
-            self.group_by_sql.push(c.as_sql().to_string());
-        }
-        self
-    }
-    pub fn having_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = clause.into();
-        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.having_binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos + 1, &ph);
-            idx += 1;
-        }
-        self.having_sql.push(clause);
-        self.having_binds.extend(incoming);
-        self
-    }
-    pub fn limit(mut self, n: i64) -> Self {
-        self.limit = Some(n);
-        self
-    }
-    pub fn offset(mut self, n: i64) -> Self {
-        self.offset = Some(n);
-        self
-    }
-    pub fn where_has_user(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = introducer_changes.user_id".to_string());
-        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        self.where_sql.push(clause);
-        self.binds.extend(sub_binds);
-        self
-    }
-    pub fn where_has_from_user(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = introducer_changes.from_user_id".to_string());
-        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        self.where_sql.push(clause);
-        self.binds.extend(sub_binds);
-        self
-    }
-    pub fn where_has_to_user(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = introducer_changes.to_user_id".to_string());
-        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        self.where_sql.push(clause);
-        self.binds.extend(sub_binds);
-        self
-    }
-    pub fn where_has_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "admin.id = introducer_changes.admin_id".to_string());
-        let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        self.where_sql.push(clause);
-        self.binds.extend(sub_binds);
-        self
-    }
-    pub fn where_doesnt_have_user(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = introducer_changes.user_id".to_string());
-        let mut clause = String::from("NOT EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        self.where_sql.push(clause);
-        self.binds.extend(sub_binds);
-        self
-    }
-    pub fn where_doesnt_have_from_user(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = introducer_changes.from_user_id".to_string());
-        let mut clause = String::from("NOT EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        self.where_sql.push(clause);
-        self.binds.extend(sub_binds);
-        self
-    }
-    pub fn where_doesnt_have_to_user(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = introducer_changes.to_user_id".to_string());
-        let mut clause = String::from("NOT EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        self.where_sql.push(clause);
-        self.binds.extend(sub_binds);
-        self
-    }
-    pub fn where_doesnt_have_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "admin.id = introducer_changes.admin_id".to_string());
-        let mut clause = String::from("NOT EXISTS (SELECT 1 FROM admin WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        self.where_sql.push(clause);
-        self.binds.extend(sub_binds);
-        self
-    }
-    pub fn or_where_has_user(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = introducer_changes.user_id".to_string());
-        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        if let Some(last) = self.where_sql.pop() {
-            self.where_sql.push(format!("({} OR {})", last, clause));
-        } else {
-            self.where_sql.push(clause);
-        }
-        self.binds.extend(sub_binds);
-        self
-    }
-    pub fn or_where_has_from_user(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = introducer_changes.from_user_id".to_string());
-        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        if let Some(last) = self.where_sql.pop() {
-            self.where_sql.push(format!("({} OR {})", last, clause));
-        } else {
-            self.where_sql.push(clause);
-        }
-        self.binds.extend(sub_binds);
-        self
-    }
-    pub fn or_where_has_to_user(mut self, scope: impl FnOnce(Query<'db, UserModel>) -> Query<'db, UserModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = introducer_changes.to_user_id".to_string());
-        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        if let Some(last) = self.where_sql.pop() {
-            self.where_sql.push(format!("({} OR {})", last, clause));
-        } else {
-            self.where_sql.push(clause);
-        }
-        self.binds.extend(sub_binds);
-        self
-    }
-    pub fn or_where_has_admin(mut self, scope: impl FnOnce(Query<'db, AdminModel>) -> Query<'db, AdminModel>) -> Self {
-        let start_idx = self.binds.len() + 1;
-        let scoped = scope(AdminModel::query_with_base_url(self.db.clone(), None));
-        let (mut sub_where, mut sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "admin.id = introducer_changes.admin_id".to_string());
-        let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        if let Some(last) = self.where_sql.pop() {
-            self.where_sql.push(format!("({} OR {})", last, clause));
-        } else {
-            self.where_sql.push(clause);
-        }
-        self.binds.extend(sub_binds);
-        self
-    }
-
-
-pub async fn get_as<T>(self) -> Result<Vec<T>>
-    where
-        T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Unpin + 'static,
-    {
-        let Self { db, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds, .. } = self;
-        let mut where_sql = where_sql;
-        let select_clause = match (distinct, distinct_on.as_ref()) {
-            (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
-            (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
-            (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
-        };
-        let table_name = from_sql.unwrap_or_else(|| "introducer_changes".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let mut sql = format!("SELECT {} {}{}", select_clause, from_clause, where_clause);
-        if !group_by_sql.is_empty() {
-            sql.push_str(" GROUP BY ");
-            sql.push_str(&group_by_sql.join(", "));
-        }
-        if !having_sql.is_empty() {
-            sql.push_str(" HAVING ");
-            sql.push_str(&having_sql.join(" AND "));
-        }
-        if !order_sql.is_empty() {
-            sql.push_str(" ORDER BY ");
-            sql.push_str(&order_sql.join(", "));
-        }
-        if let Some(off) = offset {
-            sql.push_str(" OFFSET ");
-            sql.push_str(&off.to_string());
-        }
-        if let Some(l) = limit {
-            sql.push_str(" LIMIT ");
-            sql.push_str(&l.to_string());
-        }
-        if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut q = sqlx::query_as::<_, T>(&sql);
-        for b in binds { q = bind(q, b); }
-        for b in join_binds { q = bind(q, b); }
-        for b in having_binds { q = bind(q, b); }
-        Ok(db.fetch_all(q).await?)
-    }
-    pub async fn get(self) -> Result<Vec<IntroducerChangeRecord>> {
-        let Self { db, base_url, select_sql, from_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset, limit, binds , .. } = self;
-        let mut where_sql = where_sql;
-        let select_clause = match (distinct, distinct_on.as_ref()) {
-            (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
-            (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
-            (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
-        };
-        let table_name = from_sql.unwrap_or_else(|| "introducer_changes".to_string());
-        let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
-        if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
-        if !where_sql.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&where_sql.join(" AND "));
-        }
-        if !group_by_sql.is_empty() {
-            sql.push_str(" GROUP BY ");
-            sql.push_str(&group_by_sql.join(", "));
-        }
-        if !having_sql.is_empty() {
-            sql.push_str(" HAVING ");
-            sql.push_str(&having_sql.join(" AND "));
-        }
-        if !order_sql.is_empty() {
-            sql.push_str(" ORDER BY ");
-            sql.push_str(&order_sql.join(", "));
-        }
-        if let Some(off) = offset {
-            sql.push_str(" OFFSET ");
-            sql.push_str(&off.to_string());
-        }
-        if let Some(l) = limit {
-            sql.push_str(" LIMIT ");
-            sql.push_str(&l.to_string());
-        }
-        if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).chain(having_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_as::<_, IntroducerChangeRow>(&sql);
-        for b in binds {
-            q = bind(q, b);
-        }
-        for b in join_binds { q = bind(q, b); }
-        for b in having_binds { q = bind(q, b); }
-        let rows = db.fetch_all(q).await?;
-        record_profiled_query("introducer_changes", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let user = load_user(db.clone(), &rows).await?;
-        let from_user = load_from_user(db.clone(), &rows).await?;
-        let to_user = load_to_user(db.clone(), &rows).await?;
-        let admin = load_admin(db.clone(), &rows).await?;
-        let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
-        let localized = LocalizedMap::default();
-        let mut out_vec = Vec::with_capacity(rows.len());
-        for r in rows {
-            let key = r.id.clone();
-            let mut record = hydrate_record(r.clone(), &LocalizedMap::default(), base_url.as_deref());
-            record.user = user.get(&key).cloned().unwrap_or(None);
-            record.from_user = from_user.get(&key).cloned().unwrap_or(None);
-            record.to_user = to_user.get(&key).cloned().unwrap_or(None);
-            record.admin = admin.get(&key).cloned().unwrap_or(None);
-            out_vec.push(record);
-        }
-        Ok(out_vec)
-    }
-
-    pub async fn first(self) -> Result<Option<IntroducerChangeRecord>> {
-        let mut v = self.limit(1).get().await?;
-        Ok(v.pop())
-    }
-
-    pub async fn first_or_fail(self) -> Result<IntroducerChangeRecord> {
-        self.first().await?.ok_or_else(|| anyhow::anyhow!("introducer_changes: record not found"))
-    }
-
-    pub async fn find(self, id: i64) -> Result<Option<IntroducerChangeRecord>> {
-        self.where_id(Op::Eq, id).first().await
-    }
-    pub async fn find_or_fail(self, id: i64) -> Result<IntroducerChangeRecord> {
-        self.find(id).await?.ok_or_else(|| anyhow::anyhow!("introducer_changes: record not found"))
-    }
-    pub async fn first_or_create(self, create: impl FnOnce(IntroducerChangeCreateInner<'db>) -> IntroducerChangeCreateInner<'db>) -> Result<IntroducerChangeRecord> {
-        let db = self.db.clone();
-        let base_url = self.base_url.clone();
-        if let Some(existing) = self.first().await? {
-            return Ok(existing);
-        }
-        let insert_builder = create(IntroducerChangeCreateInner::new(db.clone(), base_url.clone()));
-        let view = insert_builder.save().await?;
-        IntroducerChangeQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
-    }
-
-    pub async fn update_or_create(
-        self,
-        on_update: impl FnOnce(IntroducerChangePatchInner<'db>) -> IntroducerChangePatchInner<'db>,
-        on_create: impl FnOnce(IntroducerChangeCreateInner<'db>) -> IntroducerChangeCreateInner<'db>,
-    ) -> Result<IntroducerChangeRecord> {
-        let db = self.db.clone();
-        let base_url = self.base_url.clone();
-        let where_sql = self.where_sql.clone();
-        let binds = self.binds.clone();
-        if let Some(existing) = self.first().await? {
-            let mut update_builder = IntroducerChangePatchInner::new(db.clone(), base_url.clone());
-            update_builder.where_sql = where_sql;
-            update_builder.binds = binds;
-            let update_builder = on_update(update_builder);
-            update_builder.save().await?;
-            return IntroducerChangeQueryInner::new(db, base_url.clone()).find(existing.id.clone()).await.map(|r| r.unwrap());
-        }
-        let insert_builder = on_create(IntroducerChangeCreateInner::new(db.clone(), base_url.clone()));
-        let view = insert_builder.save().await?;
-        IntroducerChangeQueryInner::new(db, base_url).find(view.id).await.map(|r| r.unwrap())
-    }
-
-    pub async fn increment(self, col: IntroducerChangeDbCol, amount: i64) -> Result<u64> {
-        let db = self.db.clone();
-        let mut where_sql = self.where_sql;
-        let binds = self.binds;
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("UPDATE introducer_changes SET {} = {} + {} {}", col.as_sql(), col.as_sql(), amount, where_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query(&sql);
-        for b in binds { q = bind_query(q, b); }
-        let res = db.execute(q).await?;
-        record_profiled_query("introducer_changes", "UPDATE", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(res.rows_affected())
-    }
-
-    pub async fn decrement(self, col: IntroducerChangeDbCol, amount: i64) -> Result<u64> {
-        self.increment(col, -amount).await
-    }
-
-    pub async fn count(self) -> Result<i64> {
-        let Self { db, from_sql, count_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
-        let mut where_sql = where_sql;
-        let table_name = from_sql.unwrap_or_else(|| "introducer_changes".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let count_expr = count_sql.unwrap_or_else(|| "COUNT(*)".to_string());
-        let sql = format!("SELECT {} {}{}", count_expr, from_clause, where_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_scalar::<_, i64>(&sql);
-        for b in binds { q = bind_scalar(q, b); }
-        for b in join_binds { q = bind_scalar(q, b); }
-        let count = db.fetch_scalar(q).await?;
-        record_profiled_query("introducer_changes", "COUNT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(count)
-    }
-
-    pub async fn pluck_ids(self) -> Result<Vec<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds, order_sql, limit, offset  , .. } = self;
-        let mut where_sql = where_sql;
-        let table_name = from_sql.unwrap_or_else(|| "introducer_changes".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let order_clause = if order_sql.is_empty() { String::new() } else { format!(" ORDER BY {}", order_sql.join(", ")) };
-        let limit_clause = limit.map(|n| format!(" LIMIT {}", n)).unwrap_or_default();
-        let offset_clause = offset.map(|n| format!(" OFFSET {}", n)).unwrap_or_default();
-        let sql = format!("SELECT id {}{}{}{}{}", from_clause, where_clause, order_clause, limit_clause, offset_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_scalar::<_, i64>(&sql);
-        for b in binds { q = bind_scalar(q, b); }
-        for b in join_binds { q = bind_scalar(q, b); }
-        let ids = db.fetch_all_scalar(q).await?;
-        record_profiled_query("introducer_changes", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(ids)
-    }
-
-    pub async fn exists(self) -> Result<bool> {
-        Ok(self.count().await? > 0)
-    }
-
-    pub async fn chunk<F, Fut>(mut self, size: i64, mut callback: F) -> Result<()>
-    where
-        F: FnMut(Vec<IntroducerChangeRecord>) -> Fut,
-        Fut: std::future::Future<Output = Result<bool>>,
-    {
-        let mut page = 0i64;
-        let db = self.db.clone();
-        loop {
-            let mut query = IntroducerChangeQueryInner::new(db.clone(), self.base_url.clone());
-            query.where_sql = self.where_sql.clone();
-            query.binds = self.binds.clone();
-            query.order_sql = self.order_sql.clone();
-            let rows = query.limit(size).offset(page * size).get().await?;
-            if rows.is_empty() { break; }
-            let should_continue = callback(rows).await?;
-            if !should_continue { break; }
-            page += 1;
-        }
-        Ok(())
-    }
-
-    pub fn latest(self) -> Self {
-        self.order_by(IntroducerChangeDbCol::CreatedAt, OrderDir::Desc)
-    }
-
-    pub fn oldest(self) -> Self {
-        self.order_by(IntroducerChangeDbCol::CreatedAt, OrderDir::Asc)
-    }
-
-    pub fn take(self, n: i64) -> Self {
-        self.limit(n)
-    }
-
-    pub fn skip(self, n: i64) -> Self {
-        self.offset(n)
-    }
-
-    pub async fn sole(self) -> Result<IntroducerChangeRecord> {
-        let mut rows = self.limit(2).get().await?;
-        match rows.len() {
-            0 => anyhow::bail!("sole: no record found"),
-            1 => Ok(rows.remove(0)),
-            _ => anyhow::bail!("sole: multiple records found"),
-        }
-    }
-
-    fn order_by_raw(mut self, sql: impl Into<String>) -> Self {
-        self.order_sql.push(sql.into());
-        self
-    }
-
-    fn group_by_raw(mut self, sql: impl Into<String>) -> Self {
-        self.group_by_sql.push(sql.into());
-        self
-    }
-
-    pub async fn pluck_pair<K, V>(self, extract: impl Fn(&IntroducerChangeRecord) -> (K, V)) -> Result<std::collections::HashMap<K, V>>
-    where
-        K: Eq + std::hash::Hash,
-    {
-        let rows = self.get().await?;
-        Ok(rows.into_iter().map(|r| extract(&r)).collect())
-    }
-
-    pub async fn sum(self, col: IntroducerChangeDbCol) -> Result<Option<f64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
-        let mut where_sql = where_sql;
-        let table_name = from_sql.unwrap_or_else(|| "introducer_changes".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("SELECT SUM({}::DOUBLE PRECISION) {}{}", col.as_sql(), from_clause, where_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_scalar::<_, Option<f64>>(&sql);
-        for b in binds { q = bind_scalar(q, b); }
-        for b in join_binds { q = bind_scalar(q, b); }
-        let result = db.fetch_scalar(q).await?;
-        record_profiled_query("introducer_changes", "SUM", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(result)
-    }
-
-    pub async fn avg(self, col: IntroducerChangeDbCol) -> Result<Option<f64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
-        let mut where_sql = where_sql;
-        let table_name = from_sql.unwrap_or_else(|| "introducer_changes".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("SELECT AVG({}::DOUBLE PRECISION) {}{}", col.as_sql(), from_clause, where_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_scalar::<_, Option<f64>>(&sql);
-        for b in binds { q = bind_scalar(q, b); }
-        for b in join_binds { q = bind_scalar(q, b); }
-        let result = db.fetch_scalar(q).await?;
-        record_profiled_query("introducer_changes", "AVG", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(result)
-    }
-
-    pub async fn min_val(self, col: IntroducerChangeDbCol) -> Result<Option<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
-        let mut where_sql = where_sql;
-        let table_name = from_sql.unwrap_or_else(|| "introducer_changes".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("SELECT MIN({}) {}{}", col.as_sql(), from_clause, where_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_scalar::<_, Option<i64>>(&sql);
-        for b in binds { q = bind_scalar(q, b); }
-        for b in join_binds { q = bind_scalar(q, b); }
-        let result = db.fetch_scalar(q).await?;
-        record_profiled_query("introducer_changes", "MIN_VAL", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(result)
-    }
-
-    pub async fn max_val(self, col: IntroducerChangeDbCol) -> Result<Option<i64>> {
-        let Self { db, from_sql, join_sql, join_binds, where_sql, binds  , .. } = self;
-        let mut where_sql = where_sql;
-        let table_name = from_sql.unwrap_or_else(|| "introducer_changes".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let sql = format!("SELECT MAX({}) {}{}", col.as_sql(), from_clause, where_clause);
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_scalar::<_, Option<i64>>(&sql);
-        for b in binds { q = bind_scalar(q, b); }
-        for b in join_binds { q = bind_scalar(q, b); }
-        let result = db.fetch_scalar(q).await?;
-        record_profiled_query("introducer_changes", "MAX_VAL", &sql, &__profiler_binds, __profiler_start.elapsed());
-        Ok(result)
-    }
-
-    pub async fn paginate(self, page: i64, per_page: i64) -> Result<Page<IntroducerChangeRecord>> {
-        let page = if page < 1 { 1 } else { page };
-        let per_page = resolve_per_page(per_page);
-        let Self { db, base_url, select_sql, from_sql, count_sql, distinct, distinct_on, lock_sql, join_sql, join_binds, where_sql, order_sql, group_by_sql, having_sql, having_binds, offset: _, limit: _, binds , .. } = self;
-        let mut where_sql = where_sql;
-        let select_clause = match (distinct, distinct_on.as_ref()) {
-            (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
-            (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
-            (_, Some(on)) => format!("DISTINCT ON ({}) {}", on, select_sql.unwrap_or_else(|| "*".to_string())),
-        };
-        let table_name = from_sql.unwrap_or_else(|| "introducer_changes".to_string());
-        let from_clause = if join_sql.is_empty() {
-            format!("FROM {}", table_name)
-        } else {
-            format!("FROM {} {}", table_name, join_sql.join(" "))
-        };
-        let where_clause = if where_sql.is_empty() { String::new() } else { format!(" WHERE {}", where_sql.join(" AND ")) };
-        let count_expr = count_sql.unwrap_or_else(|| "COUNT(*)".to_string());
-        let count_sql = if distinct || distinct_on.is_some() {
-            format!("SELECT COUNT(*) FROM (SELECT {} {}{}) AS sub", select_clause, from_clause, where_clause)
-        } else {
-            format!("SELECT {} {}{}", count_expr, from_clause, where_clause)
-        };
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().chain(join_binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
-        for b in binds.iter().cloned() { count_q = bind_scalar(count_q, b); }
-        for b in join_binds.iter().cloned() { count_q = bind_scalar(count_q, b); }
-        let total: i64 = db.fetch_scalar(count_q).await?;
-        record_profiled_query("introducer_changes", "COUNT", &count_sql, &__profiler_binds, __profiler_start.elapsed());
-        let last_page = ((total + per_page - 1) / per_page).max(1);
-        let current_page = page.min(last_page);
-        let offset_val = (current_page - 1) * per_page;
-        let mut sql = format!("SELECT {} {}{}", select_clause, from_clause, where_clause);
-        if !order_sql.is_empty() {
-            sql.push_str(" ORDER BY ");
-            sql.push_str(&order_sql.join(", "));
-        }
-        sql.push_str(&format!(" OFFSET {}", offset_val));
-        sql.push_str(&format!(" LIMIT {}", per_page));
-        if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_as::<_, IntroducerChangeRow>(&sql);
-        for b in binds.iter().cloned() { q = bind(q, b); }
-        for b in join_binds { q = bind(q, b); }
-        let rows = db.fetch_all(q).await?;
-        record_profiled_query("introducer_changes", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        let user = load_user(db.clone(), &rows).await?;
-        let from_user = load_from_user(db.clone(), &rows).await?;
-        let to_user = load_to_user(db.clone(), &rows).await?;
-        let admin = load_admin(db.clone(), &rows).await?;
-        let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
-        let localized = LocalizedMap::default();
-        let mut data = Vec::with_capacity(rows.len());
-        for row in rows {
-            let key = row.id.clone();
-            let mut record = hydrate_record(row.clone(), &LocalizedMap::default(), base_url.as_deref());
-            record.user = user.get(&key).cloned().unwrap_or(None);
-            record.from_user = from_user.get(&key).cloned().unwrap_or(None);
-            record.to_user = to_user.get(&key).cloned().unwrap_or(None);
-            record.admin = admin.get(&key).cloned().unwrap_or(None);
-            data.push(record);
-        }
-        Ok(Page { data, total, per_page, current_page, last_page })
-    }
-    pub fn to_sql(&self) -> (String, Vec<BindValue>) {
-        let select_sql = self.select_sql.clone();
-        let from_sql = self.from_sql.clone();
-        let distinct = self.distinct;
-        let distinct_on = self.distinct_on.clone();
-        let lock_sql = self.lock_sql;
-        let join_sql = self.join_sql.clone();
-        let join_binds = self.join_binds.clone();
-        let mut where_sql = self.where_sql.clone();
-        let order_sql = self.order_sql.clone();
-        let group_by_sql = self.group_by_sql.clone();
-        let having_sql = self.having_sql.clone();
-        let having_binds = self.having_binds.clone();
-        let offset = self.offset;
-        let limit = self.limit;
-        let binds = self.binds.clone();
-        let select_clause = match (distinct, distinct_on.as_ref()) {
-            (false, None) => select_sql.unwrap_or_else(|| "*".to_string()),
-            (true, None) => format!("DISTINCT {}", select_sql.unwrap_or_else(|| "*".to_string())),
-            (_, Some(col)) => format!("DISTINCT ON ({}) {}", col, select_sql.unwrap_or_else(|| "*".to_string())),
-        };
-        let table_name = from_sql.unwrap_or_else(|| "introducer_changes".to_string());
-        let mut sql = format!("SELECT {} FROM {}", select_clause, table_name);
-        if !join_sql.is_empty() { sql.push(' '); sql.push_str(&join_sql.join(" ")); }
-        if !where_sql.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&where_sql.join(" AND "));
-        }
-        if !group_by_sql.is_empty() {
-            sql.push_str(" GROUP BY ");
-            sql.push_str(&group_by_sql.join(", "));
-        }
-        if !having_sql.is_empty() {
-            sql.push_str(" HAVING ");
-            sql.push_str(&having_sql.join(" AND "));
-        }
-        if !order_sql.is_empty() {
-            sql.push_str(" ORDER BY ");
-            sql.push_str(&order_sql.join(", "));
-        }
-        if let Some(off) = offset {
-            sql.push_str(" OFFSET ");
-            sql.push_str(&off.to_string());
-        }
-        if let Some(l) = limit {
-            sql.push_str(" LIMIT ");
-            sql.push_str(&l.to_string());
-        }
-        if let Some(lock) = lock_sql { sql.push(' '); sql.push_str(lock); }
-        let mut all_binds = binds;
-        all_binds.extend(join_binds);
-        all_binds.extend(having_binds);
-        (sql, all_binds)
-    }
-
-    pub fn into_where_parts(self) -> (Vec<String>, Vec<BindValue>) {
-        let Self { where_sql, binds, .. } = self;
-        let mut where_sql = where_sql;
-        (where_sql, binds)
-    }
-    pub async fn delete(self) -> Result<u64> {
-        if self.limit.is_some() {
-            anyhow::bail!("delete() does not support limit; add where clauses");
-        }
-        let Self { db, where_sql, binds, .. } = self;
-        if where_sql.is_empty() { anyhow::bail!("delete(): no conditions set"); }
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __observer_active = try_get_observer().is_some();
-        let __old_rows: Vec<IntroducerChangeRow> = if __observer_active {
-            let select_sql = format!("SELECT * FROM introducer_changes WHERE {}", where_sql.join(" AND "));
-            let mut fq = sqlx::query_as::<_, IntroducerChangeRow>(&select_sql);
-            for b in &binds { fq = bind(fq, b.clone()); }
-            let rows: Vec<IntroducerChangeRow> = db.fetch_all(fq).await.unwrap_or_default();
-            rows
-        } else {
-            Vec::new()
-        };
-        if !__old_rows.is_empty() {
-            if let Some(observer) = try_get_observer() {
-                for old_row in &__old_rows {
-                    let old_data = serde_json::to_value(old_row)?;
-                    let event = ModelEvent { model: "introducer_change", table: "introducer_changes", record_key: Some(format!("{}", old_row.id)) };
-                    observer.on_deleting(&event, &old_data).await?;
-                }
-            }
-        }
-        let mut sql = String::from("DELETE FROM introducer_changes");
-        if !where_sql.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&where_sql.join(" AND "));
-        }
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query(&sql);
-        for b in binds { q = bind_query(q, b); }
-        let res = db.execute(q).await?;
-        record_profiled_query("introducer_changes", "DELETE", &sql, &__profiler_binds, __profiler_start.elapsed());
-        if !__old_rows.is_empty() && res.rows_affected() > 0 {
-            if let Some(observer) = try_get_observer() {
-                for old_row in &__old_rows {
-                    let event = ModelEvent { model: "introducer_change", table: "introducer_changes", record_key: Some(format!("{}", old_row.id)) };
-                    match serde_json::to_value(old_row) {
-                        Ok(old_data) => {
-                            if let Err(err) = observer.on_deleted(&event, &old_data).await {
-                                log_observer_error("deleted", "introducer_change", &err);
-                            }
-                        }
-                        Err(err) => log_observer_error("deleted", "introducer_change", &err),
-                    }
-                }
-            }
-        }
-        Ok(res.rows_affected())
-    }
-}
-
-
-
-
 pub struct IntroducerChangeCreateInner<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-    cols: Vec<IntroducerChangeDbCol>,
-    binds: Vec<BindValue>,
-    conflict_action: Option<&'static str>,
-    conflict_cols: Vec<IntroducerChangeDbCol>,
+    pub(crate) state: core_db::common::model_api::CreateState<'db>,
 }
 
 impl<'db> IntroducerChangeCreateInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
-            db,
-            base_url,
-            cols: vec![],
-            binds: vec![],
-            conflict_action: None,
-            conflict_cols: vec![],
+            state: core_db::common::model_api::CreateState::new(db, base_url, "introducer_changes"),
+        }
+    }
+    pub fn from_state(state: core_db::common::model_api::CreateState<'db>) -> Self {
+        Self {
+            state,
         }
     }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.cols.push(IntroducerChangeDbCol::Id);
-        self.binds.push(val.into());
+        self.state = self.state.set_col("id", val.into());
         self
     }
     pub fn set_user_id(mut self, val: i64) -> Self {
-        self.cols.push(IntroducerChangeDbCol::UserId);
-        self.binds.push(val.into());
+        self.state = self.state.set_col("user_id", val.into());
         self
     }
     pub fn set_from_user_id(mut self, val: Option<i64>) -> Self {
-        self.cols.push(IntroducerChangeDbCol::FromUserId);
-        self.binds.push(val.into());
+        self.state = self.state.set_col("from_user_id", val.into());
         self
     }
     pub fn set_to_user_id(mut self, val: i64) -> Self {
-        self.cols.push(IntroducerChangeDbCol::ToUserId);
-        self.binds.push(val.into());
+        self.state = self.state.set_col("to_user_id", val.into());
         self
     }
     pub fn set_admin_id(mut self, val: i64) -> Self {
-        self.cols.push(IntroducerChangeDbCol::AdminId);
-        self.binds.push(val.into());
+        self.state = self.state.set_col("admin_id", val.into());
         self
     }
     pub fn set_remark(mut self, val: Option<String>) -> Self {
-        self.cols.push(IntroducerChangeDbCol::Remark);
-        self.binds.push(val.into());
+        self.state = self.state.set_col("remark", val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(IntroducerChangeDbCol::CreatedAt);
-        self.binds.push(val.into());
+        self.state = self.state.set_col("created_at", val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.cols.push(IntroducerChangeDbCol::UpdatedAt);
-        self.binds.push(val.into());
+        self.state = self.state.set_col("updated_at", val.into());
         self
     }
     pub fn on_conflict_do_nothing(mut self, conflict_cols: &[IntroducerChangeDbCol]) -> Self {
-        self.conflict_action = Some("DO NOTHING");
-        self.conflict_cols = conflict_cols.to_vec();
+        self.state = self.state.on_conflict_do_nothing(&conflict_cols.iter().map(|c| c.as_sql()).collect::<Vec<_>>());
         self
     }
     pub fn on_conflict_update(mut self, conflict_cols: &[IntroducerChangeDbCol]) -> Self {
-        self.conflict_action = Some("DO UPDATE");
-        self.conflict_cols = conflict_cols.to_vec();
+        self.state = self.state.on_conflict_update(&conflict_cols.iter().map(|c| c.as_sql()).collect::<Vec<_>>());
         self
     }
     fn to_create_input(&self) -> Result<IntroducerChangeCreate> {
         let mut input = IntroducerChangeCreate::default();
-        for (col, bind) in self.cols.iter().zip(self.binds.iter()) {
-            match col {
-                IntroducerChangeDbCol::Id => {
+        for (col_name, bind) in self.state.col_names.iter().zip(self.state.binds.iter()) {
+            match *col_name {
+                "id" => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.id = FieldInput::Set(value);
                 }
-                IntroducerChangeDbCol::UserId => {
+                "user_id" => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.user_id = FieldInput::Set(value);
                 }
-                IntroducerChangeDbCol::FromUserId => {
+                "from_user_id" => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
             };
                     input.from_user_id = FieldInput::Set(value);
                 }
-                IntroducerChangeDbCol::ToUserId => {
+                "to_user_id" => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.to_user_id = FieldInput::Set(value);
                 }
-                IntroducerChangeDbCol::AdminId => {
+                "admin_id" => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
         };
                     input.admin_id = FieldInput::Set(value);
                 }
-                IntroducerChangeDbCol::Remark => {
+                "remark" => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
             };
                     input.remark = FieldInput::Set(value);
                 }
-                IntroducerChangeDbCol::CreatedAt => {
+                "created_at" => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.created_at = FieldInput::Set(value);
                 }
-                IntroducerChangeDbCol::UpdatedAt => {
+                "updated_at" => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
         };
                     input.updated_at = FieldInput::Set(value);
                 }
+                _ => {}
             }
         }
         Ok(input)
@@ -1591,7 +415,7 @@ pub async fn save(self) -> Result<IntroducerChangeRecord> {
                 observer.on_creating(&event, &data).await?;
             }
         }
-        let db_conn = self.db.clone();
+        let db_conn = self.state.db.clone();
         match db_conn {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
@@ -1635,45 +459,21 @@ pub async fn save(self) -> Result<IntroducerChangeRecord> {
         }
     }
 
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>) -> Result<(IntroducerChangeRecord, IntroducerChangeRow)> {
-        let mut cols = self.cols;
-        let mut binds = self.binds;
-        if !cols.iter().any(|c| matches!(c, IntroducerChangeDbCol::Id)) {
-            cols.push(IntroducerChangeDbCol::Id);
-            binds.push(generate_snowflake_i64().into());
+    async fn save_with_db<'tx>(mut self, db: DbConn<'tx>) -> Result<(IntroducerChangeRecord, IntroducerChangeRow)> {
+        if !self.state.col_names.contains(&"id") {
+            self.state = self.state.set_col("id", generate_snowflake_i64().into());
         }
-        if HAS_CREATED_AT && !cols.iter().any(|c| matches!(c, IntroducerChangeDbCol::CreatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(IntroducerChangeDbCol::CreatedAt);
-            binds.push(now.into());
+        if HAS_CREATED_AT && !self.state.col_names.contains(&"created_at") {
+            self.state = self.state.set_col("created_at", time::OffsetDateTime::now_utc().into());
         }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, IntroducerChangeDbCol::UpdatedAt)) {
-            let now = time::OffsetDateTime::now_utc();
-            cols.push(IntroducerChangeDbCol::UpdatedAt);
-            binds.push(now.into());
+        if HAS_UPDATED_AT && !self.state.col_names.contains(&"updated_at") {
+            self.state = self.state.set_col("updated_at", time::OffsetDateTime::now_utc().into());
         }
-        if cols.is_empty() {
+        if self.state.col_names.is_empty() {
             anyhow::bail!("insert: no columns set");
         }
-        let col_sql: Vec<&'static str> = cols.iter().map(|c| c.as_sql()).collect();
-        let placeholders: Vec<String> = (1..=binds.len()).map(|i| format!("${}", i)).collect();
-        let mut sql = format!("INSERT INTO {} ({}) VALUES ({})", "introducer_changes", col_sql.join(", "), placeholders.join(", "));
-        if let Some(action) = self.conflict_action {
-            if !self.conflict_cols.is_empty() {
-                let conflict_col_sql: Vec<&'static str> = self.conflict_cols.iter().map(|c| c.as_sql()).collect();
-                sql.push_str(&format!(" ON CONFLICT ({}) {}", conflict_col_sql.join(", "), action));
-                if action == "DO UPDATE" {
-                    let set_clauses: Vec<String> = col_sql.iter().zip(placeholders.iter())
-                        .filter(|(col, _)| !conflict_col_sql.contains(col))
-                        .map(|(col, ph)| format!("{} = {}", col, ph))
-                        .collect();
-                    if !set_clauses.is_empty() {
-                        sql.push_str(&format!(" SET {}", set_clauses.join(", ")));
-                    }
-                }
-            }
-        }
-        sql.push_str(" RETURNING *");
+        let base_url = self.state.base_url.clone();
+        let (sql, binds) = self.state.build_insert_sql();
         let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
         let __profiler_start = std::time::Instant::now();
         let mut q = sqlx::query_as::<_, IntroducerChangeRow>(&sql);
@@ -1683,167 +483,164 @@ pub async fn save(self) -> Result<IntroducerChangeRecord> {
         let row = db.fetch_one(q).await?;
         record_profiled_query("introducer_changes", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
         let localized = LocalizedMap::default();
-        let record = hydrate_record(row.clone(), &LocalizedMap::default(), self.base_url.as_deref());
+        let record = hydrate_record(row.clone(), &LocalizedMap::default(), base_url.as_deref());
         Ok((record, row))
     }
 }
 
 pub struct IntroducerChangePatchInner<'db> {
-    db: DbConn<'db>,
-    base_url: Option<String>,
-    sets: Vec<(IntroducerChangeDbCol, BindValue, SetMode)>,
-    where_sql: Vec<String>,
-    binds: Vec<BindValue>,
+    pub(crate) state: core_db::common::model_api::PatchState<'db>,
 }
 
 impl<'db> IntroducerChangePatchInner<'db> {
     pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
         Self {
-            db,
-            base_url,
-            sets: vec![],
-            where_sql: vec![],
-            binds: vec![],
+            state: core_db::common::model_api::PatchState::new(db, base_url, "introducer_changes"),
+        }
+    }
+    pub fn from_state(state: core_db::common::model_api::PatchState<'db>) -> Self {
+        Self {
+            state,
         }
     }
 
 
 pub fn set_id(mut self, val: i64) -> Self {
-        self.sets.push((IntroducerChangeDbCol::Id, val.into(), SetMode::Assign));
+        self.state = self.state.assign_col(IntroducerChangeDbCol::Id.as_sql(), val.into());
         self
     }
     pub fn increment_id(mut self, val: i64) -> Self {
-        self.sets.push((IntroducerChangeDbCol::Id, val.into(), SetMode::Increment));
+        self.state = self.state.increment_col(IntroducerChangeDbCol::Id.as_sql(), val.into());
         self
     }
     pub fn decrement_id(mut self, val: i64) -> Self {
-        self.sets.push((IntroducerChangeDbCol::Id, val.into(), SetMode::Decrement));
+        self.state = self.state.decrement_col(IntroducerChangeDbCol::Id.as_sql(), val.into());
         self
     }
     pub fn set_user_id(mut self, val: i64) -> Self {
-        self.sets.push((IntroducerChangeDbCol::UserId, val.into(), SetMode::Assign));
+        self.state = self.state.assign_col(IntroducerChangeDbCol::UserId.as_sql(), val.into());
         self
     }
     pub fn increment_user_id(mut self, val: i64) -> Self {
-        self.sets.push((IntroducerChangeDbCol::UserId, val.into(), SetMode::Increment));
+        self.state = self.state.increment_col(IntroducerChangeDbCol::UserId.as_sql(), val.into());
         self
     }
     pub fn decrement_user_id(mut self, val: i64) -> Self {
-        self.sets.push((IntroducerChangeDbCol::UserId, val.into(), SetMode::Decrement));
+        self.state = self.state.decrement_col(IntroducerChangeDbCol::UserId.as_sql(), val.into());
         self
     }
     pub fn set_from_user_id(mut self, val: Option<i64>) -> Self {
-        self.sets.push((IntroducerChangeDbCol::FromUserId, val.into(), SetMode::Assign));
+        self.state = self.state.assign_col(IntroducerChangeDbCol::FromUserId.as_sql(), val.into());
         self
     }
     pub fn set_to_user_id(mut self, val: i64) -> Self {
-        self.sets.push((IntroducerChangeDbCol::ToUserId, val.into(), SetMode::Assign));
+        self.state = self.state.assign_col(IntroducerChangeDbCol::ToUserId.as_sql(), val.into());
         self
     }
     pub fn increment_to_user_id(mut self, val: i64) -> Self {
-        self.sets.push((IntroducerChangeDbCol::ToUserId, val.into(), SetMode::Increment));
+        self.state = self.state.increment_col(IntroducerChangeDbCol::ToUserId.as_sql(), val.into());
         self
     }
     pub fn decrement_to_user_id(mut self, val: i64) -> Self {
-        self.sets.push((IntroducerChangeDbCol::ToUserId, val.into(), SetMode::Decrement));
+        self.state = self.state.decrement_col(IntroducerChangeDbCol::ToUserId.as_sql(), val.into());
         self
     }
     pub fn set_admin_id(mut self, val: i64) -> Self {
-        self.sets.push((IntroducerChangeDbCol::AdminId, val.into(), SetMode::Assign));
+        self.state = self.state.assign_col(IntroducerChangeDbCol::AdminId.as_sql(), val.into());
         self
     }
     pub fn increment_admin_id(mut self, val: i64) -> Self {
-        self.sets.push((IntroducerChangeDbCol::AdminId, val.into(), SetMode::Increment));
+        self.state = self.state.increment_col(IntroducerChangeDbCol::AdminId.as_sql(), val.into());
         self
     }
     pub fn decrement_admin_id(mut self, val: i64) -> Self {
-        self.sets.push((IntroducerChangeDbCol::AdminId, val.into(), SetMode::Decrement));
+        self.state = self.state.decrement_col(IntroducerChangeDbCol::AdminId.as_sql(), val.into());
         self
     }
     pub fn set_remark(mut self, val: Option<String>) -> Self {
-        self.sets.push((IntroducerChangeDbCol::Remark, val.into(), SetMode::Assign));
+        self.state = self.state.assign_col(IntroducerChangeDbCol::Remark.as_sql(), val.into());
         self
     }
     pub fn set_created_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((IntroducerChangeDbCol::CreatedAt, val.into(), SetMode::Assign));
+        self.state = self.state.assign_col(IntroducerChangeDbCol::CreatedAt.as_sql(), val.into());
         self
     }
     pub fn set_updated_at(mut self, val: time::OffsetDateTime) -> Self {
-        self.sets.push((IntroducerChangeDbCol::UpdatedAt, val.into(), SetMode::Assign));
+        self.state = self.state.assign_col(IntroducerChangeDbCol::UpdatedAt.as_sql(), val.into());
         self
     }
     pub fn where_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::Id.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::Id.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     pub fn where_user_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::UserId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::UserId.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     pub fn where_from_user_id(mut self, op: Op, val: Option<i64>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::FromUserId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::FromUserId.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     pub fn where_to_user_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::ToUserId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::ToUserId.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     pub fn where_admin_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::AdminId.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::AdminId.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     pub fn where_remark(mut self, op: Op, val: Option<String>) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::Remark.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::Remark.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     pub fn where_created_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::CreatedAt.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     pub fn where_updated_at(mut self, op: Op, val: time::OffsetDateTime) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", IntroducerChangeDbCol::UpdatedAt.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     pub fn where_col<T: Into<BindValue>>(mut self, col: IntroducerChangeDbCol, op: Op, val: T) -> Self {
-        let idx = self.binds.len() + 1;
-        self.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
-        self.binds.push(val.into());
+        let idx = self.state.where_binds.len() + 1;
+        self.state.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
+        self.state.where_binds.push(val.into());
         self
     }
     fn where_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
         let mut clause = clause.into();
         let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.binds.len() + 1;
+        let mut idx = self.state.where_binds.len() + 1;
         while let Some(pos) = clause.find('?') {
             let ph = format!("${}", idx);
             clause.replace_range(pos..pos + 1, &ph);
             idx += 1;
         }
-        self.where_sql.push(clause);
-        self.binds.extend(incoming);
+        self.state.where_sql.push(clause);
+        self.state.where_binds.extend(incoming);
         self
     }
     fn to_update_changes(&self) -> Result<IntroducerChangeChanges> {
         let mut changes = IntroducerChangeChanges::default();
-        for (col, bind, mode) in &self.sets {
-            match col {
-                IntroducerChangeDbCol::Id => {
+        for ((col, bind), mode) in self.state.set_cols.iter().zip(self.state.set_binds.iter()).zip(self.state.set_modes.iter()) {
+            match *col {
+                "id" => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1854,7 +651,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                IntroducerChangeDbCol::UserId => {
+                "user_id" => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1865,7 +662,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                IntroducerChangeDbCol::FromUserId => {
+                "from_user_id" => {
                     let value = match bind {
                 BindValue::I64Opt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<i64>'", other),
@@ -1876,7 +673,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                IntroducerChangeDbCol::ToUserId => {
+                "to_user_id" => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1887,7 +684,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                IntroducerChangeDbCol::AdminId => {
+                "admin_id" => {
                     let value = match bind {
             BindValue::I64(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
@@ -1898,7 +695,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                IntroducerChangeDbCol::Remark => {
+                "remark" => {
                     let value = match bind {
                 BindValue::StringOpt(value) => value.clone(),
                 other => anyhow::bail!("unexpected bind value '{:?}' for type 'Option<String>'", other),
@@ -1909,7 +706,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                IntroducerChangeDbCol::CreatedAt => {
+                "created_at" => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1920,7 +717,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
-                IntroducerChangeDbCol::UpdatedAt => {
+                "updated_at" => {
                     let value = match bind {
             BindValue::Time(value) => value.clone(),
             other => anyhow::bail!("unexpected bind value '{:?}' for type 'time::OffsetDateTime'", other),
@@ -1931,6 +728,7 @@ pub fn set_id(mut self, val: i64) -> Self {
                         SetMode::Decrement => FieldChange::Decrement(value),
                     });
                 }
+                _ => {}
             }
         }
         Ok(changes)
@@ -1938,14 +736,14 @@ pub fn set_id(mut self, val: i64) -> Self {
 
 
 pub async fn save(self) -> Result<u64> {
-        if self.sets.is_empty() { anyhow::bail!("update: no columns set"); }
-        if self.where_sql.is_empty() { anyhow::bail!("update: no conditions set"); }
+        if self.state.set_cols.is_empty() { anyhow::bail!("update: no columns set"); }
+        if self.state.where_sql.is_empty() { anyhow::bail!("update: no conditions set"); }
         let observer_changes = if try_get_observer().is_some() {
             Some(self.to_update_changes()?)
         } else {
             None
         };
-        let db_conn = self.db.clone();
+        let db_conn = self.state.db.clone();
         match db_conn {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
@@ -1965,20 +763,15 @@ pub async fn save(self) -> Result<u64> {
     }
 
     async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<IntroducerChangeChanges>) -> Result<u64> {
-        let mut cols = Vec::new();
-        let mut set_binds = Vec::new();
-        let mut set_modes = Vec::new();
-        for (col, bind, mode) in self.sets { cols.push(col); set_binds.push(bind); set_modes.push(mode); }
-        if HAS_UPDATED_AT && !cols.iter().any(|c| matches!(c, IntroducerChangeDbCol::UpdatedAt)) {
+        let mut state = self.state;
+        if HAS_UPDATED_AT && !state.set_cols.contains(&IntroducerChangeDbCol::UpdatedAt.as_sql()) {
             let now = time::OffsetDateTime::now_utc();
-            cols.push(IntroducerChangeDbCol::UpdatedAt);
-            set_binds.push(now.into());
-            set_modes.push(SetMode::Assign);
+            state = state.assign_col(IntroducerChangeDbCol::UpdatedAt.as_sql(), now.into());
         }
         // find target ids for localized updates
-        let select_sql = format!("SELECT id FROM introducer_changes WHERE {}", self.where_sql.join(" AND "));
+        let select_sql = format!("SELECT id FROM introducer_changes WHERE {}", state.where_sql.join(" AND "));
         let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
-        for b in &self.binds { select_q = bind_scalar(select_q, b.clone()); }
+        for b in &state.where_binds { select_q = bind_scalar(select_q, b.clone()); }
         let target_ids = db.fetch_all_scalar(select_q).await?;
         let __observer_active = try_get_observer().is_some();
         let __old_rows: Vec<IntroducerChangeRow> = if __observer_active && !target_ids.is_empty() {
@@ -2003,35 +796,12 @@ pub async fn save(self) -> Result<u64> {
                 }
             }
         }
-        let mut parts: Vec<String> = Vec::new();
-        for (i, (c, mode)) in cols.iter().zip(set_modes.iter()).enumerate() {
-            let col = c.as_sql();
-            let part = match mode {
-                SetMode::Assign => format!("{} = ${}", col, i + 1),
-                SetMode::Increment => format!("{} = {} + ${}", col, col, i + 1),
-                SetMode::Decrement => format!("{} = {} - ${}", col, col, i + 1),
-            };
-            parts.push(part);
-        }
-        let offset = parts.len();
-        let mut where_sql = self.where_sql;
-        let binds = self.binds;
-        let mut renumbered = Vec::with_capacity(where_sql.len());
-        for clause in where_sql.drain(..) {
-            renumbered.push(renumber_placeholders(&clause, offset + 1));
-        }
-        where_sql = renumbered;
-        let mut sql = String::from("UPDATE introducer_changes SET ");
-        sql.push_str(&parts.join(", "));
-        if !where_sql.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&where_sql.join(" AND "));
-        }
+        let (sql, all_binds) = state.build_update_sql();
+        let set_binds = &state.set_binds;
         let mut q = sqlx::query(&sql);
-        let __profiler_binds = if is_sql_profiler_enabled() { set_binds.iter().chain(binds.iter()).map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+        let __profiler_binds = if is_sql_profiler_enabled() { all_binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
         let __profiler_start = std::time::Instant::now();
-        for b in &set_binds { q = bind_query(q, b.clone()); }
-        for b in &binds { q = bind_query(q, b.clone()); }
+        for b in &all_binds { q = bind_query(q, b.clone()); }
         let res = db.execute(q).await?;
         record_profiled_query("introducer_changes", "UPDATE", &sql, &__profiler_binds, __profiler_start.elapsed());
         if !__old_rows.is_empty() && res.rows_affected() > 0 {
@@ -3585,6 +2355,14 @@ impl IntroducerChangeModel {
     pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<IntroducerChangeRecord>> {
         Query::<IntroducerChangeModel>::new(db).find(id).await
     }
+    fn _transform_create_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {
+        let _ = col;
+        Ok(value)
+    }
+    fn _transform_patch_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {
+        let _ = col;
+        Ok(value)
+    }
 }
 
 impl ModelDef for IntroducerChangeModel {
@@ -3598,457 +2376,340 @@ impl ModelDef for IntroducerChangeModel {
 }
 
 impl core_db::common::model_api::QueryModel for IntroducerChangeModel {
-    type InnerQuery<'db> = QueryState<'db>;
-    fn query_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerQuery<'db> {
-        QueryState::new(db, base_url, "id, user_id, from_user_id, to_user_id, admin_id, remark, created_at, updated_at")
-    }
-    fn query_all<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
-        Box::pin(async move { IntroducerChangeQueryInner::from_state(state).get().await })
-    }
-    fn query_first<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
-        Box::pin(async move { IntroducerChangeQueryInner::from_state(state).first().await })
-    }
-    fn query_find<'db>(state: Self::InnerQuery<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
-        Box::pin(async move { IntroducerChangeQueryInner::from_state(state).find(id).await })
-    }
-    fn query_count<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
-        Box::pin(async move { IntroducerChangeQueryInner::from_state(state).count().await })
-    }
-    fn query_delete<'db>(state: Self::InnerQuery<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
-        Box::pin(async move { IntroducerChangeQueryInner::from_state(state).delete().await })
-    }
-    fn query_paginate<'db>(state: Self::InnerQuery<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+    const DEFAULT_SELECT: &'static str = "id, user_id, from_user_id, to_user_id, admin_id, remark, created_at, updated_at";
+    const HAS_SOFT_DELETE: bool = false;
+    const SOFT_DELETE_COL: &'static str = "";
+    const HAS_CREATED_AT: bool = true;
+    const HAS_UPDATED_AT: bool = true;
+    fn query_all<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
         Box::pin(async move {
-            let page = IntroducerChangeQueryInner::from_state(state).paginate(page, per_page).await?;
-            Ok(core_db::common::model_api::Page { data: page.data, total: page.total, per_page: page.per_page, current_page: page.current_page, last_page: page.last_page })
+            let (sql, binds) = state.to_select_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);
+            let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+            let __profiler_start = std::time::Instant::now();
+            let mut q = sqlx::query_as::<_, IntroducerChangeRow>(&sql);
+            for b in binds { q = bind(q, b); }
+            let rows = state.db.fetch_all(q).await?;
+            record_profiled_query("introducer_changes", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
+            let db = state.db.clone();
+            let user = load_user(db.clone(), &rows).await?;
+            let from_user = load_from_user(db.clone(), &rows).await?;
+            let to_user = load_to_user(db.clone(), &rows).await?;
+            let admin = load_admin(db.clone(), &rows).await?;
+            let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
+            let localized = LocalizedMap::default();
+            let mut out_vec = Vec::with_capacity(rows.len());
+            for r in rows {
+                let key = r.id.clone();
+                let mut record = hydrate_record(r.clone(), &LocalizedMap::default(), state.base_url.as_deref());
+                record.user = user.get(&key).cloned().unwrap_or(None);
+                record.from_user = from_user.get(&key).cloned().unwrap_or(None);
+                record.to_user = to_user.get(&key).cloned().unwrap_or(None);
+                record.admin = admin.get(&key).cloned().unwrap_or(None);
+                out_vec.push(record);
+            }
+            Ok(out_vec)
         })
     }
-    fn query_limit<'db>(state: Self::InnerQuery<'db>, limit: i64) -> Self::InnerQuery<'db> {
-        state.limit(limit)
+    fn query_first<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move {
+            let mut v = Self::query_all(state.limit(1)).await?;
+            Ok(v.pop())
+        })
     }
-    fn query_offset<'db>(state: Self::InnerQuery<'db>, offset: i64) -> Self::InnerQuery<'db> {
-        state.offset(offset)
+    fn query_find<'db>(state: QueryState<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
+        Box::pin(async move { Self::query_first(state.where_col_str("id", Op::Eq, id.into())).await })
     }
-    fn query_for_update<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
-        state.for_update()
+    fn query_count<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
+        Box::pin(async move {
+            let (sql, binds) = state.to_count_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);
+            let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+            let __profiler_start = std::time::Instant::now();
+            let mut q = sqlx::query_scalar::<_, i64>(&sql);
+            for b in binds { q = bind_scalar(q, b); }
+            let count = state.db.fetch_scalar(q).await?;
+            record_profiled_query("introducer_changes", "COUNT", &sql, &__profiler_binds, __profiler_start.elapsed());
+            Ok(count)
+        })
     }
-    fn query_for_update_skip_locked<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
-        state.for_update_skip_locked()
+    fn query_delete<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move {
+            if state.limit.is_some() {
+                anyhow::bail!("delete() does not support limit; add where clauses");
+            }
+            let db = state.db;
+            let mut where_sql = state.where_sql;
+            let binds = state.binds;
+            if where_sql.is_empty() { anyhow::bail!("delete(): no conditions set"); }
+            let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+            let __observer_active = try_get_observer().is_some();
+            let __old_rows: Vec<IntroducerChangeRow> = if __observer_active {
+                let select_sql = format!("SELECT * FROM introducer_changes WHERE {}", where_sql.join(" AND "));
+                let mut fq = sqlx::query_as::<_, IntroducerChangeRow>(&select_sql);
+                for b in &binds { fq = bind(fq, b.clone()); }
+                let rows: Vec<IntroducerChangeRow> = db.fetch_all(fq).await.unwrap_or_default();
+                rows
+            } else {
+                Vec::new()
+            };
+            if !__old_rows.is_empty() {
+                if let Some(observer) = try_get_observer() {
+                    for old_row in &__old_rows {
+                        let old_data = serde_json::to_value(old_row)?;
+                        let event = ModelEvent { model: "introducer_change", table: "introducer_changes", record_key: Some(format!("{}", old_row.id)) };
+                        observer.on_deleting(&event, &old_data).await?;
+                    }
+                }
+            }
+            let mut sql = String::from("DELETE FROM introducer_changes");
+            if !where_sql.is_empty() {
+                sql.push_str(" WHERE ");
+                sql.push_str(&where_sql.join(" AND "));
+            }
+            let __profiler_start = std::time::Instant::now();
+            let mut q = sqlx::query(&sql);
+            for b in binds { q = bind_query(q, b); }
+            let res = db.execute(q).await?;
+            record_profiled_query("introducer_changes", "DELETE", &sql, &__profiler_binds, __profiler_start.elapsed());
+            if !__old_rows.is_empty() && res.rows_affected() > 0 {
+                if let Some(observer) = try_get_observer() {
+                    for old_row in &__old_rows {
+                        let event = ModelEvent { model: "introducer_change", table: "introducer_changes", record_key: Some(format!("{}", old_row.id)) };
+                        match serde_json::to_value(old_row) {
+                            Ok(old_data) => {
+                                if let Err(err) = observer.on_deleted(&event, &old_data).await {
+                                    log_observer_error("deleted", "introducer_change", &err);
+                                }
+                            }
+                            Err(err) => log_observer_error("deleted", "introducer_change", &err),
+                        }
+                    }
+                }
+            }
+            Ok(res.rows_affected())
+        })
     }
-    fn query_for_no_key_update<'db>(state: Self::InnerQuery<'db>) -> Self::InnerQuery<'db> {
-        state.for_no_key_update()
-    }
-    fn query_where_group<'db, F>(state: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
-    where
-        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
-    {
-        state.where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
-    }
-    fn query_or_where_group<'db, F>(state: Self::InnerQuery<'db>, scope: F) -> Self::InnerQuery<'db>
-    where
-        F: FnOnce(core_db::common::model_api::Query<'db, Self>) -> core_db::common::model_api::Query<'db, Self>,
-    {
-        state.or_where_group(|group| scope(core_db::common::model_api::Query::from_inner(group)).into_inner())
-    }
-}
-
-impl core_db::common::model_api::UnsafeQueryModel for IntroducerChangeModel {
-    fn query_where_raw<'db>(state: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
-        state.where_raw(clause, binds)
-    }
-    fn query_where_exists<'db>(state: Self::InnerQuery<'db>, clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
-        state.where_exists_raw(clause, binds)
-    }
-    fn query_order_raw<'db>(state: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
-        state.order_raw(expr)
-    }
-    fn query_select_raw<'db>(state: Self::InnerQuery<'db>, expr: String) -> Self::InnerQuery<'db> {
-        state.select_raw(expr)
-    }
-    fn query_join_raw<'db>(state: Self::InnerQuery<'db>, table: String, on_clause: String, binds: Vec<BindValue>) -> Self::InnerQuery<'db> {
-        state.join_raw("INNER JOIN", table, on_clause, binds)
+    fn query_paginate<'db>(state: QueryState<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
+        Box::pin(async move {
+            let page = if page < 1 { 1 } else { page };
+            let per_page = resolve_per_page(per_page);
+            let (count_sql, count_binds) = state.to_count_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);
+            let __profiler_binds = if is_sql_profiler_enabled() { count_binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
+            let __profiler_start = std::time::Instant::now();
+            let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
+            for b in count_binds { count_q = bind_scalar(count_q, b); }
+            let total: i64 = state.db.fetch_scalar(count_q).await?;
+            record_profiled_query("introducer_changes", "COUNT", &count_sql, &__profiler_binds, __profiler_start.elapsed());
+            let last_page = ((total + per_page - 1) / per_page).max(1);
+            let current_page = page.min(last_page);
+            let offset_val = (current_page - 1) * per_page;
+            let mut state = state;
+            state.offset = Some(offset_val);
+            state.limit = Some(per_page);
+            let (sql, binds) = state.to_select_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);
+            let __profiler_start = std::time::Instant::now();
+            let mut q = sqlx::query_as::<_, IntroducerChangeRow>(&sql);
+            for b in binds { q = bind(q, b); }
+            let rows = state.db.fetch_all(q).await?;
+            record_profiled_query("introducer_changes", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
+            let db = state.db.clone();
+            let user = load_user(db.clone(), &rows).await?;
+            let from_user = load_from_user(db.clone(), &rows).await?;
+            let to_user = load_to_user(db.clone(), &rows).await?;
+            let admin = load_admin(db.clone(), &rows).await?;
+            let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
+            let localized = LocalizedMap::default();
+            let mut data = Vec::with_capacity(rows.len());
+            for r in rows {
+                let key = r.id.clone();
+                let mut record = hydrate_record(r.clone(), &LocalizedMap::default(), state.base_url.as_deref());
+                record.user = user.get(&key).cloned().unwrap_or(None);
+                record.from_user = from_user.get(&key).cloned().unwrap_or(None);
+                record.to_user = to_user.get(&key).cloned().unwrap_or(None);
+                record.admin = admin.get(&key).cloned().unwrap_or(None);
+                data.push(record);
+            }
+            Ok(core_db::common::model_api::Page { data, total, per_page, current_page, last_page })
+        })
     }
 }
 
 impl core_db::common::model_api::CreateModel for IntroducerChangeModel {
-    type InnerCreate<'db> = IntroducerChangeCreateInner<'db>;
-    fn create_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerCreate<'db> {
-        IntroducerChangeCreateInner::new(db, base_url)
-    }
-    fn create_save<'db>(builder: Self::InnerCreate<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
+    fn create_save<'db>(state: CreateState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
         Box::pin(async move {
-            let db = builder.db.clone();
-            let base_url = builder.base_url.clone();
+            let builder = IntroducerChangeCreateInner::from_state(state);
+            let db = builder.state.db.clone();
+            let base_url = builder.state.base_url.clone();
             let created = builder.save().await?;
-            IntroducerChangeQueryInner::new(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("introducer_changes: created record not found"))
+            Query::<IntroducerChangeModel>::new_with_base_url(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("introducer_changes: created record not found"))
         })
+    }
+    fn transform_create_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {
+        Self::_transform_create_value(col, value)
     }
 }
 
 impl core_db::common::model_api::CreateField<IntroducerChangeModel> for IntroducerChangeDbCol {
     type Value = BindValue;
-    fn set<'db>(field: Self, mut builder: <IntroducerChangeModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: <Self as core_db::common::model_api::CreateField<IntroducerChangeModel>>::Value) -> anyhow::Result<<IntroducerChangeModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
-        match field {
-            IntroducerChangeDbCol::Id => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::UserId => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::FromUserId => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::ToUserId => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::AdminId => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::Remark => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::CreatedAt => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::UpdatedAt => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-        }
-    }
-}
-
-impl<T> core_db::common::model_api::CreateField<IntroducerChangeModel> for Column<IntroducerChangeModel, T>
-where
-    T: Into<BindValue>,
-{
-    type Value = T;
-    fn set<'db>(field: Self, mut builder: <IntroducerChangeModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, value: Self::Value) -> anyhow::Result<<IntroducerChangeModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>> {
-        let field = resolve_introducer_change_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        let value = value.into();
-        match field {
-            IntroducerChangeDbCol::Id => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::UserId => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::FromUserId => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::ToUserId => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::AdminId => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::Remark => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::CreatedAt => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::UpdatedAt => {
-                builder.cols.push(field);
-                builder.binds.push(value);
-                Ok(builder)
-            }
-        }
+    fn set<'db>(field: Self, state: CreateState<'db>, value: BindValue) -> anyhow::Result<CreateState<'db>> {
+        let value = <IntroducerChangeModel as core_db::common::model_api::CreateModel>::transform_create_value(field.as_sql(), value)?;
+        Ok(state.set_col(field.as_sql(), value))
     }
 }
 
 impl core_db::common::model_api::CreateConflictField<IntroducerChangeModel> for IntroducerChangeDbCol {
-    fn on_conflict_do_nothing<'db>(builder: <IntroducerChangeModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <IntroducerChangeModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
-        builder.on_conflict_do_nothing(fields)
+    fn on_conflict_do_nothing<'db>(state: CreateState<'db>, fields: &[Self]) -> CreateState<'db> {
+        let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();
+        state.on_conflict_do_nothing(&cols)
     }
-    fn on_conflict_update<'db>(builder: <IntroducerChangeModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <IntroducerChangeModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
-        builder.on_conflict_update(fields)
-    }
-}
-
-impl<T> core_db::common::model_api::CreateConflictField<IntroducerChangeModel> for Column<IntroducerChangeModel, T> {
-    fn on_conflict_do_nothing<'db>(builder: <IntroducerChangeModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <IntroducerChangeModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
-        let fields: Vec<IntroducerChangeDbCol> = fields.iter().map(|field| resolve_introducer_change_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
-        builder.on_conflict_do_nothing(&fields)
-    }
-    fn on_conflict_update<'db>(builder: <IntroducerChangeModel as core_db::common::model_api::CreateModel>::InnerCreate<'db>, fields: &[Self]) -> <IntroducerChangeModel as core_db::common::model_api::CreateModel>::InnerCreate<'db> {
-        let fields: Vec<IntroducerChangeDbCol> = fields.iter().map(|field| resolve_introducer_change_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column")).collect();
-        builder.on_conflict_update(&fields)
+    fn on_conflict_update<'db>(state: CreateState<'db>, fields: &[Self]) -> CreateState<'db> {
+        let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();
+        state.on_conflict_update(&cols)
     }
 }
 
 impl core_db::common::model_api::PatchModel for IntroducerChangeModel {
-    type InnerQuery<'db> = QueryState<'db>;
-    type InnerPatch<'db> = IntroducerChangePatchInner<'db>;
-    fn patch_root<'db>(db: DbConn<'db>, base_url: Option<String>) -> Self::InnerPatch<'db> {
-        IntroducerChangePatchInner::new(db, base_url)
-    }
-    fn patch_from_query<'db>(mut state: Self::InnerQuery<'db>) -> Self::InnerPatch<'db> {
+    fn patch_from_query<'db>(mut state: QueryState<'db>) -> PatchState<'db> {
         let db = state.db.clone();
         let base_url = state.base_url.clone();
         state.select_sql = Some(IntroducerChangeDbCol::Id.as_sql().to_string());
         let (scope_sql, binds) = state.to_sql();
-        let mut builder = IntroducerChangePatchInner::new(db, base_url);
-        builder.where_sql.push(format!("{} IN ({})", IntroducerChangeDbCol::Id.as_sql(), scope_sql));
-        builder.binds = binds;
-        builder
+        let mut ps = PatchState::new(db, base_url, "introducer_changes");
+        ps.where_sql.push(format!("{} IN ({})", IntroducerChangeDbCol::Id.as_sql(), scope_sql));
+        ps.where_binds = binds;
+        ps
     }
-    fn patch_save<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
-        Box::pin(async move { builder.save().await })
-    }
-    fn patch_fetch<'db>(builder: Self::InnerPatch<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+    fn patch_save<'db>(state: PatchState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
         Box::pin(async move {
-            if builder.where_sql.is_empty() {
+            let builder = IntroducerChangePatchInner::from_state(state);
+            builder.save().await
+        })
+    }
+    fn patch_fetch<'db>(state: PatchState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move {
+            if state.where_sql.is_empty() {
                 anyhow::bail!("update: no conditions set");
             }
-            let db = builder.db.clone();
-            let base_url = builder.base_url.clone();
+            let db = state.db.clone();
+            let base_url = state.base_url.clone();
             let mut select_sql = format!("SELECT {} FROM introducer_changes", IntroducerChangeDbCol::Id.as_sql());
-            select_sql.push_str(&format!(" WHERE {}", builder.where_sql.join(" AND ")));
+            select_sql.push_str(&format!(" WHERE {}", state.where_sql.join(" AND ")));
             let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
-            for bind_value in &builder.binds { select_q = bind_scalar(select_q, bind_value.clone()); }
+            for bind_value in &state.where_binds { select_q = bind_scalar(select_q, bind_value.clone()); }
             let target_ids = db.fetch_all_scalar(select_q).await?;
+            let builder = IntroducerChangePatchInner::from_state(state);
             builder.save().await?;
             if target_ids.is_empty() {
                 return Ok(Vec::new());
             }
-            let mut query = IntroducerChangeQueryInner::new(db, base_url);
-            query.where_in(IntroducerChangeDbCol::Id, &target_ids).get().await
+            let query = Query::<IntroducerChangeModel>::new_with_base_url(db, base_url);
+            let binds: Vec<BindValue> = target_ids.iter().cloned().map(Into::into).collect();
+            let state = query.into_inner().where_in_str(IntroducerChangeDbCol::Id.as_sql(), &binds);
+            <Self as core_db::common::model_api::QueryModel>::query_all(state).await
         })
+    }
+    fn transform_patch_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {
+        Self::_transform_patch_value(col, value)
     }
 }
 
 impl core_db::common::model_api::PatchAssignField<IntroducerChangeModel> for IntroducerChangeDbCol {
     type Value = BindValue;
-    fn assign<'db>(field: Self, mut builder: <IntroducerChangeModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<IntroducerChangeModel>>::Value) -> anyhow::Result<<IntroducerChangeModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
-        match field {
-            IntroducerChangeDbCol::Id => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::UserId => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::FromUserId => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::ToUserId => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::AdminId => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::Remark => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::CreatedAt => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::UpdatedAt => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-        }
-    }
-}
-
-impl<T> core_db::common::model_api::PatchAssignField<IntroducerChangeModel> for Column<IntroducerChangeModel, T>
-where
-    T: Into<BindValue>,
-{
-    type Value = T;
-    fn assign<'db>(field: Self, mut builder: <IntroducerChangeModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: Self::Value) -> anyhow::Result<<IntroducerChangeModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
-        let field = resolve_introducer_change_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        let value = value.into();
-        match field {
-            IntroducerChangeDbCol::Id => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::UserId => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::FromUserId => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::ToUserId => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::AdminId => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::Remark => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::CreatedAt => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-            IntroducerChangeDbCol::UpdatedAt => {
-                builder.sets.push((field, value, SetMode::Assign));
-                Ok(builder)
-            }
-        }
+    fn assign<'db>(field: Self, state: PatchState<'db>, value: BindValue) -> anyhow::Result<PatchState<'db>> {
+        let value = <IntroducerChangeModel as core_db::common::model_api::PatchModel>::transform_patch_value(field.as_sql(), value)?;
+        Ok(state.assign_col(field.as_sql(), value))
     }
 }
 
 impl core_db::common::model_api::PatchNumericField<IntroducerChangeModel> for IntroducerChangeDbCol {
-    fn increment<'db>(field: Self, mut builder: <IntroducerChangeModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<IntroducerChangeModel>>::Value) -> anyhow::Result<<IntroducerChangeModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+    fn increment<'db>(field: Self, state: PatchState<'db>, value: BindValue) -> anyhow::Result<PatchState<'db>> {
         match field {
-            IntroducerChangeDbCol::Id => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
-            IntroducerChangeDbCol::UserId => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
-            IntroducerChangeDbCol::ToUserId => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
-            IntroducerChangeDbCol::AdminId => { builder.sets.push((field, value, SetMode::Increment)); Ok(builder) }
+            IntroducerChangeDbCol::Id => Ok(state.increment_col(field.as_sql(), value)),
+            IntroducerChangeDbCol::UserId => Ok(state.increment_col(field.as_sql(), value)),
+            IntroducerChangeDbCol::ToUserId => Ok(state.increment_col(field.as_sql(), value)),
+            IntroducerChangeDbCol::AdminId => Ok(state.increment_col(field.as_sql(), value)),
             _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
         }
     }
-    fn decrement<'db>(field: Self, mut builder: <IntroducerChangeModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<IntroducerChangeModel>>::Value) -> anyhow::Result<<IntroducerChangeModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
+    fn decrement<'db>(field: Self, state: PatchState<'db>, value: BindValue) -> anyhow::Result<PatchState<'db>> {
         match field {
-            IntroducerChangeDbCol::Id => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
-            IntroducerChangeDbCol::UserId => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
-            IntroducerChangeDbCol::ToUserId => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
-            IntroducerChangeDbCol::AdminId => { builder.sets.push((field, value, SetMode::Decrement)); Ok(builder) }
+            IntroducerChangeDbCol::Id => Ok(state.decrement_col(field.as_sql(), value)),
+            IntroducerChangeDbCol::UserId => Ok(state.decrement_col(field.as_sql(), value)),
+            IntroducerChangeDbCol::ToUserId => Ok(state.decrement_col(field.as_sql(), value)),
+            IntroducerChangeDbCol::AdminId => Ok(state.decrement_col(field.as_sql(), value)),
             _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
         }
     }
 }
 
-impl core_db::common::model_api::PatchNumericField<IntroducerChangeModel> for Column<IntroducerChangeModel, i64> {
-    fn increment<'db>(field: Self, mut builder: <IntroducerChangeModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<IntroducerChangeModel>>::Value) -> anyhow::Result<<IntroducerChangeModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
-        let field = resolve_introducer_change_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        match field {
-            IntroducerChangeDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
-            IntroducerChangeDbCol::UserId => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
-            IntroducerChangeDbCol::ToUserId => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
-            IntroducerChangeDbCol::AdminId => { builder.sets.push((field, value.into(), SetMode::Increment)); Ok(builder) }
-            _ => anyhow::bail!("column '{}' does not support increment", field.as_sql()),
-        }
-    }
-    fn decrement<'db>(field: Self, mut builder: <IntroducerChangeModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>, value: <Self as core_db::common::model_api::PatchAssignField<IntroducerChangeModel>>::Value) -> anyhow::Result<<IntroducerChangeModel as core_db::common::model_api::PatchModel>::InnerPatch<'db>> {
-        let field = resolve_introducer_change_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        match field {
-            IntroducerChangeDbCol::Id => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
-            IntroducerChangeDbCol::UserId => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
-            IntroducerChangeDbCol::ToUserId => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
-            IntroducerChangeDbCol::AdminId => { builder.sets.push((field, value.into(), SetMode::Decrement)); Ok(builder) }
-            _ => anyhow::bail!("column '{}' does not support decrement", field.as_sql()),
-        }
-    }
+impl core_db::common::model_api::ColExpr for IntroducerChangeDbCol {
+    fn col_sql(self) -> &'static str { self.as_sql() }
 }
 
 impl core_db::common::model_api::QueryField<IntroducerChangeModel> for IntroducerChangeDbCol {
     type Value = BindValue;
-    fn where_col<'db>(field: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<IntroducerChangeModel>>::Value) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn where_col<'db>(field: Self, state: QueryState<'db>, op: Op, value: BindValue) -> QueryState<'db> {
         state.where_col_str(field.as_sql(), op, value)
     }
-    fn or_where_col<'db>(field: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: <Self as core_db::common::model_api::QueryField<IntroducerChangeModel>>::Value) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn or_where_col<'db>(field: Self, state: QueryState<'db>, op: Op, value: BindValue) -> QueryState<'db> {
         state.or_where_col_str(field.as_sql(), op, value)
     }
-    fn where_in<'db>(field: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[<Self as core_db::common::model_api::QueryField<IntroducerChangeModel>>::Value]) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn where_in<'db>(field: Self, state: QueryState<'db>, values: &[BindValue]) -> QueryState<'db> {
         state.where_in_str(field.as_sql(), values)
     }
-    fn order_by<'db>(field: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn order_by<'db>(field: Self, state: QueryState<'db>, dir: OrderDir) -> QueryState<'db> {
         state.order_by_str(field.as_sql(), dir)
     }
-    fn where_null<'db>(field: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn where_null<'db>(field: Self, state: QueryState<'db>) -> QueryState<'db> {
         state.where_null_str(field.as_sql())
     }
-    fn where_not_null<'db>(field: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn where_not_null<'db>(field: Self, state: QueryState<'db>) -> QueryState<'db> {
         state.where_not_null_str(field.as_sql())
     }
 }
 
-impl<T> core_db::common::model_api::QueryField<IntroducerChangeModel> for Column<IntroducerChangeModel, T>
-where
-    T: Clone + Into<BindValue>,
-{
-    type Value = T;
-    fn where_col<'db>(field: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        let col = resolve_introducer_change_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        state.where_col_str(col.as_sql(), op, value.into())
-    }
-    fn or_where_col<'db>(field: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, op: Op, value: Self::Value) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        let col = resolve_introducer_change_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        state.or_where_col_str(col.as_sql(), op, value.into())
-    }
-    fn where_in<'db>(field: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, values: &[Self::Value]) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        let col = resolve_introducer_change_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        let bind_values: Vec<BindValue> = values.iter().map(|v| v.clone().into()).collect();
-        state.where_in_str(col.as_sql(), &bind_values)
-    }
-    fn order_by<'db>(field: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, dir: OrderDir) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        let col = resolve_introducer_change_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        state.order_by_str(col.as_sql(), dir)
-    }
-    fn where_null<'db>(field: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        let col = resolve_introducer_change_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        state.where_null_str(col.as_sql())
-    }
-    fn where_not_null<'db>(field: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
-        let col = resolve_introducer_change_db_col(field.as_sql()).expect("typed generated column must resolve to an internal db column");
-        state.where_not_null_str(col.as_sql())
-    }
-}
-
 impl core_db::common::model_api::IncludeRelation<IntroducerChangeModel> for OneRelation<IntroducerChangeModel, UserRow, 0> {
-    fn include<'db>(_relation: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn include<'db>(_relation: Self, state: QueryState<'db>) -> QueryState<'db> {
         state
     }
 }
 
 impl core_db::common::model_api::WhereHasRelation<IntroducerChangeModel> for OneRelation<IntroducerChangeModel, UserRow, 0> {
     type Target = UserModel;
-    fn where_has<'db, F>(_relation: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn where_has<'db, F>(_relation: Self, mut state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        IntroducerChangeQueryInner::from_state(state).where_has_user(scope).into_state()
+        let start_idx = state.binds.len() + 1;
+        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), None));
+        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
+        sub_where.insert(0, "users.id = introducer_changes.user_id".to_string());
+        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
+        clause.push_str(&sub_where.join(" AND "));
+        clause.push(')');
+        let clause = renumber_placeholders(&clause, start_idx);
+        state.where_sql.push(clause);
+        state.binds.extend(sub_binds);
+        state
     }
-    fn or_where_has<'db, F>(_relation: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn or_where_has<'db, F>(_relation: Self, mut state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        IntroducerChangeQueryInner::from_state(state).or_where_has_user(scope).into_state()
+        let start_idx = state.binds.len() + 1;
+        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), None));
+        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
+        sub_where.insert(0, "users.id = introducer_changes.user_id".to_string());
+        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
+        clause.push_str(&sub_where.join(" AND "));
+        clause.push(')');
+        let clause = renumber_placeholders(&clause, start_idx);
+        if let Some(last) = state.where_sql.pop() {
+            state.where_sql.push(format!("({} OR {})", last, clause));
+        } else {
+            state.where_sql.push(clause);
+        }
+        state.binds.extend(sub_binds);
+        state
     }
 }
 
@@ -4060,24 +2721,48 @@ impl core_db::common::model_api::RecordOneRelation<IntroducerChangeModel> for On
 }
 
 impl core_db::common::model_api::IncludeRelation<IntroducerChangeModel> for OneRelation<IntroducerChangeModel, UserRow, 1> {
-    fn include<'db>(_relation: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn include<'db>(_relation: Self, state: QueryState<'db>) -> QueryState<'db> {
         state
     }
 }
 
 impl core_db::common::model_api::WhereHasRelation<IntroducerChangeModel> for OneRelation<IntroducerChangeModel, UserRow, 1> {
     type Target = UserModel;
-    fn where_has<'db, F>(_relation: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn where_has<'db, F>(_relation: Self, mut state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        IntroducerChangeQueryInner::from_state(state).where_has_from_user(scope).into_state()
+        let start_idx = state.binds.len() + 1;
+        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), None));
+        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
+        sub_where.insert(0, "users.id = introducer_changes.from_user_id".to_string());
+        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
+        clause.push_str(&sub_where.join(" AND "));
+        clause.push(')');
+        let clause = renumber_placeholders(&clause, start_idx);
+        state.where_sql.push(clause);
+        state.binds.extend(sub_binds);
+        state
     }
-    fn or_where_has<'db, F>(_relation: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn or_where_has<'db, F>(_relation: Self, mut state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        IntroducerChangeQueryInner::from_state(state).or_where_has_from_user(scope).into_state()
+        let start_idx = state.binds.len() + 1;
+        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), None));
+        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
+        sub_where.insert(0, "users.id = introducer_changes.from_user_id".to_string());
+        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
+        clause.push_str(&sub_where.join(" AND "));
+        clause.push(')');
+        let clause = renumber_placeholders(&clause, start_idx);
+        if let Some(last) = state.where_sql.pop() {
+            state.where_sql.push(format!("({} OR {})", last, clause));
+        } else {
+            state.where_sql.push(clause);
+        }
+        state.binds.extend(sub_binds);
+        state
     }
 }
 
@@ -4089,24 +2774,48 @@ impl core_db::common::model_api::RecordOneRelation<IntroducerChangeModel> for On
 }
 
 impl core_db::common::model_api::IncludeRelation<IntroducerChangeModel> for OneRelation<IntroducerChangeModel, UserRow, 2> {
-    fn include<'db>(_relation: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn include<'db>(_relation: Self, state: QueryState<'db>) -> QueryState<'db> {
         state
     }
 }
 
 impl core_db::common::model_api::WhereHasRelation<IntroducerChangeModel> for OneRelation<IntroducerChangeModel, UserRow, 2> {
     type Target = UserModel;
-    fn where_has<'db, F>(_relation: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn where_has<'db, F>(_relation: Self, mut state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        IntroducerChangeQueryInner::from_state(state).where_has_to_user(scope).into_state()
+        let start_idx = state.binds.len() + 1;
+        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), None));
+        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
+        sub_where.insert(0, "users.id = introducer_changes.to_user_id".to_string());
+        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
+        clause.push_str(&sub_where.join(" AND "));
+        clause.push(')');
+        let clause = renumber_placeholders(&clause, start_idx);
+        state.where_sql.push(clause);
+        state.binds.extend(sub_binds);
+        state
     }
-    fn or_where_has<'db, F>(_relation: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn or_where_has<'db, F>(_relation: Self, mut state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        IntroducerChangeQueryInner::from_state(state).or_where_has_to_user(scope).into_state()
+        let start_idx = state.binds.len() + 1;
+        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), None));
+        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
+        sub_where.insert(0, "users.id = introducer_changes.to_user_id".to_string());
+        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
+        clause.push_str(&sub_where.join(" AND "));
+        clause.push(')');
+        let clause = renumber_placeholders(&clause, start_idx);
+        if let Some(last) = state.where_sql.pop() {
+            state.where_sql.push(format!("({} OR {})", last, clause));
+        } else {
+            state.where_sql.push(clause);
+        }
+        state.binds.extend(sub_binds);
+        state
     }
 }
 
@@ -4118,24 +2827,48 @@ impl core_db::common::model_api::RecordOneRelation<IntroducerChangeModel> for On
 }
 
 impl core_db::common::model_api::IncludeRelation<IntroducerChangeModel> for OneRelation<IntroducerChangeModel, AdminRow, 3> {
-    fn include<'db>(_relation: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db> {
+    fn include<'db>(_relation: Self, state: QueryState<'db>) -> QueryState<'db> {
         state
     }
 }
 
 impl core_db::common::model_api::WhereHasRelation<IntroducerChangeModel> for OneRelation<IntroducerChangeModel, AdminRow, 3> {
     type Target = AdminModel;
-    fn where_has<'db, F>(_relation: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn where_has<'db, F>(_relation: Self, mut state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        IntroducerChangeQueryInner::from_state(state).where_has_admin(scope).into_state()
+        let start_idx = state.binds.len() + 1;
+        let scoped = scope(AdminModel::query_with_base_url(state.db.clone(), None));
+        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
+        sub_where.insert(0, "admin.id = introducer_changes.admin_id".to_string());
+        let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
+        clause.push_str(&sub_where.join(" AND "));
+        clause.push(')');
+        let clause = renumber_placeholders(&clause, start_idx);
+        state.where_sql.push(clause);
+        state.binds.extend(sub_binds);
+        state
     }
-    fn or_where_has<'db, F>(_relation: Self, state: <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>, scope: F) -> <IntroducerChangeModel as core_db::common::model_api::QueryModel>::InnerQuery<'db>
+    fn or_where_has<'db, F>(_relation: Self, mut state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        IntroducerChangeQueryInner::from_state(state).or_where_has_admin(scope).into_state()
+        let start_idx = state.binds.len() + 1;
+        let scoped = scope(AdminModel::query_with_base_url(state.db.clone(), None));
+        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
+        sub_where.insert(0, "admin.id = introducer_changes.admin_id".to_string());
+        let mut clause = String::from("EXISTS (SELECT 1 FROM admin WHERE ");
+        clause.push_str(&sub_where.join(" AND "));
+        clause.push(')');
+        let clause = renumber_placeholders(&clause, start_idx);
+        if let Some(last) = state.where_sql.pop() {
+            state.where_sql.push(format!("({} OR {})", last, clause));
+        } else {
+            state.where_sql.push(clause);
+        }
+        state.binds.extend(sub_binds);
+        state
     }
 }
 

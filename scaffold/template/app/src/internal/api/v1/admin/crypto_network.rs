@@ -177,8 +177,8 @@ fn network_output(network: &generated::models::CryptoNetworkRecord) -> CryptoNet
         logo_url: network.logo_url.clone(),
         status: network.status,
         sort_order: network.sort_order,
-        created_at: network.created_at,
-        updated_at: network.updated_at,
+        created_at: network.created_at.into(),
+        updated_at: network.updated_at.into(),
     }
 }
 

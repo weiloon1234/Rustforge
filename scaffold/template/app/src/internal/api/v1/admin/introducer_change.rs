@@ -60,7 +60,7 @@ async fn change_introducer(
             to_user_id: log.to_user_id.into(),
             admin_id: log.admin_id.into(),
             remark: log.remark,
-            created_at: log.created_at,
+            created_at: log.created_at.into(),
         },
         &t("Introducer changed"),
     ))

@@ -42,11 +42,11 @@ async fn adjust_credit(
             id: txn.id.into(),
             user_id: txn.user_id.into(),
             credit_type: txn.credit_type,
-            amount: txn.amount,
+            amount: txn.amount.into(),
             transaction_type: txn.transaction_type,
             related_key: txn.related_key,
             remark: txn.remark,
-            created_at: txn.created_at,
+            created_at: txn.created_at.into(),
         },
         &t("Credit adjusted"),
     ))

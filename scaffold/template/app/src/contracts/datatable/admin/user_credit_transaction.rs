@@ -3,6 +3,7 @@ use core_web::datatable::{
     DataTableGenericQueryRequest, DataTableScopedContract,
 };
 use core_web::ids::SnowflakeId;
+use core_web::Decimal;
 use generated::models::{CreditTransactionType, CreditType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -18,9 +19,7 @@ pub struct UserCreditTransactionDatatableRow {
     pub user_id: SnowflakeId,
     pub admin_id: Option<SnowflakeId>,
     pub credit_type: CreditType,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub amount: rust_decimal::Decimal,
+    pub amount: Decimal,
     pub transaction_type: CreditTransactionType,
     /// Backend-computed human-readable label for the transaction type,
     /// respecting current locale and interpolating dynamic `params`.

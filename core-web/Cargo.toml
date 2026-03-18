@@ -50,3 +50,4 @@ schemars = { version = "0.8.21", features = ["uuid1", "chrono"] }
 core-mailer = { path = "../core-mailer" }
 regex = "1.10"
 ts-rs = { version = "10", features = ["serde-compat"] }
+rust_decimal = { workspace = true }

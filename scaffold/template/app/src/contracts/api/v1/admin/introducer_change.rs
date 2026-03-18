@@ -1,4 +1,5 @@
 use core_web::ids::SnowflakeId;
+use core_web::DateTime;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -21,7 +22,5 @@ pub struct ChangeIntroducerOutput {
     pub to_user_id: SnowflakeId,
     pub admin_id: SnowflakeId,
     pub remark: Option<String>,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub created_at: time::OffsetDateTime,
+    pub created_at: DateTime,
 }

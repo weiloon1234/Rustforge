@@ -3,6 +3,7 @@ use core_web::datatable::{
     DataTableGenericQueryRequest, DataTableScopedContract,
 };
 use core_web::ids::SnowflakeId;
+use core_web::Decimal;
 use generated::models::{CreditType, OwnerType, WithdrawalMethod, WithdrawalStatus};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -24,20 +25,12 @@ pub struct WithdrawalDatatableRow {
     pub bank_name: Option<String>,
     pub crypto_network_id: Option<SnowflakeId>,
     pub crypto_network_name: Option<String>,
-    #[schemars(with = "Option<String>")]
-    #[ts(type = "string | null")]
-    pub conversion_rate: Option<rust_decimal::Decimal>,
+    pub conversion_rate: Option<Decimal>,
     pub status: WithdrawalStatus,
     pub status_label: String,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub amount: rust_decimal::Decimal,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub fee: rust_decimal::Decimal,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub net_amount: rust_decimal::Decimal,
+    pub amount: Decimal,
+    pub fee: Decimal,
+    pub net_amount: Decimal,
     pub related_key: Option<String>,
     pub remark: Option<String>,
     pub admin_remark: Option<String>,

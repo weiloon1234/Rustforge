@@ -1600,6 +1600,7 @@ dependencies = [
  "core-i18n",
  "core-mailer",
  "regex",
+ "rust_decimal",
  "rustforge-contract-macros",
  "rustforge-contract-meta",
  "schemars",

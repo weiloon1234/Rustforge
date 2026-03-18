@@ -1,4 +1,5 @@
 use core_web::ids::SnowflakeId;
+use core_web::{DateTime, Decimal};
 use generated::models::{
     CreditType, OwnerType, WithdrawalMethod, WithdrawalReviewAction, WithdrawalStatus,
 };
@@ -28,26 +29,14 @@ pub struct WithdrawalOutput {
     pub bank_account_number: Option<String>,
     pub crypto_network_id: Option<SnowflakeId>,
     pub crypto_wallet_address: Option<String>,
-    #[schemars(with = "Option<String>")]
-    #[ts(type = "string | null")]
-    pub conversion_rate: Option<rust_decimal::Decimal>,
+    pub conversion_rate: Option<Decimal>,
     pub status: WithdrawalStatus,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub amount: rust_decimal::Decimal,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub fee: rust_decimal::Decimal,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub net_amount: rust_decimal::Decimal,
+    pub amount: Decimal,
+    pub fee: Decimal,
+    pub net_amount: Decimal,
     pub related_key: Option<String>,
     pub remark: Option<String>,
     pub admin_remark: Option<String>,
-    #[schemars(with = "Option<String>")]
-    #[ts(type = "string | null")]
-    pub reviewed_at: Option<time::OffsetDateTime>,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub created_at: time::OffsetDateTime,
+    pub reviewed_at: Option<DateTime>,
+    pub created_at: DateTime,
 }

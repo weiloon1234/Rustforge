@@ -1,6 +1,7 @@
 use crate::contracts::types::username::UsernameString;
 use core_web::contracts::rustforge_contract;
 use core_web::ids::SnowflakeId;
+use core_web::DateTime;
 use core_web::Patch;
 use generated::{models::AdminType, permissions::Permission};
 use schemars::JsonSchema;
@@ -60,12 +61,8 @@ pub struct AdminOutput {
     pub admin_type: AdminType,
     #[serde(default)]
     pub abilities: Vec<Permission>,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub updated_at: time::OffsetDateTime,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
 }
 
 impl From<generated::models::AdminRecord> for AdminOutput {
@@ -81,8 +78,8 @@ impl From<generated::models::AdminRecord> for AdminOutput {
             name: value.name,
             admin_type: value.admin_type,
             abilities,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
+            created_at: value.created_at.into(),
+            updated_at: value.updated_at.into(),
         }
     }
 }

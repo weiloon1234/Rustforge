@@ -1,4 +1,5 @@
 use core_web::ids::SnowflakeId;
+use core_web::{DateTime, Decimal};
 use generated::localized::LocalizedInput;
 use generated::models::{AdjustableCreditType, CreditTransactionType, CreditType};
 use schemars::JsonSchema;
@@ -11,9 +12,7 @@ use validator::Validate;
 pub struct AdminCreditAdjustInput {
     pub username: String,
     pub credit_type: AdjustableCreditType,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub amount: rust_decimal::Decimal,
+    pub amount: Decimal,
     #[serde(default)]
     pub remark: Option<String>,
     /// Enable custom description
@@ -50,13 +49,9 @@ pub struct UserCreditTransactionOutput {
     pub id: SnowflakeId,
     pub user_id: SnowflakeId,
     pub credit_type: CreditType,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub amount: rust_decimal::Decimal,
+    pub amount: Decimal,
     pub transaction_type: CreditTransactionType,
     pub related_key: Option<String>,
     pub remark: Option<String>,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub created_at: time::OffsetDateTime,
+    pub created_at: DateTime,
 }

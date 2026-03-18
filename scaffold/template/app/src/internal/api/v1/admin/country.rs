@@ -54,7 +54,7 @@ async fn set_default(
         AdminCountrySetDefaultOutput {
             iso2: country.iso2,
             is_default: country.is_default,
-            updated_at: country.updated_at,
+            updated_at: country.updated_at.into(),
         },
         &t("Country default updated"),
     ))
@@ -72,7 +72,7 @@ async fn update_status(
         AdminCountryStatusUpdateOutput {
             iso2: country.iso2,
             status: country.status,
-            updated_at: country.updated_at,
+            updated_at: country.updated_at.into(),
         },
         &t("Country status updated"),
     ))

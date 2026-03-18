@@ -1,4 +1,5 @@
 use core_web::contracts::rustforge_contract;
+use core_web::DateTime;
 use schemars::JsonSchema;
 use serde::Serialize;
 use ts_rs::TS;
@@ -16,9 +17,7 @@ pub struct AdminCountryStatusUpdateInput {
 pub struct AdminCountryStatusUpdateOutput {
     pub iso2: String,
     pub status: String,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub updated_at: time::OffsetDateTime,
+    pub updated_at: DateTime,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
@@ -26,7 +25,5 @@ pub struct AdminCountryStatusUpdateOutput {
 pub struct AdminCountrySetDefaultOutput {
     pub iso2: String,
     pub is_default: bool,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub updated_at: time::OffsetDateTime,
+    pub updated_at: DateTime,
 }

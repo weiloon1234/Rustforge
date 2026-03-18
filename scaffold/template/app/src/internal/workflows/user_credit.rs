@@ -18,7 +18,7 @@ pub async fn adjust_credit(
     req: AdminCreditAdjustInput,
 ) -> Result<UserCreditTransactionRecord, AppError> {
     let username = req.username.to_ascii_lowercase();
-    let amount = req.amount;
+    let amount: rust_decimal::Decimal = req.amount.into();
 
     if amount.is_zero() {
         return Err(AppError::BadRequest(t("Amount must not be zero")));

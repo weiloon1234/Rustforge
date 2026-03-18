@@ -1,4 +1,5 @@
 use core_web::ids::SnowflakeId;
+use core_web::DateTime;
 use generated::models::CompanyBankAccountStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -26,10 +27,6 @@ pub struct CompanyBankAccountOutput {
     pub account_number: String,
     pub status: CompanyBankAccountStatus,
     pub sort_order: i32,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub created_at: time::OffsetDateTime,
-    #[schemars(with = "String")]
-    #[ts(type = "string")]
-    pub updated_at: time::OffsetDateTime,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
 }
