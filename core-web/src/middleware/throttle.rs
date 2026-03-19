@@ -28,7 +28,7 @@ pub fn throttle_layer(
 
     let limiter: Arc<KeyedLimiter> = Arc::new(RateLimiter::dashmap(quota));
 
-    axum::middleware::from_fn(move |req: Request, next: Next| {
+    axum::middleware::from_fn::<_, ()>(move |req: Request, next: Next| {
         let limiter = limiter.clone();
         async move {
             let ip = extract_ip(&req);
