@@ -1,4 +1,5 @@
 use axum::middleware::from_fn_with_state;
+use core_web::middleware::throttle;
 use core_web::openapi::{aide::axum::routing::get_with, ApiRouter};
 
 use crate::internal::api::state::AppApiState;
@@ -7,9 +8,12 @@ mod auth;
 mod team;
 
 pub fn router(state: AppApiState) -> ApiRouter {
+    let rate_limiter = throttle::throttle_layer(state.rate_limit_per_sec, state.rate_limit_burst);
+
     ApiRouter::new()
         .nest("/auth", auth::router(state.clone()))
         .merge(guarded_router(state))
+        .layer(rate_limiter)
 }
 
 fn guarded_router(state: AppApiState) -> ApiRouter {

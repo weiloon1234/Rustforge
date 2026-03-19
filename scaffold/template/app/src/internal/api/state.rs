@@ -24,6 +24,8 @@ pub struct AppApiState {
     pub i18n_default_locale: String,
     pub i18n_supported_locales: Vec<String>,
     pub realtime: RealtimePublisher,
+    pub rate_limit_per_sec: u32,
+    pub rate_limit_burst: u32,
 }
 
 impl AppApiState {
@@ -65,6 +67,8 @@ impl AppApiState {
                 &ctx.settings.redis.url,
                 &ctx.settings.realtime,
             )?,
+            rate_limit_per_sec: ctx.settings.middleware.rate_limit_per_second,
+            rate_limit_burst: ctx.settings.middleware.rate_limit_burst,
         })
     }
 }
