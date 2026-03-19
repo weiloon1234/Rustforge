@@ -1,8 +1,9 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import { getRuntimeConfig } from "@shared/runtimeConfig";
-import en from "../../../i18n/en.json";
-import zh from "../../../i18n/zh.json";
+const localeModules = import.meta.glob("../../../i18n/*.json", {
+  eager: true,
+}) as Record<string, { default: Record<string, string> }>;
 
 const BOOTSTRAP_SCRIPT_ID = "rustforge-bootstrap-runtime";
 let initPromise: Promise<typeof i18n> | null = null;
@@ -77,10 +78,13 @@ export async function initI18n(): Promise<typeof i18n> {
     await loadBootstrapScript();
 
     const runtimeConfig = getRuntimeConfig();
-    const resources = {
-      en: { translation: transformParams(en) },
-      zh: { translation: transformParams(zh) },
-    };
+    const resources: Record<string, { translation: Record<string, string> }> = {};
+    for (const [path, module] of Object.entries(localeModules)) {
+      const locale = path.match(/\/([^/]+)\.json$/)?.[1];
+      if (locale) {
+        resources[locale] = { translation: transformParams(module.default) };
+      }
+    }
 
     await i18n
       .use(rustParamPostProcessor)
