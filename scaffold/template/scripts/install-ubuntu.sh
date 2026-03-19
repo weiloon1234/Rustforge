@@ -381,6 +381,10 @@ upsert_env "${ENV_FILE}" "DEPLOY_REPO_DIR" "${DEPLOY_REPO_DIR}"
 
 NGINX_CONF_PATH="/etc/nginx/sites-available/${PROJECT_SLUG}.conf"
 NGINX_LINK_PATH="/etc/nginx/sites-enabled/${PROJECT_SLUG}.conf"
+NGINX_RATE_LIMIT_PATH="/etc/nginx/conf.d/${PROJECT_SLUG}-rate-limit.conf"
+
+# limit_req_zone must live in the http context — conf.d is included there by default
+NGINX_RATE_LIMIT_CONTENT="limit_req_zone \$binary_remote_addr zone=${PROJECT_SLUG}_auth:10m rate=5r/s;"
 
 NGINX_CONF_CONTENT="$(cat <<EOF
 server {
@@ -402,6 +406,18 @@ server {
         proxy_send_timeout 86400s;
     }
 
+    # Rate-limit auth endpoints: 5 req/s per IP, burst 20
+    location ~ ^/api/v1/(user|admin)/auth {
+        limit_req zone=${PROJECT_SLUG}_auth burst=20 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:${SERVER_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:${SERVER_PORT};
         proxy_http_version 1.1;
@@ -414,6 +430,7 @@ server {
 EOF
 )"
 
+write_file_if_changed "${NGINX_RATE_LIMIT_PATH}" "0644" "${NGINX_RATE_LIMIT_CONTENT}" || true
 write_file_if_changed "${NGINX_CONF_PATH}" "0644" "${NGINX_CONF_CONTENT}" || true
 ln -sfn "${NGINX_CONF_PATH}" "${NGINX_LINK_PATH}"
 nginx -t
