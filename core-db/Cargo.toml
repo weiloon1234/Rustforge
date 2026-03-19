@@ -19,6 +19,7 @@ sqlx = { workspace = true, features = [
     "runtime-tokio-native-tls",
     "postgres",
     "macros",
+    "migrate",
     "chrono",
     "uuid",
     "time",

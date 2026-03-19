@@ -64,15 +64,14 @@ pub async fn handle(cmd: CoreCommands) -> anyhow::Result<()> {
 }
 
 async fn handle_migrate(cmd: MigrateCommands) -> anyhow::Result<()> {
+    let migrations_dir = super::migrations_dir();
     match cmd {
         MigrateCommands::Pump => super::migrations::pump().await,
-        MigrateCommands::Run => super::sqlx_tool::handle(super::sqlx_tool::MigrateCommand::Run),
-        MigrateCommands::Revert => {
-            super::sqlx_tool::handle(super::sqlx_tool::MigrateCommand::Revert)
-        }
-        MigrateCommands::Info => super::sqlx_tool::handle(super::sqlx_tool::MigrateCommand::Info),
+        MigrateCommands::Run => super::migrate_runner::run(&migrations_dir).await,
+        MigrateCommands::Revert => super::migrate_runner::revert(&migrations_dir).await,
+        MigrateCommands::Info => super::migrate_runner::info(&migrations_dir).await,
         MigrateCommands::Add { name } => {
-            super::sqlx_tool::handle(super::sqlx_tool::MigrateCommand::Add { name })
+            super::migrate_runner::add(&name, &migrations_dir).await
         }
     }
 }

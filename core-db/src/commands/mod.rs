@@ -256,60 +256,78 @@ CREATE INDEX IF NOT EXISTS idx_sql_profiler_queries_created_at ON sql_profiler_q
     }
 }
 
-/// Commands relating to SQLx migration tool
-pub mod sqlx_tool {
-    use std::process::Command;
+/// Programmatic migration runner (no sqlx-cli dependency)
+pub mod migrate_runner {
+    use sqlx::postgres::PgPool;
+    use std::path::Path;
 
-    pub enum MigrateCommand {
-        Run,
-        Revert,
-        Info,
-        Add { name: String },
+    async fn connect() -> anyhow::Result<PgPool> {
+        let url = std::env::var("DATABASE_URL")
+            .map_err(|_| anyhow::anyhow!("DATABASE_URL must be set for migrations"))?;
+        Ok(PgPool::connect(&url).await?)
     }
 
-    fn ensure_sqlx_installed() -> anyhow::Result<()> {
-        match Command::new("sqlx").arg("--version").output() {
-            Ok(_) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                anyhow::bail!(
-                    "sqlx-cli is not installed.\n\n\
-                     Install it with:\n\
-                     \n    cargo install sqlx-cli --no-default-features --features postgres\n\n\
-                     Or run: make install-tools"
-                );
-            }
-            Err(e) => Err(e.into()),
-        }
+    pub async fn run(migrations_dir: &Path) -> anyhow::Result<()> {
+        let pool = connect().await?;
+        let migrator = sqlx::migrate::Migrator::new(migrations_dir).await?;
+        migrator.run(&pool).await?;
+        println!("Migrations applied successfully.");
+        Ok(())
     }
 
-    pub fn handle(cmd: MigrateCommand) -> anyhow::Result<()> {
-        ensure_sqlx_installed()?;
+    pub async fn revert(migrations_dir: &Path) -> anyhow::Result<()> {
+        let pool = connect().await?;
+        let migrator = sqlx::migrate::Migrator::new(migrations_dir).await?;
+        migrator.undo(&pool, 0).await?;
+        println!("Last migration reverted.");
+        Ok(())
+    }
 
-        let migrations_dir = super::migrations_dir();
-        let migrations_dir = migrations_dir.to_string_lossy().to_string();
+    pub async fn info(migrations_dir: &Path) -> anyhow::Result<()> {
+        let pool = connect().await?;
+        let migrator = sqlx::migrate::Migrator::new(migrations_dir).await?;
 
-        let status = match cmd {
-            MigrateCommand::Run => Command::new("sqlx")
-                .args(["migrate", "run", "--source", &migrations_dir])
-                .status()?,
-            MigrateCommand::Revert => Command::new("sqlx")
-                .args(["migrate", "revert", "--source", &migrations_dir])
-                .status()?,
-            MigrateCommand::Info => Command::new("sqlx")
-                .args(["migrate", "info", "--source", &migrations_dir])
-                .status()?,
-            MigrateCommand::Add { name } => Command::new("sqlx")
-                .arg("migrate")
-                .arg("add")
-                .arg(name)
-                .arg("--source")
-                .arg(&migrations_dir)
-                .status()?,
-        };
+        // Get applied migrations from DB
+        let applied: std::collections::HashMap<i64, (bool, String)> = sqlx::query_as::<_, (i64, String, String)>(
+            "SELECT version, description, checksum FROM _sqlx_migrations ORDER BY version"
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(v, d, c)| (v, (true, format!("{d} [{c}]"))))
+        .collect();
 
-        if !status.success() {
-            anyhow::bail!("Migration command failed");
+        println!("{:<14} {:<50} {}", "Version", "Description", "Status");
+        println!("{}", "-".repeat(80));
+
+        for migration in migrator.iter() {
+            let status = if applied.contains_key(&migration.version) {
+                "applied"
+            } else {
+                "pending"
+            };
+            println!(
+                "{:<14} {:<50} {}",
+                migration.version,
+                migration.description,
+                status,
+            );
         }
+        Ok(())
+    }
+
+    pub async fn add(name: &str, migrations_dir: &Path) -> anyhow::Result<()> {
+        tokio::fs::create_dir_all(migrations_dir).await?;
+
+        let now = time::OffsetDateTime::now_utc();
+        let timestamp = now
+            .format(&time::format_description::parse("[year][month][day][hour][minute][second]")?)
+            .map_err(|e| anyhow::anyhow!("Failed to format timestamp: {e}"))?;
+        let filename = format!("{}_{}.sql", timestamp, name);
+        let path = migrations_dir.join(&filename);
+        tokio::fs::write(&path, "-- Add migration SQL here\n").await?;
+        println!("Created migration: {}", path.display());
         Ok(())
     }
 }
