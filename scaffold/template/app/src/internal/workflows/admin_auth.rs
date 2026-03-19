@@ -140,7 +140,12 @@ pub async fn locale_update(
     admin_id: i64,
     req: AdminLocaleUpdateInput,
 ) -> Result<String, AppError> {
-    let normalized = core_i18n::match_supported_locale(req.locale.trim())
+    let raw = req.locale.trim().to_ascii_lowercase();
+    let normalized = state
+        .i18n_supported_locales
+        .iter()
+        .find(|l| l.to_ascii_lowercase() == raw)
+        .cloned()
         .ok_or_else(|| AppError::BadRequest(t("Unsupported locale")))?;
 
     let affected = AdminModel::query(DbConn::pool(&state.db))

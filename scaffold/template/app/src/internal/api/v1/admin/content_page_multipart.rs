@@ -33,19 +33,19 @@ pub async fn parse_content_page_update_multipart(
             continue;
         }
 
-        if let Some(locale) = localized_field_locale(&field_name, "title")? {
+        if let Some(locale) = localized_field_locale(&field_name, "title", &state.i18n_supported_locales)? {
             let value = field.text().await.map_err(AppError::from)?;
-            title.insert(locale.to_string(), value.trim().to_string());
+            title.insert(locale, value.trim().to_string());
             continue;
         }
 
-        if let Some(locale) = localized_field_locale(&field_name, "content")? {
+        if let Some(locale) = localized_field_locale(&field_name, "content", &state.i18n_supported_locales)? {
             let value = field.text().await.map_err(AppError::from)?;
-            content.insert(locale.to_string(), value.trim().to_string());
+            content.insert(locale, value.trim().to_string());
             continue;
         }
 
-        if let Some(locale) = localized_field_locale(&field_name, "cover")? {
+        if let Some(locale) = localized_field_locale(&field_name, "cover", &state.i18n_supported_locales)? {
             if field.file_name().is_some() {
                 let filename = field.file_name().map(ToString::to_string);
                 let content_type = field
@@ -59,19 +59,19 @@ pub async fn parse_content_page_update_multipart(
 
                 let attachment = upload_content_page_cover(
                     state,
-                    locale,
+                    &locale,
                     filename.as_deref(),
                     &content_type,
                     bytes,
                 )
                 .await?;
 
-                cover.insert(locale.to_string(), attachment.path);
+                cover.insert(locale, attachment.path);
             } else {
                 let value = field.text().await.map_err(AppError::from)?;
                 let value = value.trim();
                 if !value.is_empty() {
-                    cover.insert(locale.to_string(), value.to_string());
+                    cover.insert(locale, value.to_string());
                 }
             }
             continue;
@@ -209,10 +209,11 @@ fn validate_attachment_allowed(
     }
 }
 
-fn localized_field_locale<'a>(
-    field_name: &'a str,
+fn localized_field_locale(
+    field_name: &str,
     prefix: &str,
-) -> Result<Option<&'a str>, AppError> {
+    supported: &[String],
+) -> Result<Option<String>, AppError> {
     let Some(locale_raw) = field_name
         .strip_prefix(prefix)
         .and_then(|rest| rest.strip_prefix('.'))
@@ -220,16 +221,20 @@ fn localized_field_locale<'a>(
         return Ok(None);
     };
 
-    let locale = normalize_locale(locale_raw)?;
+    let locale = normalize_locale(locale_raw, supported)?;
     Ok(Some(locale))
 }
 
-fn normalize_locale(raw: &str) -> Result<&'static str, AppError> {
+fn normalize_locale(raw: &str, supported: &[String]) -> Result<String, AppError> {
     let raw = raw.trim();
     if raw.is_empty() {
         return Err(AppError::BadRequest(t("Invalid locale field key")));
     }
-    core_i18n::match_supported_locale(raw)
+    let lower = raw.to_ascii_lowercase();
+    supported
+        .iter()
+        .find(|l| l.to_ascii_lowercase() == lower)
+        .cloned()
         .ok_or_else(|| AppError::BadRequest(t("Unsupported locale")))
 }
 
