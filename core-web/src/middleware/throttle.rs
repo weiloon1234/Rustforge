@@ -87,12 +87,24 @@ where
 }
 
 /// Extracts the real client IP from request headers / extensions.
-/// Priority: X-Real-IP → X-Forwarded-For (first entry) → ConnectInfo peer.
+///
+/// Priority:
+/// 1. `CF-Connecting-IP` — set by Cloudflare (orange cloud); cannot be forged by the client.
+/// 2. `X-Real-IP`        — set by nginx (`proxy_set_header X-Real-IP $remote_addr`).
+/// 3. `X-Forwarded-For`  — first entry; set by proxies. Not used alone as it is client-spoofable
+///                         without a trusted-proxy whitelist.
+/// 4. `ConnectInfo`      — TCP peer address; is a Cloudflare edge IP when behind CF, so last resort.
 fn extract_ip(req: &Request<Body>) -> IpAddr {
     req.headers()
-        .get("x-real-ip")
+        .get("cf-connecting-ip")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse().ok())
+        .or_else(|| {
+            req.headers()
+                .get("x-real-ip")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse().ok())
+        })
         .or_else(|| {
             req.headers()
                 .get("x-forwarded-for")
