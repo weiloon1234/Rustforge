@@ -314,6 +314,16 @@ struct TomlConfig {
     realtime: TomlRealtime,
     #[serde(default)]
     cors: CorsSettings,
+    #[serde(default)]
+    languages: TomlLanguages,
+}
+
+#[derive(Debug, serde::Deserialize, Default)]
+struct TomlLanguages {
+    #[serde(default)]
+    default: Option<String>,
+    #[serde(default)]
+    supported: Vec<String>,
 }
 
 #[derive(Debug, serde::Deserialize, Default)]
@@ -416,15 +426,6 @@ impl Settings {
             sweep_interval: get_env_u64("WORKER_SWEEP_INTERVAL", 30)?,
         };
 
-        let tz_str = get_env("APP_TIMEZONE", "+08:00");
-        let i18n = core_i18n::config::I18nSettings {
-            default_locale: "en",
-            supported_locales: &["en", "zh"], // Fallback if not configured
-            default_timezone: core_i18n::config::I18nSettings::parse_utc_offset(&tz_str)
-                .context("Invalid APP_TIMEZONE; expected format like +08:00")?,
-            default_timezone_str: tz_str,
-        };
-
         let middleware = MiddlewareSettings {
             rate_limit_per_second: get_env_u32("MW_RATE_LIMIT_PER_SEC", 2)?,
             rate_limit_burst: get_env_u32("MW_RATE_LIMIT_BURST", 60)?,
@@ -445,6 +446,32 @@ impl Settings {
         realtime.channels = toml_config.realtime.channels;
 
         let cors = toml_config.cors;
+
+        let tz_str = get_env("APP_TIMEZONE", "+08:00");
+        let supported_locales: &'static [&'static str] =
+            if toml_config.languages.supported.is_empty() {
+                &["en", "zh"]
+            } else {
+                let leaked: Vec<&'static str> = toml_config
+                    .languages
+                    .supported
+                    .into_iter()
+                    .map(|s| Box::leak(s.into_boxed_str()) as &str)
+                    .collect();
+                Box::leak(leaked.into_boxed_slice())
+            };
+        let default_locale: &'static str = toml_config
+            .languages
+            .default
+            .map(|s| Box::leak(s.into_boxed_str()) as &str)
+            .unwrap_or("en");
+        let i18n = core_i18n::config::I18nSettings {
+            default_locale,
+            supported_locales,
+            default_timezone: core_i18n::config::I18nSettings::parse_utc_offset(&tz_str)
+                .context("Invalid APP_TIMEZONE; expected format like +08:00")?,
+            default_timezone_str: tz_str,
+        };
 
         // Minimal sanity checks (optional but recommended)
         if db.url.is_empty() {
