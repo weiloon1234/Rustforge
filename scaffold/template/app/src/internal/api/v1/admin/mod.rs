@@ -25,7 +25,7 @@ mod user_credit;
 mod withdrawal;
 
 pub fn router(state: AppApiState) -> ApiRouter {
-    let rate_limiter = throttle::throttle_layer(state.rate_limit_per_sec, state.rate_limit_burst);
+    let rate_limiter = throttle::ThrottleLayer::new(state.rate_limit_per_sec, state.rate_limit_burst);
 
     ApiRouter::new()
         .nest("/auth", auth::router(state.clone()))
