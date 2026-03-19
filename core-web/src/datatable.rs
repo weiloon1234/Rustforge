@@ -88,34 +88,43 @@ pub struct DataTableQueryRequestBase {
     #[serde(default)]
     #[validate(range(min = 1))]
     #[schemars(range(min = 1))]
+    #[ts(optional, type = "number | null")]
     pub page: Option<i64>,
     #[serde(default)]
     #[validate(range(min = 1, max = 500))]
     #[schemars(range(min = 1, max = 500))]
+    #[ts(optional, type = "number | null")]
     pub per_page: Option<i64>,
     #[serde(default)]
     #[validate(length(min = 1, max = 256))]
     #[schemars(length(min = 1, max = 256))]
+    #[ts(optional)]
     pub cursor: Option<String>,
     #[serde(default)]
+    #[ts(optional)]
     pub pagination_mode: Option<DataTablePaginationModeDto>,
     #[serde(default)]
     #[validate(length(min = 1, max = 128))]
     #[schemars(length(min = 1, max = 128))]
+    #[ts(optional)]
     pub sorting_column: Option<String>,
     #[serde(default)]
+    #[ts(optional)]
     pub sorting: Option<DataTableSortDirectionDto>,
     #[serde(default)]
     #[validate(length(min = 1, max = 64))]
     #[schemars(length(min = 1, max = 64))]
+    #[ts(optional)]
     pub timezone: Option<String>,
     #[serde(default)]
     #[validate(length(min = 1, max = 40))]
     #[schemars(length(min = 1, max = 40))]
+    #[ts(optional)]
     pub created_at_from: Option<String>,
     #[serde(default)]
     #[validate(length(min = 1, max = 40))]
     #[schemars(length(min = 1, max = 40))]
+    #[ts(optional)]
     pub created_at_to: Option<String>,
 }
 
@@ -201,6 +210,7 @@ pub enum DataTableFilterFieldType {
     Number,
     Date,
     Datetime,
+    Time,
     Boolean,
     ContactInput,
 }
@@ -247,6 +257,7 @@ pub struct DataTableRelationColumnMetaDto {
 pub struct DataTableDefaultsDto {
     pub sorting_column: String,
     pub sorted: String,
+    #[ts(type = "number")]
     pub per_page: i64,
     pub export_ignore_columns: Vec<String>,
     pub timestamp_columns: Vec<String>,
@@ -265,6 +276,7 @@ pub struct DataTableMetaDto {
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 pub struct DataTableDiagnosticsDto {
+    #[ts(type = "number")]
     pub duration_ms: u64,
     pub auto_filters_applied: usize,
     pub unknown_filters: Vec<String>,
@@ -311,7 +323,9 @@ pub struct DataTableEmailExportStatusDto {
     pub subject: Option<String>,
     pub link_url: Option<String>,
     pub error: Option<String>,
+    #[ts(type = "number")]
     pub updated_at_unix: i64,
+    #[ts(type = "number | null")]
     pub sent_at_unix: Option<i64>,
 }
 
@@ -383,6 +397,7 @@ pub struct DataTableExportStatusResponseDto {
     pub csv_error: Option<String>,
     pub csv_file_name: Option<String>,
     pub csv_content_type: Option<String>,
+    #[ts(type = "number | null")]
     pub csv_total_records: Option<i64>,
     pub email: Option<DataTableEmailExportStatusDto>,
 }

@@ -1,39 +1,23 @@
-use core_web::auth::AuthClientType;
 use serde::Serialize;
+
+pub use core_web::ts_exports::TsExportFile;
 
 use crate::models::enums::SCHEMA_ENUM_TS_META;
 use crate::permissions::{Permission, PERMISSION_META};
 use crate::{DEFAULT_LOCALE, SUPPORTED_LOCALES};
 
-#[derive(Debug, Clone)]
-pub struct TsExportFile {
-    pub rel_path: &'static str,
-    pub rust_path: &'static str,
-    pub definition: String,
-}
-
 pub fn ts_export_files() -> Vec<TsExportFile> {
-    vec![
-        TsExportFile {
-            rel_path: "shared/types/api.ts",
-            rust_path: "generated::ts_exports::api",
-            definition: render_api_ts(),
-        },
-        TsExportFile {
-            rel_path: "shared/types/datatable.ts",
-            rust_path: "generated::ts_exports::datatable",
-            definition: render_datatable_ts(),
-        },
-        TsExportFile {
-            rel_path: "shared/types/platform.ts",
-            rust_path: "generated::ts_exports::platform",
-            definition: render_platform_ts(),
-        },
-    ]
+    let mut files = core_web::ts_exports::ts_export_files();
+    files.push(TsExportFile {
+        rel_path: "shared/types/platform.ts",
+        rust_path: "generated::ts_exports::platform",
+        definition: render_platform_ts(),
+    });
+    files
 }
 
 pub fn contract_enum_renderers() -> Vec<(String, String)> {
-    let mut out = Vec::new();
+    let mut out = core_web::ts_exports::contract_enum_renderers();
     for meta in SCHEMA_ENUM_TS_META {
         out.push((
             meta.name.to_string(),
@@ -41,165 +25,8 @@ pub fn contract_enum_renderers() -> Vec<(String, String)> {
         ));
     }
     out.push(("Permission".to_string(), render_permission_enum()));
-    out.push(("AuthClientType".to_string(), render_auth_client_type_enum()));
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
-}
-
-fn render_api_ts() -> String {
-    "\
-export interface ApiResponse<T> {
-  data: T;
-  message?: string;
-}
-
-export interface ApiErrorResponse {
-  message: string;
-  errors?: Record<string, string[]>;
-}
-"
-    .to_string()
-}
-
-fn render_datatable_ts() -> String {
-    "\
-export type DataTablePaginationMode = \"offset\" | \"cursor\";
-
-export type DataTableSortDirection = \"asc\" | \"desc\";
-
-export interface DataTableQueryRequestBase {
-  include_meta?: boolean;
-  page?: number | null;
-  per_page?: number | null;
-  cursor?: string | null;
-  pagination_mode?: DataTablePaginationMode | null;
-  sorting_column?: string | null;
-  sorting?: DataTableSortDirection | null;
-  timezone?: string | null;
-  created_at_from?: string | null;
-  created_at_to?: string | null;
-}
-
-export interface DataTableEmailExportRequestBase {
-  query: DataTableQueryRequestBase;
-  recipients: string[];
-  subject?: string | null;
-  export_file_name?: string | null;
-}
-
-export type DataTableFilterFieldType =
-  | \"text\"
-  | \"select\"
-  | \"number\"
-  | \"date\"
-  | \"datetime\"
-  | \"time\"
-  | \"boolean\";
-
-export interface DataTableFilterOptionDto {
-  label: string;
-  value: string;
-}
-
-export interface DataTableFilterFieldDto {
-  field: string;
-  filter_key: string;
-  type: DataTableFilterFieldType;
-  label: string;
-  placeholder?: string;
-  description?: string;
-  options?: DataTableFilterOptionDto[];
-}
-
-export interface DataTableColumnMetaDto {
-  name: string;
-  label: string;
-  data_type: string;
-  sortable: boolean;
-  localized: boolean;
-  filter_ops: string[];
-}
-
-export interface DataTableRelationColumnMetaDto {
-  relation: string;
-  column: string;
-  data_type: string;
-  filter_ops: string[];
-}
-
-export interface DataTableDefaultsDto {
-  sorting_column: string;
-  sorted: string;
-  per_page: number;
-  export_ignore_columns: string[];
-  timestamp_columns: string[];
-  unsortable: string[];
-}
-
-export interface DataTableDiagnosticsDto {
-  duration_ms: number;
-  auto_filters_applied: number;
-  unknown_filters: string[];
-  unknown_filter_mode: string;
-}
-
-export interface DataTableMetaDto {
-  model_key: string;
-  defaults: DataTableDefaultsDto;
-  columns: DataTableColumnMetaDto[];
-  relation_columns: DataTableRelationColumnMetaDto[];
-  filter_rows: (DataTableFilterFieldDto | DataTableFilterFieldDto[])[];
-}
-
-export interface DataTableQueryResponse<T> {
-  records: T[];
-  per_page: number;
-  total_records: number;
-  total_pages: number;
-  page: number;
-  pagination_mode: string;
-  has_more?: boolean;
-  next_cursor?: string;
-  summary?: unknown;
-  diagnostics: DataTableDiagnosticsDto;
-  meta?: DataTableMetaDto;
-}
-
-export type DataTableEmailExportState =
-  | \"waiting_csv\"
-  | \"uploading\"
-  | \"sending\"
-  | \"completed\"
-  | \"failed\";
-
-export interface DataTableEmailExportStatusDto {
-  state: DataTableEmailExportState;
-  recipients: string[];
-  subject?: string;
-  link_url?: string;
-  error?: string;
-  updated_at_unix: number;
-  sent_at_unix?: number;
-}
-
-export interface DataTableEmailExportQueuedDto {
-  job_id: string;
-  csv_state: string;
-  email_state: DataTableEmailExportState;
-}
-
-export interface DataTableExportStatusResponseDto {
-  job_id: string;
-  model_key: string;
-  csv_state: string;
-  csv_error?: string;
-  csv_file_name?: string;
-  csv_content_type?: string;
-  csv_total_records?: number;
-  email?: DataTableEmailExportStatusDto;
-}
-"
-    .to_string()
 }
 
 fn render_platform_ts() -> String {
@@ -444,13 +271,6 @@ fn ensure_unique_permission_entries() {
             panic!("duplicate permission const key `{key}`");
         }
     }
-}
-
-fn render_auth_client_type_enum() -> String {
-    enum_to_ts_type(
-        "AuthClientType",
-        &[AuthClientType::Web, AuthClientType::Mobile],
-    )
 }
 
 fn enum_to_ts_type<T: Serialize>(name: &str, variants: &[T]) -> String {
