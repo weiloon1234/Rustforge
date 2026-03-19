@@ -54,10 +54,17 @@ pub async fn build_router(ctx: BootContext) -> anyhow::Result<Router> {
 
     let public_path = core_web::static_assets::public_path_from_env();
 
+    // In dev mode (APP_ENV=local/dev/development), always serve Vite HMR proxy HTML
+    // so that changes to frontend source are reflected without rebuilding.
+    // In production, serve compiled static files from public/.
+    let is_dev = std::env::var("APP_ENV")
+        .map(|v| matches!(v.as_str(), "local" | "dev" | "development"))
+        .unwrap_or(false);
+
     // Admin SPA: /admin/* → public/admin/index.html
     let admin_public = public_path.join("admin");
     let admin_index = admin_public.join("index.html");
-    if admin_public.is_dir() && admin_index.is_file() {
+    if !is_dev && admin_public.is_dir() && admin_index.is_file() {
         router = router.nest_service(
             "/admin",
             ServeDir::new(&admin_public).fallback(ServeFile::new(&admin_index)),
@@ -81,8 +88,12 @@ pub async fn build_router(ctx: BootContext) -> anyhow::Result<Router> {
     }
 
     // User SPA: everything else → public/index.html (existing logic)
-    if let Some(static_router) = core_web::static_assets::static_assets_router(&public_path) {
-        router = router.merge(static_router);
+    if !is_dev {
+        if let Some(static_router) = core_web::static_assets::static_assets_router(&public_path) {
+            router = router.merge(static_router);
+        } else {
+            router = router.fallback(axum_get(root));
+        }
     } else {
         router = router.fallback(axum_get(root));
     }
