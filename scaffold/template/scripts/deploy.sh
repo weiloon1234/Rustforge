@@ -67,6 +67,7 @@ echo
 # 1. Pull latest code
 if [[ -d "${PROJECT_DIR}/.git" ]]; then
     echo "==> git pull"
+    run_as_project_user "cd \"${PROJECT_DIR}\" && git pull --ff-only"
     run_as_project_user "cd \"${PROJECT_DIR}\" && git checkout -- generated/src/ 2>/dev/null || true && git pull --ff-only"
 fi
 

@@ -229,21 +229,23 @@ DB_NAME=""
 DB_USER=""
 DB_PASSWORD=""
 
-if [[ -n "${db_default}" ]]; then
-    DATABASE_URL="$(prompt "DATABASE_URL" "${db_default}")"
-elif command -v psql >/dev/null 2>&1; then
-    DATABASE_URL="$(prompt "DATABASE_URL" "postgres://postgres:postgres@127.0.0.1:5432/${PROJECT_SLUG}")"
+if [[ -z "${db_default}" ]]; then
+    # First time setup — offer to install and configure PostgreSQL
+    if [[ "$(prompt_yes_no "Do you want to setup PostgreSQL?" "yes")" == "yes" ]]; then
+        SETUP_POSTGRES="yes"
+        DB_NAME="$(prompt "PostgreSQL database name" "${PROJECT_SLUG}")"
+        DB_USER="$(prompt "PostgreSQL username" "${PROJECT_SLUG}")"
+        DB_PASSWORD="$(generate_password 24)"
+        DATABASE_URL="postgres://${DB_USER}:${DB_PASSWORD}@127.0.0.1:5432/${DB_NAME}"
+        echo "  Generated DB password : ${DB_PASSWORD}"
+        echo "  DATABASE_URL          : ${DATABASE_URL}"
+        echo
+    else
+        DATABASE_URL="$(prompt "DATABASE_URL" "postgres://postgres:postgres@127.0.0.1:5432/${PROJECT_SLUG}")"
+    fi
 else
-    echo
-    echo "PostgreSQL is not installed. It will be installed and configured automatically."
-    DB_NAME="$(prompt "PostgreSQL database name" "${PROJECT_SLUG}")"
-    DB_USER="$(prompt "PostgreSQL username" "${PROJECT_SLUG}")"
-    DB_PASSWORD="$(generate_password 24)"
-    DATABASE_URL="postgres://${DB_USER}:${DB_PASSWORD}@127.0.0.1:5432/${DB_NAME}"
-    SETUP_POSTGRES="yes"
-    echo "  Generated DB password : ${DB_PASSWORD}"
-    echo "  DATABASE_URL          : ${DATABASE_URL}"
-    echo
+    # Re-run — use existing value as default, don't override
+    DATABASE_URL="$(prompt "DATABASE_URL" "${db_default}")"
 fi
 
 redis_default="$(read_env_value "${ENV_FILE}" "REDIS_URL")"
@@ -267,6 +269,7 @@ existing_worker="$(env_bool_to_yes_no "$(read_env_value "${ENV_FILE}" "RUN_WORKE
 ENABLE_WORKER="$(prompt_yes_no "Manage worker process" "${existing_worker}")"
 
 ENABLE_DEPLOY_POLL="$(prompt_yes_no "Enable auto-deploy poller (deploy-poll)" "yes")"
+
 
 echo
 echo "Summary:"
@@ -335,9 +338,7 @@ fi
 # Clone deploy repo if not already present
 if [[ ! -d "${DEPLOY_REPO_DIR}" ]]; then
     echo "Cloning deploy repository to ${DEPLOY_REPO_DIR}..."
-    echo "IMPORTANT: Set up a deploy key for your deploy repository first."
-    echo "  See: https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys"
-    git clone git@github.com:YOUR_ORG/YOUR_PROJECT-deploy.git "${DEPLOY_REPO_DIR}"
+    git clone git@github.com:alexchangmy/brui-deploy.git "${DEPLOY_REPO_DIR}"
     chown -R "${PROJECT_USER}:${PROJECT_USER}" "${DEPLOY_REPO_DIR}"
 fi
 
@@ -374,10 +375,10 @@ upsert_env "${ENV_FILE}" "REDIS_URL" "${REDIS_URL}"
 upsert_env "${ENV_FILE}" "RUN_WORKER" "$(bool_value "${ENABLE_WORKER}")"
 upsert_env "${ENV_FILE}" "ENABLE_HTTPS" "$(bool_value "${ENABLE_HTTPS}")"
 upsert_env "${ENV_FILE}" "ENABLE_SUPERVISOR" "$(bool_value "${ENABLE_SUPERVISOR}")"
+upsert_env "${ENV_FILE}" "DEPLOY_REPO_DIR" "${DEPLOY_REPO_DIR}"
 if [[ -n "${LETSENCRYPT_EMAIL}" ]]; then
     upsert_env "${ENV_FILE}" "LETSENCRYPT_EMAIL" "${LETSENCRYPT_EMAIL}"
 fi
-upsert_env "${ENV_FILE}" "DEPLOY_REPO_DIR" "${DEPLOY_REPO_DIR}"
 
 NGINX_CONF_PATH="/etc/nginx/sites-available/${PROJECT_SLUG}.conf"
 NGINX_LINK_PATH="/etc/nginx/sites-enabled/${PROJECT_SLUG}.conf"
