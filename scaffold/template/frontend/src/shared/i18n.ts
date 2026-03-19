@@ -3,7 +3,8 @@ import { initReactI18next } from "react-i18next";
 import { getRuntimeConfig } from "@shared/runtimeConfig";
 const localeModules = import.meta.glob("../../../i18n/*.json", {
   eager: true,
-}) as Record<string, { default: Record<string, string> }>;
+  import: "default",
+}) as Record<string, Record<string, string>>;
 
 const BOOTSTRAP_SCRIPT_ID = "rustforge-bootstrap-runtime";
 let initPromise: Promise<typeof i18n> | null = null;
@@ -79,10 +80,10 @@ export async function initI18n(): Promise<typeof i18n> {
 
     const runtimeConfig = getRuntimeConfig();
     const resources: Record<string, { translation: Record<string, string> }> = {};
-    for (const [path, module] of Object.entries(localeModules)) {
+    for (const [path, translations] of Object.entries(localeModules)) {
       const locale = path.match(/\/([^/]+)\.json$/)?.[1];
-      if (locale) {
-        resources[locale] = { translation: transformParams(module.default) };
+      if (locale && translations) {
+        resources[locale] = { translation: transformParams(translations) };
       }
     }
 
