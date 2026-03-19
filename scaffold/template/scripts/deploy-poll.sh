@@ -5,8 +5,8 @@ set -euo pipefail
 # Intended to run as a Supervisor-managed long-running process.
 #
 # Required env vars (from .env or environment):
-#   PROJECT_DIR           — where the app runs (e.g., /opt/brui)
-#   DEPLOY_REPO_DIR       — local clone of alexchangmy/brui-deploy
+#   PROJECT_DIR           — where the app runs (e.g., /opt/your_project)
+#   DEPLOY_REPO_DIR       — local clone of your_company/your_project-deploy
 #   SUPERVISOR_PROJECT_SLUG — supervisor program name prefix
 #
 # Optional:

@@ -338,7 +338,7 @@ fi
 # Clone deploy repo if not already present
 if [[ ! -d "${DEPLOY_REPO_DIR}" ]]; then
     echo "Cloning deploy repository to ${DEPLOY_REPO_DIR}..."
-    git clone git@github.com:alexchangmy/brui-deploy.git "${DEPLOY_REPO_DIR}"
+    git clone git@github.com:your_company/your_project-deploy.git "${DEPLOY_REPO_DIR}"
     chown -R "${PROJECT_USER}:${PROJECT_USER}" "${DEPLOY_REPO_DIR}"
 fi
 
