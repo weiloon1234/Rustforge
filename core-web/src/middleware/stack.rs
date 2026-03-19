@@ -64,6 +64,22 @@ pub fn apply_standard_middleware(router: axum::Router, settings: &Settings) -> a
             .layer(SetResponseHeaderLayer::overriding(
                 axum::http::header::X_FRAME_OPTIONS,
                 axum::http::HeaderValue::from_static("DENY"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                axum::http::header::REFERRER_POLICY,
+                axum::http::HeaderValue::from_static("strict-origin-when-cross-origin"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                axum::http::header::HeaderName::from_static("content-security-policy"),
+                axum::http::HeaderValue::from_static(
+                    "default-src 'self'; \
+                     script-src 'self' 'unsafe-inline'; \
+                     style-src 'self' 'unsafe-inline'; \
+                     img-src 'self' data: blob: https:; \
+                     connect-src 'self' wss: https:; \
+                     font-src 'self' data:; \
+                     frame-ancestors 'none';"
+                ),
             )),
     )
 }

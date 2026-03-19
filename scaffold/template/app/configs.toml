@@ -52,7 +52,7 @@ min_amount = 0.0
 
 # ── CORS ──────────────────────────────────────────────────
 # Mirrors Laravel config/cors.php conventions.
-# Use ["*"] for development; set explicit origins for production.
+# Use ["*"] for development; override via CORS_ALLOWED_ORIGINS in .env for production.
 [cors]
 allowed_origins = ["*"]
 allowed_methods = ["*"]

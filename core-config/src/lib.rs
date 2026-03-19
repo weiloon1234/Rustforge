@@ -445,7 +445,18 @@ impl Settings {
         let mut realtime = realtime;
         realtime.channels = toml_config.realtime.channels;
 
-        let cors = toml_config.cors;
+        let mut cors = toml_config.cors;
+        // CORS_ALLOWED_ORIGINS env var overrides configs.toml (comma-separated)
+        if let Ok(origins) = env::var("CORS_ALLOWED_ORIGINS") {
+            let parsed: Vec<String> = origins
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !parsed.is_empty() {
+                cors.allowed_origins = parsed;
+            }
+        }
 
         let tz_str = get_env("APP_TIMEZONE", "+08:00");
         let supported_locales: &'static [&'static str] =

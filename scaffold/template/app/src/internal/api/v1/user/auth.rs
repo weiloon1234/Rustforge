@@ -382,7 +382,7 @@ fn set_guard_refresh_cookie(
     );
     refresh_cookie.set_http_only(true);
     refresh_cookie.set_secure(should_use_secure_cookie());
-    refresh_cookie.set_same_site(SameSite::Lax);
+    refresh_cookie.set_same_site(SameSite::Strict);
     refresh_cookie.set_path(path.to_string());
     refresh_cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(
         ttl.whole_seconds(),
