@@ -19,15 +19,7 @@ type KeyedLimiter = RateLimiter<IpAddr, DashMapStateStore<IpAddr>, DefaultClock>
 pub fn throttle_layer(
     per_second: u32,
     burst_size: u32,
-) -> axum::middleware::FromFn<
-    impl Fn(
-            axum::extract::Request,
-            axum::middleware::Next,
-        ) -> impl std::future::Future<Output = Result<Response, AppError>>
-        + Clone
-        + Send
-        + 'static,
-> {
+) -> impl tower::Layer<axum::routing::Route> + Clone + Send + Sync + 'static {
     let per_second = per_second.max(1);
     let burst_size = burst_size.max(1);
 
