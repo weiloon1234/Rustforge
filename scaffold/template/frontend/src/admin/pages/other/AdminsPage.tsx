@@ -31,11 +31,14 @@ function normalizeErrorMessage(error: unknown, fallback: string): string {
   return maybe?.response?.data?.message ?? fallback;
 }
 
-const TYPE_COLORS: Record<AdminType, string> = {
-  developer: "bg-purple-100 text-purple-700",
-  superadmin: "bg-amber-100 text-amber-700",
-  admin: "bg-blue-100 text-blue-700",
-};
+function adminTypeColor(type: AdminType): string {
+  switch (type) {
+    case ADMIN_TYPE.DEVELOPER: return "bg-purple-100 text-purple-700";
+    case ADMIN_TYPE.SUPERADMIN: return "bg-amber-100 text-amber-700";
+    case ADMIN_TYPE.ADMIN: return "bg-blue-100 text-blue-700";
+  }
+  return "bg-gray-100 text-gray-700";
+}
 
 const ADMIN_PERMISSION_META = PERMISSION_META.filter(
   (meta) => meta.guard.toLowerCase() === "admin",
@@ -65,7 +68,7 @@ function resolvePermissionLabel(
 function TypeBadge({ type }: { type: AdminType }) {
   return (
     <span
-      className={`inline-flex min-h-6 items-center rounded-full px-2 py-0.5 text-xs font-medium ${TYPE_COLORS[type] ?? "bg-gray-100 text-gray-700"}`}
+      className={`inline-flex min-h-6 items-center rounded-full px-2 py-0.5 text-xs font-medium ${adminTypeColor(type)}`}
     >
       {type}
     </span>

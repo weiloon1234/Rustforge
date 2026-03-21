@@ -4,6 +4,7 @@ import type {
   AuditLogDatatableRow,
   AuditAction,
 } from "@admin/types";
+import { AUDIT_ACTION } from "@admin/types";
 import {
   Button,
   DataTable,
@@ -11,11 +12,14 @@ import {
   formatDateTime,
 } from "@shared/components";
 
-const ACTION_COLORS: Record<AuditAction, string> = {
-  "1": "bg-emerald-100 text-emerald-700",
-  "2": "bg-blue-100 text-blue-700",
-  "3": "bg-red-100 text-red-700",
-};
+function actionColor(action: AuditAction): string {
+  switch (action) {
+    case AUDIT_ACTION.CREATE: return "bg-emerald-100 text-emerald-700";
+    case AUDIT_ACTION.UPDATE: return "bg-blue-100 text-blue-700";
+    case AUDIT_ACTION.DELETE: return "bg-red-100 text-red-700";
+  }
+  return "bg-gray-100 text-gray-700";
+}
 
 function ActionBadge({
   action,
@@ -26,7 +30,7 @@ function ActionBadge({
 }) {
   return (
     <span
-      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${ACTION_COLORS[action] ?? "bg-gray-100 text-gray-700"}`}
+      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${actionColor(action)}`}
     >
       {label}
     </span>

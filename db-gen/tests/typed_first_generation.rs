@@ -92,12 +92,13 @@ pub struct Example {
 
     assert!(enums_rs.contains("pub enum AdminType"));
     assert!(enums_rs.contains("pub enum ContentPageSystemFlag"));
+    assert!(enums_rs.contains("pub struct SchemaEnumVariantMeta"));
     assert!(enums_rs.contains("pub struct SchemaEnumTsMeta"));
     assert!(enums_rs.contains("pub const SCHEMA_ENUM_TS_META: &[SchemaEnumTsMeta] = &["));
     assert!(enums_rs.contains("name: \"AdminType\""));
-    assert!(enums_rs.contains("variants: &[\"developer\", \"superadmin\", \"admin\"]"));
+    assert!(enums_rs.contains("SchemaEnumVariantMeta { value: \"developer\", label: \"Developer\", i18n_key: \"enum.admin_type.developer\" }"));
     assert!(enums_rs.contains("name: \"ContentPageSystemFlag\""));
-    assert!(enums_rs.contains("variants: &[\"0\", \"1\"]"));
+    assert!(enums_rs.contains("SchemaEnumVariantMeta { value: \"0\", label: \"No\", i18n_key: \"enum.content_page_system_flag.no\" }"));
     assert!(enums_rs.contains("let label = (*v).explained_label();"));
     assert!(enums_rs.contains("let value = (*v).as_str();"));
     assert!(enums_rs.contains("pub fn from_storage(raw: &str) -> Option<Self> {"));

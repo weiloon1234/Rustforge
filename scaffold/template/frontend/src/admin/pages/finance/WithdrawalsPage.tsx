@@ -1,9 +1,8 @@
 import { useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { WithdrawalDatatableRow } from "@admin/types";
-import { CREDIT_TYPE_I18N, WITHDRAWAL_METHOD_I18N } from "@admin/constants/enums";
-import { PERMISSION } from "@admin/types";
+import type { WithdrawalDatatableRow, WithdrawalStatus } from "@admin/types";
+import { CREDIT_TYPE_I18N, WITHDRAWAL_METHOD_I18N, WITHDRAWAL_STATUS, WITHDRAWAL_STATUS_I18N, PERMISSION } from "@admin/types";
 import { useAuthStore } from "@admin/stores/auth";
 import {
   Button,
@@ -23,19 +22,15 @@ function normalizeErrorMessage(error: unknown, fallback: string): string {
   return maybe?.response?.data?.message ?? fallback;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  "1": "bg-yellow-100 text-yellow-800", // Pending
-  "2": "bg-blue-100 text-blue-800",     // Processing
-  "3": "bg-green-100 text-green-800",   // Approved
-  "4": "bg-red-100 text-red-800",       // Rejected
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  "1": "Pending",
-  "2": "Processing",
-  "3": "Approved",
-  "4": "Rejected",
-};
+function withdrawalStatusColor(status: WithdrawalStatus): string {
+  switch (status) {
+    case WITHDRAWAL_STATUS.PENDING: return "bg-yellow-100 text-yellow-800";
+    case WITHDRAWAL_STATUS.PROCESSING: return "bg-blue-100 text-blue-800";
+    case WITHDRAWAL_STATUS.APPROVED: return "bg-green-100 text-green-800";
+    case WITHDRAWAL_STATUS.REJECTED: return "bg-red-100 text-red-800";
+  }
+  return "bg-gray-100 text-gray-800";
+}
 
 function ReviewWithdrawalForm({
   withdrawalId,
@@ -285,8 +280,8 @@ export default function WithdrawalsPage() {
           key: "status",
           label: t("Status"),
           render: (row) => (
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[row.status] ?? "bg-gray-100 text-gray-800"}`}>
-              {row.status_label || t(STATUS_LABELS[row.status] ?? "Unknown")}
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${withdrawalStatusColor(row.status as WithdrawalStatus)}`}>
+              {row.status_label || t(WITHDRAWAL_STATUS_I18N[row.status as WithdrawalStatus] ?? "Unknown")}
             </span>
           ),
         },

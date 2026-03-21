@@ -8,6 +8,7 @@ import { Button } from "@shared/components/Button";
 import { TextInput } from "@shared/components/TextInput";
 import { Select } from "@shared/components/Select";
 import type { ApiResponse, ApiErrorResponse, WithdrawalStatus } from "@shared/types";
+import { WITHDRAWAL_STATUS, WITHDRAWAL_STATUS_I18N, CREDIT_TRANSACTION_TYPE_I18N } from "@shared/types";
 import type {
   WalletLedgerEntry,
   WalletLedgerResponse,
@@ -19,17 +20,6 @@ import type {
 
 // ─── Shared helpers ──────────────────────────────────────────────
 
-const TX_TYPE_I18N: Record<string, string> = {
-  admin_add: "enum.credit_transaction_type.admin_add",
-  admin_deduct: "enum.credit_transaction_type.admin_deduct",
-  transfer_in: "enum.credit_transaction_type.transfer_in",
-  transfer_out: "enum.credit_transaction_type.transfer_out",
-  withdraw: "enum.credit_transaction_type.withdraw",
-  withdraw_refund: "enum.credit_transaction_type.withdraw_refund",
-  top_up: "enum.credit_transaction_type.top_up",
-  crash_bet: "enum.credit_transaction_type.crash_bet",
-  crash_win: "enum.credit_transaction_type.crash_win",
-};
 
 function parseDate(dateStr: string): Date {
   const iso = dateStr
@@ -57,7 +47,7 @@ type TabKey = "transactions" | "topup" | "withdrawal";
 function LedgerCard({ entry, t }: { entry: WalletLedgerEntry; t: (key: string, opts?: Record<string, unknown>) => string }) {
   const amount = parseFloat(entry.amount);
   const isPositive = amount >= 0;
-  const label = TX_TYPE_I18N[entry.transaction_type] ?? entry.transaction_type;
+  const label = CREDIT_TRANSACTION_TYPE_I18N[entry.transaction_type] ?? entry.transaction_type;
 
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3">
@@ -174,15 +164,24 @@ function TopUpTab() {
 
 // ─── WithdrawalTab ───────────────────────────────────────────────
 
-const STATUS_STYLES: Record<WithdrawalStatus, { bg: string; text: string; icon: typeof Clock; i18n: string }> = {
-  "1": { bg: "bg-yellow-500/10", text: "text-yellow-400", icon: Clock, i18n: "enum.withdrawal_status.pending" },
-  "2": { bg: "bg-blue-500/10", text: "text-blue-400", icon: AlertCircle, i18n: "enum.withdrawal_status.processing" },
-  "3": { bg: "bg-green-500/10", text: "text-green-400", icon: CheckCircle, i18n: "enum.withdrawal_status.approved" },
-  "4": { bg: "bg-red-500/10", text: "text-red-400", icon: XCircle, i18n: "enum.withdrawal_status.rejected" },
-};
+interface StatusStyle { bg: string; text: string; icon: typeof Clock; i18n: string }
+
+function statusStyleFor(status: WithdrawalStatus): StatusStyle {
+  switch (status) {
+    case WITHDRAWAL_STATUS.PENDING:
+      return { bg: "bg-yellow-500/10", text: "text-yellow-400", icon: Clock, i18n: WITHDRAWAL_STATUS_I18N[status] };
+    case WITHDRAWAL_STATUS.PROCESSING:
+      return { bg: "bg-blue-500/10", text: "text-blue-400", icon: AlertCircle, i18n: WITHDRAWAL_STATUS_I18N[status] };
+    case WITHDRAWAL_STATUS.APPROVED:
+      return { bg: "bg-green-500/10", text: "text-green-400", icon: CheckCircle, i18n: WITHDRAWAL_STATUS_I18N[status] };
+    case WITHDRAWAL_STATUS.REJECTED:
+      return { bg: "bg-red-500/10", text: "text-red-400", icon: XCircle, i18n: WITHDRAWAL_STATUS_I18N[status] };
+  }
+  return { bg: "bg-gray-500/10", text: "text-gray-400", icon: Clock, i18n: WITHDRAWAL_STATUS_I18N[status] ?? status };
+}
 
 function getStatusStyle(status: string) {
-  return STATUS_STYLES[status as WithdrawalStatus] ?? STATUS_STYLES["1"];
+  return statusStyleFor(status as WithdrawalStatus);
 }
 
 function WithdrawalTab() {

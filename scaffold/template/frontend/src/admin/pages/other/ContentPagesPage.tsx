@@ -15,7 +15,7 @@ import {
   formatDateTime,
 } from "@shared/components";
 
-const CONTENT_PAGE_SYSTEM_YES: ContentPageSystemFlag = CONTENT_PAGE_SYSTEM_FLAG._1;
+const CONTENT_PAGE_SYSTEM_YES: ContentPageSystemFlag = CONTENT_PAGE_SYSTEM_FLAG.YES;
 
 function normalizeErrorMessage(error: unknown, fallback: string): string {
   const maybe = error as { response?: { data?: { message?: string } } };

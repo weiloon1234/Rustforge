@@ -2,7 +2,7 @@ use serde::Serialize;
 
 pub use core_web::ts_exports::TsExportFile;
 
-use crate::models::enums::SCHEMA_ENUM_TS_META;
+use crate::models::enums::{SchemaEnumVariantMeta, SCHEMA_ENUM_TS_META};
 use crate::permissions::{Permission, PERMISSION_META};
 use crate::{DEFAULT_LOCALE, SUPPORTED_LOCALES};
 
@@ -21,7 +21,7 @@ pub fn contract_enum_renderers() -> Vec<(String, String)> {
     for meta in SCHEMA_ENUM_TS_META {
         out.push((
             meta.name.to_string(),
-            render_schema_enum(meta.name, meta.variants),
+            render_schema_enum_rich(meta.name, meta.variants),
         ));
     }
     out.push(("Permission".to_string(), render_permission_enum()));
@@ -144,53 +144,70 @@ export type LocalizedMap<TLocale extends string = LocaleCode> = Record<
     )
 }
 
-fn render_schema_enum(name: &str, variants: &[&str]) -> String {
-    ensure_unique_schema_enum(name, variants);
+fn render_schema_enum_rich(name: &str, variants: &[SchemaEnumVariantMeta]) -> String {
+    ensure_unique_schema_enum_rich(name, variants);
 
-    let mut out = enum_to_ts_type(name, variants);
+    let values: Vec<&str> = variants.iter().map(|v| v.value).collect();
+    let mut out = enum_to_ts_type(name, &values);
     let const_base = ts_type_const_key(name);
     let list_const = ts_plural_const_key(&const_base);
 
+    // Named const object (e.g. WITHDRAWAL_STATUS.PENDING = "1")
     out.push_str(&format!(
         "\n\nexport const {const_base}: Readonly<Record<string, {name}>> = {{"
     ));
     for variant in variants {
         out.push_str(&format!(
             "\n  {}: {},",
-            ts_const_key(variant),
-            serde_json::to_string(variant).expect("schema enum value"),
+            ts_const_key(variant.label),
+            serde_json::to_string(variant.value).expect("schema enum value"),
         ));
     }
     out.push_str("\n};");
 
+    // Array of all values
     out.push_str(&format!(
         "\n\nexport const {list_const}: ReadonlyArray<{name}> = ["
     ));
     for variant in variants {
         out.push_str(&format!(
             "\n  {},",
-            serde_json::to_string(variant).expect("schema enum list value"),
+            serde_json::to_string(variant.value).expect("schema enum list value"),
         ));
     }
     out.push_str("\n];");
+
+    // I18N mapping (e.g. WITHDRAWAL_STATUS_I18N["1"] = "enum.withdrawal_status.pending")
+    out.push_str(&format!(
+        "\n\nexport const {const_base}_I18N: Readonly<Record<{name}, string>> = {{"
+    ));
+    for variant in variants {
+        out.push_str(&format!(
+            "\n  {}: {},",
+            serde_json::to_string(variant.value).expect("i18n key value"),
+            serde_json::to_string(variant.i18n_key).expect("i18n key string"),
+        ));
+    }
+    out.push_str("\n};");
+
     out
 }
 
-fn ensure_unique_schema_enum(name: &str, variants: &[&str]) {
+fn ensure_unique_schema_enum_rich(name: &str, variants: &[SchemaEnumVariantMeta]) {
     use std::collections::BTreeSet;
 
     let mut variant_values = BTreeSet::new();
     for variant in variants {
-        if !variant_values.insert(*variant) {
-            panic!("duplicate enum variant value `{variant}` in `{name}`");
+        if !variant_values.insert(variant.value) {
+            panic!("duplicate enum variant value `{}` in `{name}`", variant.value);
         }
     }
 
     let mut const_keys = BTreeSet::new();
     for variant in variants {
-        let key = ts_const_key(variant);
+        let key = ts_const_key(variant.label);
         if !const_keys.insert(key.clone()) {
-            panic!("duplicate enum const key `{key}` in `{name}`");
+            panic!("duplicate enum const key `{key}` (from label `{}`) in `{name}`", variant.label);
         }
     }
 }

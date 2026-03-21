@@ -2,9 +2,16 @@
 // Generated from Rust model source enum definitions
 
 #[derive(Debug, Clone, Copy)]
+pub struct SchemaEnumVariantMeta {
+    pub value: &'static str,
+    pub label: &'static str,
+    pub i18n_key: &'static str,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct SchemaEnumTsMeta {
     pub name: &'static str,
-    pub variants: &'static [&'static str],
+    pub variants: &'static [SchemaEnumVariantMeta],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -281,6 +288,6 @@ impl From<ArticleSystemFlag> for core_db::common::sql::BindValue {
 
 
 pub const SCHEMA_ENUM_TS_META: &[SchemaEnumTsMeta] = &[
-    SchemaEnumTsMeta { name: "ArticleStatus", variants: &["draft", "published"] },
-    SchemaEnumTsMeta { name: "ArticleSystemFlag", variants: &["0", "1"] },
+    SchemaEnumTsMeta { name: "ArticleStatus", variants: &[SchemaEnumVariantMeta { value: "draft", label: "Draft", i18n_key: "enum.article_status.draft" }, SchemaEnumVariantMeta { value: "published", label: "Published", i18n_key: "enum.article_status.published" }] },
+    SchemaEnumTsMeta { name: "ArticleSystemFlag", variants: &[SchemaEnumVariantMeta { value: "0", label: "No", i18n_key: "enum.article_system_flag.no" }, SchemaEnumVariantMeta { value: "1", label: "Yes", i18n_key: "enum.article_system_flag.yes" }] },
 ];

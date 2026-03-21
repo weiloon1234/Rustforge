@@ -2,8 +2,7 @@ import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import type { UserCreditTransactionDatatableRow } from "@admin/types";
-import { ADJUSTABLE_CREDIT_TYPES } from "@admin/types";
-import { CREDIT_TYPE_I18N, ADJUSTABLE_CREDIT_TYPE_I18N } from "@admin/constants/enums";
+import { ADJUSTABLE_CREDIT_TYPES, CREDIT_TYPE_I18N, ADJUSTABLE_CREDIT_TYPE_I18N } from "@admin/types";
 import {
   Button,
   DataTable,

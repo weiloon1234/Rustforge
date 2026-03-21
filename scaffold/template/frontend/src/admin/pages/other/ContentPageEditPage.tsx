@@ -15,7 +15,7 @@ import {
 } from "@shared/components";
 import { useAutoForm, type AutoFormDefaultValue } from "@shared/useAutoForm";
 
-const CONTENT_PAGE_SYSTEM_YES = CONTENT_PAGE_SYSTEM_FLAG._1;
+const CONTENT_PAGE_SYSTEM_YES = CONTENT_PAGE_SYSTEM_FLAG.YES;
 
 function ContentPageForm({
   pageId,

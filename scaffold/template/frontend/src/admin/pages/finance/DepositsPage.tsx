@@ -1,8 +1,7 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
-import type { DepositDatatableRow } from "@admin/types";
-import { CREDIT_TYPE_I18N, DEPOSIT_METHOD_I18N } from "@admin/constants/enums";
-import { PERMISSION } from "@admin/types";
+import type { DepositDatatableRow, DepositStatus } from "@admin/types";
+import { CREDIT_TYPE_I18N, DEPOSIT_METHOD_I18N, DEPOSIT_STATUS, DEPOSIT_STATUS_I18N, PERMISSION } from "@admin/types";
 import { useAuthStore } from "@admin/stores/auth";
 import {
   Button,
@@ -22,17 +21,14 @@ function normalizeErrorMessage(error: unknown, fallback: string): string {
   return maybe?.response?.data?.message ?? fallback;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  "1": "bg-yellow-100 text-yellow-800", // Pending
-  "2": "bg-green-100 text-green-800",   // Approved
-  "3": "bg-red-100 text-red-800",       // Rejected
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  "1": "Pending",
-  "2": "Approved",
-  "3": "Rejected",
-};
+function depositStatusColor(status: DepositStatus): string {
+  switch (status) {
+    case DEPOSIT_STATUS.PENDING: return "bg-yellow-100 text-yellow-800";
+    case DEPOSIT_STATUS.APPROVED: return "bg-green-100 text-green-800";
+    case DEPOSIT_STATUS.REJECTED: return "bg-red-100 text-red-800";
+  }
+  return "bg-gray-100 text-gray-800";
+}
 
 function ReviewDepositForm({
   depositId,
@@ -264,8 +260,8 @@ export default function DepositsPage() {
           key: "status",
           label: t("Status"),
           render: (row) => (
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[row.status] ?? "bg-gray-100 text-gray-800"}`}>
-              {row.status_label || t(STATUS_LABELS[row.status] ?? "Unknown")}
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${depositStatusColor(row.status as DepositStatus)}`}>
+              {row.status_label || t(DEPOSIT_STATUS_I18N[row.status as DepositStatus] ?? "Unknown")}
             </span>
           ),
         },

@@ -376,20 +376,27 @@ fn escape_rust_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-fn enum_storage_values(spec: &EnumSpec) -> Vec<String> {
+/// Returns (value, label, i18n_key) triples for each variant.
+fn enum_variant_metas(name: &str, spec: &EnumSpec) -> Vec<(String, String, String)> {
+    let enum_key = to_snake(name);
     match spec.storage.as_str() {
         "string" | "text" => match &spec.variants {
-            EnumVariants::Simple(names) => names.iter().map(|name| name.to_lowercase()).collect(),
+            EnumVariants::Simple(names) => names
+                .iter()
+                .map(|n| {
+                    let value = n.to_lowercase();
+                    let i18n = format!("enum.{}.{}", enum_key, to_snake(n));
+                    (value, n.clone(), i18n)
+                })
+                .collect(),
             EnumVariants::Explicit(vars) => vars
                 .iter()
                 .map(|variant| {
-                    variant.value.as_str().unwrap_or_else(|| {
-                        panic!(
-                            "String enum variant '{}' must have string value",
-                            variant.name
-                        )
-                    })
-                    .to_string()
+                    let value = variant.value.as_str().unwrap_or_else(|| {
+                        panic!("String enum '{}' variant '{}' must have string value", name, variant.name)
+                    }).to_string();
+                    let i18n = format!("enum.{}.{}", enum_key, to_snake(&variant.name));
+                    (value, variant.name.clone(), i18n)
                 })
                 .collect(),
         },
@@ -397,23 +404,18 @@ fn enum_storage_values(spec: &EnumSpec) -> Vec<String> {
             EnumVariants::Explicit(vars) => vars
                 .iter()
                 .map(|variant| {
-                    variant.value.as_i64().unwrap_or_else(|| {
-                        panic!(
-                            "Integer enum variant '{}' must have integer value",
-                            variant.name
-                        )
-                    })
-                    .to_string()
+                    let value = variant.value.as_i64().unwrap_or_else(|| {
+                        panic!("Integer enum '{}' variant '{}' must have integer value", name, variant.name)
+                    }).to_string();
+                    let i18n = format!("enum.{}.{}", enum_key, to_snake(&variant.name));
+                    (value, variant.name.clone(), i18n)
                 })
                 .collect(),
             EnumVariants::Simple(_) => panic!(
-                "Integer enums require explicit values, use syntax: variants = [{{name = \"Name\", value = 0}}]"
+                "Integer enums require explicit values"
             ),
         },
-        other => panic!(
-            "Unsupported enum storage type: {}. Supported: string, i16, i32, i64",
-            other
-        ),
+        other => panic!("Unsupported enum storage type: {}", other),
     }
 }
 
@@ -448,10 +450,17 @@ pub fn generate_enums_with_options(
     let schema_enum_ts_meta_entries = enum_specs
         .iter()
         .map(|(name, spec)| {
-            let variants = enum_storage_values(spec);
-            let variants_list = variants
+            let metas = enum_variant_metas(name, spec);
+            let variants_list = metas
                 .iter()
-                .map(|value| format!("\"{}\"", escape_rust_string(value)))
+                .map(|(value, label, i18n_key)| {
+                    format!(
+                        "SchemaEnumVariantMeta {{ value: \"{}\", label: \"{}\", i18n_key: \"{}\" }}",
+                        escape_rust_string(value),
+                        escape_rust_string(label),
+                        escape_rust_string(i18n_key),
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(

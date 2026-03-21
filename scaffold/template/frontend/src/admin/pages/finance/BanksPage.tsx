@@ -1,8 +1,8 @@
 import { useMemo, useEffect, useRef } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { BankDatatableRow } from "@admin/types";
-import { PERMISSION } from "@admin/types";
+import type { BankDatatableRow, BankStatus } from "@admin/types";
+import { PERMISSION, BANK_STATUS, BANK_STATUS_I18N } from "@admin/types";
 import { api } from "@admin/api";
 import { useAuthStore } from "@admin/stores/auth";
 import { availableCountries } from "@shared/countryRuntime";
@@ -24,15 +24,13 @@ function normalizeErrorMessage(error: unknown, fallback: string): string {
   return maybe?.response?.data?.message ?? fallback;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  "1": "bg-emerald-100 text-emerald-700",
-  "2": "bg-gray-100 text-gray-700",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  "1": "Enabled",
-  "2": "Disabled",
-};
+function bankStatusColor(status: BankStatus): string {
+  switch (status) {
+    case BANK_STATUS.ENABLED: return "bg-emerald-100 text-emerald-700";
+    case BANK_STATUS.DISABLED: return "bg-gray-100 text-gray-700";
+  }
+  return "bg-gray-100 text-gray-800";
+}
 
 function BankForm({
   bankId,
@@ -189,8 +187,8 @@ export default function BanksPage() {
           key: "status",
           label: t("Status"),
           render: (row: BankDatatableRow) => (
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[row.status] ?? "bg-gray-100 text-gray-800"}`}>
-              {row.status_label || t(STATUS_LABELS[row.status] ?? "Unknown")}
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${bankStatusColor(row.status as BankStatus)}`}>
+              {row.status_label || t(BANK_STATUS_I18N[row.status as BankStatus] ?? "Unknown")}
             </span>
           ),
         },

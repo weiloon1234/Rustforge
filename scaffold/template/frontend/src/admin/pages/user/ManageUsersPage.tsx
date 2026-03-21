@@ -10,8 +10,7 @@ import type {
   BatchResolveOutput,
   CreditType,
 } from "@admin/types";
-import { PERMISSION, USER_BAN_STATUS, CREDIT_TYPE } from "@admin/types";
-import { CREDIT_TYPE_I18N, BAN_STATUS_I18N } from "@admin/constants/enums";
+import { PERMISSION, USER_BAN_STATUS, CREDIT_TYPE, CREDIT_TYPE_I18N, USER_BAN_STATUS_I18N } from "@admin/types";
 import type { ApiResponse } from "@shared/types";
 import {
   Button,
@@ -36,13 +35,13 @@ function normalizeErrorMessage(error: unknown, fallback: string): string {
 }
 
 const BAN_COLORS: Record<UserBanStatus, { className: string; labelKey: string }> = {
-  "0": { className: "bg-emerald-100 text-emerald-700", labelKey: BAN_STATUS_I18N["0"] },
-  "1": { className: "bg-red-100 text-red-700", labelKey: BAN_STATUS_I18N["1"] },
+  "0": { className: "bg-emerald-100 text-emerald-700", labelKey: USER_BAN_STATUS_I18N["0"] },
+  "1": { className: "bg-red-100 text-red-700", labelKey: USER_BAN_STATUS_I18N["1"] },
 };
 
 function BanBadge({ status }: { status: UserBanStatus }) {
   const { t } = useTranslation();
-  const config = BAN_COLORS[status] ?? BAN_COLORS[USER_BAN_STATUS._0];
+  const config = BAN_COLORS[status] ?? BAN_COLORS[USER_BAN_STATUS.NO];
   return (
     <span
       className={`inline-flex min-h-6 items-center rounded-full px-2 py-0.5 text-xs font-medium ${config.className}`}
@@ -489,8 +488,8 @@ export default function ManageUsersPage() {
   const handleBan = async (
     user: UserDatatableRow,
   ) => {
-    const isBanned = user.ban === USER_BAN_STATUS._1;
-    const newStatus: UserBanStatus = isBanned ? USER_BAN_STATUS._0 : USER_BAN_STATUS._1;
+    const isBanned = user.ban === USER_BAN_STATUS.YES;
+    const newStatus: UserBanStatus = isBanned ? USER_BAN_STATUS.NO : USER_BAN_STATUS.YES;
     const confirmTitle = isBanned ? t("Unban") : t("Ban");
     const confirmMessage = isBanned
       ? t('Are you sure you want to unban ":username"?', { username: user.username })
@@ -569,7 +568,7 @@ export default function ManageUsersPage() {
             <button
               type="button"
               className="cursor-pointer rounded-lg border border-border bg-surface px-3 py-2 text-left text-sm transition-colors hover:bg-muted/50"
-              onClick={() => handleSummaryCardCreditClick(CREDIT_TYPE._1)}
+              onClick={() => handleSummaryCardCreditClick(CREDIT_TYPE.CREDIT1)}
             >
               <p className="text-xs text-muted">{t("Total Credit 1")}</p>
               <p className="font-semibold tabular-nums">{summary.total_credit_1}</p>
@@ -577,7 +576,7 @@ export default function ManageUsersPage() {
             <button
               type="button"
               className="cursor-pointer rounded-lg border border-border bg-surface px-3 py-2 text-left text-sm transition-colors hover:bg-muted/50"
-              onClick={() => handleSummaryCardCreditClick(CREDIT_TYPE._2)}
+              onClick={() => handleSummaryCardCreditClick(CREDIT_TYPE.CREDIT2)}
             >
               <p className="text-xs text-muted">{t("Total Credit 2")}</p>
               <p className="font-semibold tabular-nums">{summary.total_credit_2}</p>
@@ -595,7 +594,7 @@ export default function ManageUsersPage() {
                 render: (
                   user: UserDatatableRow,
                 ) => {
-                  const isBanned = user.ban === USER_BAN_STATUS._1;
+                  const isBanned = user.ban === USER_BAN_STATUS.YES;
                   const banning = banningUserId === user.id;
                   return (
                     <div className="flex gap-1">
@@ -667,7 +666,7 @@ export default function ManageUsersPage() {
             <button
               type="button"
               className="cursor-pointer text-blue-500 hover:text-blue-700 hover:underline"
-              onClick={() => handleCreditClick(user, CREDIT_TYPE._1)}
+              onClick={() => handleCreditClick(user, CREDIT_TYPE.CREDIT1)}
             >
               {user.credit_1 ?? "0"}
             </button>
@@ -681,7 +680,7 @@ export default function ManageUsersPage() {
             <button
               type="button"
               className="cursor-pointer text-blue-500 hover:text-blue-700 hover:underline"
-              onClick={() => handleCreditClick(user, CREDIT_TYPE._2)}
+              onClick={() => handleCreditClick(user, CREDIT_TYPE.CREDIT2)}
             >
               {user.credit_2 ?? "0"}
             </button>
@@ -707,7 +706,7 @@ export default function ManageUsersPage() {
       onPostCall={handleDatatablePostCall}
       renderTableFooter={({ records }) => {
         const bannedCount = records.filter(
-          (user) => user.ban === USER_BAN_STATUS._1,
+          (user) => user.ban === USER_BAN_STATUS.YES,
         ).length;
         return (
           <tr>

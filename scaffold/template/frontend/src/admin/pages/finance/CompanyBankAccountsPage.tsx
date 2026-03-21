@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { CompanyBankAccountDatatableRow, BankOutput } from "@admin/types";
-import { PERMISSION } from "@admin/types";
+import type { CompanyBankAccountDatatableRow, BankOutput, CompanyBankAccountStatus } from "@admin/types";
+import { PERMISSION, COMPANY_BANK_ACCOUNT_STATUS, COMPANY_BANK_ACCOUNT_STATUS_I18N } from "@admin/types";
 import { api } from "@admin/api";
 import { useAuthStore } from "@admin/stores/auth";
 import {
@@ -24,15 +24,13 @@ function normalizeErrorMessage(error: unknown, fallback: string): string {
   return maybe?.response?.data?.message ?? fallback;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  "1": "bg-emerald-100 text-emerald-700",
-  "2": "bg-gray-100 text-gray-700",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  "1": "Enabled",
-  "2": "Disabled",
-};
+function statusColor(status: CompanyBankAccountStatus): string {
+  switch (status) {
+    case COMPANY_BANK_ACCOUNT_STATUS.ENABLED: return "bg-emerald-100 text-emerald-700";
+    case COMPANY_BANK_ACCOUNT_STATUS.DISABLED: return "bg-gray-100 text-gray-700";
+  }
+  return "bg-gray-100 text-gray-800";
+}
 
 function CompanyBankAccountForm({
   accountId,
@@ -194,8 +192,8 @@ export default function CompanyBankAccountsPage() {
           key: "status",
           label: t("Status"),
           render: (row: CompanyBankAccountDatatableRow) => (
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[row.status] ?? "bg-gray-100 text-gray-800"}`}>
-              {row.status_label || t(STATUS_LABELS[row.status] ?? "Unknown")}
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusColor(row.status as CompanyBankAccountStatus)}`}>
+              {row.status_label || t(COMPANY_BANK_ACCOUNT_STATUS_I18N[row.status as CompanyBankAccountStatus] ?? "Unknown")}
             </span>
           ),
         },
