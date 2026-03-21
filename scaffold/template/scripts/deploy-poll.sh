@@ -190,6 +190,11 @@ deploy_new_version() {
         return 1
     fi
 
+    # Fix ownership (rsync via sudo may set root ownership)
+    if [[ -n "${PROJECT_USER}" ]]; then
+        chown -R "${PROJECT_USER}:${PROJECT_USER}" "${PROJECT_DIR}"
+    fi
+
     # Fix permissions on binaries
     chmod +x "${PROJECT_DIR}/target/release/api-server" \
               "${PROJECT_DIR}/target/release/websocket-server" \
