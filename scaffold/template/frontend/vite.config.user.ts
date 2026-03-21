@@ -22,7 +22,11 @@ function manualVendorChunk(id: string): string | undefined {
   ) {
     return "vendor-editor";
   }
-  if (id.includes("/react/") || id.includes("/react-dom/") || id.includes("/scheduler/")) {
+  if (
+    id.includes("/react/") ||
+    id.includes("/react-dom/") ||
+    id.includes("/scheduler/")
+  ) {
     return "vendor-react";
   }
   if (id.includes("/react-datepicker/") || id.includes("/date-fns/")) {
@@ -69,14 +73,6 @@ export default defineConfig({
       onwarn(warning, _warn) {
         failOnRollupWarning(warning);
       },
-    },
-  },
-  // Rename user.html → index.html in the output so the Rust SPA
-  // fallback (which looks for public/index.html) works unchanged.
-  experimental: {
-    renderBuiltUrl(filename, { hostType }) {
-      if (hostType === "html") return filename;
-      return "/" + filename;
     },
   },
   server: {
