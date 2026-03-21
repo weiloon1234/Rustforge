@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Trash2, RefreshCw, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { LogFileEntry } from "@admin/types";
@@ -45,34 +45,73 @@ function highlightLine(line: string): React.ReactNode {
   return <span className={levelClass(level)}>{line}</span>;
 }
 
-function LogContent({
-  content,
-  searchQuery,
-  minLevel,
-}: {
-  content: string;
-  searchQuery: string;
-  minLevel: string;
-}) {
-  const minIdx = LOG_LEVELS.indexOf(minLevel as LogLevel);
-  const lines = content.split("\n").reverse();
-  const filteredLines = lines.filter((line) => {
-    if (minIdx > 0) {
-      const level = getLineLevel(line);
-      if (level && LOG_LEVELS.indexOf(level) < minIdx) return false;
-    }
-    if (searchQuery) {
-      return line.toLowerCase().includes(searchQuery.toLowerCase());
-    }
-    return true;
-  });
+const LINE_HEIGHT = 20; // text-xs leading-5 = 1.25rem = 20px
+const OVERSCAN = 20;
+
+function useFilteredLines(content: string, searchQuery: string, minLevel: string) {
+  return useMemo(() => {
+    const minIdx = LOG_LEVELS.indexOf(minLevel as LogLevel);
+    return content
+      .split("\n")
+      .reverse()
+      .filter((line) => {
+        if (minIdx > 0) {
+          const level = getLineLevel(line);
+          if (level && LOG_LEVELS.indexOf(level) < minIdx) return false;
+        }
+        if (searchQuery) {
+          return line.toLowerCase().includes(searchQuery.toLowerCase());
+        }
+        return true;
+      });
+  }, [content, searchQuery, minLevel]);
+}
+
+function LogContent({ lines }: { lines: string[] }) {
+  const containerRef = useRef<HTMLPreElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewHeight, setViewHeight] = useState(600);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(([entry]) => {
+      setViewHeight(entry.contentRect.height);
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  const totalHeight = lines.length * LINE_HEIGHT;
+  const startIdx = Math.max(0, Math.floor(scrollTop / LINE_HEIGHT) - OVERSCAN);
+  const endIdx = Math.min(
+    lines.length,
+    Math.ceil((scrollTop + viewHeight) / LINE_HEIGHT) + OVERSCAN,
+  );
 
   return (
     <div className="flex-1 min-h-0">
-      <pre className="max-h-[calc(100vh-16rem)] overflow-auto rounded-lg border border-border bg-gray-950 p-3 font-mono text-xs leading-5 text-gray-200">
-        {filteredLines.map((line, i) => (
-          <div key={i}>{highlightLine(line) || "\u00A0"}</div>
-        ))}
+      <pre
+        ref={containerRef}
+        onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+        className="max-h-[calc(100vh-16rem)] overflow-auto rounded-lg border border-border bg-gray-950 p-3 font-mono text-xs leading-5 text-gray-200"
+      >
+        <div style={{ height: totalHeight, position: "relative" }}>
+          <div
+            style={{
+              position: "absolute",
+              top: startIdx * LINE_HEIGHT,
+              left: 0,
+              right: 0,
+            }}
+          >
+            {lines.slice(startIdx, endIdx).map((line, i) => (
+              <div key={startIdx + i} style={{ height: LINE_HEIGHT }}>
+                {highlightLine(line) || "\u00A0"}
+              </div>
+            ))}
+          </div>
+        </div>
       </pre>
     </div>
   );
@@ -186,6 +225,7 @@ export default function LogViewerPage() {
   };
 
   const selectedMeta = files.find((f) => f.filename === selectedFile);
+  const filteredLines = useFilteredLines(content, searchQuery, minLevel);
 
   return (
     <div className="flex h-full flex-col gap-4 p-4">
@@ -269,25 +309,13 @@ export default function LogViewerPage() {
           </span>
           {(searchQuery || minLevel) && (
             <span>
-              {t("Showing")}:{" "}
-              {content
-                .split("\n")
-                .filter((l) => {
-                  if (minLevel) {
-                    const lvl = getLineLevel(l);
-                    if (lvl && LOG_LEVELS.indexOf(lvl) < LOG_LEVELS.indexOf(minLevel as LogLevel)) return false;
-                  }
-                  if (searchQuery) return l.toLowerCase().includes(searchQuery.toLowerCase());
-                  return true;
-                })
-                .length.toLocaleString()}{" "}
-              {t("matches")}
+              {t("Showing")}: {filteredLines.length.toLocaleString()} {t("matches")}
             </span>
           )}
         </div>
       )}
 
-      <LogContent content={content} searchQuery={searchQuery} minLevel={minLevel} />
+      <LogContent lines={filteredLines} />
     </div>
   );
 }
