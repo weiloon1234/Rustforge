@@ -78,6 +78,8 @@ dev: ensure-frontend-deps
 	@trap 'kill 0' EXIT; \
 	RUN_WORKER=true cargo watch -x "run -p app --bin api-server" & \
 	cargo run -p app --bin websocket-server & \
+	cargo watch --no-vcs-trigger -w app/models -w app/permissions.toml -w app/configs.toml -s "make gen" & \
+	cargo watch --no-vcs-trigger -w app/src/contracts -s "make gen-types" & \
 	npm --prefix frontend run dev:user & \
 	npm --prefix frontend run dev:admin & \
 	wait
