@@ -84,7 +84,7 @@ fn build_csp_header(settings: &Settings) -> axum::http::HeaderValue {
          script-src 'self' 'unsafe-inline' http://localhost:*; \
          style-src 'self' 'unsafe-inline'; \
          img-src 'self' data: blob: https:; \
-         connect-src 'self' ws://localhost:* http://localhost:* wss: https:; \
+         connect-src 'self' ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:* wss: https:; \
          font-src 'self' data:; \
          frame-ancestors 'none';"
     } else {
