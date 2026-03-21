@@ -5,7 +5,7 @@ use core_web::{
     authz::PermissionMode,
     contracts::ContractJson,
     error::AppError,
-    openapi::{with_permission_check_post_with, ApiRouter},
+    openapi::{with_permission_check_get_with, with_permission_check_post_with, ApiRouter},
     response::ApiResponse,
 };
 use generated::{guards::AdminGuard, models::WithdrawalStatus, permissions::Permission};
@@ -20,6 +20,16 @@ use super::receipt_upload::{build_attachment_url, parse_receipt_multipart, valid
 
 pub fn router(state: AppApiState) -> ApiRouter {
     ApiRouter::new()
+        .api_route(
+            "/{id}",
+            with_permission_check_get_with(
+                get_withdrawal,
+                AdminGuard,
+                PermissionMode::Any,
+                [Permission::WithdrawalRead.as_str(), Permission::WithdrawalManage.as_str()],
+                |op| op.summary("Get withdrawal detail").tag("Admin Withdrawals"),
+            ),
+        )
         .api_route(
             "/{id}/review",
             with_permission_check_post_with(
@@ -41,6 +51,39 @@ pub fn router(state: AppApiState) -> ApiRouter {
             ),
         )
         .with_state(state)
+}
+
+async fn get_withdrawal(
+    State(state): State<AppApiState>,
+    _auth: AuthUser<AdminGuard>,
+    Path(id): Path<i64>,
+) -> Result<ApiResponse<WithdrawalOutput>, AppError> {
+    let withdrawal = workflow::detail(&state, id).await?;
+    Ok(ApiResponse::success(
+        WithdrawalOutput {
+            id: withdrawal.id.into(),
+            owner_type: withdrawal.owner_type,
+            owner_id: withdrawal.owner_id.into(),
+            credit_type: withdrawal.credit_type,
+            withdrawal_method: withdrawal.withdrawal_method,
+            bank_id: withdrawal.bank_id.map(Into::into),
+            bank_account_name: withdrawal.bank_account_name.clone(),
+            bank_account_number: withdrawal.bank_account_number.clone(),
+            crypto_network_id: withdrawal.crypto_network_id.map(Into::into),
+            crypto_wallet_address: withdrawal.crypto_wallet_address.clone(),
+            conversion_rate: withdrawal.conversion_rate.map(Into::into),
+            status: withdrawal.status,
+            amount: withdrawal.amount.into(),
+            fee: withdrawal.fee.into(),
+            net_amount: withdrawal.net_amount.into(),
+            related_key: withdrawal.related_key.clone(),
+            remark: withdrawal.remark.clone(),
+            admin_remark: withdrawal.admin_remark.clone(),
+            reviewed_at: withdrawal.reviewed_at.map(Into::into),
+            created_at: withdrawal.created_at.into(),
+        },
+        &t("Withdrawal loaded"),
+    ))
 }
 
 async fn review_withdrawal(

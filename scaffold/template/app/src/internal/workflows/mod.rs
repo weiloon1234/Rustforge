@@ -13,4 +13,5 @@ pub mod user_auth;
 pub mod user_manage;
 pub mod user_credit;
 pub mod user_team;
+pub mod wallet;
 pub mod withdrawal;

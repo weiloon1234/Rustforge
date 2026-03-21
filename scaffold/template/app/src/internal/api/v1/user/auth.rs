@@ -232,6 +232,7 @@ async fn me(
             locale: user.locale,
             country_iso2: user.country_iso2,
             contact_number: user.contact_number,
+            credit_1: user.credit_1.into(),
         },
         &t("Profile loaded"),
     ))

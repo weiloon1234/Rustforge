@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { WithdrawalDatatableRow } from "@admin/types";
 import { CREDIT_TYPE_I18N, WITHDRAWAL_METHOD_I18N } from "@admin/constants/enums";
@@ -149,6 +150,7 @@ function UploadReceiptForm({
 
 export default function WithdrawalsPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const account = useAuthStore((s) => s.account);
   const canManage = useAuthStore.hasPermission(PERMISSION.WITHDRAWAL_MANAGE, account);
 
@@ -230,7 +232,16 @@ export default function WithdrawalsPage() {
         {
           key: "id",
           label: t("ID"),
-          cellClassName: "tabular-nums text-muted",
+          cellClassName: "tabular-nums",
+          render: (row) => (
+            <button
+              type="button"
+              className="text-primary hover:underline cursor-pointer"
+              onClick={() => navigate(`/finance/withdrawals/${row.id}`)}
+            >
+              {row.id}
+            </button>
+          ),
         },
         {
           key: "owner_id",

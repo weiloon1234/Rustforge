@@ -70,6 +70,7 @@ impl DataTableScopedContract for AdminUserDataTableContract {
                     label: "Keyword".to_string(),
                     placeholder: Some("Search name/username/email".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -79,6 +80,7 @@ impl DataTableScopedContract for AdminUserDataTableContract {
                     label: "Email".to_string(),
                     placeholder: Some("Contains".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
             ],
@@ -90,6 +92,7 @@ impl DataTableScopedContract for AdminUserDataTableContract {
                     label: "Username".to_string(),
                     placeholder: Some("Contains".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
                 DataTableFilterFieldDto {
@@ -111,6 +114,7 @@ impl DataTableScopedContract for AdminUserDataTableContract {
                     label: "Ban Status".to_string(),
                     placeholder: Some("All".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: Some(UserBanStatus::datatable_filter_options()),
                 },
                 DataTableFilterFieldDto {
@@ -120,6 +124,7 @@ impl DataTableScopedContract for AdminUserDataTableContract {
                     label: "Introducer".to_string(),
                     placeholder: Some("Contains".to_string()),
                     description: None,
+                    secondary_filter_key: None,
                     options: None,
                 },
             ],

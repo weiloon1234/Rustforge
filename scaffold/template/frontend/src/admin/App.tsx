@@ -17,6 +17,7 @@ const AdjustCreditsPage = lazy(() => import("@admin/pages/user/AdjustCreditsPage
 const AuditLogsPage = lazy(() => import("@admin/pages/other/AuditLogsPage"));
 const DepositsPage = lazy(() => import("@admin/pages/finance/DepositsPage"));
 const WithdrawalsPage = lazy(() => import("@admin/pages/finance/WithdrawalsPage"));
+const WithdrawalDetailPage = lazy(() => import("@admin/pages/finance/WithdrawalDetailPage"));
 const BanksPage = lazy(() => import("@admin/pages/finance/BanksPage"));
 const CryptoNetworksPage = lazy(() => import("@admin/pages/finance/CryptoNetworksPage"));
 const CompanyBankAccountsPage = lazy(() => import("@admin/pages/finance/CompanyBankAccountsPage"));
@@ -50,6 +51,7 @@ export default function App() {
             <Route path="/other/audit-logs" element={<AuditLogsPage />} />
             <Route path="/finance/deposits" element={<DepositsPage />} />
             <Route path="/finance/withdrawals" element={<WithdrawalsPage />} />
+            <Route path="/finance/withdrawals/:id" element={<WithdrawalDetailPage />} />
             <Route path="/finance/banks" element={<BanksPage />} />
             <Route path="/finance/crypto-networks" element={<CryptoNetworksPage />} />
             <Route path="/finance/company-bank-accounts" element={<CompanyBankAccountsPage />} />

@@ -166,6 +166,7 @@ export interface DataTableProps<T> {
   renderTableFooter?: (ctx: DataTableFooterContext<T>) => ReactNode;
   onPreCall?: (event: DataTablePreCallEvent) => void;
   onPostCall?: (event: DataTablePostCallEvent<T>) => void;
+  initialFilters?: Record<string, string>;
   footer?: ReactNode;
 }
 
@@ -559,6 +560,7 @@ export function DataTable<T>({
   renderTableFooter,
   onPreCall,
   onPostCall,
+  initialFilters,
   footer,
 }: DataTableProps<T>) {
   const api = useDataTableApi();
@@ -582,8 +584,12 @@ export function DataTable<T>({
 
   const [sortColumn, setSortColumn] = useState("");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  const [filterValues, setFilterValues] = useState<Record<string, string>>({});
-  const appliedFiltersRef = useRef<Record<string, string>>({});
+  const [filterValues, setFilterValues] = useState<Record<string, string>>(
+    () => initialFilters ?? {},
+  );
+  const appliedFiltersRef = useRef<Record<string, string>>(
+    initialFilters ? { ...initialFilters } : {},
+  );
   const [filterVersion, setFilterVersion] = useState(0);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState<boolean>(() =>
     enableAutoRefresh ? readAutoRefreshEnabled() : false,

@@ -6,7 +6,4 @@ export interface ApiResponse<T> {
   message?: string;
 }
 
-export interface ApiErrorResponse {
-  message: string;
-  errors?: Record<string, string[]>;
-}
+export type ApiErrorResponse = { message: string, errors?: { [key in string]?: Array<string> }, };

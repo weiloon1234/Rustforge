@@ -26,6 +26,7 @@ pub struct AppApiState {
     pub realtime: RealtimePublisher,
     pub rate_limit_per_sec: u32,
     pub rate_limit_burst: u32,
+    pub withdrawal_fee_config: crate::internal::config::withdrawal::WithdrawalFeeConfig,
 }
 
 impl AppApiState {
@@ -69,6 +70,7 @@ impl AppApiState {
             )?,
             rate_limit_per_sec: ctx.settings.middleware.rate_limit_per_second,
             rate_limit_burst: ctx.settings.middleware.rate_limit_burst,
+            withdrawal_fee_config: crate::internal::config::withdrawal::WithdrawalFeeConfig::default(),
         })
     }
 }

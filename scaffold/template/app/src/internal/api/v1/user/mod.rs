@@ -5,6 +5,7 @@ use crate::internal::api::state::AppApiState;
 
 mod auth;
 mod team;
+mod wallet;
 
 pub fn router(state: AppApiState) -> ApiRouter {
     ApiRouter::new()
@@ -21,6 +22,7 @@ fn guarded_router(state: AppApiState) -> ApiRouter {
             }),
         )
         .nest("/team", team::router(state.clone()))
+        .nest("/wallet", wallet::router(state.clone()))
         .layer(from_fn_with_state(
             state,
             crate::internal::middleware::auth::require_user,

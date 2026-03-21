@@ -2,6 +2,7 @@ use crate::contracts::types::username::UsernameString;
 use core_web::auth::AuthClientType;
 use core_web::contracts::rustforge_contract;
 use core_web::ids::SnowflakeId;
+use core_web::Decimal;
 use core_web::DateTime;
 use core_web::Patch;
 use schemars::JsonSchema;
@@ -155,6 +156,7 @@ pub struct UserMeOutput {
     pub locale: Option<String>,
     pub country_iso2: Option<String>,
     pub contact_number: Option<String>,
+    pub credit_1: Decimal,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]

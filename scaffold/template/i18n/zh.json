@@ -692,5 +692,15 @@
   "Crypto network is not enabled": "加密网络未启用",
   "Company bank account not found": "找不到公司银行账户",
   "Company crypto account not found": "找不到公司加密账户",
-  "Receipt can only be uploaded for pending or processing withdrawals": "只有待处理或处理中的提现才能上传凭证"
+  "Receipt can only be uploaded for pending or processing withdrawals": "只有待处理或处理中的提现才能上传凭证",
+  "Withdrawal Amount": "提现金额",
+  "Fee (:percent%)": "手续费 (:percent%)",
+  "You Receive": "实际到账",
+  "Received": "到账",
+  "Amount is below minimum withdrawal amount": "金额低于最低提现金额",
+  "Withdrawal loaded": "提现详情已加载",
+  "View your credit transactions.": "查看你的额度交易记录。",
+  "No transactions yet.": "暂无交易记录。",
+  "No withdrawals yet.": "暂无提现记录。",
+  "Failed to submit withdrawal.": "提现提交失败。"
 }

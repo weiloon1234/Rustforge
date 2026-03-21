@@ -75,6 +75,17 @@ impl DepositDataTableHooks for DepositDataTableAppHooks {
                     Ok(Some(query))
                 }
             }
+            "f-user_id" => {
+                if let Ok(uid) = value.trim().parse::<i64>() {
+                    Ok(Some(
+                        query
+                            .where_col(DepositCol::OWNER_TYPE, Op::Eq, OwnerType::User)
+                            .where_col(DepositCol::OWNER_ID, Op::Eq, uid),
+                    ))
+                } else {
+                    Ok(Some(query))
+                }
+            }
             _ => Ok(None),
         }
     }
