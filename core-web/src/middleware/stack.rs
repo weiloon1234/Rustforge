@@ -71,17 +71,32 @@ pub fn apply_standard_middleware(router: axum::Router, settings: &Settings) -> a
             ))
             .layer(SetResponseHeaderLayer::overriding(
                 axum::http::header::HeaderName::from_static("content-security-policy"),
-                axum::http::HeaderValue::from_static(
-                    "default-src 'self'; \
-                     script-src 'self' 'unsafe-inline'; \
-                     style-src 'self' 'unsafe-inline'; \
-                     img-src 'self' data: blob: https:; \
-                     connect-src 'self' wss: https:; \
-                     font-src 'self' data:; \
-                     frame-ancestors 'none';"
-                ),
+                build_csp_header(settings),
             )),
     )
+}
+
+fn build_csp_header(settings: &Settings) -> axum::http::HeaderValue {
+    let is_dev = matches!(settings.app.env.as_str(), "local" | "dev" | "development");
+    let csp = if is_dev {
+        // In dev mode, allow Vite HMR dev server origins for script/style/connect
+        "default-src 'self'; \
+         script-src 'self' 'unsafe-inline' http://localhost:*; \
+         style-src 'self' 'unsafe-inline'; \
+         img-src 'self' data: blob: https:; \
+         connect-src 'self' ws://localhost:* http://localhost:* wss: https:; \
+         font-src 'self' data:; \
+         frame-ancestors 'none';"
+    } else {
+        "default-src 'self'; \
+         script-src 'self' 'unsafe-inline'; \
+         style-src 'self' 'unsafe-inline'; \
+         img-src 'self' data: blob: https:; \
+         connect-src 'self' wss: https:; \
+         font-src 'self' data:; \
+         frame-ancestors 'none';"
+    };
+    axum::http::HeaderValue::from_static(csp)
 }
 
 fn build_cors_layer(settings: &Settings) -> CorsLayer {
