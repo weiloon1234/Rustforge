@@ -200,9 +200,6 @@ PROJECT_SLUG="$(prompt "Project slug (used for nginx/supervisor file names)" "${
 existing_domain="$(read_env_value "${ENV_FILE}" "DOMAIN")"
 DOMAIN="$(prompt "Domain (example: api.example.com)" "${existing_domain:-example.com}")"
 
-existing_deploy_repo="$(read_env_value "${ENV_FILE}" "DEPLOY_REPO_DIR")"
-DEPLOY_REPO_DIR="$(prompt "Deploy repo clone directory" "${existing_deploy_repo:-/opt/${PROJECT_SLUG}-deploy}")"
-
 PROJECT_USER="$(stat -c '%U' "${PROJECT_DIR}")"
 if [[ -z "${PROJECT_USER}" ]] || [[ "${PROJECT_USER}" == "root" ]]; then
     echo "Project directory is owned by root. Please chown it to your deploy user first."
@@ -282,20 +279,20 @@ echo "  HTTPS            : ${ENABLE_HTTPS}"
 echo "  Supervisor       : ${ENABLE_SUPERVISOR}"
 echo "  Websocket proc   : ${ENABLE_WS}"
 echo "  Worker proc      : ${ENABLE_WORKER}"
-echo "  Deploy poller    : ${ENABLE_DEPLOY_POLL}"
+echo "  Deploy poller    : ${ENABLE_DEPLOY_POLL} (R2-based)"
 echo
 if [[ "$(prompt_yes_no "Proceed with installation?" "yes")" != "yes" ]]; then
     echo "Cancelled."
     exit 0
 fi
 
-if ! command -v psql >/dev/null 2>&1; then
-    echo "Installing PostgreSQL..."
-    ensure_packages postgresql postgresql-contrib
-    systemctl enable --now postgresql
-fi
-
 if [[ "${SETUP_POSTGRES}" == "yes" ]]; then
+    if ! command -v psql >/dev/null 2>&1; then
+        echo "Installing PostgreSQL..."
+        ensure_packages postgresql postgresql-contrib
+        systemctl enable --now postgresql
+    fi
+
     echo "Creating PostgreSQL user '${DB_USER}' and database '${DB_NAME}'..."
     sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1 \
         || sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';"
@@ -331,32 +328,66 @@ fi
 
 ensure_packages rsync unzip
 
+# Install AWS CLI v2 (for R2 deploy downloads)
+if ! command -v aws >/dev/null 2>&1; then
+    echo "Installing AWS CLI v2..."
+    aws_tmp="$(mktemp -d)"
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "${aws_tmp}/awscliv2.zip"
+    unzip -q "${aws_tmp}/awscliv2.zip" -d "${aws_tmp}"
+    "${aws_tmp}/aws/install" --update
+    rm -rf "${aws_tmp}"
+fi
+
 if [[ "${ENABLE_HTTPS}" == "yes" ]]; then
     ensure_packages certbot python3-certbot-nginx cron
 fi
 
-# Clone deploy repo if not already present
-if [[ ! -d "${DEPLOY_REPO_DIR}" ]]; then
-    echo "Cloning deploy repository to ${DEPLOY_REPO_DIR}..."
-    git clone git@github.com:your_company/your_project-deploy.git "${DEPLOY_REPO_DIR}"
-    chown -R "${PROJECT_USER}:${PROJECT_USER}" "${DEPLOY_REPO_DIR}"
-fi
+# Download and extract initial release from R2 if VERSION not yet in project dir
+S3_ENDPOINT_VAL="$(read_env_value "${ENV_FILE}" "S3_ENDPOINT")"
+S3_BUCKET_VAL="$(read_env_value "${ENV_FILE}" "S3_BUCKET")"
+S3_ACCESS_KEY_VAL="$(read_env_value "${ENV_FILE}" "S3_ACCESS_KEY")"
+S3_SECRET_KEY_VAL="$(read_env_value "${ENV_FILE}" "S3_SECRET_KEY")"
 
-# Extract initial release if VERSION not yet in project dir
-if [[ -f "${DEPLOY_REPO_DIR}/release.zip" ]]; then
-    echo "Extracting initial release..."
-    cd "${DEPLOY_REPO_DIR}"
-    if sha256sum -c SHA256SUMS; then
-        staging="$(mktemp -d)"
-        unzip -q release.zip -d "${staging}"
-        rsync -a --exclude='.env' --exclude='logs/' --exclude='.git/' "${staging}/" "${PROJECT_DIR}/"
-        rm -rf "${staging}"
-        chown -R "${PROJECT_USER}:${PROJECT_USER}" "${PROJECT_DIR}"
-        chmod +x "${PROJECT_DIR}/target/release/"* "${PROJECT_DIR}/bin/"* "${PROJECT_DIR}/console" "${PROJECT_DIR}/scripts/"*.sh 2>/dev/null || true
-        echo "Release extracted to ${PROJECT_DIR}"
+if [[ -n "${S3_ENDPOINT_VAL}" && -n "${S3_BUCKET_VAL}" && -n "${S3_ACCESS_KEY_VAL}" && -n "${S3_SECRET_KEY_VAL}" ]]; then
+    export AWS_ACCESS_KEY_ID="${S3_ACCESS_KEY_VAL}"
+    export AWS_SECRET_ACCESS_KEY="${S3_SECRET_KEY_VAL}"
+    export AWS_DEFAULT_REGION="auto"
+
+    echo "Fetching latest version from R2..."
+    download_dir="$(mktemp -d)"
+    if aws s3 cp "s3://${S3_BUCKET_VAL}/deploy/VERSION" "${download_dir}/VERSION" \
+        --endpoint-url "${S3_ENDPOINT_VAL}" --quiet 2>/dev/null; then
+
+        DEPLOY_VERSION="$(cat "${download_dir}/VERSION")"
+        echo "Latest version: ${DEPLOY_VERSION}"
+
+        if aws s3 cp "s3://${S3_BUCKET_VAL}/deploy/${DEPLOY_VERSION}/release.zip" "${download_dir}/release.zip" \
+            --endpoint-url "${S3_ENDPOINT_VAL}" --quiet && \
+           aws s3 cp "s3://${S3_BUCKET_VAL}/deploy/${DEPLOY_VERSION}/SHA256SUMS" "${download_dir}/SHA256SUMS" \
+            --endpoint-url "${S3_ENDPOINT_VAL}" --quiet; then
+
+            if (cd "${download_dir}" && sha256sum -c SHA256SUMS); then
+                staging="$(mktemp -d)"
+                unzip -q release.zip -d "${staging}"
+                rsync -a --exclude='.env' --exclude='logs/' --exclude='.git/' "${staging}/" "${PROJECT_DIR}/"
+                rm -rf "${staging}"
+                chown -R "${PROJECT_USER}:${PROJECT_USER}" "${PROJECT_DIR}"
+                chmod +x "${PROJECT_DIR}/target/release/"* "${PROJECT_DIR}/bin/"* "${PROJECT_DIR}/console" "${PROJECT_DIR}/scripts/"*.sh 2>/dev/null || true
+                echo "Release ${DEPLOY_VERSION} extracted to ${PROJECT_DIR}"
+            else
+                echo "WARNING: Checksum verification failed. Skipping extraction."
+            fi
+        else
+            echo "WARNING: Failed to download release artifacts from R2. Skipping extraction."
+        fi
     else
-        echo "WARNING: Checksum verification failed for release.zip. Skipping extraction."
+        echo "WARNING: No VERSION found in R2. Skipping initial release download."
     fi
+    rm -rf "${download_dir}"
+
+    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION
+else
+    echo "WARNING: S3 credentials not configured in .env. Skipping initial release download."
 fi
 
 upsert_env "${ENV_FILE}" "APP_NAME" "${APP_NAME}"
@@ -375,7 +406,6 @@ upsert_env "${ENV_FILE}" "REDIS_URL" "${REDIS_URL}"
 upsert_env "${ENV_FILE}" "RUN_WORKER" "$(bool_value "${ENABLE_WORKER}")"
 upsert_env "${ENV_FILE}" "ENABLE_HTTPS" "$(bool_value "${ENABLE_HTTPS}")"
 upsert_env "${ENV_FILE}" "ENABLE_SUPERVISOR" "$(bool_value "${ENABLE_SUPERVISOR}")"
-upsert_env "${ENV_FILE}" "DEPLOY_REPO_DIR" "${DEPLOY_REPO_DIR}"
 if [[ -n "${LETSENCRYPT_EMAIL}" ]]; then
     upsert_env "${ENV_FILE}" "LETSENCRYPT_EMAIL" "${LETSENCRYPT_EMAIL}"
 fi
@@ -549,8 +579,5 @@ echo "Nginx site : ${NGINX_CONF_PATH}"
 echo "Env file   : ${ENV_FILE}"
 if [[ "${ENABLE_SUPERVISOR}" == "yes" ]]; then
     echo "Supervisor : /etc/supervisor/conf.d/${PROJECT_SLUG}.conf"
-    if [[ -n "${DEPLOY_REPO_DIR:-}" ]]; then
-        echo "Deploy repo : ${DEPLOY_REPO_DIR}"
-    fi
 fi
 echo "Try: https://${DOMAIN} (or http://${DOMAIN} when HTTPS is disabled)"

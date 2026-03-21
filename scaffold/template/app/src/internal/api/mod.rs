@@ -83,7 +83,7 @@ fn build_api_router(ctx: &BootContext, state: AppApiState) -> anyhow::Result<Rou
 
     let mut api = OpenApi::default();
     api.info = Info {
-        title: "starter-api".to_string(),
+        title: "{{PROJECT_NAME}}-api".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         ..Default::default()
     };

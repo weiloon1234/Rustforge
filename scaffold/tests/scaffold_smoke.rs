@@ -20,6 +20,10 @@ fn run_scaffold(output: &Path, force: bool) -> std::process::Output {
     if force {
         cmd.arg("--force");
     }
+    cmd.arg("--project-name")
+        .arg("testproject")
+        .arg("--bucket-name")
+        .arg("testbucket");
     cmd.output().expect("failed to run scaffold binary")
 }
 

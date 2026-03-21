@@ -11,10 +11,10 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: 'npm'
@@ -27,7 +27,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Cargo registry and build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -44,9 +44,6 @@ jobs:
         env:
           VITE_APP_NAME: ${{ secrets.VITE_APP_NAME }}
           VITE_S3_URL: ${{ secrets.VITE_S3_URL }}
-          # Add any other VITE_* variables your frontend needs at build time.
-          # These are baked into the JS bundle during build — they must be
-          # available as GitHub Actions secrets, not runtime .env values.
         run: npm --prefix frontend run build
 
       - name: Get version from tag
@@ -105,41 +102,45 @@ jobs:
       - name: Generate checksums
         run: sha256sum release.zip > SHA256SUMS
 
-      - name: Push to deploy repository
+      - name: Upload artifacts to R2
         env:
-          DEPLOY_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
           VERSION_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          git clone "https://x-access-token:${DEPLOY_TOKEN}@github.com/YOUR_ORG/YOUR_PROJECT-deploy.git" deploy-repo
-          cd deploy-repo
+          # Upload versioned artifacts
+          aws s3 cp release.zip "s3://${R2_BUCKET}/deploy/${VERSION_TAG}/release.zip" --endpoint-url "${R2_ENDPOINT}"
+          aws s3 cp SHA256SUMS "s3://${R2_BUCKET}/deploy/${VERSION_TAG}/SHA256SUMS" --endpoint-url "${R2_ENDPOINT}"
 
-          # Remove old artifacts (keep .git and README)
-          find . -maxdepth 1 -not -name '.git' -not -name 'README.md' -not -name '.' -exec rm -rf {} +
-
-          # Copy new artifacts
-          cp ../release.zip .
-          cp ../SHA256SUMS .
+          # Update VERSION pointer
           echo "${VERSION_TAG}" > VERSION
+          aws s3 cp VERSION "s3://${R2_BUCKET}/deploy/VERSION" --endpoint-url "${R2_ENDPOINT}"
 
-          # Create README if not exists
-          if [ ! -f README.md ]; then
-            printf '%s\n' \
-              "# your-project-deploy" \
-              "" \
-              "Build-only deployment repository. Contains compiled release artifacts." \
-              "" \
-              "Do not edit manually. Contents are published by GitHub Actions from the source repository." \
-              "" \
-              "## Files" \
-              "" \
-              "- release.zip: Deployable package (binaries, frontend, migrations, scripts)" \
-              "- VERSION: Current version tag" \
-              "- SHA256SUMS: Checksum for release.zip integrity verification" \
-              > README.md
+      - name: Cleanup old versions (retain 3)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          # List all version prefixes, sort descending, skip first 3, delete the rest
+          PREFIXES=$(aws s3api list-objects-v2 \
+            --bucket "${R2_BUCKET}" \
+            --prefix "deploy/v" \
+            --delimiter "/" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --query "CommonPrefixes[].Prefix" \
+            --output text 2>/dev/null || true)
+
+          if [ -n "${PREFIXES}" ]; then
+            echo "${PREFIXES}" | tr '\t' '\n' | sort -r | tail -n +4 | while read -r prefix; do
+              if [ -n "${prefix}" ]; then
+                echo "Deleting old version: ${prefix}"
+                aws s3 rm "s3://${R2_BUCKET}/${prefix}" --recursive --endpoint-url "${R2_ENDPOINT}"
+              fi
+            done
           fi
-
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add -A
-          git commit -m "Release ${VERSION_TAG}" || echo "No changes to commit"
-          git push

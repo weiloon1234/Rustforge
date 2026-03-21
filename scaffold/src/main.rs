@@ -2,6 +2,7 @@ use anyhow::{bail, Context};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use clap::Parser;
 use colored::*;
+use dialoguer::Input;
 use include_dir::{include_dir, Dir, DirEntry, File};
 use rand::RngExt;
 use std::collections::BTreeSet;
@@ -21,6 +22,14 @@ struct Cli {
     /// Overwrite output directory when it is non-empty
     #[arg(long, short)]
     force: bool,
+
+    /// Project name (prompted interactively if omitted)
+    #[arg(long)]
+    project_name: Option<String>,
+
+    /// R2 bucket name (prompted interactively if omitted)
+    #[arg(long)]
+    bucket_name: Option<String>,
 }
 
 #[tokio::main]
@@ -30,11 +39,30 @@ async fn main() -> anyhow::Result<()> {
 
     println!("{}", "Rustforge Starter Scaffold".bold().cyan());
     println!("{} {}", "Output:".bold(), output.display());
+    println!();
+
+    let project_name = match cli.project_name {
+        Some(name) => name,
+        None => Input::new()
+            .with_prompt("Project name")
+            .interact_text()?,
+    };
+
+    let bucket_name = match cli.bucket_name {
+        Some(name) => name,
+        None => Input::new()
+            .with_prompt("R2 bucket name")
+            .interact_text()?,
+    };
 
     ensure_output_ready(&output, cli.force)?;
 
     let app_key = generate_app_key();
-    let replacements = [("APP_KEY", app_key.as_str())];
+    let replacements = [
+        ("APP_KEY", app_key.as_str()),
+        ("PROJECT_NAME", project_name.as_str()),
+        ("BUCKET_NAME", bucket_name.as_str()),
+    ];
 
     let files = template_files();
     if cli.force {

@@ -19,6 +19,10 @@ fn run_scaffold(output: &Path) -> std::process::Output {
         .arg("--output")
         .arg(output)
         .arg("--force")
+        .arg("--project-name")
+        .arg("testproject")
+        .arg("--bucket-name")
+        .arg("testbucket")
         .output()
         .expect("failed to run scaffold binary")
 }

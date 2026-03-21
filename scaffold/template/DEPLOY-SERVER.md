@@ -1,8 +1,6 @@
 # Deploy Server Cheatsheet
 
-Step-by-step guide for bootstrapping a fresh Ubuntu 24.04 server for your app.
-
-> Replace `<your-app>` with your project slug (e.g. `myapp`) and `<your-github-user>` with your GitHub username throughout this guide.
+Step-by-step guide for bootstrapping a fresh Ubuntu 24.04 server for {{PROJECT_NAME}}.
 
 > Ubuntu 24.04 defaults to SSH via the `ubuntu` user (root SSH is disabled).
 > The install script rejects root-owned project directories, so all paths use the `ubuntu` user.
@@ -14,90 +12,87 @@ Step-by-step guide for bootstrapping a fresh Ubuntu 24.04 server for your app.
 - Fresh Ubuntu 24.04 server
 - DNS A record pointing your domain to the server IP
 - SSH access as `ubuntu`
+- GitHub Actions secrets configured (see [GitHub Setup](#github-setup) below)
+- At least one release already uploaded to R2 (run `make deploy` from source repo first)
 
 ## 2. Install Base Tools
 
 ```bash
 sudo apt-get update -y
-sudo apt-get install -y git curl unzip
+sudo apt-get install -y curl unzip
+
+# Install AWS CLI v2 (not available via apt on Ubuntu 24.04)
+curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+unzip -q /tmp/awscliv2.zip -d /tmp
+sudo /tmp/aws/install
+rm -rf /tmp/awscliv2.zip /tmp/aws
 ```
 
-## 3. Create Deploy Key
+## 3. Create Project Directory
 
 ```bash
-ssh-keygen -t ed25519 -C "<your-app>-deploy" -f /home/ubuntu/.ssh/<your-app>_deploy -N ""
-cat /home/ubuntu/.ssh/<your-app>_deploy.pub
+sudo mkdir -p /opt/{{PROJECT_NAME}}
+sudo chown ubuntu:ubuntu /opt/{{PROJECT_NAME}}
 ```
 
-Copy the public key output.
+## 4. Create .env File
 
-## 4. Add Key to GitHub
-
-1. Go to **GitHub → `<your-github-user>/<your-app>-deploy` → Settings → Deploy keys**
-2. Click **Add deploy key**
-3. Paste the public key, title it `<your-app>-server`, leave **Allow write access** unchecked
-4. Save
-
-## 5. Configure SSH Host Alias
+Copy `.env.example` to `.env` and configure the S3/R2 credentials (needed for initial release download):
 
 ```bash
-cat >> /home/ubuntu/.ssh/config << 'EOF'
-Host github-<your-app>
-    HostName github.com
-    User git
-    IdentityFile /home/ubuntu/.ssh/<your-app>_deploy
-    IdentitiesOnly yes
+# If you have .env.example from a previous extraction or copy it manually:
+cp /opt/{{PROJECT_NAME}}/.env.example /opt/{{PROJECT_NAME}}/.env
+
+# Or create minimal .env with R2 credentials for initial bootstrap:
+cat > /opt/{{PROJECT_NAME}}/.env << 'EOF'
+S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+S3_BUCKET={{BUCKET_NAME}}
+S3_ACCESS_KEY=<your-r2-access-key>
+S3_SECRET_KEY=<your-r2-secret-key>
 EOF
-chmod 600 /home/ubuntu/.ssh/config
 ```
 
-## 6. Test GitHub Auth
+## 5. Download First Release from R2
 
 ```bash
-ssh -T git@github-<your-app>
-```
+export AWS_ACCESS_KEY_ID=<your-r2-access-key>
+export AWS_SECRET_ACCESS_KEY=<your-r2-secret-key>
+export AWS_DEFAULT_REGION=auto
+R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
+R2_BUCKET="{{BUCKET_NAME}}"
 
-You should see: `Hi <your-github-user>/<your-app>-deploy! You've successfully authenticated...`
+# Fetch latest version
+aws s3 cp "s3://${R2_BUCKET}/deploy/VERSION" /tmp/deploy-version --endpoint-url "${R2_ENDPOINT}"
+VERSION=$(cat /tmp/deploy-version)
+echo "Latest version: ${VERSION}"
 
-## 7. Create Directories
+# Download and verify
+aws s3 cp "s3://${R2_BUCKET}/deploy/${VERSION}/release.zip" /tmp/release.zip --endpoint-url "${R2_ENDPOINT}"
+aws s3 cp "s3://${R2_BUCKET}/deploy/${VERSION}/SHA256SUMS" /tmp/SHA256SUMS --endpoint-url "${R2_ENDPOINT}"
+(cd /tmp && sha256sum -c SHA256SUMS)
 
-```bash
-sudo mkdir -p /opt/<your-app> /opt/<your-app>-deploy
-sudo chown ubuntu:ubuntu /opt/<your-app> /opt/<your-app>-deploy
-```
-
-## 8. Clone Deploy Repo
-
-```bash
-git clone git@github-<your-app>:<your-github-user>/<your-app>-deploy.git /opt/<your-app>-deploy
-```
-
-## 9. Extract First Release
-
-```bash
-cd /opt/<your-app>-deploy
-sha256sum -c SHA256SUMS
-unzip -q release.zip -d /opt/<your-app>
-chmod +x /opt/<your-app>/target/release/* /opt/<your-app>/bin/* /opt/<your-app>/console /opt/<your-app>/scripts/*.sh 2>/dev/null || true
+# Extract to project directory
+unzip -q /tmp/release.zip -d /opt/{{PROJECT_NAME}}
+chmod +x /opt/{{PROJECT_NAME}}/target/release/* /opt/{{PROJECT_NAME}}/bin/* /opt/{{PROJECT_NAME}}/console /opt/{{PROJECT_NAME}}/scripts/*.sh 2>/dev/null || true
+rm -f /tmp/release.zip /tmp/SHA256SUMS /tmp/deploy-version
 ```
 
 The install script requires `VERSION` and `bin/api-server` to exist in the project directory before it will run.
 
-## 10. Run Install Script
+## 6. Run Install Script
 
 ```bash
-sudo /opt/<your-app>/scripts/install.sh
+sudo /opt/{{PROJECT_NAME}}/scripts/install.sh
 ```
 
 The script will prompt for:
 
 | Prompt | Default | Notes |
 |--------|---------|-------|
-| Project directory | `/opt/<your-app>` | |
-| APP_NAME | `<your-app>` | |
-| Project slug | `<your-app>` | Used for nginx/supervisor file names |
+| Project directory | `/opt/{{PROJECT_NAME}}` | |
+| APP_NAME | `{{PROJECT_NAME}}` | |
+| Project slug | `{{PROJECT_NAME}}` | Used for nginx/supervisor file names |
 | Domain | `example.com` | Your actual domain |
-| Deploy repo directory | `/opt/<your-app>-deploy` | |
 | APP_ENV | `production` | |
 | APP_DEBUG | `no` | |
 | SERVER_PORT | `3000` | |
@@ -110,13 +105,13 @@ The script will prompt for:
 | Enable Supervisor | `yes` | |
 | Manage websocket-server | `yes` | |
 | Manage worker | `yes` | |
-| Enable deploy-poll | `yes` | Auto-deploy poller |
+| Enable deploy-poll | `yes` | R2-based auto-deploy poller |
 
-The script installs PostgreSQL, Redis, nginx, supervisor, and certbot as needed. It's idempotent — safe to re-run.
+The script installs PostgreSQL, Redis, nginx, supervisor, AWS CLI v2, and certbot as needed. It's idempotent — safe to re-run.
 
 **Save the PostgreSQL credentials** printed during first run.
 
-## 11. Verify
+## 7. Verify
 
 ```bash
 # Check all processes are running
@@ -132,13 +127,45 @@ curl -s http://localhost:3000/health
 curl -s https://yourdomain.com/health
 ```
 
-## 12. Symlink for Convenience
+## 8. Symlink for Convenience
 
 ```bash
-ln -sfn /opt/<your-app> ~/<your-app>
+ln -sfn /opt/{{PROJECT_NAME}} ~/{{PROJECT_NAME}}
 ```
 
-Now you can `cd ~/<your-app>` instead of `/opt/<your-app>`.
+Now you can `cd ~/{{PROJECT_NAME}}` instead of `/opt/{{PROJECT_NAME}}`.
+
+---
+
+## GitHub Setup
+
+### Secrets Required
+
+Configure these in **GitHub → Source repo → Settings → Secrets and variables → Actions**:
+
+| Secret | Value | Notes |
+|--------|-------|-------|
+| `R2_ACCESS_KEY_ID` | R2 API token access key | Same as app's `S3_ACCESS_KEY` |
+| `R2_SECRET_ACCESS_KEY` | R2 API token secret key | Same as app's `S3_SECRET_KEY` |
+| `R2_ENDPOINT` | `https://<account-id>.r2.cloudflarestorage.com` | Same as app's `S3_ENDPOINT` |
+| `R2_BUCKET` | `{{PROJECT_NAME}}` | Same as app's `S3_BUCKET` |
+| `VITE_APP_NAME` | App name for frontend | |
+| `VITE_S3_URL` | Public R2 URL for frontend assets | |
+
+### R2 Object Layout
+
+Artifacts are stored under the `deploy/` prefix in the same R2 bucket used for app file uploads:
+
+```
+{{BUCKET_NAME}}/
+├── deploy/
+│   ├── VERSION                    ← current version pointer
+│   ├── v2026.03.22.120000/
+│   │   ├── release.zip
+│   │   └── SHA256SUMS
+│   └── ...                        ← 3 versions retained
+├── uploads/...                    ← app file uploads (untouched)
+```
 
 ---
 
@@ -146,38 +173,51 @@ Now you can `cd ~/<your-app>` instead of `/opt/<your-app>`.
 
 Deploys are automatic. The workflow:
 
-1. Tag a version in the source repo: `git tag v1.2.3 && git push --tags`
-2. GitHub Actions builds `release.zip` and pushes to `<your-github-user>/<your-app>-deploy`
-3. `deploy-poll.sh` (running via Supervisor) checks every 5 minutes
-4. On VERSION mismatch: verifies SHA256 → extracts via rsync → runs migrations → restarts services
+1. Tag a version in the source repo: `make deploy` (creates `v{TIMESTAMP}` tag)
+2. GitHub Actions builds `release.zip` and uploads to R2 under `deploy/{version}/`
+3. `deploy-poll.sh` (running via Supervisor) polls R2 every 5 minutes
+4. On VERSION mismatch: downloads zip → verifies SHA256 → extracts via rsync → runs migrations → restarts services
+5. GitHub Actions cleans up old versions (retains 3 most recent)
 
 No SSH required for routine deploys.
 
 ### Manual Deploy (if needed)
 
 ```bash
-cd /opt/<your-app>-deploy && git pull
-cd /opt/<your-app>
-sha256sum -c /opt/<your-app>-deploy/SHA256SUMS
-# Extract
+cd /opt/{{PROJECT_NAME}}
+export AWS_ACCESS_KEY_ID=$(grep S3_ACCESS_KEY .env | cut -d= -f2)
+export AWS_SECRET_ACCESS_KEY=$(grep S3_SECRET_KEY .env | cut -d= -f2)
+export AWS_DEFAULT_REGION=auto
+R2_ENDPOINT=$(grep S3_ENDPOINT .env | cut -d= -f2)
+R2_BUCKET=$(grep S3_BUCKET .env | cut -d= -f2)
+
+# Fetch version and artifacts
+aws s3 cp "s3://${R2_BUCKET}/deploy/VERSION" /tmp/deploy-version --endpoint-url "${R2_ENDPOINT}"
+VERSION=$(cat /tmp/deploy-version)
+aws s3 cp "s3://${R2_BUCKET}/deploy/${VERSION}/release.zip" /tmp/release.zip --endpoint-url "${R2_ENDPOINT}"
+aws s3 cp "s3://${R2_BUCKET}/deploy/${VERSION}/SHA256SUMS" /tmp/SHA256SUMS --endpoint-url "${R2_ENDPOINT}"
+(cd /tmp && sha256sum -c SHA256SUMS)
+
+# Extract and deploy
 staging=$(mktemp -d)
-unzip -q /opt/<your-app>-deploy/release.zip -d "$staging"
-rsync -a --delete --exclude='.env' --exclude='logs/' --exclude='.git/' "$staging/" /opt/<your-app>/
-rm -rf "$staging"
-chmod +x /opt/<your-app>/target/release/* /opt/<your-app>/bin/* /opt/<your-app>/console /opt/<your-app>/scripts/*.sh 2>/dev/null || true
+unzip -q /tmp/release.zip -d "$staging"
+rsync -a --delete --exclude='.env' --exclude='logs/' --exclude='.git/' "$staging/" /opt/{{PROJECT_NAME}}/
+rm -rf "$staging" /tmp/release.zip /tmp/SHA256SUMS /tmp/deploy-version
+chmod +x /opt/{{PROJECT_NAME}}/target/release/* /opt/{{PROJECT_NAME}}/bin/* /opt/{{PROJECT_NAME}}/console /opt/{{PROJECT_NAME}}/scripts/*.sh 2>/dev/null || true
+
 # Migrate and restart
 ./console migrate run
-sudo supervisorctl restart <your-app>-api <your-app>-ws <your-app>-worker
+sudo supervisorctl restart {{PROJECT_NAME}}-api {{PROJECT_NAME}}-ws {{PROJECT_NAME}}-worker
 ```
 
 ### Rollback
 
-Revert the commit in the deploy repo and push — deploy-poll picks it up automatically:
+Update the `deploy/VERSION` file in R2 to point to an older retained version:
 
 ```bash
-cd /opt/<your-app>-deploy
-git revert HEAD
-git push
+# From any machine with awscli + R2 credentials configured
+echo "v2026.03.21.100000" > /tmp/rollback-version
+aws s3 cp /tmp/rollback-version "s3://{{PROJECT_NAME}}/deploy/VERSION" --endpoint-url "$R2_ENDPOINT"
 # deploy-poll will detect the VERSION change and redeploy within 5 minutes
 ```
 
@@ -187,30 +227,30 @@ git push
 
 ```bash
 # Supervisor
-sudo supervisorctl status                           # all process statuses
-sudo supervisorctl restart <your-app>-api           # restart API server
-sudo supervisorctl restart <your-app>-ws            # restart websocket server
-sudo supervisorctl restart <your-app>-worker        # restart background worker
-sudo supervisorctl restart <your-app>-deploy-poll   # restart deploy poller
-sudo supervisorctl tail -f <your-app>-api           # follow API stdout
+sudo supervisorctl status                    # all process statuses
+sudo supervisorctl restart {{PROJECT_NAME}}-api          # restart API server
+sudo supervisorctl restart {{PROJECT_NAME}}-ws           # restart websocket server
+sudo supervisorctl restart {{PROJECT_NAME}}-worker       # restart background worker
+sudo supervisorctl restart {{PROJECT_NAME}}-deploy-poll  # restart deploy poller
+sudo supervisorctl tail -f {{PROJECT_NAME}}-api          # follow API stdout
 
 # Logs
-tail -f /var/log/<your-app>-api.log                 # API stdout
-tail -f /var/log/<your-app>-api.err.log             # API stderr
-tail -f /var/log/<your-app>-ws.log                  # Websocket stdout
-tail -f /var/log/<your-app>-worker.log              # Worker stdout
-tail -f /var/log/<your-app>-deploy-poll.log         # Deploy poller log
+tail -f /var/log/{{PROJECT_NAME}}-api.log               # API stdout
+tail -f /var/log/{{PROJECT_NAME}}-api.err.log           # API stderr
+tail -f /var/log/{{PROJECT_NAME}}-ws.log                # Websocket stdout
+tail -f /var/log/{{PROJECT_NAME}}-worker.log            # Worker stdout
+tail -f /var/log/{{PROJECT_NAME}}-deploy-poll.log       # Deploy poller log
 
 # Nginx
-sudo nginx -t                                       # test config
-sudo systemctl reload nginx                         # reload after config change
-cat /etc/nginx/sites-available/<your-app>.conf      # view site config
+sudo nginx -t                               # test config
+sudo systemctl reload nginx                 # reload after config change
+cat /etc/nginx/sites-available/{{PROJECT_NAME}}.conf    # view site config
 
 # App
-cd /opt/<your-app> && ./console migrate run         # run migrations manually
-cat /opt/<your-app>/VERSION                         # current deployed version
-cat /opt/<your-app>/.env                            # app environment config
+cd /opt/{{PROJECT_NAME}} && ./console migrate run       # run migrations manually
+cat /opt/{{PROJECT_NAME}}/VERSION                       # current deployed version
+cat /opt/{{PROJECT_NAME}}/.env                          # app environment config
 
 # SSL
-sudo certbot renew --dry-run                        # test certificate renewal
+sudo certbot renew --dry-run                # test certificate renewal
 ```

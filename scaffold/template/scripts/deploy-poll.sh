@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# deploy-poll.sh — Polls the deploy repo for new versions and auto-deploys.
+# deploy-poll.sh — Polls R2 for new versions and auto-deploys.
 # Intended to run as a Supervisor-managed long-running process.
 #
 # Required env vars (from .env or environment):
-#   PROJECT_DIR           — where the app runs (e.g., /opt/your_project)
-#   DEPLOY_REPO_DIR       — local clone of your_company/your_project-deploy
-#   SUPERVISOR_PROJECT_SLUG — supervisor program name prefix
+#   PROJECT_DIR               — where the app runs (e.g., /opt/brui)
+#   SUPERVISOR_PROJECT_SLUG   — supervisor program name prefix
+#   S3_ENDPOINT               — R2 endpoint URL
+#   S3_BUCKET                 — R2 bucket name
+#   S3_ACCESS_KEY             — R2 access key ID
+#   S3_SECRET_KEY             — R2 secret access key
 #
 # Optional:
-#   DEPLOY_POLL_INTERVAL  — seconds between polls (default: 300)
+#   DEPLOY_POLL_INTERVAL      — seconds between polls (default: 300)
 
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
@@ -34,24 +37,47 @@ read_env_value() {
 
 # Load config from .env
 if [[ -f "${ENV_FILE}" ]]; then
-    DEPLOY_REPO_DIR="${DEPLOY_REPO_DIR:-$(read_env_value "${ENV_FILE}" "DEPLOY_REPO_DIR")}"
     SUPERVISOR_PROJECT_SLUG="${SUPERVISOR_PROJECT_SLUG:-$(read_env_value "${ENV_FILE}" "SUPERVISOR_PROJECT_SLUG")}"
     PROJECT_USER="${PROJECT_USER:-$(read_env_value "${ENV_FILE}" "PROJECT_USER")}"
+    S3_ENDPOINT="${S3_ENDPOINT:-$(read_env_value "${ENV_FILE}" "S3_ENDPOINT")}"
+    S3_BUCKET="${S3_BUCKET:-$(read_env_value "${ENV_FILE}" "S3_BUCKET")}"
+    S3_ACCESS_KEY="${S3_ACCESS_KEY:-$(read_env_value "${ENV_FILE}" "S3_ACCESS_KEY")}"
+    S3_SECRET_KEY="${S3_SECRET_KEY:-$(read_env_value "${ENV_FILE}" "S3_SECRET_KEY")}"
 fi
 
-DEPLOY_REPO_DIR="${DEPLOY_REPO_DIR:-}"
 SUPERVISOR_PROJECT_SLUG="${SUPERVISOR_PROJECT_SLUG:-}"
 PROJECT_USER="${PROJECT_USER:-}"
+S3_ENDPOINT="${S3_ENDPOINT:-}"
+S3_BUCKET="${S3_BUCKET:-}"
+S3_ACCESS_KEY="${S3_ACCESS_KEY:-}"
+S3_SECRET_KEY="${S3_SECRET_KEY:-}"
 POLL_INTERVAL="${DEPLOY_POLL_INTERVAL:-300}"
 
-if [[ -z "${DEPLOY_REPO_DIR}" ]]; then
-    echo "ERROR: DEPLOY_REPO_DIR is not set. Set it in ${ENV_FILE} or environment."
-    exit 1
-fi
 if [[ -z "${SUPERVISOR_PROJECT_SLUG}" ]]; then
     echo "ERROR: SUPERVISOR_PROJECT_SLUG is not set. Set it in ${ENV_FILE} or environment."
     exit 1
 fi
+if [[ -z "${S3_ENDPOINT}" ]]; then
+    echo "ERROR: S3_ENDPOINT is not set. Set it in ${ENV_FILE} or environment."
+    exit 1
+fi
+if [[ -z "${S3_BUCKET}" ]]; then
+    echo "ERROR: S3_BUCKET is not set. Set it in ${ENV_FILE} or environment."
+    exit 1
+fi
+if [[ -z "${S3_ACCESS_KEY}" ]]; then
+    echo "ERROR: S3_ACCESS_KEY is not set. Set it in ${ENV_FILE} or environment."
+    exit 1
+fi
+if [[ -z "${S3_SECRET_KEY}" ]]; then
+    echo "ERROR: S3_SECRET_KEY is not set. Set it in ${ENV_FILE} or environment."
+    exit 1
+fi
+
+# Export AWS credentials for awscli
+export AWS_ACCESS_KEY_ID="${S3_ACCESS_KEY}"
+export AWS_SECRET_ACCESS_KEY="${S3_SECRET_KEY}"
+export AWS_DEFAULT_REGION="auto"
 
 log() {
     echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] $*"
@@ -87,15 +113,56 @@ run_as_project_user() {
     fi
 }
 
+s3_download() {
+    local s3_path="$1"
+    local local_path="$2"
+    aws s3 cp "s3://${S3_BUCKET}/${s3_path}" "${local_path}" \
+        --endpoint-url "${S3_ENDPOINT}" \
+        --quiet 2>/dev/null
+}
+
+get_remote_version() {
+    local tmp_version
+    tmp_version="$(mktemp)"
+    if s3_download "deploy/VERSION" "${tmp_version}"; then
+        tr -d '[:space:]' < "${tmp_version}"
+        rm -f "${tmp_version}"
+    else
+        rm -f "${tmp_version}"
+        return 1
+    fi
+}
+
+get_deployed_version() {
+    tr -d '[:space:]' < "${PROJECT_DIR}/VERSION" 2>/dev/null || echo ""
+}
+
 deploy_new_version() {
     local version="$1"
     log "New version detected: ${version}"
 
+    # Download artifacts to temp dir
+    local download_dir
+    download_dir="$(mktemp -d)"
+
+    log "Downloading artifacts from R2..."
+    if ! s3_download "deploy/${version}/release.zip" "${download_dir}/release.zip"; then
+        log "ERROR: Failed to download release.zip. Aborting deploy."
+        rm -rf "${download_dir}"
+        return 1
+    fi
+
+    if ! s3_download "deploy/${version}/SHA256SUMS" "${download_dir}/SHA256SUMS"; then
+        log "ERROR: Failed to download SHA256SUMS. Aborting deploy."
+        rm -rf "${download_dir}"
+        return 1
+    fi
+
     # Verify checksum
     log "Verifying release.zip checksum..."
-    cd "${DEPLOY_REPO_DIR}"
-    if ! sha256sum -c SHA256SUMS; then
+    if ! (cd "${download_dir}" && sha256sum -c SHA256SUMS); then
         log "ERROR: Checksum verification failed. Aborting deploy."
+        rm -rf "${download_dir}"
         return 1
     fi
 
@@ -103,11 +170,13 @@ deploy_new_version() {
     local staging
     staging="$(mktemp -d)"
     log "Extracting release.zip to staging: ${staging}"
-    if ! unzip -q "${DEPLOY_REPO_DIR}/release.zip" -d "${staging}"; then
+    if ! unzip -q "${download_dir}/release.zip" -d "${staging}"; then
         log "ERROR: Failed to extract release.zip. Aborting deploy."
-        rm -rf "${staging}"
+        rm -rf "${download_dir}" "${staging}"
         return 1
     fi
+
+    rm -rf "${download_dir}"
 
     # Rsync to project directory, preserving .env and logs
     log "Syncing files to ${PROJECT_DIR}..."
@@ -159,62 +228,34 @@ deploy_new_version() {
     log "Deploy complete: ${version}"
 }
 
-get_deployed_version() {
-    cat "${PROJECT_DIR}/VERSION" 2>/dev/null || echo ""
-}
-
-get_repo_version() {
-    cat "${DEPLOY_REPO_DIR}/VERSION" 2>/dev/null || echo ""
-}
-
 # Main poll loop
 log "Deploy poller started."
 log "  PROJECT_DIR: ${PROJECT_DIR}"
-log "  DEPLOY_REPO_DIR: ${DEPLOY_REPO_DIR}"
+log "  S3_ENDPOINT: ${S3_ENDPOINT}"
+log "  S3_BUCKET: ${S3_BUCKET}"
 log "  SUPERVISOR_PROJECT_SLUG: ${SUPERVISOR_PROJECT_SLUG}"
 log "  POLL_INTERVAL: ${POLL_INTERVAL}s"
 
 while true; do
-    cd "${DEPLOY_REPO_DIR}"
-
-    # Fetch and pull latest from remote
-    if ! git fetch origin main --quiet 2>/dev/null; then
-        log "WARNING: git fetch failed. Will retry next cycle."
-        sleep "${POLL_INTERVAL}"
-        continue
-    fi
-
-    LOCAL_HEAD="$(git rev-parse HEAD)"
-    REMOTE_HEAD="$(git rev-parse origin/main)"
-
-    if [[ "${LOCAL_HEAD}" != "${REMOTE_HEAD}" ]]; then
-        if ! git pull origin main --quiet 2>/dev/null; then
-            log "WARNING: git pull failed. Will retry next cycle."
-            sleep "${POLL_INTERVAL}"
-            continue
-        fi
-    fi
-
-    # Compare deployed version vs repo version (not git HEAD)
-    # This ensures failed deploys are retried on next cycle
-    REPO_VERSION="$(get_repo_version)"
+    # Fetch remote version from R2
+    REMOTE_VERSION="$(get_remote_version 2>/dev/null || true)"
     DEPLOYED_VERSION="$(get_deployed_version)"
 
-    if [[ "${REPO_VERSION}" == "${DEPLOYED_VERSION}" ]]; then
+    if [[ -z "${REMOTE_VERSION}" ]]; then
+        log "WARNING: Could not fetch VERSION from R2. Will retry next cycle."
         sleep "${POLL_INTERVAL}"
         continue
     fi
 
-    if [[ -z "${REPO_VERSION}" ]]; then
-        log "WARNING: No VERSION file in deploy repo. Skipping."
+    if [[ "${REMOTE_VERSION}" == "${DEPLOYED_VERSION}" ]]; then
         sleep "${POLL_INTERVAL}"
         continue
     fi
 
-    if deploy_new_version "${REPO_VERSION}"; then
-        log "Successfully deployed ${REPO_VERSION}"
+    if deploy_new_version "${REMOTE_VERSION}"; then
+        log "Successfully deployed ${REMOTE_VERSION}"
     else
-        log "Deploy failed for ${REPO_VERSION}. Will retry next cycle."
+        log "Deploy failed for ${REMOTE_VERSION}. Will retry next cycle."
     fi
 
     sleep "${POLL_INTERVAL}"
