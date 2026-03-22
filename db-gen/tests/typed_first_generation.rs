@@ -204,6 +204,56 @@ impl ArticleRecord {
 }
 
 #[test]
+fn generated_models_trim_trailing_underscores_for_enum_explained_fields() {
+    let root = temp_dir("enum_explained_suffix");
+    let models_dir = root.join("models");
+    let out_dir = root.join("out");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
+    fs::create_dir_all(&out_dir).expect("failed to create out dir");
+    write_basic_configs(&root, &["en"]);
+
+    write_file(
+        models_dir.join("job.rs"),
+        r#"
+#[rf_db_enum(storage = "string")]
+pub enum JobType {
+    Image,
+}
+
+#[rf_model(table = "jobs")]
+pub struct Job {
+    pub id: i64,
+    pub type_: JobType,
+}
+"#,
+    );
+
+    let (cfgs, _) = config::load(
+        root.join("configs.toml")
+            .to_str()
+            .expect("configs path should be valid utf-8"),
+    )
+    .expect("failed to load config");
+    let parsed_schema = schema::load(
+        models_dir
+            .to_str()
+            .expect("schema path should be valid utf-8"),
+    )
+    .expect("failed to load schema");
+
+    generate_enums(&parsed_schema, &out_dir).expect("enum generation should succeed");
+    generate_models(&parsed_schema, &cfgs, &out_dir).expect("model generation should succeed");
+
+    let job_rs = fs::read_to_string(out_dir.join("job.rs")).expect("job.rs should exist");
+
+    assert!(job_rs.contains("pub type_explained: String,"));
+    assert!(job_rs.contains("type_explained: row.type_.explained_label(),"));
+    assert!(!job_rs.contains("type__explained"));
+
+    fs::remove_dir_all(root).expect("failed to remove temp dir");
+}
+
+#[test]
 fn framework_models_load_from_core_db_single_source_of_truth() {
     let framework_paths = schema::framework_model_source_paths_from_core_db();
     let parsed_schema = schema::load_framework_from_paths(&framework_paths)
