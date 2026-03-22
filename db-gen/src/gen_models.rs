@@ -57,6 +57,11 @@ fn parse_option_inner_type(raw: &str) -> Option<String> {
     }
 }
 
+fn enum_explained_field_name(field_name: &str) -> String {
+    let normalized = field_name.trim_end_matches('_');
+    format!("{normalized}_explained")
+}
+
 fn enum_field_spec(
     field_name: &str,
     field_type: &str,
@@ -65,7 +70,7 @@ fn enum_field_spec(
     if enum_type_names.contains(field_type.trim()) {
         return Some(EnumExplainedFieldSpec {
             name: field_name.to_string(),
-            explained_name: format!("{field_name}_explained"),
+            explained_name: enum_explained_field_name(field_name),
             optional: false,
         });
     }
@@ -77,7 +82,7 @@ fn enum_field_spec(
 
     Some(EnumExplainedFieldSpec {
         name: field_name.to_string(),
-        explained_name: format!("{field_name}_explained"),
+        explained_name: enum_explained_field_name(field_name),
         optional: true,
     })
 }
@@ -88,6 +93,25 @@ fn create_input_ident(model_title: &str) -> String {
 
 fn update_changes_ident(model_title: &str) -> String {
     format!("{model_title}Changes")
+}
+
+/// Return the Rust type to use with `serde_json::from_value` for a given field type.
+/// Enums are stored as strings, so we deserialize them as String (or Option<String>).
+fn json_deser_type_for_field(
+    ty: &str,
+    enum_specs: &BTreeMap<String, EnumSpec>,
+) -> String {
+    let trimmed = ty.trim();
+    if let Some(inner) = parse_option_inner_type(trimmed) {
+        if enum_specs.contains_key(inner.as_str()) {
+            return "Option<String>".to_string();
+        }
+        return format!("Option<{inner}>");
+    }
+    if enum_specs.contains_key(trimmed) {
+        return "String".to_string();
+    }
+    trimmed.to_string()
 }
 
 fn bind_variant_for_type(ty: &str) -> Option<&'static str> {
@@ -1353,6 +1377,7 @@ fn render_query_delete_body(
     row_ident: &str,
     pk_snake: &str,
     skip_profiler: bool,
+    parent_pk_ty: &str,
 ) -> String {
     let mut out = String::new();
     writeln!(out, "            if state.limit.is_some() {{").unwrap();
@@ -1412,22 +1437,37 @@ fn render_query_delete_body(
             "                if let Some(observer) = try_get_observer() {{"
         )
         .unwrap();
-        writeln!(out, "                    for old_row in &__old_rows {{").unwrap();
         writeln!(
             out,
-            "                        let old_data = serde_json::to_value(old_row)?;"
+            "                    let old_data = serde_json::to_value(&__old_rows)?;"
         )
         .unwrap();
         writeln!(
             out,
-            "                        let event = ModelEvent {{ model: \"{model_key}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", old_row.{pk_snake})) }};"
+            "                    let event = ModelEvent {{ model: \"{model_key}\", table: \"{table}\", record_key: None }};"
         )
         .unwrap();
         writeln!(
             out,
-            "                        observer.on_deleting(&event, &old_data).await?;"
+            "                    let action = observer.on_deleting(&event, &old_data).await?;"
         )
         .unwrap();
+        writeln!(out, "                    match action {{").unwrap();
+        writeln!(out, "                        ObserverAction::Prevent(err) => return Err(err),").unwrap();
+        writeln!(out, "                        ObserverAction::Modify(overrides) => {{").unwrap();
+        writeln!(
+            out,
+            "                            let ids: Vec<{parent_pk_ty}> = __old_rows.iter().map(|r| r.{pk_snake}).collect();"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                            let affected = Self::convert_delete_to_update(&db, &ids, overrides).await?;"
+        )
+        .unwrap();
+        writeln!(out, "                            return Ok(affected);").unwrap();
+        writeln!(out, "                        }}").unwrap();
+        writeln!(out, "                        ObserverAction::Continue => {{}}").unwrap();
         writeln!(out, "                    }}").unwrap();
         writeln!(out, "                }}").unwrap();
         writeln!(out, "            }}").unwrap();
@@ -2257,7 +2297,7 @@ fn render_model(
     if emit_hooks {
         writeln!(
             imports,
-            "use core_db::common::model_observer::{{ModelEvent, try_get_observer}};"
+            "use core_db::common::model_observer::{{ModelEvent, ObserverAction, try_get_observer}};"
         )
         .unwrap();
     }
@@ -3133,12 +3173,63 @@ fn render_model(
     writeln!(out, "        Ok(input)").unwrap();
     writeln!(out, "    }}").unwrap();
 
+    if emit_hooks {
+        writeln!(out).unwrap();
+        writeln!(
+            out,
+            "    fn apply_create_overrides(mut state: CreateState<'_>, overrides: serde_json::Value) -> Result<CreateState<'_>> {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let map = overrides.as_object()"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            .ok_or_else(|| anyhow::anyhow!(\"observer overrides must be a JSON object\"))?;"
+        )
+        .unwrap();
+        writeln!(out, "        for (key, val) in map {{").unwrap();
+        writeln!(out, "            match key.as_str() {{").unwrap();
+        for f in &db_fields {
+            let deser_ty = json_deser_type_for_field(&f.ty, &enum_specs);
+            writeln!(
+                out,
+                "                \"{}\" => {{",
+                f.name
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                    let v: {deser_ty} = serde_json::from_value(val.clone())?;"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                    state = state.set_col(\"{}\", v.into());",
+                f.name
+            )
+            .unwrap();
+            writeln!(out, "                }}").unwrap();
+        }
+        writeln!(
+            out,
+            "                other => anyhow::bail!(\"unknown column '{{}}' in observer create overrides\", other),"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "        Ok(state)").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+
     let insert_builder_methods_section = out;
     let mut out = String::new();
 
     writeln!(
         out,
-        "    pub async fn save(self) -> Result<{record_ident}> {{"
+        "    pub async fn save(mut self) -> Result<{record_ident}> {{"
     )
     .unwrap();
     if emit_hooks {
@@ -3169,9 +3260,16 @@ fn render_model(
         .unwrap();
         writeln!(
             out,
-            "                observer.on_creating(&event, &data).await?;"
+            "                let action = observer.on_creating(&event, &data).await?;"
         )
         .unwrap();
+        writeln!(out, "                match action {{").unwrap();
+        writeln!(out, "                    ObserverAction::Prevent(err) => return Err(err),").unwrap();
+        writeln!(out, "                    ObserverAction::Modify(overrides) => {{").unwrap();
+        writeln!(out, "                        self.state = Self::apply_create_overrides(self.state, overrides)?;").unwrap();
+        writeln!(out, "                    }}").unwrap();
+        writeln!(out, "                    ObserverAction::Continue => {{}}").unwrap();
+        writeln!(out, "                }}").unwrap();
         writeln!(out, "            }}").unwrap();
         writeln!(out, "        }}").unwrap();
     }
@@ -3697,6 +3795,57 @@ fn render_model(
     writeln!(out, "        Ok(changes)").unwrap();
     writeln!(out, "    }}").unwrap();
 
+    if emit_hooks {
+        writeln!(out).unwrap();
+        writeln!(
+            out,
+            "    fn apply_update_overrides(mut state: PatchState<'_>, overrides: serde_json::Value) -> Result<PatchState<'_>> {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let map = overrides.as_object()"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            .ok_or_else(|| anyhow::anyhow!(\"observer overrides must be a JSON object\"))?;"
+        )
+        .unwrap();
+        writeln!(out, "        for (key, val) in map {{").unwrap();
+        writeln!(out, "            match key.as_str() {{").unwrap();
+        for f in &db_fields {
+            let deser_ty = json_deser_type_for_field(&f.ty, &enum_specs);
+            writeln!(
+                out,
+                "                \"{}\" => {{",
+                f.name
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                    let v: {deser_ty} = serde_json::from_value(val.clone())?;"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                    state = state.assign_col(\"{}\", v.into());",
+                f.name
+            )
+            .unwrap();
+            writeln!(out, "                }}").unwrap();
+        }
+        writeln!(
+            out,
+            "                other => anyhow::bail!(\"unknown column '{{}}' in observer update overrides\", other),"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "        Ok(state)").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+
     let update_builder_methods_section = out;
     let mut out = String::new();
 
@@ -3813,7 +3962,6 @@ fn render_model(
     )
     .unwrap();
     if emit_hooks {
-        let pk_snake = to_snake(&pk);
         writeln!(
             out,
             "        let __observer_active = try_get_observer().is_some();"
@@ -3857,22 +4005,27 @@ fn render_model(
             "                    let changes_data = serde_json::to_value(changes)?;"
         )
         .unwrap();
-        writeln!(out, "                    for old_row in &__old_rows {{").unwrap();
         writeln!(
             out,
-            "                        let old_data = serde_json::to_value(old_row)?;"
+            "                    let old_data = serde_json::to_value(&__old_rows)?;"
         )
         .unwrap();
         writeln!(
             out,
-            "                        let event = ModelEvent {{ model: \"{model_snake}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", old_row.{pk_snake})) }};"
+            "                    let event = ModelEvent {{ model: \"{model_snake}\", table: \"{table}\", record_key: None }};"
         )
         .unwrap();
         writeln!(
             out,
-            "                        observer.on_updating(&event, &old_data, &changes_data).await?;"
+            "                    let action = observer.on_updating(&event, &old_data, &changes_data).await?;"
         )
         .unwrap();
+        writeln!(out, "                    match action {{").unwrap();
+        writeln!(out, "                        ObserverAction::Prevent(err) => return Err(err),").unwrap();
+        writeln!(out, "                        ObserverAction::Modify(overrides) => {{").unwrap();
+        writeln!(out, "                            state = Self::apply_update_overrides(state, overrides)?;").unwrap();
+        writeln!(out, "                        }}").unwrap();
+        writeln!(out, "                        ObserverAction::Continue => {{}}").unwrap();
         writeln!(out, "                    }}").unwrap();
         writeln!(out, "                }}").unwrap();
         writeln!(out, "            }}").unwrap();
@@ -5661,9 +5814,85 @@ fn render_model(
         &row_ident,
         &to_snake(&pk),
         skip_profiler,
+        &parent_pk_ty,
     ));
     writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
+    if emit_hooks {
+        let pk_snake_local = to_snake(&pk);
+        writeln!(out).unwrap();
+        writeln!(
+            out,
+            "    async fn convert_delete_to_update<'tx>(db: &DbConn<'tx>, ids: &[{parent_pk_ty}], overrides: serde_json::Value) -> Result<u64> {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let map = overrides.as_object()"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            .ok_or_else(|| anyhow::anyhow!(\"observer overrides must be a JSON object\"))?;"
+        )
+        .unwrap();
+        writeln!(out, "        let mut set_clauses: Vec<String> = Vec::new();").unwrap();
+        writeln!(out, "        let mut binds: Vec<BindValue> = Vec::new();").unwrap();
+        writeln!(out, "        let mut idx = 1usize;").unwrap();
+        writeln!(out, "        for (key, val) in map {{").unwrap();
+        writeln!(out, "            match key.as_str() {{").unwrap();
+        for f in &db_fields {
+            let deser_ty = json_deser_type_for_field(&f.ty, &enum_specs);
+            writeln!(
+                out,
+                "                \"{}\" => {{",
+                f.name
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                    let v: {deser_ty} = serde_json::from_value(val.clone())?;"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                    set_clauses.push(format!(\"{{}} = ${{}}\", \"{}\", idx));",
+                f.name
+            )
+            .unwrap();
+            writeln!(out, "                    binds.push(v.into());").unwrap();
+            writeln!(out, "                    idx += 1;").unwrap();
+            writeln!(out, "                }}").unwrap();
+        }
+        writeln!(
+            out,
+            "                other => anyhow::bail!(\"unknown column '{{}}' in observer delete overrides\", other),"
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(
+            out,
+            "        if set_clauses.is_empty() {{ anyhow::bail!(\"observer Modify returned empty overrides\"); }}"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let phs: Vec<String> = ids.iter().enumerate().map(|(i, _)| format!(\"${{}}\", idx + i)).collect();"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let sql = format!(\"UPDATE {table} SET {{}} WHERE {pk_snake_local} IN ({{}})\", set_clauses.join(\", \"), phs.join(\", \"));"
+        )
+        .unwrap();
+        writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
+        writeln!(out, "        for b in &binds {{ q = bind_query(q, b.clone()); }}").unwrap();
+        writeln!(out, "        for id in ids {{ q = q.bind(id); }}").unwrap();
+        writeln!(out, "        let res = db.execute(q).await?;").unwrap();
+        writeln!(out, "        Ok(res.rows_affected())").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
     // query_paginate: inline using to_count_sql + to_select_sql
     writeln!(
         out,
