@@ -1245,6 +1245,51 @@ impl ArticleModel {
         let _ = col;
         Ok(value)
     }
+
+    async fn convert_delete_to_update<'tx>(db: &DbConn<'tx>, ids: &[i64], overrides: serde_json::Value) -> Result<u64> {
+        let map = overrides.as_object()
+            .ok_or_else(|| anyhow::anyhow!("observer overrides must be a JSON object"))?;
+        let mut set_clauses: Vec<String> = Vec::new();
+        let mut binds: Vec<BindValue> = Vec::new();
+        let mut idx = 1usize;
+        for (key, val) in map {
+            match key.as_str() {
+                "id" => {
+                    let v: i64 = serde_json::from_value(val.clone())?;
+                    set_clauses.push(format!("{} = ${}", "id", idx));
+                    binds.push(v.into());
+                    idx += 1;
+                }
+                "author_id" => {
+                    let v: i64 = serde_json::from_value(val.clone())?;
+                    set_clauses.push(format!("{} = ${}", "author_id", idx));
+                    binds.push(v.into());
+                    idx += 1;
+                }
+                "status" => {
+                    let v: String = serde_json::from_value(val.clone())?;
+                    set_clauses.push(format!("{} = ${}", "status", idx));
+                    binds.push(v.into());
+                    idx += 1;
+                }
+                "is_system" => {
+                    let v: String = serde_json::from_value(val.clone())?;
+                    set_clauses.push(format!("{} = ${}", "is_system", idx));
+                    binds.push(v.into());
+                    idx += 1;
+                }
+                other => anyhow::bail!("unknown column '{}' in observer delete overrides", other),
+            }
+        }
+        if set_clauses.is_empty() { anyhow::bail!("observer Modify returned empty overrides"); }
+        let phs: Vec<String> = ids.iter().enumerate().map(|(i, _)| format!("${}", idx + i)).collect();
+        let sql = format!("UPDATE articles SET {} WHERE id IN ({})", set_clauses.join(", "), phs.join(", "));
+        let mut q = sqlx::query(&sql);
+        for b in &binds { q = bind_query(q, b.clone()); }
+        for id in ids { q = q.bind(id); }
+        let res = db.execute(q).await?;
+        Ok(res.rows_affected())
+    }
 }
 
 impl ModelDef for ArticleModel {
@@ -1337,7 +1382,7 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
                     match action {
                         ObserverAction::Prevent(err) => return Err(err),
                         ObserverAction::Modify(overrides) => {
-                            let ids: Vec<i64> = __old_rows.iter().map(|r| r.id).collect();
+                            let ids: Vec<i64> = __old_rows.iter().map(|r| r.id.clone()).collect();
                             let affected = Self::convert_delete_to_update(&db, &ids, overrides).await?;
                             return Ok(affected);
                         }
@@ -1372,51 +1417,6 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
             }
             Ok(res.rows_affected())
         })
-    }
-
-    async fn convert_delete_to_update<'tx>(db: &DbConn<'tx>, ids: &[i64], overrides: serde_json::Value) -> Result<u64> {
-        let map = overrides.as_object()
-            .ok_or_else(|| anyhow::anyhow!("observer overrides must be a JSON object"))?;
-        let mut set_clauses: Vec<String> = Vec::new();
-        let mut binds: Vec<BindValue> = Vec::new();
-        let mut idx = 1usize;
-        for (key, val) in map {
-            match key.as_str() {
-                "id" => {
-                    let v: i64 = serde_json::from_value(val.clone())?;
-                    set_clauses.push(format!("{} = ${}", "id", idx));
-                    binds.push(v.into());
-                    idx += 1;
-                }
-                "author_id" => {
-                    let v: i64 = serde_json::from_value(val.clone())?;
-                    set_clauses.push(format!("{} = ${}", "author_id", idx));
-                    binds.push(v.into());
-                    idx += 1;
-                }
-                "status" => {
-                    let v: String = serde_json::from_value(val.clone())?;
-                    set_clauses.push(format!("{} = ${}", "status", idx));
-                    binds.push(v.into());
-                    idx += 1;
-                }
-                "is_system" => {
-                    let v: String = serde_json::from_value(val.clone())?;
-                    set_clauses.push(format!("{} = ${}", "is_system", idx));
-                    binds.push(v.into());
-                    idx += 1;
-                }
-                other => anyhow::bail!("unknown column '{}' in observer delete overrides", other),
-            }
-        }
-        if set_clauses.is_empty() { anyhow::bail!("observer Modify returned empty overrides"); }
-        let phs: Vec<String> = ids.iter().enumerate().map(|(i, _)| format!("${}", idx + i)).collect();
-        let sql = format!("UPDATE articles SET {} WHERE id IN ({})", set_clauses.join(", "), phs.join(", "));
-        let mut q = sqlx::query(&sql);
-        for b in &binds { q = bind_query(q, b.clone()); }
-        for id in ids { q = q.bind(id); }
-        let res = db.execute(q).await?;
-        Ok(res.rows_affected())
     }
     fn query_paginate<'db>(state: QueryState<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
         Box::pin(async move {
