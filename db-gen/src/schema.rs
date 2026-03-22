@@ -47,6 +47,10 @@ pub struct ModelSpec {
     /// Whether SQL queries on this model are included in profiler output.
     /// Default: true — set `profile = false` to exclude (e.g. profiler tables).
     pub profile: bool,
+    /// Max depth for DataTable relation filter/sort paths.
+    /// Default: None (uses global DATATABLE_REL_FILTER_MAX_DEPTH).
+    /// Set to limit combinatorial explosion on models with many relations.
+    pub datatable_rel_depth: Option<usize>,
     pub helper_items: Vec<String>,
     pub record_impl_items: Vec<String>,
     pub model_impl_items: Vec<String>,
@@ -73,6 +77,7 @@ impl Default for ModelSpec {
             disable_timestamps: false,
             observe: true,
             profile: true,
+            datatable_rel_depth: None,
             helper_items: Vec::new(),
             record_impl_items: Vec::new(),
             model_impl_items: Vec::new(),
@@ -567,6 +572,7 @@ fn parse_model_struct(item: &ItemStruct, source: &Path) -> anyhow::Result<(Strin
         soft_delete: model_attr.soft_delete,
         observe: model_attr.observe,
         profile: model_attr.profile,
+        datatable_rel_depth: model_attr.datatable_rel_depth,
         ..ModelSpec::default()
     };
 
@@ -671,6 +677,7 @@ struct ParsedModelAttr {
     soft_delete: bool,
     observe: bool,
     profile: bool,
+    datatable_rel_depth: Option<usize>,
 }
 
 fn parse_model_attr(
@@ -683,6 +690,7 @@ fn parse_model_attr(
         soft_delete: false,
         observe: true,
         profile: true,
+        datatable_rel_depth: None,
     };
 
     for attr in attrs.iter().filter(|attr| attr.path().is_ident("rf_model")) {
@@ -697,6 +705,9 @@ fn parse_model_attr(
                 }
                 Meta::NameValue(nv) if nv.path.is_ident("profile") => {
                     out.profile = expr_to_bool(&nv.value)?;
+                }
+                Meta::NameValue(nv) if nv.path.is_ident("datatable_rel_depth") => {
+                    out.datatable_rel_depth = Some(expr_to_i64(&nv.value)? as usize);
                 }
                 other => {
                     bail!(

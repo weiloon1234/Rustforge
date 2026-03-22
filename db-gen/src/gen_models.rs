@@ -11,7 +11,7 @@ use std::fmt::Write;
 use std::fs;
 use std::path::Path;
 
-const DATATABLE_REL_FILTER_MAX_DEPTH: usize = 3;
+const DATATABLE_REL_FILTER_MAX_DEPTH: usize = 2;
 
 #[derive(Debug, Clone, Copy)]
 pub struct GenerateModelsOptions {
@@ -232,6 +232,7 @@ fn collect_relation_paths(
         path: &mut Vec<String>,
         out: &mut Vec<RelationPathSpec>,
         seen: &mut BTreeSet<String>,
+        visited_models: &mut BTreeSet<String>,
         max_depth: usize,
     ) {
         if path.len() >= max_depth {
@@ -258,7 +259,14 @@ fn collect_relation_paths(
                 });
             }
 
-            walk(schema, &rel.target_model, path, out, seen, max_depth);
+            // Only recurse if this model type hasn't been visited in the
+            // current path — prevents combinatorial explosion from
+            // self-referencing relations (e.g. User.introducer → User).
+            if visited_models.insert(rel.target_model.clone()) {
+                walk(schema, &rel.target_model, path, out, seen, visited_models, max_depth);
+                visited_models.remove(&rel.target_model);
+            }
+
             path.pop();
         }
     }
@@ -266,8 +274,10 @@ fn collect_relation_paths(
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
     let mut path = Vec::new();
+    let mut visited_models = BTreeSet::new();
+    visited_models.insert(model_name.to_string());
     walk(
-        schema, model_name, &mut path, &mut out, &mut seen, max_depth,
+        schema, model_name, &mut path, &mut out, &mut seen, &mut visited_models, max_depth,
     );
     out
 }
@@ -2122,7 +2132,8 @@ fn render_model(
         .iter()
         .filter(|relation| matches!(relation.kind, RelationKind::HasMany))
         .collect();
-    let relation_paths = collect_relation_paths(schema, name, DATATABLE_REL_FILTER_MAX_DEPTH);
+    let max_rel_depth = cfg.datatable_rel_depth.unwrap_or(DATATABLE_REL_FILTER_MAX_DEPTH);
+    let relation_paths = collect_relation_paths(schema, name, max_rel_depth);
     let computed_fields = parse_computed(cfg);
     let hidden_fields: BTreeSet<String> = cfg
         .hidden

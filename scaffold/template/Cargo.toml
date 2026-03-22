@@ -35,3 +35,7 @@ core-notify = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "
 core-realtime = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 core-web = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 db-gen = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
+
+[profile.dev.package.generated]
+opt-level = 0
+codegen-units = 256
