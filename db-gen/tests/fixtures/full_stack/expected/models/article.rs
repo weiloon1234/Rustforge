@@ -22,7 +22,7 @@ use crate::generated::models::user::{UserDbCol, UserModel, UserRow, UserRel};
 use crate::generated::models::profile::{ProfileDbCol, ProfileModel, ProfileRow};
 use crate::generated::localized::LocalizedMapHelper;
 use super::enums::*;
-use core_db::common::model_observer::{ModelEvent, try_get_observer};
+use core_db::common::model_observer::{ModelEvent, ObserverAction, try_get_observer};
 const HAS_CREATED_AT: bool = false;
 const HAS_UPDATED_AT: bool = false;
 const HAS_SOFT_DELETE: bool = false;
@@ -59,13 +59,21 @@ pub struct ArticleRecord {
     pub author_id: i64,
     pub status: ArticleStatus,
     pub is_system: ArticleSystemFlag,
+    #[serde(default)]
     pub status_explained: String,
+    #[serde(default)]
     pub is_system_explained: String,
+    #[serde(default)]
     pub title: Option<String>,
+    #[serde(default)]
     pub title_translations: Option<localized::LocalizedText>,
+    #[serde(default)]
     pub hero: Option<Attachment>,
+    #[serde(default)]
     pub hero_url: Option<String>,
+    #[serde(default)]
     pub meta: std::collections::HashMap<String, JsonValue>,
+    #[serde(default)]
     pub author: Option<UserRow>,
 }
 
@@ -335,8 +343,35 @@ pub fn set_id(mut self, val: i64) -> Self {
         Ok(input)
     }
 
+    fn apply_create_overrides(mut state: CreateState<'_>, overrides: serde_json::Value) -> Result<CreateState<'_>> {
+        let map = overrides.as_object()
+            .ok_or_else(|| anyhow::anyhow!("observer overrides must be a JSON object"))?;
+        for (key, val) in map {
+            match key.as_str() {
+                "id" => {
+                    let v: i64 = serde_json::from_value(val.clone())?;
+                    state = state.set_col("id", v.into());
+                }
+                "author_id" => {
+                    let v: i64 = serde_json::from_value(val.clone())?;
+                    state = state.set_col("author_id", v.into());
+                }
+                "status" => {
+                    let v: String = serde_json::from_value(val.clone())?;
+                    state = state.set_col("status", v.into());
+                }
+                "is_system" => {
+                    let v: String = serde_json::from_value(val.clone())?;
+                    state = state.set_col("is_system", v.into());
+                }
+                other => anyhow::bail!("unknown column '{}' in observer create overrides", other),
+            }
+        }
+        Ok(state)
+    }
 
-pub async fn save(self) -> Result<ArticleRecord> {
+
+pub async fn save(mut self) -> Result<ArticleRecord> {
         let __create_input = if try_get_observer().is_some() {
             Some(self.to_create_input()?)
         } else {
@@ -346,7 +381,14 @@ pub async fn save(self) -> Result<ArticleRecord> {
             if let Some(create_input) = __create_input.as_ref() {
                 let event = ModelEvent { model: "article", table: "articles", record_key: None };
                 let data = serde_json::to_value(create_input)?;
-                observer.on_creating(&event, &data).await?;
+                let action = observer.on_creating(&event, &data).await?;
+                match action {
+                    ObserverAction::Prevent(err) => return Err(err),
+                    ObserverAction::Modify(overrides) => {
+                        self.state = Self::apply_create_overrides(self.state, overrides)?;
+                    }
+                    ObserverAction::Continue => {}
+                }
             }
         }
         let db_conn = self.state.db.clone();
@@ -655,6 +697,33 @@ pub fn set_id(mut self, val: i64) -> Self {
         Ok(changes)
     }
 
+    fn apply_update_overrides(mut state: PatchState<'_>, overrides: serde_json::Value) -> Result<PatchState<'_>> {
+        let map = overrides.as_object()
+            .ok_or_else(|| anyhow::anyhow!("observer overrides must be a JSON object"))?;
+        for (key, val) in map {
+            match key.as_str() {
+                "id" => {
+                    let v: i64 = serde_json::from_value(val.clone())?;
+                    state = state.assign_col("id", v.into());
+                }
+                "author_id" => {
+                    let v: i64 = serde_json::from_value(val.clone())?;
+                    state = state.assign_col("author_id", v.into());
+                }
+                "status" => {
+                    let v: String = serde_json::from_value(val.clone())?;
+                    state = state.assign_col("status", v.into());
+                }
+                "is_system" => {
+                    let v: String = serde_json::from_value(val.clone())?;
+                    state = state.assign_col("is_system", v.into());
+                }
+                other => anyhow::bail!("unknown column '{}' in observer update overrides", other),
+            }
+        }
+        Ok(state)
+    }
+
 
 pub async fn save(self) -> Result<u64> {
         if self.state.set_cols.is_empty() { anyhow::bail!("update: no columns set"); }
@@ -705,10 +774,15 @@ pub async fn save(self) -> Result<u64> {
             if let Some(observer) = try_get_observer() {
                 if let Some(changes) = observer_changes.as_ref() {
                     let changes_data = serde_json::to_value(changes)?;
-                    for old_row in &__old_rows {
-                        let old_data = serde_json::to_value(old_row)?;
-                        let event = ModelEvent { model: "article", table: "articles", record_key: Some(format!("{}", old_row.id)) };
-                        observer.on_updating(&event, &old_data, &changes_data).await?;
+                    let old_data = serde_json::to_value(&__old_rows)?;
+                    let event = ModelEvent { model: "article", table: "articles", record_key: None };
+                    let action = observer.on_updating(&event, &old_data, &changes_data).await?;
+                    match action {
+                        ObserverAction::Prevent(err) => return Err(err),
+                        ObserverAction::Modify(overrides) => {
+                            state = Self::apply_update_overrides(state, overrides)?;
+                        }
+                        ObserverAction::Continue => {}
                     }
                 }
             }
@@ -1257,10 +1331,17 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
             };
             if !__old_rows.is_empty() {
                 if let Some(observer) = try_get_observer() {
-                    for old_row in &__old_rows {
-                        let old_data = serde_json::to_value(old_row)?;
-                        let event = ModelEvent { model: "article", table: "articles", record_key: Some(format!("{}", old_row.id)) };
-                        observer.on_deleting(&event, &old_data).await?;
+                    let old_data = serde_json::to_value(&__old_rows)?;
+                    let event = ModelEvent { model: "article", table: "articles", record_key: None };
+                    let action = observer.on_deleting(&event, &old_data).await?;
+                    match action {
+                        ObserverAction::Prevent(err) => return Err(err),
+                        ObserverAction::Modify(overrides) => {
+                            let ids: Vec<i64> = __old_rows.iter().map(|r| r.id).collect();
+                            let affected = Self::convert_delete_to_update(&db, &ids, overrides).await?;
+                            return Ok(affected);
+                        }
+                        ObserverAction::Continue => {}
                     }
                 }
             }
@@ -1291,6 +1372,51 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
             }
             Ok(res.rows_affected())
         })
+    }
+
+    async fn convert_delete_to_update<'tx>(db: &DbConn<'tx>, ids: &[i64], overrides: serde_json::Value) -> Result<u64> {
+        let map = overrides.as_object()
+            .ok_or_else(|| anyhow::anyhow!("observer overrides must be a JSON object"))?;
+        let mut set_clauses: Vec<String> = Vec::new();
+        let mut binds: Vec<BindValue> = Vec::new();
+        let mut idx = 1usize;
+        for (key, val) in map {
+            match key.as_str() {
+                "id" => {
+                    let v: i64 = serde_json::from_value(val.clone())?;
+                    set_clauses.push(format!("{} = ${}", "id", idx));
+                    binds.push(v.into());
+                    idx += 1;
+                }
+                "author_id" => {
+                    let v: i64 = serde_json::from_value(val.clone())?;
+                    set_clauses.push(format!("{} = ${}", "author_id", idx));
+                    binds.push(v.into());
+                    idx += 1;
+                }
+                "status" => {
+                    let v: String = serde_json::from_value(val.clone())?;
+                    set_clauses.push(format!("{} = ${}", "status", idx));
+                    binds.push(v.into());
+                    idx += 1;
+                }
+                "is_system" => {
+                    let v: String = serde_json::from_value(val.clone())?;
+                    set_clauses.push(format!("{} = ${}", "is_system", idx));
+                    binds.push(v.into());
+                    idx += 1;
+                }
+                other => anyhow::bail!("unknown column '{}' in observer delete overrides", other),
+            }
+        }
+        if set_clauses.is_empty() { anyhow::bail!("observer Modify returned empty overrides"); }
+        let phs: Vec<String> = ids.iter().enumerate().map(|(i, _)| format!("${}", idx + i)).collect();
+        let sql = format!("UPDATE articles SET {} WHERE id IN ({})", set_clauses.join(", "), phs.join(", "));
+        let mut q = sqlx::query(&sql);
+        for b in &binds { q = bind_query(q, b.clone()); }
+        for id in ids { q = q.bind(id); }
+        let res = db.execute(q).await?;
+        Ok(res.rows_affected())
     }
     fn query_paginate<'db>(state: QueryState<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
         Box::pin(async move {
