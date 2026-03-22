@@ -5159,6 +5159,15 @@ fn render_model(
         )
         .unwrap();
         for rel_path in &relation_paths {
+            // Only emit HasLike arm if target model has String fields
+            let target_cfg_check = schema.models.get(&rel_path.target_model);
+            let has_string_fields = target_cfg_check.map_or(false, |c| {
+                let pk = c.pk.clone().unwrap_or_else(|| "id".to_string());
+                parse_fields(c, &pk).iter().any(|f| f.ty.contains("String"))
+            });
+            if !has_string_fields {
+                continue;
+            }
             let rel_key = rel_path.path.join("__");
             let target_snake = to_snake(&rel_path.target_model);
             let helper_like = format!("filter_has_like_for_{}_cols", target_snake);
