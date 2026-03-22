@@ -1101,7 +1101,6 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
                 let pattern = format!("%{}%", trimmed);
                 match relation.as_str() {
                     "author" => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| Self::filter_has_like_for_user_cols(column.as_str(), rq, pattern.clone())))),
-                    "author__profile" => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| Self::filter_has_like_for_profile_cols(column.as_str(), rq, pattern.clone()))))),
                     _ => Ok(None),
                 }
             }
