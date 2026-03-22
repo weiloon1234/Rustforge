@@ -869,9 +869,15 @@ impl ArticleTableAdapter {
             _ => None,
         }
     }
+    fn parse_locale_field_for_profile_cols(column: &str) -> Option<&'static str> {
+        match column {
+            "display_name" => Some("display_name"),
+            _ => None,
+        }
+    }
     fn parse_locale_field_for_relation(relation: &str, column: &str) -> Option<&'static str> {
-        match (relation, column) {
-            ("author__profile", "display_name") => Some("display_name"),
+        match relation {
+            "author__profile" => Self::parse_locale_field_for_profile_cols(column),
             _ => None,
         }
     }
@@ -895,12 +901,24 @@ impl ArticleTableAdapter {
             _ => None,
         }
     }
+    fn parse_bind_for_profile_cols(column: &str, raw: &str) -> Option<BindValue> {
+        match column {
+            "id" => raw.trim().parse::<i64>().ok().map(Into::into),
+            _ => None,
+        }
+    }
+    fn parse_bind_for_user_cols(column: &str, raw: &str) -> Option<BindValue> {
+        match column {
+            "id" => raw.trim().parse::<i64>().ok().map(Into::into),
+            "name" => Some(raw.trim().to_string().into()),
+            "profile_id" => raw.trim().parse::<i64>().ok().map(Into::into),
+            _ => None,
+        }
+    }
     fn parse_bind_for_relation(relation: &str, column: &str, raw: &str) -> Option<BindValue> {
-        match (relation, column) {
-            ("author", "id") => raw.trim().parse::<i64>().ok().map(Into::into),
-            ("author", "name") => Some(raw.trim().to_string().into()),
-            ("author", "profile_id") => raw.trim().parse::<i64>().ok().map(Into::into),
-            ("author__profile", "id") => raw.trim().parse::<i64>().ok().map(Into::into),
+        match relation {
+            "author__profile" => Self::parse_bind_for_profile_cols(column, raw),
+            "author" => Self::parse_bind_for_user_cols(column, raw),
             _ => None,
         }
     }
@@ -966,6 +984,38 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
             "f-locale-has-<relation>-<col>",
             "f-locale-has-like-<relation>-<col>",
         ]
+    }
+    fn filter_has_for_profile_cols<'db>(column: &str, rq: Query<'db, ProfileModel>, bind: BindValue) -> Query<'db, ProfileModel> {
+        match column {
+            "id" => rq.where_col(ProfileDbCol::Id, Op::Eq, bind),
+            _ => rq,
+        }
+    }
+    fn filter_locale_has_for_profile_cols<'db>(column: &str, rq: Query<'db, ProfileModel>, field: &str, locale: &str, value: String) -> Query<'db, ProfileModel> {
+        match column {
+            "display_name" => rq.where_exists_raw("EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = profiles.id AND l.field = ? AND l.locale = ? AND l.value = ?)".to_string(), vec![localized::PROFILE_OWNER_TYPE.to_string(), field.to_string(), locale.to_string(), value]),
+            _ => rq,
+        }
+    }
+    fn filter_locale_has_like_for_profile_cols<'db>(column: &str, rq: Query<'db, ProfileModel>, field: &str, locale: &str, pattern: String) -> Query<'db, ProfileModel> {
+        match column {
+            "display_name" => rq.where_exists_raw("EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = profiles.id AND l.field = ? AND l.locale = ? AND l.value LIKE ?)".to_string(), vec![localized::PROFILE_OWNER_TYPE.to_string(), field.to_string(), locale.to_string(), pattern]),
+            _ => rq,
+        }
+    }
+    fn filter_has_for_user_cols<'db>(column: &str, rq: Query<'db, UserModel>, bind: BindValue) -> Query<'db, UserModel> {
+        match column {
+            "id" => rq.where_col(UserDbCol::Id, Op::Eq, bind),
+            "name" => rq.where_col(UserDbCol::Name, Op::Eq, bind),
+            "profile_id" => rq.where_col(UserDbCol::ProfileId, Op::Eq, bind),
+            _ => rq,
+        }
+    }
+    fn filter_has_like_for_user_cols<'db>(column: &str, rq: Query<'db, UserModel>, pattern: String) -> Query<'db, UserModel> {
+        match column {
+            "name" => rq.where_col(UserDbCol::Name, Op::Like, pattern),
+            _ => rq,
+        }
     }
     fn apply_auto_filter<'db>(&self, query: Query<'db, ArticleModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, ArticleModel>>> where Self: 'db {
         let trimmed = value.trim();
@@ -1041,26 +1091,26 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
                 if applied { Ok(Some(next)) } else { Ok(None) }
             }
             ParsedFilter::Has { relation, column } => {
-                match (relation.as_str(), column.as_str()) {
-                    ("author", "id") => { let Some(bind) = Self::parse_bind_for_relation("author", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_col(UserDbCol::Id, Op::Eq, bind)))) },
-                    ("author", "name") => { let Some(bind) = Self::parse_bind_for_relation("author", "name", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_col(UserDbCol::Name, Op::Eq, bind)))) },
-                    ("author", "profile_id") => { let Some(bind) = Self::parse_bind_for_relation("author", "profile_id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_col(UserDbCol::ProfileId, Op::Eq, bind)))) },
-                    ("author__profile", "id") => { let Some(bind) = Self::parse_bind_for_relation("author__profile", "id", trimmed) else { return Ok(None); }; Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_col(ProfileDbCol::Id, Op::Eq, bind))))) },
+                match relation.as_str() {
+                    "author" => { let Some(bind) = Self::parse_bind_for_user_cols(column.as_str(), trimmed) else { return Ok(None); }; Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| Self::filter_has_for_user_cols(column.as_str(), rq, bind)))) },
+                    "author__profile" => { let Some(bind) = Self::parse_bind_for_profile_cols(column.as_str(), trimmed) else { return Ok(None); }; Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| Self::filter_has_for_profile_cols(column.as_str(), rq, bind))))) },
                     _ => Ok(None),
                 }
             }
             ParsedFilter::HasLike { relation, column } => {
                 let pattern = format!("%{}%", trimmed);
-                match (relation.as_str(), column.as_str()) {
-                    ("author", "name") => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_col(UserDbCol::Name, Op::Like, pattern.clone())))),
+                match relation.as_str() {
+                    "author" => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| Self::filter_has_like_for_user_cols(column.as_str(), rq, pattern.clone())))),
+                    "author__profile" => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| Self::filter_has_like_for_profile_cols(column.as_str(), rq, pattern.clone()))))),
                     _ => Ok(None),
                 }
             }
             ParsedFilter::LocaleHas { relation, column } => {
                 let Some(field) = Self::parse_locale_field_for_relation(relation.as_str(), column.as_str()) else { return Ok(None); };
                 let locale = core_i18n::current_locale().to_string();
-                match (relation.as_str(), column.as_str()) {
-                    ("author__profile", "display_name") => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_exists_raw("EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = profiles.id AND l.field = ? AND l.locale = ? AND l.value = ?)".to_string(), vec![localized::PROFILE_OWNER_TYPE.to_string(), field.to_string(), locale.clone(), trimmed.to_string()]))))),
+                match relation.as_str() {
+                    "author" => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| Self::filter_locale_has_for_user_cols(column.as_str(), rq, &field, &locale, trimmed.to_string())))),
+                    "author__profile" => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| Self::filter_locale_has_for_profile_cols(column.as_str(), rq, &field, &locale, trimmed.to_string()))))),
                     _ => Ok(None),
                 }
             }
@@ -1068,8 +1118,9 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
                 let Some(field) = Self::parse_locale_field_for_relation(relation.as_str(), column.as_str()) else { return Ok(None); };
                 let locale = core_i18n::current_locale().to_string();
                 let pattern = format!("%{}%", trimmed);
-                match (relation.as_str(), column.as_str()) {
-                    ("author__profile", "display_name") => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_exists_raw("EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = profiles.id AND l.field = ? AND l.locale = ? AND l.value LIKE ?)".to_string(), vec![localized::PROFILE_OWNER_TYPE.to_string(), field.to_string(), locale.clone(), pattern.clone()]))))),
+                match relation.as_str() {
+                    "author" => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| Self::filter_locale_has_like_for_user_cols(column.as_str(), rq, &field, &locale, pattern.clone())))),
+                    "author__profile" => Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| Self::filter_locale_has_like_for_profile_cols(column.as_str(), rq, &field, &locale, pattern.clone()))))),
                     _ => Ok(None),
                 }
             }

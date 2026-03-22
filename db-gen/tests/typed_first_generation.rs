@@ -382,12 +382,12 @@ pub struct Article {
     let article_rs =
         fs::read_to_string(out_dir.join("article.rs")).expect("article.rs should exist");
 
-    assert!(article_rs.contains("(\"author__profile\", \"display_name\")"));
+    assert!(article_rs.contains("\"author__profile\" => Self::parse_bind_for_profile_cols(column, raw)"));
     assert!(article_rs.contains(
-        "Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_col(ProfileDbCol::Id, Op::Eq, bind)))))"
+        "Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| Self::filter_has_for_profile_cols(column.as_str(), rq, bind)))))"
     ));
     assert!(article_rs.contains(
-        "Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| rq.where_col(ProfileDbCol::DisplayName, Op::Like, pattern.clone())))))"
+        "Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| Self::filter_has_like_for_profile_cols(column.as_str(), rq, pattern.clone())))))"
     ));
 
     fs::remove_dir_all(root).expect("failed to remove temp dir");
