@@ -4613,6 +4613,134 @@ fn render_model(
         writeln!(out, "        }}").unwrap();
         writeln!(out, "        None").unwrap();
         writeln!(out, "    }}").unwrap();
+
+        // -- per-target-model filter_has / filter_has_like helpers (deduplicated) --
+        {
+            let mut unique_targets: BTreeMap<String, Vec<&RelationPathSpec>> = BTreeMap::new();
+            for rel_path in &relation_paths {
+                unique_targets
+                    .entry(rel_path.target_model.clone())
+                    .or_default()
+                    .push(rel_path);
+            }
+            for (target_model, _) in &unique_targets {
+                let target_title = to_title_case(target_model);
+                let target_col_ident = format!("{}DbCol", target_title);
+                let target_cfg = schema
+                    .models
+                    .get(target_model)
+                    .unwrap_or_else(|| panic!("Target model '{}' not found", target_model));
+                let target_pk = target_cfg.pk.clone().unwrap_or_else(|| "id".to_string());
+                let target_fields = parse_fields(target_cfg, &target_pk);
+
+                // filter_has_for_{model}_cols
+                let fn_name = format!("filter_has_for_{}_cols", to_snake(target_model));
+                writeln!(
+                    out,
+                    "    fn {fn_name}<'db>(column: &str, rq: Query<'db, {target_title}Model>, bind: BindValue) -> Query<'db, {target_title}Model> {{"
+                )
+                .unwrap();
+                writeln!(out, "        match column {{").unwrap();
+                for tf in &target_fields {
+                    writeln!(
+                        out,
+                        "            \"{col}\" => rq.where_col({target_col_ident}::{variant}, Op::Eq, bind),",
+                        col = tf.name,
+                        variant = to_title_case(&tf.name)
+                    )
+                    .unwrap();
+                }
+                writeln!(out, "            _ => rq,").unwrap();
+                writeln!(out, "        }}").unwrap();
+                writeln!(out, "    }}").unwrap();
+
+                // filter_has_like_for_{model}_cols — only String fields
+                let string_fields: Vec<_> = target_fields.iter().filter(|tf| tf.ty.contains("String")).collect();
+                if !string_fields.is_empty() {
+                    let fn_name_like = format!("filter_has_like_for_{}_cols", to_snake(target_model));
+                    writeln!(
+                        out,
+                        "    fn {fn_name_like}<'db>(column: &str, rq: Query<'db, {target_title}Model>, pattern: String) -> Query<'db, {target_title}Model> {{"
+                    )
+                    .unwrap();
+                    writeln!(out, "        match column {{").unwrap();
+                    for tf in &string_fields {
+                        writeln!(
+                            out,
+                            "            \"{col}\" => rq.where_col({target_col_ident}::{variant}, Op::Like, pattern),",
+                            col = tf.name,
+                            variant = to_title_case(&tf.name)
+                        )
+                        .unwrap();
+                    }
+                    writeln!(out, "            _ => rq,").unwrap();
+                    writeln!(out, "        }}").unwrap();
+                    writeln!(out, "    }}").unwrap();
+                }
+
+                // locale_has helpers
+                let target_localized_fields: Vec<String> = target_cfg
+                    .localized
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|s| to_snake(&s))
+                    .collect();
+                if !target_localized_fields.is_empty() {
+                    let target_table = target_cfg
+                        .table
+                        .as_ref()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| to_snake(target_model));
+                    let target_pk_str = target_cfg
+                        .pk
+                        .as_ref()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "id".to_string());
+                    let target_owner_const = format!(
+                        "{}_OWNER_TYPE",
+                        to_snake(target_model).to_uppercase()
+                    );
+
+                    let fn_locale_has = format!("filter_locale_has_for_{}_cols", to_snake(target_model));
+                    writeln!(
+                        out,
+                        "    fn {fn_locale_has}<'db>(column: &str, rq: Query<'db, {target_title}Model>, field: &str, locale: &str, value: String) -> Query<'db, {target_title}Model> {{"
+                    )
+                    .unwrap();
+                    writeln!(out, "        match column {{").unwrap();
+                    for tf in &target_localized_fields {
+                        writeln!(
+                            out,
+                            "            \"{tf}\" => rq.where_exists_raw(\"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {target_table}.{target_pk_str} AND l.field = ? AND l.locale = ? AND l.value = ?)\".to_string(), vec![localized::{target_owner_const}.to_string(), field.to_string(), locale.to_string(), value]),"
+                        )
+                        .unwrap();
+                    }
+                    writeln!(out, "            _ => rq,").unwrap();
+                    writeln!(out, "        }}").unwrap();
+                    writeln!(out, "    }}").unwrap();
+
+                    let fn_locale_has_like = format!("filter_locale_has_like_for_{}_cols", to_snake(target_model));
+                    writeln!(
+                        out,
+                        "    fn {fn_locale_has_like}<'db>(column: &str, rq: Query<'db, {target_title}Model>, field: &str, locale: &str, pattern: String) -> Query<'db, {target_title}Model> {{"
+                    )
+                    .unwrap();
+                    writeln!(out, "        match column {{").unwrap();
+                    for tf in &target_localized_fields {
+                        writeln!(
+                            out,
+                            "            \"{tf}\" => rq.where_exists_raw(\"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {target_table}.{target_pk_str} AND l.field = ? AND l.locale = ? AND l.value LIKE ?)\".to_string(), vec![localized::{target_owner_const}.to_string(), field.to_string(), locale.to_string(), pattern]),"
+                        )
+                        .unwrap();
+                    }
+                    writeln!(out, "            _ => rq,").unwrap();
+                    writeln!(out, "        }}").unwrap();
+                    writeln!(out, "    }}").unwrap();
+                }
+            }
+        }
+
         writeln!(out, "}}").unwrap();
 
         writeln!(
@@ -4751,135 +4879,6 @@ fn render_model(
         }
         writeln!(out, "        ]").unwrap();
         writeln!(out, "    }}").unwrap();
-
-        // -- per-target-model filter_has / filter_has_like helpers (deduplicated) --
-        {
-            let mut unique_targets: BTreeMap<String, Vec<&RelationPathSpec>> = BTreeMap::new();
-            for rel_path in &relation_paths {
-                unique_targets
-                    .entry(rel_path.target_model.clone())
-                    .or_default()
-                    .push(rel_path);
-            }
-            for (target_model, _) in &unique_targets {
-                let target_title = to_title_case(target_model);
-                let target_col_ident = format!("{}DbCol", target_title);
-                let target_cfg = schema
-                    .models
-                    .get(target_model)
-                    .unwrap_or_else(|| panic!("Target model '{}' not found", target_model));
-                let target_pk = target_cfg.pk.clone().unwrap_or_else(|| "id".to_string());
-                let target_fields = parse_fields(target_cfg, &target_pk);
-
-                // filter_has_for_{model}_cols
-                let fn_name = format!("filter_has_for_{}_cols", to_snake(target_model));
-                writeln!(
-                    out,
-                    "    fn {fn_name}<'db>(column: &str, rq: Query<'db, {target_title}Model>, bind: BindValue) -> Query<'db, {target_title}Model> {{"
-                )
-                .unwrap();
-                writeln!(out, "        match column {{").unwrap();
-                for tf in &target_fields {
-                    writeln!(
-                        out,
-                        "            \"{col}\" => rq.where_col({target_col_ident}::{variant}, Op::Eq, bind),",
-                        col = tf.name,
-                        variant = to_title_case(&tf.name)
-                    )
-                    .unwrap();
-                }
-                writeln!(out, "            _ => rq,").unwrap();
-                writeln!(out, "        }}").unwrap();
-                writeln!(out, "    }}").unwrap();
-
-                // filter_has_like_for_{model}_cols — only String fields
-                let string_fields: Vec<_> = target_fields.iter().filter(|tf| tf.ty.contains("String")).collect();
-                if !string_fields.is_empty() {
-                    let fn_name_like = format!("filter_has_like_for_{}_cols", to_snake(target_model));
-                    writeln!(
-                        out,
-                        "    fn {fn_name_like}<'db>(column: &str, rq: Query<'db, {target_title}Model>, pattern: String) -> Query<'db, {target_title}Model> {{"
-                    )
-                    .unwrap();
-                    writeln!(out, "        match column {{").unwrap();
-                    for tf in &string_fields {
-                        writeln!(
-                            out,
-                            "            \"{col}\" => rq.where_col({target_col_ident}::{variant}, Op::Like, pattern),",
-                            col = tf.name,
-                            variant = to_title_case(&tf.name)
-                        )
-                        .unwrap();
-                    }
-                    writeln!(out, "            _ => rq,").unwrap();
-                    writeln!(out, "        }}").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-
-                // locale_has helpers
-                let target_localized_fields: Vec<String> = target_cfg
-                    .localized
-                    .clone()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|s| to_snake(&s))
-                    .collect();
-                if !target_localized_fields.is_empty() {
-                    let target_table = target_cfg
-                        .table
-                        .as_ref()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| to_snake(target_model));
-                    let target_pk_str = target_cfg
-                        .pk
-                        .as_ref()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| "id".to_string());
-                    let target_owner_const = format!(
-                        "{}_OWNER_TYPE",
-                        to_snake(target_model).to_uppercase()
-                    );
-
-                    // filter_locale_has_for_{model}_cols
-                    let fn_locale_has = format!("filter_locale_has_for_{}_cols", to_snake(target_model));
-                    writeln!(
-                        out,
-                        "    fn {fn_locale_has}<'db>(column: &str, rq: Query<'db, {target_title}Model>, field: &str, locale: &str, value: String) -> Query<'db, {target_title}Model> {{"
-                    )
-                    .unwrap();
-                    writeln!(out, "        match column {{").unwrap();
-                    for tf in &target_localized_fields {
-                        writeln!(
-                            out,
-                            "            \"{tf}\" => rq.where_exists_raw(\"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {target_table}.{target_pk_str} AND l.field = ? AND l.locale = ? AND l.value = ?)\".to_string(), vec![localized::{target_owner_const}.to_string(), field.to_string(), locale.to_string(), value]),"
-                        )
-                        .unwrap();
-                    }
-                    writeln!(out, "            _ => rq,").unwrap();
-                    writeln!(out, "        }}").unwrap();
-                    writeln!(out, "    }}").unwrap();
-
-                    // filter_locale_has_like_for_{model}_cols
-                    let fn_locale_has_like = format!("filter_locale_has_like_for_{}_cols", to_snake(target_model));
-                    writeln!(
-                        out,
-                        "    fn {fn_locale_has_like}<'db>(column: &str, rq: Query<'db, {target_title}Model>, field: &str, locale: &str, pattern: String) -> Query<'db, {target_title}Model> {{"
-                    )
-                    .unwrap();
-                    writeln!(out, "        match column {{").unwrap();
-                    for tf in &target_localized_fields {
-                        writeln!(
-                            out,
-                            "            \"{tf}\" => rq.where_exists_raw(\"EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {target_table}.{target_pk_str} AND l.field = ? AND l.locale = ? AND l.value LIKE ?)\".to_string(), vec![localized::{target_owner_const}.to_string(), field.to_string(), locale.to_string(), pattern]),"
-                        )
-                        .unwrap();
-                    }
-                    writeln!(out, "            _ => rq,").unwrap();
-                    writeln!(out, "        }}").unwrap();
-                    writeln!(out, "    }}").unwrap();
-                }
-            }
-        }
 
         writeln!(
         out,
@@ -5204,6 +5203,13 @@ fn render_model(
         )
         .unwrap();
         for rel_path in &relation_paths {
+            let target_cfg_check = schema.models.get(&rel_path.target_model);
+            let has_locale = target_cfg_check
+                .and_then(|c| c.localized.as_ref())
+                .map_or(false, |l| !l.is_empty());
+            if !has_locale {
+                continue;
+            }
             let rel_key = rel_path.path.join("__");
             let target_snake = to_snake(&rel_path.target_model);
             let helper_locale_has = format!("filter_locale_has_for_{}_cols", target_snake);
@@ -5248,6 +5254,13 @@ fn render_model(
         )
         .unwrap();
         for rel_path in &relation_paths {
+            let target_cfg_check = schema.models.get(&rel_path.target_model);
+            let has_locale = target_cfg_check
+                .and_then(|c| c.localized.as_ref())
+                .map_or(false, |l| !l.is_empty());
+            if !has_locale {
+                continue;
+            }
             let rel_key = rel_path.path.join("__");
             let target_snake = to_snake(&rel_path.target_model);
             let helper_locale_has_like = format!("filter_locale_has_like_for_{}_cols", target_snake);
