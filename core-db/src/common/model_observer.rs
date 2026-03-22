@@ -17,6 +17,17 @@ pub struct ModelEvent {
     pub record_key: Option<String>,
 }
 
+/// Result of a "before" observer hook.
+pub enum ObserverAction {
+    /// Continue with no modifications.
+    Continue,
+    /// Continue but apply these field overrides before executing.
+    /// Keys must be database column names. Value must be a JSON object.
+    Modify(serde_json::Value),
+    /// Abort the operation with this error.
+    Prevent(anyhow::Error),
+}
+
 /// Observer trait for model lifecycle hooks.
 ///
 /// All methods have default no-op implementations so consumers
@@ -28,8 +39,8 @@ pub trait ModelObserver: Send + Sync {
         &self,
         _event: &ModelEvent,
         _new_data: &serde_json::Value,
-    ) -> anyhow::Result<()> {
-        Ok(())
+    ) -> anyhow::Result<ObserverAction> {
+        Ok(ObserverAction::Continue)
     }
 
     /// Called after a successful INSERT.
@@ -47,8 +58,8 @@ pub trait ModelObserver: Send + Sync {
         _event: &ModelEvent,
         _old_data: &serde_json::Value,
         _changes: &serde_json::Value,
-    ) -> anyhow::Result<()> {
-        Ok(())
+    ) -> anyhow::Result<ObserverAction> {
+        Ok(ObserverAction::Continue)
     }
 
     /// Called after a successful UPDATE with both old and new state.
@@ -66,8 +77,8 @@ pub trait ModelObserver: Send + Sync {
         &self,
         _event: &ModelEvent,
         _old_data: &serde_json::Value,
-    ) -> anyhow::Result<()> {
-        Ok(())
+    ) -> anyhow::Result<ObserverAction> {
+        Ok(ObserverAction::Continue)
     }
 
     /// Called after a successful DELETE.
