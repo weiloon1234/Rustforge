@@ -1,4 +1,4 @@
-use core_db::common::model_observer::ModelEvent;
+use core_db::common::model_observer::{ModelEvent, ObserverAction};
 use generated::models::{
     CompanyCryptoAccountCreate, CompanyCryptoAccountRecord, CompanyCryptoAccountChanges,
 };
@@ -6,8 +6,8 @@ use generated::models::{
 pub async fn creating(
     _event: &ModelEvent,
     _new_data: &CompanyCryptoAccountCreate,
-) -> anyhow::Result<()> {
-    Ok(())
+) -> anyhow::Result<ObserverAction> {
+    Ok(ObserverAction::Continue)
 }
 
 pub async fn created(
@@ -19,10 +19,10 @@ pub async fn created(
 
 pub async fn updating(
     _event: &ModelEvent,
-    _old_row: &CompanyCryptoAccountRecord,
+    _old_rows: &[CompanyCryptoAccountRecord],
     _changes: &CompanyCryptoAccountChanges,
-) -> anyhow::Result<()> {
-    Ok(())
+) -> anyhow::Result<ObserverAction> {
+    Ok(ObserverAction::Continue)
 }
 
 pub async fn updated(
@@ -35,9 +35,9 @@ pub async fn updated(
 
 pub async fn deleting(
     _event: &ModelEvent,
-    _row: &CompanyCryptoAccountRecord,
-) -> anyhow::Result<()> {
-    Ok(())
+    _rows: &[CompanyCryptoAccountRecord],
+) -> anyhow::Result<ObserverAction> {
+    Ok(ObserverAction::Continue)
 }
 
 pub async fn deleted(

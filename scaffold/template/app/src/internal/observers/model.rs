@@ -1,5 +1,5 @@
 use anyhow::Context;
-use core_db::common::model_observer::{ModelEvent, ModelObserver};
+use core_db::common::model_observer::{ModelEvent, ModelObserver, ObserverAction};
 use generated::models::{
     AdminModel, AdminCreate, AdminRecord, AdminChanges, BankModel, BankCreate, BankRecord,
     BankChanges, CompanyBankAccountModel, CompanyBankAccountCreate, CompanyBankAccountRecord,
@@ -27,7 +27,7 @@ macro_rules! dispatch_creating {
                     $handler($event, &payload).await
                 }
             )+
-            _ => Ok(()),
+            _ => Ok(ObserverAction::Continue),
         }
     }};
 }
@@ -51,12 +51,26 @@ macro_rules! dispatch_updating {
         match $event.model {
             $(
                 <$model>::MODEL_KEY => {
-                    let old_row = decode::<$row>($old, stringify!($row))?;
+                    let old_rows = decode::<Vec<$row>>($old, stringify!($row))?;
                     let changes = decode::<$update>($changes, stringify!($update))?;
-                    $handler($event, &old_row, &changes).await
+                    $handler($event, &old_rows, &changes).await
                 }
             )+
-            _ => Ok(()),
+            _ => Ok(ObserverAction::Continue),
+        }
+    }};
+}
+
+macro_rules! dispatch_before_hook {
+    ($event:expr, $payload:expr, $(($model:ty, $row:ty, $handler:path)),+ $(,)?) => {{
+        match $event.model {
+            $(
+                <$model>::MODEL_KEY => {
+                    let rows = decode::<Vec<$row>>($payload, stringify!($row))?;
+                    $handler($event, &rows).await
+                }
+            )+
+            _ => Ok(ObserverAction::Continue),
         }
     }};
 }
@@ -98,7 +112,7 @@ impl ModelObserver for AppModelObserver {
         &self,
         event: &ModelEvent,
         new_data: &serde_json::Value,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<ObserverAction> {
         dispatch_creating!(
             event,
             new_data,
@@ -196,7 +210,7 @@ impl ModelObserver for AppModelObserver {
         event: &ModelEvent,
         old_data: &serde_json::Value,
         changes: &serde_json::Value,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<ObserverAction> {
         dispatch_updating!(
             event,
             old_data,
@@ -313,8 +327,8 @@ impl ModelObserver for AppModelObserver {
         &self,
         event: &ModelEvent,
         old_data: &serde_json::Value,
-    ) -> anyhow::Result<()> {
-        dispatch_row_hook!(
+    ) -> anyhow::Result<ObserverAction> {
+        dispatch_before_hook!(
             event,
             old_data,
             (AdminModel, AdminRecord, models::admin::deleting),
