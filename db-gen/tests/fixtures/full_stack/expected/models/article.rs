@@ -74,7 +74,7 @@ pub struct ArticleRecord {
     #[serde(default)]
     pub meta: std::collections::HashMap<String, JsonValue>,
     #[serde(default)]
-    pub author: Option<UserRow>,
+    pub author: Option<UserRecord>,
 }
 
 impl ArticleRecord {
@@ -180,10 +180,10 @@ impl ArticleDbCol {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ArticleRel;
 impl ArticleRel {
-    pub const AUTHOR: OneRelation<ArticleModel, UserRow, 0> = OneRelation::<ArticleModel, UserRow, 0>::new("author");
+    pub const AUTHOR: OneRelation<ArticleModel, UserRecord, 0> = OneRelation::<ArticleModel, UserRecord, 0>::new("author");
 }
 
-async fn load_author<'db>(db: DbConn<'db>, parents: &[ArticleRow]) -> Result<HashMap<i64, Option<UserRow>>> {
+async fn load_author<'db>(db: DbConn<'db>, parents: &[ArticleRow], base_url: Option<&str>) -> Result<HashMap<i64, Option<UserRecord>>> {
         if parents.is_empty() { return Ok(HashMap::new()); }
         let mut fk_vals = Vec::new();
         let mut parent_pairs = Vec::new();
@@ -197,8 +197,14 @@ async fn load_author<'db>(db: DbConn<'db>, parents: &[ArticleRow]) -> Result<Has
         let mut q = sqlx::query_as::<_, UserRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
         let rows = db.fetch_all(q).await?;
-        let mut by_pk: HashMap<i64, UserRow> = HashMap::new();
-        for row in rows { by_pk.insert(row.id.clone(), row); }
+            let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
+            let localized = LocalizedMap::default();
+        let mut by_pk: HashMap<i64, UserRecord> = HashMap::new();
+        for row in rows {
+            let key = row.id.clone();
+            let record = hydrate_record(row, &LocalizedMap::default(), base_url);
+            by_pk.insert(key, record);
+        }
         let mut out = HashMap::new();
         for (pid, fk) in parent_pairs {
             out.insert(pid, fk.and_then(|k| by_pk.get(&k).cloned()));
@@ -1366,7 +1372,7 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
             let rows = state.db.fetch_all(q).await?;
             record_profiled_query("articles", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
             let db = state.db.clone();
-            let author = load_author(db.clone(), &rows).await?;
+            let author = load_author(db.clone(), &rows, state.base_url.as_deref()).await?;
             let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
             let localized = localized::load_article_localized(db.clone(), &ids).await?;
             let meta_map = localized::load_article_meta(db.clone(), &ids).await?;
@@ -1490,7 +1496,7 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
             let rows = state.db.fetch_all(q).await?;
             record_profiled_query("articles", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
             let db = state.db.clone();
-            let author = load_author(db.clone(), &rows).await?;
+            let author = load_author(db.clone(), &rows, state.base_url.as_deref()).await?;
             let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
             let localized = localized::load_article_localized(db.clone(), &ids).await?;
             let meta_map = localized::load_article_meta(db.clone(), &ids).await?;
@@ -1637,20 +1643,20 @@ impl core_db::common::model_api::QueryField<ArticleModel> for ArticleDbCol {
     }
 }
 
-impl core_db::common::model_api::IncludeRelation<ArticleModel> for OneRelation<ArticleModel, UserRow, 0> {
+impl core_db::common::model_api::IncludeRelation<ArticleModel> for OneRelation<ArticleModel, UserRecord, 0> {
     fn include<'db>(_relation: Self, state: QueryState<'db>) -> QueryState<'db> {
         state
     }
 }
 
-impl core_db::common::model_api::WhereHasRelation<ArticleModel> for OneRelation<ArticleModel, UserRow, 0> {
+impl core_db::common::model_api::WhereHasRelation<ArticleModel> for OneRelation<ArticleModel, UserRecord, 0> {
     type Target = UserModel;
     fn where_has<'db, F>(_relation: Self, mut state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
         let start_idx = state.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), None));
+        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), state.base_url.clone()));
         let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.id = articles.author_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
@@ -1666,7 +1672,7 @@ impl core_db::common::model_api::WhereHasRelation<ArticleModel> for OneRelation<
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
         let start_idx = state.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), None));
+        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), state.base_url.clone()));
         let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
         sub_where.insert(0, "users.id = articles.author_id".to_string());
         let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
@@ -1683,8 +1689,8 @@ impl core_db::common::model_api::WhereHasRelation<ArticleModel> for OneRelation<
     }
 }
 
-impl core_db::common::model_api::RecordOneRelation<ArticleModel> for OneRelation<ArticleModel, UserRow, 0> {
-    type Target = UserRow;
+impl core_db::common::model_api::RecordOneRelation<ArticleModel> for OneRelation<ArticleModel, UserRecord, 0> {
+    type Target = UserRecord;
     fn get<'a>(_relation: Self, record: &'a ArticleRecord) -> Option<&'a Self::Target> {
         record.author.as_ref()
     }

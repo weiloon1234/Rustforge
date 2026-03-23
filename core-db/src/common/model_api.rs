@@ -3,10 +3,39 @@ use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::sync::{OnceLock, RwLock};
 
 use crate::common::sql::{BindValue, DbConn, Op, OrderDir, SetMode};
 
 pub type BoxModelFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
+
+static DEFAULT_ATTACHMENT_BASE_URL: OnceLock<RwLock<Option<String>>> = OnceLock::new();
+
+fn attachment_base_url_store() -> &'static RwLock<Option<String>> {
+    DEFAULT_ATTACHMENT_BASE_URL.get_or_init(|| RwLock::new(None))
+}
+
+pub fn set_default_attachment_base_url(base_url: Option<String>) {
+    *attachment_base_url_store()
+        .write()
+        .expect("attachment base url store poisoned") = base_url
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().trim_end_matches('/').to_string());
+}
+
+pub fn default_attachment_base_url() -> Option<String> {
+    attachment_base_url_store()
+        .read()
+        .expect("attachment base url store poisoned")
+        .clone()
+}
+
+fn resolve_attachment_base_url(base_url: Option<String>) -> Option<String> {
+    base_url
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .or_else(default_attachment_base_url)
+}
 
 pub trait ModelDef: Sized + 'static {
     type Pk: Clone + Send + Sync + Into<BindValue> + 'static;
@@ -77,11 +106,7 @@ pub trait WhereHasRelation<M: QueryModel>: Copy {
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>;
 
-    fn or_where_has<'db, F>(
-        relation: Self,
-        state: QueryState<'db>,
-        scope: F,
-    ) -> QueryState<'db>
+    fn or_where_has<'db, F>(relation: Self, state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>;
 }
@@ -132,15 +157,9 @@ pub trait CreateField<M: CreateModel>: Copy {
 }
 
 pub trait CreateConflictField<M: CreateModel>: Copy {
-    fn on_conflict_do_nothing<'db>(
-        state: CreateState<'db>,
-        fields: &[Self],
-    ) -> CreateState<'db>;
+    fn on_conflict_do_nothing<'db>(state: CreateState<'db>, fields: &[Self]) -> CreateState<'db>;
 
-    fn on_conflict_update<'db>(
-        state: CreateState<'db>,
-        fields: &[Self],
-    ) -> CreateState<'db>;
+    fn on_conflict_update<'db>(state: CreateState<'db>, fields: &[Self]) -> CreateState<'db>;
 }
 
 pub trait PatchModel: ModelDef {
@@ -314,14 +333,22 @@ impl<'db, M: QueryModel> Clone for Query<'db, M> {
 impl<'db, M: QueryModel> Query<'db, M> {
     pub fn new(db: impl Into<DbConn<'db>>) -> Self {
         Self {
-            state: QueryState::new(db.into(), None, M::DEFAULT_SELECT),
+            state: QueryState::new(
+                db.into(),
+                resolve_attachment_base_url(None),
+                M::DEFAULT_SELECT,
+            ),
             _marker: PhantomData,
         }
     }
 
     pub fn new_with_base_url(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self {
         Self {
-            state: QueryState::new(db.into(), base_url, M::DEFAULT_SELECT),
+            state: QueryState::new(
+                db.into(),
+                resolve_attachment_base_url(base_url),
+                M::DEFAULT_SELECT,
+            ),
             _marker: PhantomData,
         }
     }
@@ -431,9 +458,9 @@ impl<'db, M: QueryModel> Query<'db, M> {
     where
         F: FnOnce(Self) -> Self,
     {
-        let state = self.state.where_group(|group_state| {
-            scope(Self::from_inner(group_state)).state
-        });
+        let state = self
+            .state
+            .where_group(|group_state| scope(Self::from_inner(group_state)).state);
         Self {
             state,
             _marker: PhantomData,
@@ -444,9 +471,9 @@ impl<'db, M: QueryModel> Query<'db, M> {
     where
         F: FnOnce(Self) -> Self,
     {
-        let state = self.state.or_where_group(|group_state| {
-            scope(Self::from_inner(group_state)).state
-        });
+        let state = self
+            .state
+            .or_where_group(|group_state| scope(Self::from_inner(group_state)).state);
         Self {
             state,
             _marker: PhantomData,
@@ -508,10 +535,9 @@ impl<'db, M: QueryModel> Query<'db, M> {
         T: Into<BindValue>,
     {
         Self {
-            state: self.state.where_exists_raw(
-                clause.into(),
-                binds.into_iter().map(Into::into).collect(),
-            ),
+            state: self
+                .state
+                .where_exists_raw(clause.into(), binds.into_iter().map(Into::into).collect()),
             _marker: PhantomData,
         }
     }
@@ -737,7 +763,9 @@ impl<'db, M: QueryModel> Query<'db, M> {
         V: Into<BindValue>,
     {
         Self {
-            state: self.state.where_between_str(field.col_sql(), low.into(), high.into()),
+            state: self
+                .state
+                .where_between_str(field.col_sql(), low.into(), high.into()),
             _marker: PhantomData,
         }
     }
@@ -842,10 +870,10 @@ impl<'db, M: QueryModel> UnsafeQuery<'db, M> {
     {
         Self {
             inner: Query {
-                state: self.inner.state.where_raw(
-                    clause.into(),
-                    binds.into_iter().map(Into::into).collect(),
-                ),
+                state: self
+                    .inner
+                    .state
+                    .where_raw(clause.into(), binds.into_iter().map(Into::into).collect()),
                 _marker: PhantomData,
             },
         }
@@ -908,14 +936,14 @@ pub struct Create<'db, M: CreateModel> {
 impl<'db, M: CreateModel> Create<'db, M> {
     pub fn new(db: impl Into<DbConn<'db>>) -> Self {
         Self {
-            state: CreateState::new(db.into(), None, M::TABLE),
+            state: CreateState::new(db.into(), resolve_attachment_base_url(None), M::TABLE),
             _marker: PhantomData,
         }
     }
 
     pub fn new_with_base_url(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self {
         Self {
-            state: CreateState::new(db.into(), base_url, M::TABLE),
+            state: CreateState::new(db.into(), resolve_attachment_base_url(base_url), M::TABLE),
             _marker: PhantomData,
         }
     }
@@ -979,14 +1007,14 @@ pub struct Patch<'db, M: PatchModel> {
 impl<'db, M: PatchModel> Patch<'db, M> {
     pub fn new(db: impl Into<DbConn<'db>>) -> Self {
         Self {
-            state: PatchState::new(db.into(), None, M::TABLE),
+            state: PatchState::new(db.into(), resolve_attachment_base_url(None), M::TABLE),
             _marker: PhantomData,
         }
     }
 
     pub fn new_with_base_url(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Self {
         Self {
-            state: PatchState::new(db.into(), base_url, M::TABLE),
+            state: PatchState::new(db.into(), resolve_attachment_base_url(base_url), M::TABLE),
             _marker: PhantomData,
         }
     }
@@ -1232,7 +1260,9 @@ impl<'db> QueryState<'db> {
             let group_clauses: Vec<String> = result.where_sql.drain(start_where..).collect();
             let grouped_sql = format!("({})", group_clauses.join(" AND "));
             if let Some(last) = result.where_sql.pop() {
-                result.where_sql.push(format!("({} OR {})", last, grouped_sql));
+                result
+                    .where_sql
+                    .push(format!("({} OR {})", last, grouped_sql));
             } else {
                 result.where_sql.push(grouped_sql);
             }
@@ -1243,8 +1273,7 @@ impl<'db> QueryState<'db> {
     // ── ORDER BY ───────────────────────────────────────────────────────
 
     pub fn order_by_str(mut self, col_sql: &str, dir: OrderDir) -> Self {
-        self.order_sql
-            .push(format!("{} {}", col_sql, dir.as_sql()));
+        self.order_sql.push(format!("{} {}", col_sql, dir.as_sql()));
         self
     }
 
@@ -1585,11 +1614,8 @@ impl<'db> QueryState<'db> {
 
     /// Assemble a full SELECT statement and return it with binds (consuming self).
     pub fn to_sql(self) -> (String, Vec<BindValue>) {
-        let select_clause = Self::build_select_clause(
-            self.distinct,
-            self.distinct_on.as_deref(),
-            self.select_sql,
-        );
+        let select_clause =
+            Self::build_select_clause(self.distinct, self.distinct_on.as_deref(), self.select_sql);
         let table_name = self.from_sql.unwrap_or_default();
         let mut sql = if table_name.is_empty() {
             format!("SELECT {}", select_clause)
@@ -1812,9 +1838,7 @@ impl<'db> CreateState<'db> {
     }
 
     pub fn build_insert_sql(&self) -> (String, Vec<BindValue>) {
-        let placeholders: Vec<String> = (1..=self.binds.len())
-            .map(|i| format!("${}", i))
-            .collect();
+        let placeholders: Vec<String> = (1..=self.binds.len()).map(|i| format!("${}", i)).collect();
         let mut sql = format!(
             "INSERT INTO {} ({}) VALUES ({})",
             self.table,
@@ -2034,18 +2058,12 @@ impl<M, T> CreateConflictField<M> for Column<M, T>
 where
     M: CreateModel,
 {
-    fn on_conflict_do_nothing<'db>(
-        state: CreateState<'db>,
-        fields: &[Self],
-    ) -> CreateState<'db> {
+    fn on_conflict_do_nothing<'db>(state: CreateState<'db>, fields: &[Self]) -> CreateState<'db> {
         let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();
         state.on_conflict_do_nothing(&cols)
     }
 
-    fn on_conflict_update<'db>(
-        state: CreateState<'db>,
-        fields: &[Self],
-    ) -> CreateState<'db> {
+    fn on_conflict_update<'db>(state: CreateState<'db>, fields: &[Self]) -> CreateState<'db> {
         let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();
         state.on_conflict_update(&cols)
     }
@@ -2096,3 +2114,128 @@ macro_rules! impl_patch_numeric_field {
 }
 
 impl_patch_numeric_field!(i16, i32, i64, f64, rust_decimal::Decimal);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::postgres::PgPoolOptions;
+
+    struct FakeModel;
+
+    impl ModelDef for FakeModel {
+        type Pk = i64;
+        type Record = ();
+        type Create = ();
+        type Changes = ();
+
+        const TABLE: &'static str = "fake_models";
+        const MODEL_KEY: &'static str = "fake_model";
+        const PK_COL: &'static str = "id";
+    }
+
+    impl QueryModel for FakeModel {
+        const DEFAULT_SELECT: &'static str = "id";
+        const HAS_SOFT_DELETE: bool = false;
+        const SOFT_DELETE_COL: &'static str = "";
+        const HAS_CREATED_AT: bool = false;
+        const HAS_UPDATED_AT: bool = false;
+
+        fn query_all<'db>(_: QueryState<'db>) -> BoxModelFuture<'db, Vec<Self::Record>> {
+            unreachable!()
+        }
+
+        fn query_first<'db>(_: QueryState<'db>) -> BoxModelFuture<'db, Option<Self::Record>> {
+            unreachable!()
+        }
+
+        fn query_find<'db>(
+            _: QueryState<'db>,
+            _: Self::Pk,
+        ) -> BoxModelFuture<'db, Option<Self::Record>> {
+            unreachable!()
+        }
+
+        fn query_count<'db>(_: QueryState<'db>) -> BoxModelFuture<'db, i64> {
+            unreachable!()
+        }
+
+        fn query_delete<'db>(_: QueryState<'db>) -> BoxModelFuture<'db, u64> {
+            unreachable!()
+        }
+
+        fn query_paginate<'db>(
+            _: QueryState<'db>,
+            _: i64,
+            _: i64,
+        ) -> BoxModelFuture<'db, Page<Self::Record>> {
+            unreachable!()
+        }
+    }
+
+    impl CreateModel for FakeModel {
+        fn create_save<'db>(_: CreateState<'db>) -> BoxModelFuture<'db, Self::Record> {
+            unreachable!()
+        }
+
+        fn transform_create_value(_: &str, value: BindValue) -> Result<BindValue> {
+            Ok(value)
+        }
+    }
+
+    impl PatchModel for FakeModel {
+        fn patch_from_query<'db>(_: QueryState<'db>) -> PatchState<'db> {
+            unreachable!()
+        }
+
+        fn patch_save<'db>(_: PatchState<'db>) -> BoxModelFuture<'db, u64> {
+            unreachable!()
+        }
+
+        fn patch_fetch<'db>(_: PatchState<'db>) -> BoxModelFuture<'db, Vec<Self::Record>> {
+            unreachable!()
+        }
+
+        fn transform_patch_value(_: &str, value: BindValue) -> Result<BindValue> {
+            Ok(value)
+        }
+    }
+
+    fn fake_pool() -> sqlx::PgPool {
+        PgPoolOptions::new()
+            .connect_lazy("postgres://postgres:postgres@127.0.0.1/test")
+            .expect("connect_lazy should succeed")
+    }
+
+    #[tokio::test]
+    async fn query_create_and_patch_inherit_default_attachment_base_url() {
+        set_default_attachment_base_url(Some("https://cdn.example.com/media/".to_string()));
+        let db = fake_pool();
+
+        let query = Query::<FakeModel>::new(&db);
+        assert_eq!(
+            query.into_inner().base_url.as_deref(),
+            Some("https://cdn.example.com/media")
+        );
+
+        let create = Create::<FakeModel>::new(&db);
+        assert_eq!(
+            create.into_inner().base_url.as_deref(),
+            Some("https://cdn.example.com/media")
+        );
+
+        let patch = Patch::<FakeModel>::new(&db);
+        assert_eq!(
+            patch.into_inner().base_url.as_deref(),
+            Some("https://cdn.example.com/media")
+        );
+
+        let query = Query::<FakeModel>::new_with_base_url(
+            &db,
+            Some("https://images.example.com/custom/".to_string()),
+        );
+        assert_eq!(
+            query.into_inner().base_url.as_deref(),
+            Some("https://images.example.com/custom")
+        );
+    }
+}

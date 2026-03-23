@@ -97,10 +97,7 @@ fn update_changes_ident(model_title: &str) -> String {
 
 /// Return the Rust type to use with `serde_json::from_value` for a given field type.
 /// Enums are stored as strings, so we deserialize them as String (or Option<String>).
-fn json_deser_type_for_field(
-    ty: &str,
-    enum_specs: &BTreeMap<String, EnumSpec>,
-) -> String {
+fn json_deser_type_for_field(ty: &str, enum_specs: &BTreeMap<String, EnumSpec>) -> String {
     let trimmed = ty.trim();
     if let Some(inner) = parse_option_inner_type(trimmed) {
         if enum_specs.contains_key(inner.as_str()) {
@@ -263,7 +260,15 @@ fn collect_relation_paths(
             // current path — prevents combinatorial explosion from
             // self-referencing relations (e.g. User.introducer → User).
             if visited_models.insert(rel.target_model.clone()) {
-                walk(schema, &rel.target_model, path, out, seen, visited_models, max_depth);
+                walk(
+                    schema,
+                    &rel.target_model,
+                    path,
+                    out,
+                    seen,
+                    visited_models,
+                    max_depth,
+                );
                 visited_models.remove(&rel.target_model);
             }
 
@@ -277,7 +282,13 @@ fn collect_relation_paths(
     let mut visited_models = BTreeSet::new();
     visited_models.insert(model_name.to_string());
     walk(
-        schema, model_name, &mut path, &mut out, &mut seen, &mut visited_models, max_depth,
+        schema,
+        model_name,
+        &mut path,
+        &mut out,
+        &mut seen,
+        &mut visited_models,
+        max_depth,
     );
     out
 }
@@ -329,32 +340,6 @@ fn build_nested_where_has_expr(
 
     render(schema, root_model_name, path, leaf_expr_template, root_var)
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 fn render_insert_field_setters(db_fields: &[FieldSpec], _col_ident: &str) -> String {
     let mut out = String::new();
@@ -683,7 +668,11 @@ fn render_public_column_namespace(
         .unwrap();
     }
     writeln!(out, "}}\n").unwrap();
-    writeln!(out, "fn {resolver_ident}(sql: &str) -> Option<{col_ident}> {{").unwrap();
+    writeln!(
+        out,
+        "fn {resolver_ident}(sql: &str) -> Option<{col_ident}> {{"
+    )
+    .unwrap();
     writeln!(out, "    match sql {{").unwrap();
     for field in db_fields {
         writeln!(
@@ -699,7 +688,6 @@ fn render_public_column_namespace(
     writeln!(out, "}}\n").unwrap();
     out
 }
-
 
 fn render_update_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> String {
     let mut out = String::new();
@@ -958,7 +946,6 @@ fn render_record_collection_build_no_relations(
     out
 }
 
-
 fn render_record_collection_build(
     relations: &[RelationSpec],
     pk: &str,
@@ -1041,16 +1028,6 @@ fn render_profiler_log(
     out
 }
 
-
-
-
-
-
-
-
-
-
-
 /// Generate the body of `query_all` that uses QueryState::to_select_sql + hydration.
 /// Returns the code inside the `Box::pin(async move { ... })` block.
 fn render_query_all_body(
@@ -1088,11 +1065,7 @@ fn render_query_all_body(
     )
     .unwrap();
     writeln!(out, "            for b in binds {{ q = bind(q, b); }}").unwrap();
-    writeln!(
-        out,
-        "            let rows = state.db.fetch_all(q).await?;"
-    )
-    .unwrap();
+    writeln!(out, "            let rows = state.db.fetch_all(q).await?;").unwrap();
     if !skip_profiler {
         writeln!(out, "            record_profiled_query(\"{table}\", \"SELECT\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
     }
@@ -1103,7 +1076,7 @@ fn render_query_all_body(
             let rel_name = to_snake(&rel.name);
             writeln!(
                 out,
-                "            let {rel_name} = load_{rel_name}(db.clone(), &rows).await?;"
+                "            let {rel_name} = load_{rel_name}(db.clone(), &rows, state.base_url.as_deref()).await?;"
             )
             .unwrap();
         }
@@ -1182,11 +1155,7 @@ fn render_query_all_body(
 }
 
 /// Generate the body of `query_count` using QueryState::to_count_sql.
-fn render_query_count_body(
-    has_soft_delete: bool,
-    table: &str,
-    skip_profiler: bool,
-) -> String {
+fn render_query_count_body(has_soft_delete: bool, table: &str, skip_profiler: bool) -> String {
     let mut out = String::new();
     let _soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
     writeln!(
@@ -1241,8 +1210,16 @@ fn render_query_paginate_body(
 ) -> String {
     let mut out = String::new();
     let _soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
-    writeln!(out, "            let page = if page < 1 {{ 1 }} else {{ page }};").unwrap();
-    writeln!(out, "            let per_page = resolve_per_page(per_page);").unwrap();
+    writeln!(
+        out,
+        "            let page = if page < 1 {{ 1 }} else {{ page }};"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            let per_page = resolve_per_page(per_page);"
+    )
+    .unwrap();
     // Count query
     writeln!(
         out,
@@ -1275,7 +1252,11 @@ fn render_query_paginate_body(
     if !skip_profiler {
         writeln!(out, "            record_profiled_query(\"{table}\", \"COUNT\", &count_sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
     }
-    writeln!(out, "            let last_page = ((total + per_page - 1) / per_page).max(1);").unwrap();
+    writeln!(
+        out,
+        "            let last_page = ((total + per_page - 1) / per_page).max(1);"
+    )
+    .unwrap();
     writeln!(out, "            let current_page = page.min(last_page);").unwrap();
     writeln!(
         out,
@@ -1304,11 +1285,7 @@ fn render_query_paginate_body(
     )
     .unwrap();
     writeln!(out, "            for b in binds {{ q = bind(q, b); }}").unwrap();
-    writeln!(
-        out,
-        "            let rows = state.db.fetch_all(q).await?;"
-    )
-    .unwrap();
+    writeln!(out, "            let rows = state.db.fetch_all(q).await?;").unwrap();
     if !skip_profiler {
         writeln!(out, "            record_profiled_query(\"{table}\", \"SELECT\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
     }
@@ -1319,7 +1296,7 @@ fn render_query_paginate_body(
             let rel_name = to_snake(&rel.name);
             writeln!(
                 out,
-                "            let {rel_name} = load_{rel_name}(db.clone(), &rows).await?;"
+                "            let {rel_name} = load_{rel_name}(db.clone(), &rows, state.base_url.as_deref()).await?;"
             )
             .unwrap();
         }
@@ -1330,7 +1307,14 @@ fn render_query_paginate_body(
         "db.clone()"
     };
     let support_loaders = render_support_data_loaders(
-        model_snake, pk, parent_pk_ty, localized_fields, has_meta, has_attachments, "rows", db_expr,
+        model_snake,
+        pk,
+        parent_pk_ty,
+        localized_fields,
+        has_meta,
+        has_attachments,
+        "rows",
+        db_expr,
     );
     for line in support_loaders.lines() {
         if line.trim().is_empty() {
@@ -1342,7 +1326,15 @@ fn render_query_paginate_body(
     let base_url_expr = "state.base_url.as_deref()";
     if !relations.is_empty() {
         let build = render_record_collection_build(
-            relations, pk, "rows", "r", "data", localized_fields, has_meta, has_attachments, base_url_expr,
+            relations,
+            pk,
+            "rows",
+            "r",
+            "data",
+            localized_fields,
+            has_meta,
+            has_attachments,
+            base_url_expr,
         );
         for line in build.lines() {
             if line.trim().is_empty() {
@@ -1353,7 +1345,13 @@ fn render_query_paginate_body(
         }
     } else {
         let build = render_record_collection_build_no_relations(
-            "data", "r", "rows", localized_fields, has_meta, has_attachments, base_url_expr,
+            "data",
+            "r",
+            "rows",
+            localized_fields,
+            has_meta,
+            has_attachments,
+            base_url_expr,
         );
         for line in build.lines() {
             if line.trim().is_empty() {
@@ -1463,8 +1461,16 @@ fn render_query_delete_body(
         )
         .unwrap();
         writeln!(out, "                    match action {{").unwrap();
-        writeln!(out, "                        ObserverAction::Prevent(err) => return Err(err),").unwrap();
-        writeln!(out, "                        ObserverAction::Modify(overrides) => {{").unwrap();
+        writeln!(
+            out,
+            "                        ObserverAction::Prevent(err) => return Err(err),"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                        ObserverAction::Modify(overrides) => {{"
+        )
+        .unwrap();
         writeln!(
             out,
             "                            let ids: Vec<{parent_pk_ty}> = __old_rows.iter().map(|r| r.{pk_snake}.clone()).collect();"
@@ -1477,7 +1483,11 @@ fn render_query_delete_body(
         .unwrap();
         writeln!(out, "                            return Ok(affected);").unwrap();
         writeln!(out, "                        }}").unwrap();
-        writeln!(out, "                        ObserverAction::Continue => {{}}").unwrap();
+        writeln!(
+            out,
+            "                        ObserverAction::Continue => {{}}"
+        )
+        .unwrap();
         writeln!(out, "                    }}").unwrap();
         writeln!(out, "                }}").unwrap();
         writeln!(out, "            }}").unwrap();
@@ -1637,11 +1647,6 @@ fn render_query_delete_body(
     out
 }
 
-
-
-
-
-
 fn render_create_model_impl(
     model_title: &str,
     insert_ident: &str,
@@ -1661,9 +1666,17 @@ fn render_create_model_impl(
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
-    writeln!(out, "            let builder = {insert_ident}::from_state(state);").unwrap();
+    writeln!(
+        out,
+        "            let builder = {insert_ident}::from_state(state);"
+    )
+    .unwrap();
     writeln!(out, "            let db = builder.state.db.clone();").unwrap();
-    writeln!(out, "            let base_url = builder.state.base_url.clone();").unwrap();
+    writeln!(
+        out,
+        "            let base_url = builder.state.base_url.clone();"
+    )
+    .unwrap();
     writeln!(out, "            let created = builder.save().await?;").unwrap();
     writeln!(
         out,
@@ -1683,7 +1696,11 @@ fn render_create_model_impl(
     out
 }
 
-fn render_create_field_impl(model_title: &str, col_ident: &str, _db_fields: &[FieldSpec]) -> String {
+fn render_create_field_impl(
+    model_title: &str,
+    col_ident: &str,
+    _db_fields: &[FieldSpec],
+) -> String {
     let mut out = String::new();
     writeln!(
         out,
@@ -1715,7 +1732,11 @@ fn render_create_conflict_field_impl(model_title: &str, col_ident: &str) -> Stri
         "    fn on_conflict_do_nothing<'db>(state: CreateState<'db>, fields: &[Self]) -> CreateState<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();").unwrap();
+    writeln!(
+        out,
+        "        let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();"
+    )
+    .unwrap();
     writeln!(out, "        state.on_conflict_do_nothing(&cols)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
@@ -1723,14 +1744,16 @@ fn render_create_conflict_field_impl(model_title: &str, col_ident: &str) -> Stri
         "    fn on_conflict_update<'db>(state: CreateState<'db>, fields: &[Self]) -> CreateState<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();").unwrap();
+    writeln!(
+        out,
+        "        let cols: Vec<&'static str> = fields.iter().map(|f| f.as_sql()).collect();"
+    )
+    .unwrap();
     writeln!(out, "        state.on_conflict_update(&cols)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
     out
 }
-
-
 
 fn render_patch_model_impl(
     model_title: &str,
@@ -1780,7 +1803,11 @@ fn render_patch_model_impl(
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
-    writeln!(out, "            let builder = {update_ident}::from_state(state);").unwrap();
+    writeln!(
+        out,
+        "            let builder = {update_ident}::from_state(state);"
+    )
+    .unwrap();
     writeln!(out, "            builder.save().await").unwrap();
     writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
@@ -1824,7 +1851,11 @@ fn render_patch_model_impl(
         "            let target_ids = db.fetch_all_scalar(select_q).await?;"
     )
     .unwrap();
-    writeln!(out, "            let builder = {update_ident}::from_state(state);").unwrap();
+    writeln!(
+        out,
+        "            let builder = {update_ident}::from_state(state);"
+    )
+    .unwrap();
     writeln!(out, "            builder.save().await?;").unwrap();
     writeln!(out, "            if target_ids.is_empty() {{").unwrap();
     writeln!(out, "                return Ok(Vec::new());").unwrap();
@@ -1835,18 +1866,30 @@ fn render_patch_model_impl(
     )
     .unwrap();
     if has_soft_delete {
-        writeln!(out, "            let mut state = query.into_inner().with_deleted();").unwrap();
+        writeln!(
+            out,
+            "            let mut state = query.into_inner().with_deleted();"
+        )
+        .unwrap();
         writeln!(out, "            let binds: Vec<BindValue> = target_ids.iter().cloned().map(Into::into).collect();").unwrap();
         writeln!(
             out,
             "            state = state.where_in_str({col_ident}::{pk_col_variant}.as_sql(), &binds);"
         )
         .unwrap();
-        writeln!(out, "            <Self as core_db::common::model_api::QueryModel>::query_all(state).await").unwrap();
+        writeln!(
+            out,
+            "            <Self as core_db::common::model_api::QueryModel>::query_all(state).await"
+        )
+        .unwrap();
     } else {
         writeln!(out, "            let binds: Vec<BindValue> = target_ids.iter().cloned().map(Into::into).collect();").unwrap();
         writeln!(out, "            let state = query.into_inner().where_in_str({col_ident}::{pk_col_variant}.as_sql(), &binds);").unwrap();
-        writeln!(out, "            <Self as core_db::common::model_api::QueryModel>::query_all(state).await").unwrap();
+        writeln!(
+            out,
+            "            <Self as core_db::common::model_api::QueryModel>::query_all(state).await"
+        )
+        .unwrap();
     }
     writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
@@ -1884,7 +1927,6 @@ fn render_patch_assign_field_impl(
     writeln!(out, "}}\n").unwrap();
     out
 }
-
 
 fn render_patch_numeric_field_impl(
     model_title: &str,
@@ -1950,7 +1992,6 @@ fn render_patch_numeric_field_impl(
     writeln!(out, "}}\n").unwrap();
     out
 }
-
 
 pub fn generate_models(
     schema: &Schema,
@@ -2132,7 +2173,9 @@ fn render_model(
         .iter()
         .filter(|relation| matches!(relation.kind, RelationKind::HasMany))
         .collect();
-    let max_rel_depth = cfg.datatable_rel_depth.unwrap_or(DATATABLE_REL_FILTER_MAX_DEPTH);
+    let max_rel_depth = cfg
+        .datatable_rel_depth
+        .unwrap_or(DATATABLE_REL_FILTER_MAX_DEPTH);
     let relation_paths = collect_relation_paths(schema, name, max_rel_depth);
     let computed_fields = parse_computed(cfg);
     let hidden_fields: BTreeSet<String> = cfg
@@ -2258,11 +2301,7 @@ fn render_model(
                 writeln!(
                     imports,
                     "use crate::generated::models::{}::{{{}DbCol, {}Model, {}Row{}}};",
-                    target_mod,
-                    target_title,
-                    target_title,
-                    target_title,
-                    target_rel_import
+                    target_mod, target_title, target_title, target_title, target_rel_import
                 )
                 .unwrap();
             }
@@ -2285,11 +2324,7 @@ fn render_model(
                 writeln!(
                     imports,
                     "use crate::generated::models::{}::{{{}DbCol, {}Model, {}Row{}}};",
-                    target_mod,
-                    target_title,
-                    target_title,
-                    target_title,
-                    target_rel_import
+                    target_mod, target_title, target_title, target_title, target_rel_import
                 )
                 .unwrap();
             }
@@ -2437,14 +2472,14 @@ fn render_model(
     for rel in &relations {
         let rel_field = to_snake(&rel.name);
         let target_title = to_title_case(&rel.target_model);
-        let target_row = format!("{}Row", target_title);
+        let target_record = format!("{}Record", target_title);
         record_fields.push("    #[serde(default)]".to_string());
         match rel.kind {
             RelationKind::HasMany => {
-                record_fields.push(format!("    pub {rel_field}: Vec<{target_row}>,"));
+                record_fields.push(format!("    pub {rel_field}: Vec<{target_record}>,"));
             }
             RelationKind::BelongsTo => {
-                record_fields.push(format!("    pub {rel_field}: Option<{target_row}>,"));
+                record_fields.push(format!("    pub {rel_field}: Option<{target_record}>,"));
             }
         }
     }
@@ -2700,7 +2735,11 @@ fn render_model(
         )
         .unwrap();
         writeln!(out, "    if let Some(ref ml) = ml_{f} {{").unwrap();
-        writeln!(out, "        record.{f} = Some(ml.get(locale).to_string());").unwrap();
+        writeln!(
+            out,
+            "        record.{f} = Some(ml.get(locale).to_string());"
+        )
+        .unwrap();
         writeln!(out, "    }}").unwrap();
         writeln!(out, "    record.{f}_translations = ml_{f};").unwrap();
     }
@@ -2794,7 +2833,10 @@ fn render_model(
     }
 
     if !cfg.record_impl_items.is_empty() {
-        out.push_str(&render_custom_impl_block(&record_ident, &cfg.record_impl_items));
+        out.push_str(&render_custom_impl_block(
+            &record_ident,
+            &cfg.record_impl_items,
+        ));
     }
 
     let row_view_json_section = out;
@@ -2852,32 +2894,28 @@ fn render_model(
         for (rel_idx, rel) in relations.iter().enumerate() {
             let rel_const = to_snake(&rel.name).to_uppercase();
             let target_title = to_title_case(&rel.target_model);
-            let target_row_ident = format!("{target_title}Row");
+            let target_record_ident = format!("{target_title}Record");
             let rel_ty = match rel.kind {
-                RelationKind::BelongsTo => format!(
-                    "OneRelation<{model_title}Model, {target_row_ident}, {rel_idx}>"
-                ),
-                RelationKind::HasMany => format!(
-                    "ManyRelation<{model_title}Model, {target_row_ident}, {rel_idx}>"
-                ),
+                RelationKind::BelongsTo => {
+                    format!("OneRelation<{model_title}Model, {target_record_ident}, {rel_idx}>")
+                }
+                RelationKind::HasMany => {
+                    format!("ManyRelation<{model_title}Model, {target_record_ident}, {rel_idx}>")
+                }
             };
             let rel_value = match rel.kind {
                 RelationKind::BelongsTo => format!(
-                    "OneRelation::<{model_title}Model, {target_row_ident}, {rel_idx}>::new(\"{rel_name}\")",
+                    "OneRelation::<{model_title}Model, {target_record_ident}, {rel_idx}>::new(\"{rel_name}\")",
                     rel_name = rel.name
                 ),
                 RelationKind::HasMany => format!(
-                    "ManyRelation::<{model_title}Model, {target_row_ident}, {rel_idx}>::new(\"{rel_name}\", \"{target_table}\", \"{foreign_key}\")",
+                    "ManyRelation::<{model_title}Model, {target_record_ident}, {rel_idx}>::new(\"{rel_name}\", \"{target_table}\", \"{foreign_key}\")",
                     rel_name = rel.name,
                     target_table = rel.target_table,
                     foreign_key = rel.foreign_key
                 ),
             };
-            writeln!(
-                out,
-                "    pub const {rel_const}: {rel_ty} = {rel_value};",
-            )
-            .unwrap();
+            writeln!(out, "    pub const {rel_const}: {rel_ty} = {rel_value};",).unwrap();
         }
         writeln!(out, "}}\n").unwrap();
     }
@@ -2887,10 +2925,42 @@ fn render_model(
         let fn_name = format!("load_{}", to_snake(&rel.name));
         let target_title = to_title_case(&rel.target_model);
         let target_row = format!("{}Row", target_title);
+        let target_record = format!("{}Record", target_title);
+        let target_cfg = schema
+            .models
+            .get(&rel.target_model)
+            .unwrap_or_else(|| panic!("missing relation target model '{}'", rel.target_model));
+        let target_model_snake = to_snake(&rel.target_model);
+        let target_localized_fields: Vec<String> = target_cfg
+            .localized
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| to_snake(&s))
+            .collect();
+        let target_has_meta = !parse_meta(target_cfg).is_empty();
+        let target_has_attachments = !parse_attachments(target_cfg).is_empty();
+        let target_support_loaders = render_support_data_loaders(
+            &target_model_snake,
+            &rel.target_pk,
+            &rel.target_pk_ty,
+            &target_localized_fields,
+            target_has_meta,
+            target_has_attachments,
+            "rows",
+            "db.clone()",
+        );
+        let target_hydrate_expr = build_hydrate_record_expr(
+            "row",
+            &target_localized_fields,
+            target_has_meta,
+            target_has_attachments,
+            "base_url",
+        );
         match rel.kind {
             RelationKind::HasMany => {
                 let target_fk_optional = relation_target_field_is_optional(schema, rel);
-                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}]) -> Result<HashMap<{parent_pk_ty}, Vec<{target_row}>>> {{").unwrap();
+                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}], base_url: Option<&str>) -> Result<HashMap<{parent_pk_ty}, Vec<{target_record}>>> {{").unwrap();
                 writeln!(
                     out,
                     "        if parents.is_empty() {{ return Ok(HashMap::new()); }}"
@@ -2906,20 +2976,33 @@ fn render_model(
                 .unwrap();
                 writeln!(out, "        for id in ids {{ q = bind(q, id.into()); }}").unwrap();
                 writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-                writeln!(out, "        let mut map: HashMap<{parent_pk_ty}, Vec<{target_row}>> = HashMap::new();").unwrap();
+                for line in target_support_loaders.lines() {
+                    if line.trim().is_empty() {
+                        writeln!(out).unwrap();
+                    } else {
+                        writeln!(out, "    {}", line).unwrap();
+                    }
+                }
+                writeln!(out, "        let mut map: HashMap<{parent_pk_ty}, Vec<{target_record}>> = HashMap::new();").unwrap();
                 writeln!(out, "        for row in rows {{").unwrap();
                 if target_fk_optional {
                     writeln!(
                         out,
-                        "            if let Some(fk_val) = row.{fk}.clone() {{ map.entry(fk_val).or_default().push(row); }}",
+                        "            if let Some(fk_val) = row.{fk}.clone() {{ let record = {target_hydrate_expr}; map.entry(fk_val).or_default().push(record); }}",
                         fk = rel.foreign_key
                     )
                     .unwrap();
                 } else {
                     writeln!(
                         out,
-                        "            map.entry(row.{fk}.clone()).or_default().push(row);",
+                        "            let fk_val = row.{fk}.clone();",
                         fk = rel.foreign_key
+                    )
+                    .unwrap();
+                    writeln!(out, "            let record = {target_hydrate_expr};").unwrap();
+                    writeln!(
+                        out,
+                        "            map.entry(fk_val).or_default().push(record);"
                     )
                     .unwrap();
                 }
@@ -2931,7 +3014,7 @@ fn render_model(
                 let is_fk_optional = fields
                     .iter()
                     .any(|f| f.name == rel.foreign_key && f.ty.starts_with("Option<"));
-                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}]) -> Result<HashMap<{parent_pk_ty}, Option<{target_row}>>> {{").unwrap();
+                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}], base_url: Option<&str>) -> Result<HashMap<{parent_pk_ty}, Option<{target_record}>>> {{").unwrap();
                 writeln!(
                     out,
                     "        if parents.is_empty() {{ return Ok(HashMap::new()); }}"
@@ -2982,13 +3065,24 @@ fn render_model(
                 )
                 .unwrap();
                 writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-                writeln!(out, "        let mut by_pk: HashMap<{target_pk_ty}, {target_row}> = HashMap::new();", target_pk_ty = rel.target_pk_ty).unwrap();
+                for line in target_support_loaders.lines() {
+                    if line.trim().is_empty() {
+                        writeln!(out).unwrap();
+                    } else {
+                        writeln!(out, "    {}", line).unwrap();
+                    }
+                }
+                writeln!(out, "        let mut by_pk: HashMap<{target_pk_ty}, {target_record}> = HashMap::new();", target_pk_ty = rel.target_pk_ty).unwrap();
+                writeln!(out, "        for row in rows {{").unwrap();
                 writeln!(
                     out,
-                    "        for row in rows {{ by_pk.insert(row.{target_pk}.clone(), row); }}",
+                    "            let key = row.{target_pk}.clone();",
                     target_pk = rel.target_pk
                 )
                 .unwrap();
+                writeln!(out, "            let record = {target_hydrate_expr};").unwrap();
+                writeln!(out, "            by_pk.insert(key, record);").unwrap();
+                writeln!(out, "        }}").unwrap();
                 writeln!(out, "        let mut out = HashMap::new();").unwrap();
                 writeln!(out, "        for (pid, fk) in parent_pairs {{").unwrap();
                 writeln!(
@@ -3033,17 +3127,18 @@ fn render_model(
         )
         .unwrap();
     query_context
-        .insert(
-            "unsafe_query_section",
-        unsafe_query_section,
-        )
+        .insert("unsafe_query_section", unsafe_query_section)
         .unwrap();
     let query_section = render_template("models/query.rs.tpl", &query_context).unwrap();
     let mut out = String::new();
 
     // Insert builder — wraps CreateState for SQL, adds model-specific extension fields
     writeln!(out, "pub struct {insert_ident}<'db> {{").unwrap();
-    writeln!(out, "    pub(crate) state: core_db::common::model_api::CreateState<'db>,").unwrap();
+    writeln!(
+        out,
+        "    pub(crate) state: core_db::common::model_api::CreateState<'db>,"
+    )
+    .unwrap();
     if !localized_fields.is_empty() {
         writeln!(
             out,
@@ -3163,12 +3258,7 @@ fn render_model(
     writeln!(out, "            match *col_name {{").unwrap();
     for f in &db_fields {
         let decode_expr = render_bind_decode_expr(&f.ty, "bind", &enum_specs);
-        writeln!(
-            out,
-            "                \"{}\" => {{",
-            f.name
-        )
-        .unwrap();
+        writeln!(out, "                \"{}\" => {{", f.name).unwrap();
         writeln!(out, "                    let value = {decode_expr};").unwrap();
         writeln!(
             out,
@@ -3191,11 +3281,7 @@ fn render_model(
             "    fn apply_create_overrides(mut state: CreateState<'_>, overrides: serde_json::Value) -> Result<CreateState<'_>> {{"
         )
         .unwrap();
-        writeln!(
-            out,
-            "        let map = overrides.as_object()"
-        )
-        .unwrap();
+        writeln!(out, "        let map = overrides.as_object()").unwrap();
         writeln!(
             out,
             "            .ok_or_else(|| anyhow::anyhow!(\"observer overrides must be a JSON object\"))?;"
@@ -3205,12 +3291,7 @@ fn render_model(
         writeln!(out, "            match key.as_str() {{").unwrap();
         for f in &db_fields {
             let deser_ty = json_deser_type_for_field(&f.ty, &enum_specs);
-            writeln!(
-                out,
-                "                \"{}\" => {{",
-                f.name
-            )
-            .unwrap();
+            writeln!(out, "                \"{}\" => {{", f.name).unwrap();
             writeln!(
                 out,
                 "                    let v: {deser_ty} = serde_json::from_value(val.clone())?;"
@@ -3275,8 +3356,16 @@ fn render_model(
         )
         .unwrap();
         writeln!(out, "                match action {{").unwrap();
-        writeln!(out, "                    ObserverAction::Prevent(err) => return Err(err),").unwrap();
-        writeln!(out, "                    ObserverAction::Modify(overrides) => {{").unwrap();
+        writeln!(
+            out,
+            "                    ObserverAction::Prevent(err) => return Err(err),"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                    ObserverAction::Modify(overrides) => {{"
+        )
+        .unwrap();
         writeln!(out, "                        self.state = Self::apply_create_overrides(self.state, overrides)?;").unwrap();
         writeln!(out, "                    }}").unwrap();
         writeln!(out, "                    ObserverAction::Continue => {{}}").unwrap();
@@ -3451,7 +3540,11 @@ fn render_model(
     .unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "        let base_url = self.state.base_url.clone();").unwrap();
-    writeln!(out, "        let (sql, binds) = self.state.build_insert_sql();").unwrap();
+    writeln!(
+        out,
+        "        let (sql, binds) = self.state.build_insert_sql();"
+    )
+    .unwrap();
     writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
     out.push_str(&render_profiler_start(skip_profiler));
     writeln!(
@@ -3607,7 +3700,11 @@ fn render_model(
 
     // Update builder — wraps PatchState for SQL, adds model-specific extension fields
     writeln!(out, "pub struct {update_ident}<'db> {{").unwrap();
-    writeln!(out, "    pub(crate) state: core_db::common::model_api::PatchState<'db>,").unwrap();
+    writeln!(
+        out,
+        "    pub(crate) state: core_db::common::model_api::PatchState<'db>,"
+    )
+    .unwrap();
     if !localized_fields.is_empty() {
         writeln!(
             out,
@@ -3744,7 +3841,11 @@ fn render_model(
         "        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
     )
     .unwrap();
-    writeln!(out, "        let mut idx = self.state.where_binds.len() + 1;").unwrap();
+    writeln!(
+        out,
+        "        let mut idx = self.state.where_binds.len() + 1;"
+    )
+    .unwrap();
     writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
     writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
     writeln!(out, "            clause.replace_range(pos..pos + 1, &ph);").unwrap();
@@ -3769,12 +3870,7 @@ fn render_model(
     writeln!(out, "            match *col {{").unwrap();
     for f in &db_fields {
         let decode_expr = render_bind_decode_expr(&f.ty, "bind", &enum_specs);
-        writeln!(
-            out,
-            "                \"{}\" => {{",
-            f.name
-        )
-        .unwrap();
+        writeln!(out, "                \"{}\" => {{", f.name).unwrap();
         writeln!(out, "                    let value = {decode_expr};").unwrap();
         writeln!(
             out,
@@ -3813,11 +3909,7 @@ fn render_model(
             "    fn apply_update_overrides(mut state: PatchState<'_>, overrides: serde_json::Value) -> Result<PatchState<'_>> {{"
         )
         .unwrap();
-        writeln!(
-            out,
-            "        let map = overrides.as_object()"
-        )
-        .unwrap();
+        writeln!(out, "        let map = overrides.as_object()").unwrap();
         writeln!(
             out,
             "            .ok_or_else(|| anyhow::anyhow!(\"observer overrides must be a JSON object\"))?;"
@@ -3827,12 +3919,7 @@ fn render_model(
         writeln!(out, "            match key.as_str() {{").unwrap();
         for f in &db_fields {
             let deser_ty = json_deser_type_for_field(&f.ty, &enum_specs);
-            writeln!(
-                out,
-                "                \"{}\" => {{",
-                f.name
-            )
-            .unwrap();
+            writeln!(out, "                \"{}\" => {{", f.name).unwrap();
             writeln!(
                 out,
                 "                    let v: {deser_ty} = serde_json::from_value(val.clone())?;"
@@ -3940,11 +4027,7 @@ fn render_model(
         "    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<{update_changes_struct_ident}>) -> Result<u64> {{"
     )
     .unwrap();
-    writeln!(
-        out,
-        "        let mut state = self.state;"
-    )
-    .unwrap();
+    writeln!(out, "        let mut state = self.state;").unwrap();
     if has_updated_at {
         writeln!(out, "        if HAS_UPDATED_AT && !state.set_cols.contains(&{col_ident}::UpdatedAt.as_sql()) {{").unwrap();
         writeln!(
@@ -3952,7 +4035,11 @@ fn render_model(
             "            let now = time::OffsetDateTime::now_utc();"
         )
         .unwrap();
-        writeln!(out, "            state = state.assign_col({col_ident}::UpdatedAt.as_sql(), now.into());").unwrap();
+        writeln!(
+            out,
+            "            state = state.assign_col({col_ident}::UpdatedAt.as_sql(), now.into());"
+        )
+        .unwrap();
         writeln!(out, "        }}").unwrap();
     }
     writeln!(out, "        // find target ids for localized updates").unwrap();
@@ -4032,17 +4119,37 @@ fn render_model(
         )
         .unwrap();
         writeln!(out, "                    match action {{").unwrap();
-        writeln!(out, "                        ObserverAction::Prevent(err) => return Err(err),").unwrap();
-        writeln!(out, "                        ObserverAction::Modify(overrides) => {{").unwrap();
-        writeln!(out, "                            state = Self::apply_update_overrides(state, overrides)?;").unwrap();
+        writeln!(
+            out,
+            "                        ObserverAction::Prevent(err) => return Err(err),"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                        ObserverAction::Modify(overrides) => {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                            state = Self::apply_update_overrides(state, overrides)?;"
+        )
+        .unwrap();
         writeln!(out, "                        }}").unwrap();
-        writeln!(out, "                        ObserverAction::Continue => {{}}").unwrap();
+        writeln!(
+            out,
+            "                        ObserverAction::Continue => {{}}"
+        )
+        .unwrap();
         writeln!(out, "                    }}").unwrap();
         writeln!(out, "                }}").unwrap();
         writeln!(out, "            }}").unwrap();
         writeln!(out, "        }}").unwrap();
     }
-    writeln!(out, "        let (sql, all_binds) = state.build_update_sql();").unwrap();
+    writeln!(
+        out,
+        "        let (sql, all_binds) = state.build_update_sql();"
+    )
+    .unwrap();
     writeln!(out, "        let set_binds = &state.set_binds;").unwrap();
     writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
     // touch parent timestamps
@@ -4257,10 +4364,7 @@ fn render_model(
         )
         .unwrap();
     update_context
-        .insert(
-            "unsafe_update_section",
-        unsafe_update_section,
-        )
+        .insert("unsafe_update_section", unsafe_update_section)
         .unwrap();
     let update_section = render_template("models/update.rs.tpl", &update_context).unwrap();
     let mut out = String::new();
@@ -4655,9 +4759,13 @@ fn render_model(
                 writeln!(out, "    }}").unwrap();
 
                 // filter_has_like_for_{model}_cols — only String fields
-                let string_fields: Vec<_> = target_fields.iter().filter(|tf| tf.ty.contains("String")).collect();
+                let string_fields: Vec<_> = target_fields
+                    .iter()
+                    .filter(|tf| tf.ty.contains("String"))
+                    .collect();
                 if !string_fields.is_empty() {
-                    let fn_name_like = format!("filter_has_like_for_{}_cols", to_snake(target_model));
+                    let fn_name_like =
+                        format!("filter_has_like_for_{}_cols", to_snake(target_model));
                     writeln!(
                         out,
                         "    fn {fn_name_like}<'db>(column: &str, rq: Query<'db, {target_title}Model>, pattern: String) -> Query<'db, {target_title}Model> {{"
@@ -4697,12 +4805,11 @@ fn render_model(
                         .as_ref()
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| "id".to_string());
-                    let target_owner_const = format!(
-                        "{}_OWNER_TYPE",
-                        to_snake(target_model).to_uppercase()
-                    );
+                    let target_owner_const =
+                        format!("{}_OWNER_TYPE", to_snake(target_model).to_uppercase());
 
-                    let fn_locale_has = format!("filter_locale_has_for_{}_cols", to_snake(target_model));
+                    let fn_locale_has =
+                        format!("filter_locale_has_for_{}_cols", to_snake(target_model));
                     writeln!(
                         out,
                         "    fn {fn_locale_has}<'db>(column: &str, rq: Query<'db, {target_title}Model>, field: &str, locale: &str, value: String) -> Query<'db, {target_title}Model> {{"
@@ -4720,7 +4827,8 @@ fn render_model(
                     writeln!(out, "        }}").unwrap();
                     writeln!(out, "    }}").unwrap();
 
-                    let fn_locale_has_like = format!("filter_locale_has_like_for_{}_cols", to_snake(target_model));
+                    let fn_locale_has_like =
+                        format!("filter_locale_has_like_for_{}_cols", to_snake(target_model));
                     writeln!(
                         out,
                         "    fn {fn_locale_has_like}<'db>(column: &str, rq: Query<'db, {target_title}Model>, field: &str, locale: &str, pattern: String) -> Query<'db, {target_title}Model> {{"
@@ -5118,19 +5226,13 @@ fn render_model(
             "            ParsedFilter::Has {{ relation, column }} => {{"
         )
         .unwrap();
-        writeln!(
-            out,
-            "                match relation.as_str() {{"
-        )
-        .unwrap();
+        writeln!(out, "                match relation.as_str() {{").unwrap();
         for rel_path in &relation_paths {
             let rel_key = rel_path.path.join("__");
             let target_snake = to_snake(&rel_path.target_model);
             let helper_bind = format!("parse_bind_for_{}_cols", target_snake);
             let helper_has = format!("filter_has_for_{}_cols", target_snake);
-            let leaf_expr = format!(
-                "Self::{helper_has}(column.as_str(), {{var}}, bind)"
-            );
+            let leaf_expr = format!("Self::{helper_has}(column.as_str(), {{var}}, bind)");
             let has_expr =
                 build_nested_where_has_expr(schema, name, &rel_path.path, &leaf_expr, "query");
             writeln!(
@@ -5153,11 +5255,7 @@ fn render_model(
             "                let pattern = format!(\"%{{}}%\", trimmed);"
         )
         .unwrap();
-        writeln!(
-            out,
-            "                match relation.as_str() {{"
-        )
-        .unwrap();
+        writeln!(out, "                match relation.as_str() {{").unwrap();
         for rel_path in &relation_paths {
             // Only emit HasLike arm if target model has String fields
             let target_cfg_check = schema.models.get(&rel_path.target_model);
@@ -5171,16 +5269,10 @@ fn render_model(
             let rel_key = rel_path.path.join("__");
             let target_snake = to_snake(&rel_path.target_model);
             let helper_like = format!("filter_has_like_for_{}_cols", target_snake);
-            let leaf_expr = format!(
-                "Self::{helper_like}(column.as_str(), {{var}}, pattern.clone())"
-            );
-            let has_like_expr = build_nested_where_has_expr(
-                schema,
-                name,
-                &rel_path.path,
-                &leaf_expr,
-                "query",
-            );
+            let leaf_expr =
+                format!("Self::{helper_like}(column.as_str(), {{var}}, pattern.clone())");
+            let has_like_expr =
+                build_nested_where_has_expr(schema, name, &rel_path.path, &leaf_expr, "query");
             writeln!(
                 out,
                 "                    \"{rel_name}\" => Ok(Some({has_like_expr})),",
@@ -5206,11 +5298,7 @@ fn render_model(
             "                let locale = core_i18n::current_locale().to_string();"
         )
         .unwrap();
-        writeln!(
-            out,
-            "                match relation.as_str() {{"
-        )
-        .unwrap();
+        writeln!(out, "                match relation.as_str() {{").unwrap();
         for rel_path in &relation_paths {
             let target_cfg_check = schema.models.get(&rel_path.target_model);
             let has_locale = target_cfg_check
@@ -5257,11 +5345,7 @@ fn render_model(
             "                let pattern = format!(\"%{{}}%\", trimmed);"
         )
         .unwrap();
-        writeln!(
-            out,
-            "                match relation.as_str() {{"
-        )
-        .unwrap();
+        writeln!(out, "                match relation.as_str() {{").unwrap();
         for rel_path in &relation_paths {
             let target_cfg_check = schema.models.get(&rel_path.target_model);
             let has_locale = target_cfg_check
@@ -5272,7 +5356,8 @@ fn render_model(
             }
             let rel_key = rel_path.path.join("__");
             let target_snake = to_snake(&rel_path.target_model);
-            let helper_locale_has_like = format!("filter_locale_has_like_for_{}_cols", target_snake);
+            let helper_locale_has_like =
+                format!("filter_locale_has_like_for_{}_cols", target_snake);
             let leaf_expr = format!(
                 "Self::{helper_locale_has_like}(column.as_str(), {{var}}, &field, &locale, pattern.clone())"
             );
@@ -5788,7 +5873,11 @@ fn render_model(
         "    pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: {parent_pk_ty}) -> Result<Option<{model_title}Record>> {{"
     )
     .unwrap();
-    writeln!(out, "        Query::<{model_title}Model>::new(db).find(id).await").unwrap();
+    writeln!(
+        out,
+        "        Query::<{model_title}Model>::new(db).find(id).await"
+    )
+    .unwrap();
     writeln!(out, "    }}").unwrap();
     // _transform_create_value — handles hashed fields for CreateModel::transform_create_value
     writeln!(out, "    fn _transform_create_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {{").unwrap();
@@ -5804,8 +5893,16 @@ fn render_model(
             writeln!(out, "        match col {{").unwrap();
             for field in &hashed_fields {
                 let col_variant = to_title_case(&field.name);
-                writeln!(out, "            c if c == {col_ident}::{col_variant}.as_sql() => {{").unwrap();
-                writeln!(out, "                let BindValue::String(value) = value else {{").unwrap();
+                writeln!(
+                    out,
+                    "            c if c == {col_ident}::{col_variant}.as_sql() => {{"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "                let BindValue::String(value) = value else {{"
+                )
+                .unwrap();
                 writeln!(out, "                    anyhow::bail!(\"column '{{}}' expects String before hashing, got '{{:?}}'\", col, value);").unwrap();
                 writeln!(out, "                }};").unwrap();
                 writeln!(out, "                let hashed = core_db::common::auth::hash::hash_password(&value)?;").unwrap();
@@ -5831,8 +5928,16 @@ fn render_model(
             writeln!(out, "        match col {{").unwrap();
             for field in &hashed_fields {
                 let col_variant = to_title_case(&field.name);
-                writeln!(out, "            c if c == {col_ident}::{col_variant}.as_sql() => {{").unwrap();
-                writeln!(out, "                let BindValue::String(value) = value else {{").unwrap();
+                writeln!(
+                    out,
+                    "            c if c == {col_ident}::{col_variant}.as_sql() => {{"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "                let BindValue::String(value) = value else {{"
+                )
+                .unwrap();
                 writeln!(out, "                    anyhow::bail!(\"column '{{}}' expects String before hashing, got '{{:?}}'\", col, value);").unwrap();
                 writeln!(out, "                }};").unwrap();
                 writeln!(out, "                let hashed = core_db::common::auth::hash::hash_password(&value)?;").unwrap();
@@ -5852,29 +5957,24 @@ fn render_model(
             "    async fn convert_delete_to_update<'tx>(db: &DbConn<'tx>, ids: &[{parent_pk_ty}], overrides: serde_json::Value) -> Result<u64> {{"
         )
         .unwrap();
-        writeln!(
-            out,
-            "        let map = overrides.as_object()"
-        )
-        .unwrap();
+        writeln!(out, "        let map = overrides.as_object()").unwrap();
         writeln!(
             out,
             "            .ok_or_else(|| anyhow::anyhow!(\"observer overrides must be a JSON object\"))?;"
         )
         .unwrap();
-        writeln!(out, "        let mut set_clauses: Vec<String> = Vec::new();").unwrap();
+        writeln!(
+            out,
+            "        let mut set_clauses: Vec<String> = Vec::new();"
+        )
+        .unwrap();
         writeln!(out, "        let mut binds: Vec<BindValue> = Vec::new();").unwrap();
         writeln!(out, "        let mut idx = 1usize;").unwrap();
         writeln!(out, "        for (key, val) in map {{").unwrap();
         writeln!(out, "            match key.as_str() {{").unwrap();
         for f in &db_fields {
             let deser_ty = json_deser_type_for_field(&f.ty, &enum_specs);
-            writeln!(
-                out,
-                "                \"{}\" => {{",
-                f.name
-            )
-            .unwrap();
+            writeln!(out, "                \"{}\" => {{", f.name).unwrap();
             writeln!(
                 out,
                 "                    let v: {deser_ty} = serde_json::from_value(val.clone())?;"
@@ -5913,7 +6013,11 @@ fn render_model(
         )
         .unwrap();
         writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
-        writeln!(out, "        for b in &binds {{ q = bind_query(q, b.clone()); }}").unwrap();
+        writeln!(
+            out,
+            "        for b in &binds {{ q = bind_query(q, b.clone()); }}"
+        )
+        .unwrap();
         writeln!(out, "        for id in ids {{ q = q.bind(id); }}").unwrap();
         writeln!(out, "        let res = db.execute(q).await?;").unwrap();
         writeln!(out, "        Ok(res.rows_affected())").unwrap();
@@ -5931,7 +6035,11 @@ fn render_model(
     writeln!(out, "    type Record = {model_title}Record;").unwrap();
     writeln!(out, "    type Create = {model_title}Create;").unwrap();
     writeln!(out, "    type Changes = {model_title}Changes;").unwrap();
-    writeln!(out, "    const TABLE: &'static str = {model_title}Model::TABLE;").unwrap();
+    writeln!(
+        out,
+        "    const TABLE: &'static str = {model_title}Model::TABLE;"
+    )
+    .unwrap();
     writeln!(
         out,
         "    const MODEL_KEY: &'static str = {model_title}Model::MODEL_KEY;"
@@ -5944,11 +6052,19 @@ fn render_model(
         "impl core_db::common::model_api::QueryModel for {model_title}Model {{"
     )
     .unwrap();
-    writeln!(out, "    const DEFAULT_SELECT: &'static str = \"{base_select}\";").unwrap();
+    writeln!(
+        out,
+        "    const DEFAULT_SELECT: &'static str = \"{base_select}\";"
+    )
+    .unwrap();
     writeln!(out, "    const HAS_SOFT_DELETE: bool = {has_soft_delete};").unwrap();
     {
         let sd_col = if has_soft_delete { "deleted_at" } else { "" };
-        writeln!(out, "    const SOFT_DELETE_COL: &'static str = \"{sd_col}\";").unwrap();
+        writeln!(
+            out,
+            "    const SOFT_DELETE_COL: &'static str = \"{sd_col}\";"
+        )
+        .unwrap();
     }
     writeln!(out, "    const HAS_CREATED_AT: bool = {has_created_at};").unwrap();
     writeln!(out, "    const HAS_UPDATED_AT: bool = {has_updated_at};").unwrap();
@@ -5981,7 +6097,11 @@ fn render_model(
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
-    writeln!(out, "            let mut v = Self::query_all(state.limit(1)).await?;").unwrap();
+    writeln!(
+        out,
+        "            let mut v = Self::query_all(state.limit(1)).await?;"
+    )
+    .unwrap();
     writeln!(out, "            Ok(v.pop())").unwrap();
     writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
@@ -6004,7 +6124,11 @@ fn render_model(
     )
     .unwrap();
     writeln!(out, "        Box::pin(async move {{").unwrap();
-    out.push_str(&render_query_count_body(has_soft_delete, &table, skip_profiler));
+    out.push_str(&render_query_count_body(
+        has_soft_delete,
+        &table,
+        skip_profiler,
+    ));
     writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
     // query_delete: inline with observer hooks and soft-delete
@@ -6089,7 +6213,11 @@ fn render_model(
         "impl core_db::common::model_api::ColExpr for {col_ident} {{"
     )
     .unwrap();
-    writeln!(out, "    fn col_sql(self) -> &'static str {{ self.as_sql() }}").unwrap();
+    writeln!(
+        out,
+        "    fn col_sql(self) -> &'static str {{ self.as_sql() }}"
+    )
+    .unwrap();
     writeln!(out, "}}\n").unwrap();
     writeln!(
         out,
@@ -6102,14 +6230,22 @@ fn render_model(
         "    fn where_col<'db>(field: Self, state: QueryState<'db>, op: Op, value: BindValue) -> QueryState<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        state.where_col_str(field.as_sql(), op, value)").unwrap();
+    writeln!(
+        out,
+        "        state.where_col_str(field.as_sql(), op, value)"
+    )
+    .unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
         "    fn or_where_col<'db>(field: Self, state: QueryState<'db>, op: Op, value: BindValue) -> QueryState<'db> {{"
     )
     .unwrap();
-    writeln!(out, "        state.or_where_col_str(field.as_sql(), op, value)").unwrap();
+    writeln!(
+        out,
+        "        state.or_where_col_str(field.as_sql(), op, value)"
+    )
+    .unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
@@ -6145,14 +6281,14 @@ fn render_model(
         for (rel_idx, rel) in relations.iter().enumerate() {
             let rel_snake = to_snake(&rel.name);
             let target_model_title = to_title_case(&rel.target_model);
-            let target_row_ident = format!("{target_model_title}Row");
+            let target_record_ident = format!("{target_model_title}Record");
             let rel_ty = match rel.kind {
-                RelationKind::BelongsTo => format!(
-                    "OneRelation<{model_title}Model, {target_row_ident}, {rel_idx}>"
-                ),
-                RelationKind::HasMany => format!(
-                    "ManyRelation<{model_title}Model, {target_row_ident}, {rel_idx}>"
-                ),
+                RelationKind::BelongsTo => {
+                    format!("OneRelation<{model_title}Model, {target_record_ident}, {rel_idx}>")
+                }
+                RelationKind::HasMany => {
+                    format!("ManyRelation<{model_title}Model, {target_record_ident}, {rel_idx}>")
+                }
             };
             writeln!(
                 out,
@@ -6199,7 +6335,7 @@ fn render_model(
             writeln!(out, "        let start_idx = state.binds.len() + 1;").unwrap();
             writeln!(
                 out,
-                "        let scoped = scope({target_model_title}Model::query_with_base_url(state.db.clone(), None));"
+                "        let scoped = scope({target_model_title}Model::query_with_base_url(state.db.clone(), state.base_url.clone()));"
             )
             .unwrap();
             writeln!(
@@ -6244,7 +6380,7 @@ fn render_model(
             writeln!(out, "        let start_idx = state.binds.len() + 1;").unwrap();
             writeln!(
                 out,
-                "        let scoped = scope({target_model_title}Model::query_with_base_url(state.db.clone(), None));"
+                "        let scoped = scope({target_model_title}Model::query_with_base_url(state.db.clone(), state.base_url.clone()));"
             )
             .unwrap();
             writeln!(
@@ -6271,7 +6407,11 @@ fn render_model(
             )
             .unwrap();
             writeln!(out, "        if let Some(last) = state.where_sql.pop() {{").unwrap();
-            writeln!(out, "            state.where_sql.push(format!(\"({{}} OR {{}})\", last, clause));").unwrap();
+            writeln!(
+                out,
+                "            state.where_sql.push(format!(\"({{}} OR {{}})\", last, clause));"
+            )
+            .unwrap();
             writeln!(out, "        }} else {{").unwrap();
             writeln!(out, "            state.where_sql.push(clause);").unwrap();
             writeln!(out, "        }}").unwrap();
@@ -6287,7 +6427,7 @@ fn render_model(
                         "impl core_db::common::model_api::RecordOneRelation<{model_title}Model> for {rel_ty} {{"
                     )
                     .unwrap();
-                    writeln!(out, "    type Target = {target_row_ident};").unwrap();
+                    writeln!(out, "    type Target = {target_record_ident};").unwrap();
                     writeln!(
                         out,
                         "    fn get<'a>(_relation: Self, record: &'a {model_title}Record) -> Option<&'a Self::Target> {{"
@@ -6303,7 +6443,7 @@ fn render_model(
                         "impl core_db::common::model_api::RecordManyRelation<{model_title}Model> for {rel_ty} {{"
                     )
                     .unwrap();
-                    writeln!(out, "    type Target = {target_row_ident};").unwrap();
+                    writeln!(out, "    type Target = {target_record_ident};").unwrap();
                     writeln!(
                         out,
                         "    fn get<'a>(_relation: Self, record: &'a {model_title}Record) -> &'a [Self::Target] {{"

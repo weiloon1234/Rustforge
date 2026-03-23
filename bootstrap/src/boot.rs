@@ -26,6 +26,7 @@ pub async fn init_app() -> Result<(BootContext, core_web::logging::WorkerGuard)>
     // 3. Load Settings
     let settings = Settings::load()?;
     info!("Bootstrapping {} ({})", settings.app.name, settings.app.env);
+    core_db::common::model_api::set_default_attachment_base_url(settings.cdn.base_url.clone());
 
     // 4. Init I18n (default locale + timezone + catalogs)
     core_i18n::init(&settings.i18n);
