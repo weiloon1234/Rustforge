@@ -1,4 +1,5 @@
 target/
+target-local/
 scaffold/template/Cargo.lock
 
 **/*.rs.bk
