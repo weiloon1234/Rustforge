@@ -208,13 +208,13 @@ fn scaffold_smoke_generation_and_force_behaviour() {
         );
     }
 
-    let check_generated = run_cargo_check(&out_dir, "generated");
+    let check_generated = run_cargo_check(&out_dir, "testproject-generated");
     assert_ok(
         &check_generated,
         "fresh scaffold output should compile generated package",
     );
 
-    let check_app = run_cargo_check(&out_dir, "app");
+    let check_app = run_cargo_check(&out_dir, "testproject");
     assert_ok(
         &check_app,
         "fresh scaffold output should compile app package",

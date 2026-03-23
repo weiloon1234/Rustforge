@@ -1,5 +1,5 @@
 [package]
-name = "{{PROJECT_NAME}}"
+name = "rustforge-starter"
 version = "0.1.0"
 edition.workspace = true
 
@@ -22,7 +22,7 @@ core-notify = { workspace = true }
 core-realtime = { workspace = true }
 core-web = { workspace = true }
 
-generated = { path = "../generated", package = "{{PROJECT_NAME}}-generated" }
+generated = { path = "../generated", package = "rustforge-starter-generated" }
 
 anyhow = { workspace = true }
 tokio = { workspace = true }

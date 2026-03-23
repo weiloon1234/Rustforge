@@ -79,6 +79,7 @@ async fn main() -> anyhow::Result<()> {
 
         if let Some(content) = file.contents_utf8() {
             let rendered = render_template(content, &replacements);
+            let rendered = rendered.replace("rustforge-starter", &project_name);
             fs::write(&path, rendered.as_bytes())
                 .with_context(|| format!("failed to write {}", path.display()))?;
 
@@ -113,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
     println!("{}", "  cd <output>".cyan());
     println!("{}", "  ./console migrate pump".cyan());
     println!("{}", "  ./console migrate run".cyan());
-    println!("{}", "  cargo check -p app".cyan());
+    println!("  {}", format!("cargo check -p {project_name}").cyan());
 
     Ok(())
 }

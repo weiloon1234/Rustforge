@@ -36,6 +36,6 @@ core-realtime = { git = "https://github.com/weiloon1234/Rustforge.git", branch =
 core-web = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 db-gen = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 
-[profile.dev.package.{{PROJECT_NAME}}-generated]
+[profile.dev.package.rustforge-starter-generated]
 opt-level = 0
 codegen-units = 256

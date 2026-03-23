@@ -259,8 +259,8 @@ Generated code is output to `OUT_DIR` (inside `target/`) at build time — not t
 
 The scaffold generates project-unique crate names to avoid build cache collisions when multiple Rustforge projects share a cargo target directory:
 
-- `app/Cargo.toml`: package name = `{{PROJECT_NAME}}`, library name = `app`
-- `generated/Cargo.toml`: package name = `{{PROJECT_NAME}}-generated`
+- `app/Cargo.toml`: package name = your project name, library name = `app`
+- `generated/Cargo.toml`: package name = `{project-name}-generated`
 
 Code continues to use `app::` and `generated::` — only the cargo package names are unique.
 

@@ -55,7 +55,7 @@ fn scaffold_force_into_tmp_uses_model_sources_layout() {
         "app/models/admin.rs",
         "app/models/user.rs",
         "generated/build.rs",
-        "generated/src/models/mod.rs",
+        "generated/src/lib.rs",
     ] {
         assert!(
             out_dir.join(rel).is_file(),
