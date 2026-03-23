@@ -1,7 +1,10 @@
 [package]
-name = "app"
+name = "{{PROJECT_NAME}}"
 version = "0.1.0"
 edition.workspace = true
+
+[lib]
+name = "app"
 
 [[bin]]
 name = "export-types"
@@ -19,7 +22,7 @@ core-notify = { workspace = true }
 core-realtime = { workspace = true }
 core-web = { workspace = true }
 
-generated = { path = "../generated" }
+generated = { path = "../generated", package = "{{PROJECT_NAME}}-generated" }
 
 anyhow = { workspace = true }
 tokio = { workspace = true }

@@ -253,7 +253,16 @@ This script auto-detects whether Rust/Node are available and skips build steps i
 | `app/permissions.toml` | `Permission` enum |
 | `app/configs.toml` | Typed `Settings`, auth guards, localization artifacts |
 
-Never edit generated outputs directly (for example: `generated/src/lib.rs`, `generated/src/models/*`, `generated/src/guards/*`, `generated/src/permissions.rs`, `generated/src/localized.rs`) — they are overwritten by generation/build steps. Put model-specific helper items and generated `View` / `WithRelations` methods in `app/models/*.rs`.
+Generated code is output to `OUT_DIR` (inside `target/`) at build time — not to `generated/src/`. The `generated/src/lib.rs` uses `include!()` to pull in the generated modules. Never edit `generated/src/lib.rs` — put model-specific helper items and generated `View` / `WithRelations` methods in `app/models/*.rs`.
+
+### Crate Naming
+
+The scaffold generates project-unique crate names to avoid build cache collisions when multiple Rustforge projects share a cargo target directory:
+
+- `app/Cargo.toml`: package name = `{{PROJECT_NAME}}`, library name = `app`
+- `generated/Cargo.toml`: package name = `{{PROJECT_NAME}}-generated`
+
+Code continues to use `app::` and `generated::` — only the cargo package names are unique.
 
 ### i18n
 
