@@ -948,6 +948,7 @@ fn render_record_collection_build_no_relations(
 
 fn render_record_collection_build(
     relations: &[RelationSpec],
+    model_snake: &str,
     pk: &str,
     rows_ident: &str,
     row_var: &str,
@@ -988,11 +989,19 @@ fn render_record_collection_build(
                 .unwrap();
             }
             RelationKind::BelongsTo => {
-                writeln!(
-                    out,
-                    "            record.{field} = {field}.get(&key).cloned().unwrap_or(None);"
-                )
-                .unwrap();
+                if to_snake(&rel.target_model) == model_snake {
+                    writeln!(
+                        out,
+                        "            record.{field} = {field}.get(&key).cloned().unwrap_or(None).map(Box::new);"
+                    )
+                    .unwrap();
+                } else {
+                    writeln!(
+                        out,
+                        "            record.{field} = {field}.get(&key).cloned().unwrap_or(None);"
+                    )
+                    .unwrap();
+                }
             }
         }
     }
@@ -1089,10 +1098,10 @@ fn render_query_all_body(
     };
     // Indent: render_support_data_loaders generates 8-space indented code, we need 12
     let support_loaders = render_support_data_loaders(
-        model_snake,
-        pk,
-        parent_pk_ty,
-        localized_fields,
+        &model_snake,
+        &pk,
+        &parent_pk_ty,
+        &localized_fields,
         has_meta,
         has_attachments,
         "rows",
@@ -1111,6 +1120,7 @@ fn render_query_all_body(
     if !relations.is_empty() {
         let build = render_record_collection_build(
             relations,
+            model_snake,
             pk,
             "rows",
             "r",
@@ -1307,10 +1317,10 @@ fn render_query_paginate_body(
         "db.clone()"
     };
     let support_loaders = render_support_data_loaders(
-        model_snake,
-        pk,
-        parent_pk_ty,
-        localized_fields,
+        &model_snake,
+        &pk,
+        &parent_pk_ty,
+        &localized_fields,
         has_meta,
         has_attachments,
         "rows",
@@ -1327,6 +1337,7 @@ fn render_query_paginate_body(
     if !relations.is_empty() {
         let build = render_record_collection_build(
             relations,
+            model_snake,
             pk,
             "rows",
             "r",
@@ -2479,7 +2490,13 @@ fn render_model(
                 record_fields.push(format!("    pub {rel_field}: Vec<{target_record}>,"));
             }
             RelationKind::BelongsTo => {
-                record_fields.push(format!("    pub {rel_field}: Option<{target_record}>,"));
+                if rel.target_model == name {
+                    record_fields
+                        .push(format!("    pub {rel_field}: Option<Box<{target_record}>>,"));
+                } else {
+                    record_fields
+                        .push(format!("    pub {rel_field}: Option<{target_record}>,"));
+                }
             }
         }
     }
@@ -2648,25 +2665,25 @@ fn render_model(
     if has_meta && has_attachments {
         writeln!(
             out,
-            "fn hydrate_record(row: {row_ident}, {loc_ident}: &LocalizedMap, meta: &MetaMap, attachments: &AttachmentMap, {base_url_ident}: Option<&str>) -> {record_ident} {{"
+            "pub(crate) fn hydrate_record(row: {row_ident}, {loc_ident}: &LocalizedMap, meta: &MetaMap, attachments: &AttachmentMap, {base_url_ident}: Option<&str>) -> {record_ident} {{"
         )
         .unwrap();
     } else if has_meta {
         writeln!(
             out,
-            "fn hydrate_record(row: {row_ident}, {loc_ident}: &LocalizedMap, meta: &MetaMap, {base_url_ident}: Option<&str>) -> {record_ident} {{"
+            "pub(crate) fn hydrate_record(row: {row_ident}, {loc_ident}: &LocalizedMap, meta: &MetaMap, {base_url_ident}: Option<&str>) -> {record_ident} {{"
         )
         .unwrap();
     } else if has_attachments {
         writeln!(
             out,
-            "fn hydrate_record(row: {row_ident}, {loc_ident}: &LocalizedMap, attachments: &AttachmentMap, {base_url_ident}: Option<&str>) -> {record_ident} {{"
+            "pub(crate) fn hydrate_record(row: {row_ident}, {loc_ident}: &LocalizedMap, attachments: &AttachmentMap, {base_url_ident}: Option<&str>) -> {record_ident} {{"
         )
         .unwrap();
     } else {
         writeln!(
             out,
-            "fn hydrate_record(row: {row_ident}, {loc_ident}: &LocalizedMap, {base_url_ident}: Option<&str>) -> {record_ident} {{"
+            "pub(crate) fn hydrate_record(row: {row_ident}, {loc_ident}: &LocalizedMap, {base_url_ident}: Option<&str>) -> {record_ident} {{"
         )
         .unwrap();
     }
@@ -2777,6 +2794,48 @@ fn render_model(
         }
     }
     writeln!(out, "    record").unwrap();
+    writeln!(out, "}}\n").unwrap();
+
+    let support_loaders = render_support_data_loaders(
+        &model_snake,
+        &pk,
+        &parent_pk_ty,
+        &localized_fields,
+        has_meta,
+        has_attachments,
+        "rows",
+        "db.clone()",
+    );
+    writeln!(
+        out,
+        "pub(crate) async fn hydrate_records<'db>(db: DbConn<'db>, rows: &[{row_ident}], base_url: Option<&str>) -> Result<Vec<{record_ident}>> {{"
+    )
+    .unwrap();
+    writeln!(out, "    if rows.is_empty() {{ return Ok(Vec::new()); }}").unwrap();
+    for line in support_loaders.lines() {
+        if line.trim().is_empty() {
+            writeln!(out).unwrap();
+        } else {
+            writeln!(out, "{}", line).unwrap();
+        }
+    }
+    let helper_build = render_record_collection_build_no_relations(
+        "records",
+        "row",
+        "rows",
+        &localized_fields,
+        has_meta,
+        has_attachments,
+        "base_url",
+    );
+    for line in helper_build.lines() {
+        if line.trim().is_empty() {
+            writeln!(out).unwrap();
+        } else {
+            writeln!(out, "{}", line).unwrap();
+        }
+    }
+    writeln!(out, "    Ok(records)").unwrap();
     writeln!(out, "}}\n").unwrap();
 
     if !relations.is_empty() {
@@ -2926,37 +2985,14 @@ fn render_model(
         let target_title = to_title_case(&rel.target_model);
         let target_row = format!("{}Row", target_title);
         let target_record = format!("{}Record", target_title);
-        let target_cfg = schema
-            .models
-            .get(&rel.target_model)
-            .unwrap_or_else(|| panic!("missing relation target model '{}'", rel.target_model));
         let target_model_snake = to_snake(&rel.target_model);
-        let target_localized_fields: Vec<String> = target_cfg
-            .localized
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| to_snake(&s))
-            .collect();
-        let target_has_meta = !parse_meta(target_cfg).is_empty();
-        let target_has_attachments = !parse_attachments(target_cfg).is_empty();
-        let target_support_loaders = render_support_data_loaders(
-            &target_model_snake,
-            &rel.target_pk,
-            &rel.target_pk_ty,
-            &target_localized_fields,
-            target_has_meta,
-            target_has_attachments,
-            "rows",
-            "db.clone()",
-        );
-        let target_hydrate_expr = build_hydrate_record_expr(
-            "row",
-            &target_localized_fields,
-            target_has_meta,
-            target_has_attachments,
-            "base_url",
-        );
+        let target_hydrate_records_expr = if rel.target_model == name {
+            "hydrate_records(db.clone(), &rows, base_url).await?".to_string()
+        } else {
+            format!(
+                "crate::generated::models::{target_model_snake}::hydrate_records(db.clone(), &rows, base_url).await?"
+            )
+        };
         match rel.kind {
             RelationKind::HasMany => {
                 let target_fk_optional = relation_target_field_is_optional(schema, rel);
@@ -2976,30 +3012,27 @@ fn render_model(
                 .unwrap();
                 writeln!(out, "        for id in ids {{ q = bind(q, id.into()); }}").unwrap();
                 writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-                for line in target_support_loaders.lines() {
-                    if line.trim().is_empty() {
-                        writeln!(out).unwrap();
-                    } else {
-                        writeln!(out, "    {}", line).unwrap();
-                    }
-                }
+                writeln!(
+                    out,
+                    "        let records = {target_hydrate_records_expr};"
+                )
+                .unwrap();
                 writeln!(out, "        let mut map: HashMap<{parent_pk_ty}, Vec<{target_record}>> = HashMap::new();").unwrap();
-                writeln!(out, "        for row in rows {{").unwrap();
+                writeln!(out, "        for record in records {{").unwrap();
                 if target_fk_optional {
                     writeln!(
                         out,
-                        "            if let Some(fk_val) = row.{fk}.clone() {{ let record = {target_hydrate_expr}; map.entry(fk_val).or_default().push(record); }}",
+                        "            if let Some(fk_val) = record.{fk}.clone() {{ map.entry(fk_val).or_default().push(record); }}",
                         fk = rel.foreign_key
                     )
                     .unwrap();
                 } else {
                     writeln!(
                         out,
-                        "            let fk_val = row.{fk}.clone();",
+                        "            let fk_val = record.{fk}.clone();",
                         fk = rel.foreign_key
                     )
                     .unwrap();
-                    writeln!(out, "            let record = {target_hydrate_expr};").unwrap();
                     writeln!(
                         out,
                         "            map.entry(fk_val).or_default().push(record);"
@@ -3065,22 +3098,19 @@ fn render_model(
                 )
                 .unwrap();
                 writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-                for line in target_support_loaders.lines() {
-                    if line.trim().is_empty() {
-                        writeln!(out).unwrap();
-                    } else {
-                        writeln!(out, "    {}", line).unwrap();
-                    }
-                }
-                writeln!(out, "        let mut by_pk: HashMap<{target_pk_ty}, {target_record}> = HashMap::new();", target_pk_ty = rel.target_pk_ty).unwrap();
-                writeln!(out, "        for row in rows {{").unwrap();
                 writeln!(
                     out,
-                    "            let key = row.{target_pk}.clone();",
+                    "        let records = {target_hydrate_records_expr};"
+                )
+                .unwrap();
+                writeln!(out, "        let mut by_pk: HashMap<{target_pk_ty}, {target_record}> = HashMap::new();", target_pk_ty = rel.target_pk_ty).unwrap();
+                writeln!(out, "        for record in records {{").unwrap();
+                writeln!(
+                    out,
+                    "            let key = record.{target_pk}.clone();",
                     target_pk = rel.target_pk
                 )
                 .unwrap();
-                writeln!(out, "            let record = {target_hydrate_expr};").unwrap();
                 writeln!(out, "            by_pk.insert(key, record);").unwrap();
                 writeln!(out, "        }}").unwrap();
                 writeln!(out, "        let mut out = HashMap::new();").unwrap();
@@ -6433,7 +6463,11 @@ fn render_model(
                         "    fn get<'a>(_relation: Self, record: &'a {model_title}Record) -> Option<&'a Self::Target> {{"
                     )
                     .unwrap();
-                    writeln!(out, "        record.{rel_snake}.as_ref()").unwrap();
+                    if rel.target_model == name {
+                        writeln!(out, "        record.{rel_snake}.as_deref()").unwrap();
+                    } else {
+                        writeln!(out, "        record.{rel_snake}.as_ref()").unwrap();
+                    }
                     writeln!(out, "    }}").unwrap();
                     writeln!(out, "}}\n").unwrap();
                 }

@@ -94,7 +94,7 @@ impl ArticleRecord {
     }
 }
 
-fn hydrate_record(row: ArticleRow, loc: &LocalizedMap, meta: &MetaMap, attachments: &AttachmentMap, base_url: Option<&str>) -> ArticleRecord {
+pub(crate) fn hydrate_record(row: ArticleRow, loc: &LocalizedMap, meta: &MetaMap, attachments: &AttachmentMap, base_url: Option<&str>) -> ArticleRecord {
     let locale = current_locale();
     let mut record = ArticleRecord {
         id: row.id,
@@ -119,6 +119,19 @@ fn hydrate_record(row: ArticleRow, loc: &LocalizedMap, meta: &MetaMap, attachmen
     record.hero = attachments.get_single("hero", record.id);
     record.hero_url = record.hero.as_ref().map(|a| a.url_with_base(base_url));
     record
+}
+
+pub(crate) async fn hydrate_records<'db>(db: DbConn<'db>, rows: &[ArticleRow], base_url: Option<&str>) -> Result<Vec<ArticleRecord>> {
+    if rows.is_empty() { return Ok(Vec::new()); }
+        let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
+        let localized = localized::load_article_localized(db.clone(), &ids).await?;
+        let meta_map = localized::load_article_meta(db.clone(), &ids).await?;
+        let attachments = localized::load_article_attachments(db.clone(), &ids).await?;
+        let mut records = Vec::with_capacity(rows.len());
+        for row in rows {
+            records.push(hydrate_record(row, &localized, &meta_map, &attachments, base_url));
+        }
+    Ok(records)
 }
 
 impl ArticleRecord {
@@ -197,12 +210,10 @@ async fn load_author<'db>(db: DbConn<'db>, parents: &[ArticleRow], base_url: Opt
         let mut q = sqlx::query_as::<_, UserRow>(&sql);
         for fk in fk_vals { q = bind(q, fk.into()); }
         let rows = db.fetch_all(q).await?;
-            let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
-            let localized = LocalizedMap::default();
+        let records = crate::generated::models::user::hydrate_records(db.clone(), &rows, base_url).await?;
         let mut by_pk: HashMap<i64, UserRecord> = HashMap::new();
-        for row in rows {
-            let key = row.id.clone();
-            let record = hydrate_record(row, &LocalizedMap::default(), base_url);
+        for record in records {
+            let key = record.id.clone();
             by_pk.insert(key, record);
         }
         let mut out = HashMap::new();
