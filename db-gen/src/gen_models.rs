@@ -948,7 +948,7 @@ fn render_record_collection_build_no_relations(
 
 fn render_record_collection_build(
     relations: &[RelationSpec],
-    model_snake: &str,
+    _model_snake: &str,
     pk: &str,
     rows_ident: &str,
     row_var: &str,
@@ -989,19 +989,11 @@ fn render_record_collection_build(
                 .unwrap();
             }
             RelationKind::BelongsTo => {
-                if to_snake(&rel.target_model) == model_snake {
-                    writeln!(
-                        out,
-                        "            record.{field} = {field}.get(&key).cloned().unwrap_or(None).map(Box::new);"
-                    )
-                    .unwrap();
-                } else {
-                    writeln!(
-                        out,
-                        "            record.{field} = {field}.get(&key).cloned().unwrap_or(None);"
-                    )
-                    .unwrap();
-                }
+                writeln!(
+                    out,
+                    "            record.{field} = {field}.get(&key).cloned().unwrap_or(None).map(Box::new);"
+                )
+                .unwrap();
             }
         }
     }
@@ -2490,13 +2482,9 @@ fn render_model(
                 record_fields.push(format!("    pub {rel_field}: Vec<{target_record}>,"));
             }
             RelationKind::BelongsTo => {
-                if rel.target_model == name {
-                    record_fields
-                        .push(format!("    pub {rel_field}: Option<Box<{target_record}>>,"));
-                } else {
-                    record_fields
-                        .push(format!("    pub {rel_field}: Option<{target_record}>,"));
-                }
+                record_fields.push(format!(
+                    "    pub {rel_field}: Option<Box<{target_record}>>,",
+                ));
             }
         }
     }
@@ -6462,11 +6450,7 @@ fn render_model(
                         "    fn get<'a>(_relation: Self, record: &'a {model_title}Record) -> Option<&'a Self::Target> {{"
                     )
                     .unwrap();
-                    if rel.target_model == name {
-                        writeln!(out, "        record.{rel_snake}.as_deref()").unwrap();
-                    } else {
-                        writeln!(out, "        record.{rel_snake}.as_ref()").unwrap();
-                    }
+                    writeln!(out, "        record.{rel_snake}.as_deref()").unwrap();
                     writeln!(out, "    }}").unwrap();
                     writeln!(out, "}}\n").unwrap();
                 }

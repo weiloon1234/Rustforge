@@ -74,7 +74,7 @@ pub struct ArticleRecord {
     #[serde(default)]
     pub meta: std::collections::HashMap<String, JsonValue>,
     #[serde(default)]
-    pub author: Option<UserRecord>,
+    pub author: Option<Box<UserRecord>>,
 }
 
 impl ArticleRecord {
@@ -1392,7 +1392,7 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
             for r in rows {
                 let key = r.id.clone();
                 let mut record = hydrate_record(r.clone(), &localized, &meta_map, &attachments, state.base_url.as_deref());
-                record.author = author.get(&key).cloned().unwrap_or(None);
+                record.author = author.get(&key).cloned().unwrap_or(None).map(Box::new);
                 out_vec.push(record);
             }
             Ok(out_vec)
@@ -1516,7 +1516,7 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
             for r in rows {
                 let key = r.id.clone();
                 let mut record = hydrate_record(r.clone(), &localized, &meta_map, &attachments, state.base_url.as_deref());
-                record.author = author.get(&key).cloned().unwrap_or(None);
+                record.author = author.get(&key).cloned().unwrap_or(None).map(Box::new);
                 data.push(record);
             }
             Ok(core_db::common::model_api::Page { data, total, per_page, current_page, last_page })
@@ -1703,7 +1703,7 @@ impl core_db::common::model_api::WhereHasRelation<ArticleModel> for OneRelation<
 impl core_db::common::model_api::RecordOneRelation<ArticleModel> for OneRelation<ArticleModel, UserRecord, 0> {
     type Target = UserRecord;
     fn get<'a>(_relation: Self, record: &'a ArticleRecord) -> Option<&'a Self::Target> {
-        record.author.as_ref()
+        record.author.as_deref()
     }
 }
 
