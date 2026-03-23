@@ -8,4 +8,4 @@ RELEASE_BIN="./target/release/websocket-server"
 if [[ -x "${RELEASE_BIN}" ]]; then
     exec "${RELEASE_BIN}" "$@"
 fi
-cargo run -p app --bin websocket-server -- "$@"
+cargo run -p rustforge-starter --bin websocket-server -- "$@"

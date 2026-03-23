@@ -8,4 +8,4 @@ RELEASE_BIN="./target/release/console"
 if [[ -x "${RELEASE_BIN}" ]]; then
     exec "${RELEASE_BIN}" "$@"
 fi
-cargo run -p app --bin console -- "$@"
+cargo run -p rustforge-starter --bin console -- "$@"

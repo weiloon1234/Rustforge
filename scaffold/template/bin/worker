@@ -8,4 +8,4 @@ RELEASE_BIN="./target/release/worker"
 if [[ -x "${RELEASE_BIN}" ]]; then
     exec "${RELEASE_BIN}" "$@"
 fi
-cargo run -p app --bin worker -- "$@"
+cargo run -p rustforge-starter --bin worker -- "$@"

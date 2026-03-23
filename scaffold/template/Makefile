@@ -51,7 +51,7 @@ install-frontend:
 .PHONY: dev-api
 dev-api:
 	@command -v cargo-watch >/dev/null 2>&1 || (echo "cargo-watch not found. Run: make install-tools" && exit 1)
-	RUN_WORKER=true cargo watch -x "run -p app --bin api-server"
+	RUN_WORKER=true cargo watch -x "run -p rustforge-starter --bin api-server"
 
 .PHONY: ensure-frontend-deps
 ensure-frontend-deps:
@@ -76,8 +76,8 @@ dev-frontend: ensure-frontend-deps
 dev: ensure-frontend-deps
 	@command -v cargo-watch >/dev/null 2>&1 || (echo "cargo-watch not found. Run: make install-tools" && exit 1)
 	@trap 'kill 0' EXIT; \
-	RUN_WORKER=true cargo watch -x "run -p app --bin api-server" & \
-	cargo run -p app --bin websocket-server & \
+	RUN_WORKER=true cargo watch -x "run -p rustforge-starter --bin api-server" & \
+	cargo run -p rustforge-starter --bin websocket-server & \
 	cargo watch -w app/models -w app/permissions.toml -w app/configs.toml -s "make gen" & \
 	cargo watch -w app/src/contracts -s "make gen-types" & \
 	npm --prefix frontend run dev:user & \
@@ -94,7 +94,7 @@ run-api:
 
 .PHONY: run-ws
 run-ws:
-	cargo run -p app --bin websocket-server
+	cargo run -p rustforge-starter --bin websocket-server
 
 .PHONY: run-worker
 run-worker:
@@ -144,12 +144,12 @@ check: ensure-frontend-deps
 
 .PHONY: gen-types
 gen-types:
-	cargo run -p app --bin export-types
+	cargo run -p rustforge-starter --bin export-types
 	@echo "TypeScript types regenerated in frontend/src/"
 
 .PHONY: gen
 gen:
-	cargo build -p generated
+	cargo build -p rustforge-starter-generated
 	$(MAKE) gen-types
 
 .PHONY: release
