@@ -1,9 +1,6 @@
 #![allow(dead_code)]
-// AUTO-GENERATED FILE — DO NOT EDIT
-pub mod models;
-pub mod guards;
-pub mod permissions;
-pub mod localized;
-pub use localized::*;
+include!(concat!(env!("OUT_DIR"), "/generated_root.rs"));
 pub mod ts_exports;
-pub mod generated { pub use crate::*; }
+pub mod generated {
+    pub use crate::*;
+}
