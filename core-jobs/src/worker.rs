@@ -333,7 +333,6 @@ impl Worker {
                             continue;
                         }
                     };
-
                     match self.process_wrapper(&wrapper).await {
                         Ok(JobResult::Success) => {}
                         Ok(JobResult::Failure {

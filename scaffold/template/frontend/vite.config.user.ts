@@ -44,7 +44,7 @@ function manualVendorChunk(id: string): string | undefined {
   if (id.includes("/lucide-react/")) {
     return "vendor-icons";
   }
-  return undefined;
+  return "vendor";
 }
 
 export default defineConfig({
@@ -53,6 +53,7 @@ export default defineConfig({
   envDir: path.resolve(__dirname, ".."),
   envPrefix: "VITE_",
   base: "/",
+  cacheDir: "node_modules/.vite-user",
   resolve: {
     alias: {
       "@shared": path.resolve(__dirname, "src/shared"),
