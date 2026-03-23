@@ -18,8 +18,8 @@ use core_db::common::model_api::{ColExpr, Column, Create, CreateState, ManyRelat
 use core_db::platform::meta::types::MetaMap;
 use crate::generated::localized;
 use core_i18n::current_locale;
-use crate::generated::models::user::{UserDbCol, UserModel, UserRow, UserRel};
-use crate::generated::models::profile::{ProfileDbCol, ProfileModel, ProfileRow};
+use crate::generated::models::user::{UserDbCol, UserModel, UserRecord, UserRow, UserRel};
+use crate::generated::models::profile::{ProfileDbCol, ProfileModel, ProfileRecord, ProfileRow};
 use crate::generated::localized::LocalizedMapHelper;
 use super::enums::*;
 use core_db::common::model_observer::{ModelEvent, ObserverAction, try_get_observer};

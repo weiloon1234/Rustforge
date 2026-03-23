@@ -2300,8 +2300,8 @@ fn render_model(
                 };
                 writeln!(
                     imports,
-                    "use crate::generated::models::{}::{{{}DbCol, {}Model, {}Row{}}};",
-                    target_mod, target_title, target_title, target_title, target_rel_import
+                    "use crate::generated::models::{}::{{{}DbCol, {}Model, {}Record, {}Row{}}};",
+                    target_mod, target_title, target_title, target_title, target_title, target_rel_import
                 )
                 .unwrap();
             }
@@ -2323,8 +2323,8 @@ fn render_model(
                 };
                 writeln!(
                     imports,
-                    "use crate::generated::models::{}::{{{}DbCol, {}Model, {}Row{}}};",
-                    target_mod, target_title, target_title, target_title, target_rel_import
+                    "use crate::generated::models::{}::{{{}DbCol, {}Model, {}Record, {}Row{}}};",
+                    target_mod, target_title, target_title, target_title, target_title, target_rel_import
                 )
                 .unwrap();
             }
