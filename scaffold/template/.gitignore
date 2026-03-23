@@ -1,5 +1,7 @@
 target/
 **/target/
+target-local/
+**/target-local/
 .env
 .env.local
 .env.*.local
