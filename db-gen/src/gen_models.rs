@@ -2819,22 +2819,21 @@ fn render_model(
             writeln!(out, "{}", line).unwrap();
         }
     }
-    let helper_build = render_record_collection_build_no_relations(
-        "records",
-        "row",
-        "rows",
-        &localized_fields,
-        has_meta,
-        has_attachments,
-        "base_url",
-    );
-    for line in helper_build.lines() {
-        if line.trim().is_empty() {
-            writeln!(out).unwrap();
-        } else {
-            writeln!(out, "{}", line).unwrap();
-        }
-    }
+    writeln!(out, "    let mut records = Vec::with_capacity(rows.len());").unwrap();
+    writeln!(out, "    for row in rows {{").unwrap();
+    writeln!(
+        out,
+        "        records.push({});",
+        build_hydrate_record_expr(
+            "row.clone()",
+            &localized_fields,
+            has_meta,
+            has_attachments,
+            "base_url",
+        )
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
     writeln!(out, "    Ok(records)").unwrap();
     writeln!(out, "}}\n").unwrap();
 

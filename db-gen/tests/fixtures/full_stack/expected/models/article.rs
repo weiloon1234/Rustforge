@@ -127,10 +127,10 @@ pub(crate) async fn hydrate_records<'db>(db: DbConn<'db>, rows: &[ArticleRow], b
         let localized = localized::load_article_localized(db.clone(), &ids).await?;
         let meta_map = localized::load_article_meta(db.clone(), &ids).await?;
         let attachments = localized::load_article_attachments(db.clone(), &ids).await?;
-        let mut records = Vec::with_capacity(rows.len());
-        for row in rows {
-            records.push(hydrate_record(row, &localized, &meta_map, &attachments, base_url));
-        }
+    let mut records = Vec::with_capacity(rows.len());
+    for row in rows {
+        records.push(hydrate_record(row.clone(), &localized, &meta_map, &attachments, base_url));
+    }
     Ok(records)
 }
 
