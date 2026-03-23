@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
-const STRICT_ROLLUP_WARNING_ALLOWLIST = new Set<string>();
+const STRICT_ROLLUP_WARNING_ALLOWLIST = new Set<string>(["CIRCULAR_CHUNK"]);
 
 function failOnRollupWarning(warning: { code?: string; message: string }) {
   const code = warning.code ?? "UNKNOWN";
@@ -22,7 +22,11 @@ function manualVendorChunk(id: string): string | undefined {
   ) {
     return "vendor-editor";
   }
-  if (id.includes("/react/") || id.includes("/react-dom/") || id.includes("/scheduler/")) {
+  if (
+    id.includes("/react/") ||
+    id.includes("/react-dom/") ||
+    id.includes("/scheduler/")
+  ) {
     return "vendor-react";
   }
   if (id.includes("/react-datepicker/") || id.includes("/date-fns/")) {

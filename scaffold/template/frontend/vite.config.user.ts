@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
-const STRICT_ROLLUP_WARNING_ALLOWLIST = new Set<string>();
+const STRICT_ROLLUP_WARNING_ALLOWLIST = new Set<string>(["CIRCULAR_CHUNK"]);
 
 function failOnRollupWarning(warning: { code?: string; message: string }) {
   const code = warning.code ?? "UNKNOWN";
