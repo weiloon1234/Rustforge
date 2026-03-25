@@ -485,6 +485,7 @@ fn to_runtime_country(country: CountryRecord) -> CountryRuntime {
         longitude: country.longitude,
         independent: country.independent,
         status: country.status.as_str().to_string(),
+        conversion_rate: country.conversion_rate,
         is_default: matches!(country.is_default, CountryIsDefault::Yes),
         assignment_status: country.assignment_status,
         un_member: country.un_member,

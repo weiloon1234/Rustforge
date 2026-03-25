@@ -99,6 +99,7 @@ export interface CountryRuntime {
   longitude?: number | null;
   independent?: boolean | null;
   status: CountryStatus;
+  conversion_rate: string;
   is_default: boolean;
   assignment_status?: string | null;
   un_member?: boolean | null;
