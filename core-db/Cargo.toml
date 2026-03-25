@@ -14,7 +14,7 @@ tower = { workspace = true, features = ["util"] }
 tower-http = { workspace = true, features = ["trace", "cors"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-schemars = { version = "0.8.21", features = ["uuid1", "chrono"] }
+schemars = { version = "0.8.21", features = ["uuid1", "chrono", "rust_decimal"] }
 sqlx = { workspace = true, features = [
     "runtime-tokio-native-tls",
     "postgres",

@@ -246,7 +246,6 @@ pub struct Country {
     #[ts(optional)]
     pub independent: Option<bool>,
     pub status: String,
-    #[schemars(with = "String")]
     #[ts(type = "string")]
     pub conversion_rate: rust_decimal::Decimal,
     pub is_default: bool,
