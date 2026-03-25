@@ -198,6 +198,7 @@ CREATE TABLE IF NOT EXISTS countries (
     longitude DOUBLE PRECISION,
     independent BOOLEAN,
     status TEXT NOT NULL DEFAULT 'disabled',
+    conversion_rate NUMERIC(18,8) NOT NULL DEFAULT 1.0,
     assignment_status TEXT,
     un_member BOOLEAN,
     flag_emoji TEXT,

@@ -342,54 +342,6 @@ if [[ "${ENABLE_HTTPS}" == "yes" ]]; then
     ensure_packages certbot python3-certbot-nginx cron
 fi
 
-# Download and extract initial release from R2 if VERSION not yet in project dir
-S3_ENDPOINT_VAL="$(read_env_value "${ENV_FILE}" "S3_ENDPOINT")"
-S3_BUCKET_VAL="$(read_env_value "${ENV_FILE}" "S3_BUCKET")"
-S3_ACCESS_KEY_VAL="$(read_env_value "${ENV_FILE}" "S3_ACCESS_KEY")"
-S3_SECRET_KEY_VAL="$(read_env_value "${ENV_FILE}" "S3_SECRET_KEY")"
-
-if [[ -n "${S3_ENDPOINT_VAL}" && -n "${S3_BUCKET_VAL}" && -n "${S3_ACCESS_KEY_VAL}" && -n "${S3_SECRET_KEY_VAL}" ]]; then
-    export AWS_ACCESS_KEY_ID="${S3_ACCESS_KEY_VAL}"
-    export AWS_SECRET_ACCESS_KEY="${S3_SECRET_KEY_VAL}"
-    export AWS_DEFAULT_REGION="auto"
-
-    echo "Fetching latest version from R2..."
-    download_dir="$(mktemp -d)"
-    if aws s3 cp "s3://${S3_BUCKET_VAL}/deploy/VERSION" "${download_dir}/VERSION" \
-        --endpoint-url "${S3_ENDPOINT_VAL}" --quiet 2>/dev/null; then
-
-        DEPLOY_VERSION="$(cat "${download_dir}/VERSION")"
-        echo "Latest version: ${DEPLOY_VERSION}"
-
-        if aws s3 cp "s3://${S3_BUCKET_VAL}/deploy/${DEPLOY_VERSION}/release.zip" "${download_dir}/release.zip" \
-            --endpoint-url "${S3_ENDPOINT_VAL}" --quiet && \
-           aws s3 cp "s3://${S3_BUCKET_VAL}/deploy/${DEPLOY_VERSION}/SHA256SUMS" "${download_dir}/SHA256SUMS" \
-            --endpoint-url "${S3_ENDPOINT_VAL}" --quiet; then
-
-            if (cd "${download_dir}" && sha256sum -c SHA256SUMS); then
-                staging="$(mktemp -d)"
-                unzip -q release.zip -d "${staging}"
-                rsync -a --exclude='.env' --exclude='logs/' --exclude='.git/' "${staging}/" "${PROJECT_DIR}/"
-                rm -rf "${staging}"
-                chown -R "${PROJECT_USER}:${PROJECT_USER}" "${PROJECT_DIR}"
-                chmod +x "${PROJECT_DIR}/target/release/"* "${PROJECT_DIR}/bin/"* "${PROJECT_DIR}/console" "${PROJECT_DIR}/scripts/"*.sh 2>/dev/null || true
-                echo "Release ${DEPLOY_VERSION} extracted to ${PROJECT_DIR}"
-            else
-                echo "WARNING: Checksum verification failed. Skipping extraction."
-            fi
-        else
-            echo "WARNING: Failed to download release artifacts from R2. Skipping extraction."
-        fi
-    else
-        echo "WARNING: No VERSION found in R2. Skipping initial release download."
-    fi
-    rm -rf "${download_dir}"
-
-    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION
-else
-    echo "WARNING: S3 credentials not configured in .env. Skipping initial release download."
-fi
-
 upsert_env "${ENV_FILE}" "APP_NAME" "${APP_NAME}"
 upsert_env "${ENV_FILE}" "APP_ENV" "${APP_ENV}"
 upsert_env "${ENV_FILE}" "APP_DEBUG" "$(bool_value "${APP_DEBUG}")"
@@ -475,21 +427,12 @@ fi
 
 if [[ "${ENABLE_SUPERVISOR}" == "yes" ]]; then
     SUPERVISOR_CONF_PATH="/etc/supervisor/conf.d/${PROJECT_SLUG}.conf"
-    if [[ -x "${PROJECT_DIR}/target/release/api-server" ]]; then
-        api_command="${PROJECT_DIR}/target/release/api-server"
-    else
-        api_command="${PROJECT_DIR}/bin/api-server"
-    fi
-    if [[ -x "${PROJECT_DIR}/target/release/websocket-server" ]]; then
-        ws_command="${PROJECT_DIR}/target/release/websocket-server"
-    else
-        ws_command="${PROJECT_DIR}/bin/websocket-server"
-    fi
-    if [[ -x "${PROJECT_DIR}/target/release/worker" ]]; then
-        worker_command="${PROJECT_DIR}/target/release/worker"
-    else
-        worker_command="${PROJECT_DIR}/bin/worker"
-    fi
+    # Use bash -c to source .env before exec'ing the binary (dotenvy may fail on ${} syntax in .env)
+    env_prefix="bash -c 'set -a; source ${PROJECT_DIR}/.env 2>/dev/null; set +a; exec"
+    env_suffix="'"
+    api_command="${env_prefix} ${PROJECT_DIR}/target/release/api-server${env_suffix}"
+    ws_command="${env_prefix} ${PROJECT_DIR}/target/release/websocket-server${env_suffix}"
+    worker_command="${env_prefix} ${PROJECT_DIR}/target/release/worker${env_suffix}"
 
     supervisor_content=""
     supervisor_content+="[program:${PROJECT_SLUG}-api]

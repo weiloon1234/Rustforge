@@ -33,6 +33,7 @@ pub struct Country {
     pub longitude: Option<f64>,
     pub independent: Option<bool>,
     pub status: CountryStatus,
+    pub conversion_rate: rust_decimal::Decimal,
     pub is_default: CountryIsDefault,
     pub assignment_status: Option<String>,
     pub un_member: Option<bool>,

@@ -7,11 +7,39 @@ Step-by-step guide for bootstrapping a fresh Ubuntu 24.04 server for {{PROJECT_N
 
 ---
 
+## 0. Pre-requisite: Create `ubuntu` User (if logged in as root)
+
+Some cloud providers (e.g. DigitalOcean, Vultr) default to a `root` login with no `ubuntu` user. The install script rejects root-owned directories, so you must create the `ubuntu` user first.
+
+```bash
+# Run these as root:
+adduser ubuntu --disabled-password --gecos ""
+usermod -aG sudo ubuntu
+
+# Allow passwordless sudo (required for install script and supervisor)
+echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu
+chmod 0440 /etc/sudoers.d/ubuntu
+
+# Copy SSH authorized_keys so you can SSH as ubuntu
+mkdir -p /home/ubuntu/.ssh
+cp /root/.ssh/authorized_keys /home/ubuntu/.ssh/authorized_keys
+chown -R ubuntu:ubuntu /home/ubuntu/.ssh
+chmod 700 /home/ubuntu/.ssh
+chmod 600 /home/ubuntu/.ssh/authorized_keys
+
+# Test: open a new terminal and SSH as ubuntu before proceeding
+# ssh ubuntu@your-server-ip
+```
+
+Once confirmed, all remaining steps should be run as `ubuntu` (not root).
+
+---
+
 ## 1. Prerequisites
 
 - Fresh Ubuntu 24.04 server
 - DNS A record pointing your domain to the server IP
-- SSH access as `ubuntu`
+- SSH access as `ubuntu` (see [step 0](#0-pre-requisite-create-ubuntu-user-if-logged-in-as-root) if only root is available)
 - GitHub Actions secrets configured (see [GitHub Setup](#github-setup) below)
 - At least one release already uploaded to R2 (run `make deploy` from source repo first)
 
