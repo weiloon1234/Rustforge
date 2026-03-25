@@ -19,6 +19,12 @@ pub use gen_localized::generate_localized;
 pub use gen_models::{generate_models, generate_models_with_options, GenerateModelsOptions};
 pub use gen_permissions::generate_permissions;
 pub use permissions::load_permissions;
+/// Escape a path for use inside a `#[path = "..."]` attribute.
+/// Replaces backslashes with double-backslashes for Windows compatibility.
+pub fn escape_path_for_include(p: &std::path::Path) -> String {
+    p.display().to_string().replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 /// Write file only when content differs — prevents spurious `git status` noise
 /// from code generation that produces identical output.
 pub fn write_if_changed(path: &std::path::Path, content: impl AsRef<[u8]>) -> std::io::Result<()> {

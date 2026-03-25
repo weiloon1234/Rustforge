@@ -10,18 +10,14 @@ fn main() {
     let framework_paths = db_gen::framework_model_source_paths_from_core_db();
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
 
+    let model_files = collect_rs_files(&models_dir);
+
     // Watch individual files, not the directory — avoids spurious triggers from
     // editor temp files, .DS_Store, etc.
     println!("cargo:rerun-if-changed={}", configs_path.display());
     println!("cargo:rerun-if-changed={}", permissions_path.display());
-    if models_dir.is_dir() {
-        for entry in std::fs::read_dir(&models_dir).expect("Failed to read models dir") {
-            let entry = entry.expect("Failed to read model entry");
-            let path = entry.path();
-            if path.extension().map_or(false, |e| e == "rs") {
-                println!("cargo:rerun-if-changed={}", path.display());
-            }
-        }
+    for path in &model_files {
+        println!("cargo:rerun-if-changed={}", path.display());
     }
     for path in &framework_paths {
         println!("cargo:rerun-if-changed={}", path.display());
@@ -29,13 +25,11 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     // Content-hash guard: skip generation if inputs haven't changed.
-    let input_hash = hash_inputs(&configs_path, &permissions_path, &models_dir, &framework_paths);
+    let input_hash = hash_inputs(&configs_path, &permissions_path, &model_files, &framework_paths);
     let hash_file = out_dir.join(".generation_hash");
-    if hash_file.exists() {
-        if let Ok(existing) = std::fs::read_to_string(&hash_file) {
-            if existing.trim() == input_hash {
-                return;
-            }
+    if let Ok(existing) = std::fs::read_to_string(&hash_file) {
+        if existing.trim() == input_hash {
+            return;
         }
     }
 
@@ -64,10 +58,9 @@ fn main() {
     db_gen::generate_localized(&cfgs.languages, &cfgs, &schema, &out_dir)
         .expect("Failed to gen localized");
 
-    // Generate the include root — same pattern as core-db/build.rs
     use std::fmt::Write as _;
     let mut root = String::new();
-    let escape = |p: PathBuf| p.display().to_string().replace('\\', "\\\\");
+    let escape = |p: PathBuf| db_gen::escape_path_for_include(&p);
 
     let _ = writeln!(root, "#[path = \"{}\"] pub mod models;", escape(models_out.join("mod.rs")));
     let _ = writeln!(root, "#[path = \"{}\"] pub mod guards;", escape(guards_out.join("mod.rs")));
@@ -82,34 +75,40 @@ fn main() {
     std::fs::write(&hash_file, &input_hash).expect("Failed to write generation hash");
 }
 
+/// Collect sorted `.rs` files from a directory (empty vec if dir doesn't exist).
+fn collect_rs_files(dir: &std::path::Path) -> Vec<PathBuf> {
+    if !dir.is_dir() {
+        return vec![];
+    }
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
+        .expect("Failed to read models dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().map_or(false, |ext| ext == "rs"))
+        .collect();
+    paths.sort();
+    paths
+}
+
 fn hash_inputs(
     configs_path: &std::path::Path,
     permissions_path: &std::path::Path,
-    models_dir: &std::path::Path,
+    model_files: &[PathBuf],
     framework_paths: &[PathBuf],
 ) -> String {
     let mut hasher = DefaultHasher::new();
 
-    // Hash file contents, not just metadata — actual content changes matter.
-    if let Ok(data) = std::fs::read(configs_path) {
-        data.hash(&mut hasher);
-    }
-    if let Ok(data) = std::fs::read(permissions_path) {
-        data.hash(&mut hasher);
-    }
-    if models_dir.is_dir() {
-        let mut entries: Vec<_> = std::fs::read_dir(models_dir)
-            .expect("Failed to read models dir")
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "rs"))
-            .collect();
-        entries.sort_by_key(|e| e.file_name());
-        for entry in entries {
-            entry.file_name().hash(&mut hasher);
-            if let Ok(data) = std::fs::read(entry.path()) {
-                data.hash(&mut hasher);
-            }
-        }
+    std::fs::read(configs_path)
+        .expect("Failed to read configs.toml")
+        .hash(&mut hasher);
+    std::fs::read(permissions_path)
+        .expect("Failed to read permissions.toml")
+        .hash(&mut hasher);
+    for path in model_files {
+        path.file_name().hash(&mut hasher);
+        std::fs::read(path)
+            .expect("Failed to read model file")
+            .hash(&mut hasher);
     }
     for path in framework_paths {
         if let Ok(data) = std::fs::read(path) {

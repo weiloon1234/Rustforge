@@ -49,11 +49,7 @@ fn main() {
     .expect("failed to generate framework models");
 
     let mut out = String::new();
-    let models_mod_path = models_dir
-        .join("mod.rs")
-        .display()
-        .to_string()
-        .replace('\\', "\\\\");
+    let models_mod_path = db_gen::escape_path_for_include(&models_dir.join("mod.rs"));
     let _ = writeln!(out, "#[path = \"{models_mod_path}\"] pub mod models;");
 
     fs::write(out_dir.join("framework_generated.rs"), out)
