@@ -1,4 +1,5 @@
 use core_db::platform::countries::CountryStatus;
+use core_web::Decimal;
 use core_web::datatable::{
     DataTableFilterFieldDto, DataTableFilterFieldType, DataTableFilterOptionDto,
     DataTableGenericEmailExportRequest, DataTableGenericQueryRequest, DataTableScopedContract,
@@ -19,6 +20,7 @@ pub struct CountryDatatableRow {
     pub name: String,
     pub region: Option<String>,
     pub calling_code: Option<String>,
+    pub conversion_rate: Decimal,
     pub status: String,
     pub is_default: bool,
     pub updated_at: String,

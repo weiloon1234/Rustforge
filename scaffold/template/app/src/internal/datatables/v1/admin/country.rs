@@ -21,7 +21,7 @@ use crate::contracts::datatable::admin::country::{
 };
 use crate::internal::datatables::v1::admin::authorize_with_optional_export;
 
-const COUNTRY_SORTABLE_COLUMNS: [&str; 8] = [
+const COUNTRY_SORTABLE_COLUMNS: [&str; 9] = [
     "iso2",
     "iso3",
     "name",
@@ -29,10 +29,11 @@ const COUNTRY_SORTABLE_COLUMNS: [&str; 8] = [
     "is_default",
     "region",
     "calling_code",
+    "conversion_rate",
     "updated_at",
 ];
 
-const COUNTRY_COLUMN_DESCRIPTORS: [DataTableColumnDescriptor; 9] = [
+const COUNTRY_COLUMN_DESCRIPTORS: [DataTableColumnDescriptor; 10] = [
     DataTableColumnDescriptor {
         name: "id",
         label: "ID",
@@ -80,6 +81,14 @@ const COUNTRY_COLUMN_DESCRIPTORS: [DataTableColumnDescriptor; 9] = [
         sortable: true,
         localized: false,
         filter_ops: &["like"],
+    },
+    DataTableColumnDescriptor {
+        name: "conversion_rate",
+        label: "Conversion Rate",
+        data_type: "number",
+        sortable: true,
+        localized: false,
+        filter_ops: &[],
     },
     DataTableColumnDescriptor {
         name: "status",
@@ -223,6 +232,7 @@ impl GeneratedTableAdapter for CountryTableAdapter {
                     name: row.name,
                     region: row.region,
                     calling_code: row.calling_code,
+                    conversion_rate: row.conversion_rate.into(),
                     status: row.status.as_str().to_string(),
                     is_default: matches!(row.is_default, CountryIsDefault::Yes),
                     updated_at: format_rfc3339(row.updated_at),
@@ -413,6 +423,7 @@ fn normalize_sort_column(value: &str) -> Option<&'static str> {
         "region" => Some("region"),
         "calling_code" => Some("calling_code"),
         "is_default" => Some("is_default"),
+        "conversion_rate" => Some("conversion_rate"),
         "updated_at" => Some("updated_at"),
         _ => None,
     }
@@ -430,6 +441,7 @@ fn apply_country_sort<'db>(
         "region" => query.order_by(CountryCol::REGION, direction),
         "calling_code" => query.order_by(CountryCol::CALLING_CODE, direction),
         "is_default" => query.order_by(CountryCol::IS_DEFAULT, direction),
+        "conversion_rate" => query.order_by(CountryCol::CONVERSION_RATE, direction),
         "updated_at" => query.order_by(CountryCol::UPDATED_AT, direction),
         _ => query.order_by(CountryCol::NAME, direction),
     }

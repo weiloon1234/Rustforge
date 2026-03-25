@@ -170,6 +170,7 @@ fn country_record_to_runtime(view: CountryRecord) -> Country {
         longitude: view.longitude,
         independent: view.independent,
         status: view.status.as_str().to_string(),
+        conversion_rate: view.conversion_rate,
         is_default: matches!(view.is_default, CountryIsDefault::Yes),
         assignment_status: view.assignment_status,
         un_member: view.un_member,

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Pencil, Star } from "lucide-react";
+import { ArrowLeftRight, Pencil, Star } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { CountryDatatableRow } from "@admin/types";
 import { PERMISSION } from "@admin/types";
@@ -93,6 +93,64 @@ function EditCountryStatusForm({
   );
 }
 
+function EditConversionRateForm({
+  row,
+  formId,
+  onBusyChange,
+}: {
+  row: CountryDatatableRow;
+  formId: string;
+  onBusyChange: (busy: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const closeWithRefresh = useModalStore((s) => s.closeWithRefresh);
+
+  const { submit, busy, form } = useAutoForm(api, {
+    url: `countries/${row.iso2}/conversion-rate`,
+    method: "patch",
+    fields: [
+      {
+        name: "country",
+        type: "text",
+        label: t("Country"),
+        disabled: true,
+        span: 1,
+      },
+      {
+        name: "conversion_rate",
+        type: "text",
+        label: t("Conversion Rate"),
+        required: true,
+        span: 1,
+      },
+    ],
+    defaults: {
+      country: `${row.name} (${row.iso2})`,
+      conversion_rate: row.conversion_rate,
+    },
+    onSuccess: () => {
+      closeWithRefresh();
+      alertSuccess({ title: t("Success"), message: t("Conversion rate updated") });
+    },
+    onError: (error) => {
+      alertError({
+        title: t("Error"),
+        message: normalizeErrorMessage(error, t("Failed to update conversion rate.")),
+      });
+    },
+  });
+
+  useEffect(() => {
+    onBusyChange(busy);
+  }, [busy, onBusyChange]);
+
+  return (
+    <form id={formId} onSubmit={submit}>
+      {form}
+    </form>
+  );
+}
+
 export default function CountriesPage() {
   const { t } = useTranslation();
   const account = useAuthStore((state) => state.account);
@@ -123,6 +181,41 @@ export default function CountriesPage() {
           });
         }
       },
+    });
+  };
+
+  const openConversionRateModal = (row: CountryDatatableRow) => {
+    const formId = `country-rate-form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    let modalId = "";
+    const renderFooter = (busy: boolean) => (
+      <>
+        <Button
+          type="button"
+          onClick={() => useModalStore.getState().close()}
+          variant="secondary"
+          disabled={busy}
+        >
+          {t("Cancel")}
+        </Button>
+        <Button type="submit" form={formId} variant="primary" busy={busy}>
+          {busy ? t("Saving…") : t("Save")}
+        </Button>
+      </>
+    );
+    modalId = useModalStore.getState().open({
+      title: t("Edit Conversion Rate"),
+      size: "md",
+      content: (
+        <EditConversionRateForm
+          row={row}
+          formId={formId}
+          onBusyChange={(busy) => {
+            if (!modalId) return;
+            useModalStore.getState().update(modalId, { footer: renderFooter(busy) });
+          }}
+        />
+      ),
+      footer: renderFooter(false),
     });
   };
 
@@ -188,6 +281,16 @@ export default function CountriesPage() {
                 >
                   <Pencil size={16} />
                 </Button>
+                <Button
+                  type="button"
+                  onClick={() => openConversionRateModal(row)}
+                  variant="plain"
+                  size="sm"
+                  iconOnly
+                  title={t("Edit Conversion Rate")}
+                >
+                  <ArrowLeftRight size={16} />
+                </Button>
                 {!row.is_default && (
                   <Button
                     type="button"
@@ -248,6 +351,12 @@ export default function CountriesPage() {
           key: "region",
           label: t("Region"),
           render: (row) => row.region ?? "—",
+        },
+        {
+          key: "conversion_rate",
+          label: t("Conversion Rate"),
+          cellClassName: "tabular-nums",
+          render: (row) => row.conversion_rate ?? "—",
         },
         {
           key: "updated_at",
