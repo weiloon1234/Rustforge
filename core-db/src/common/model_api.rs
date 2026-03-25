@@ -1129,6 +1129,19 @@ impl<'db> QueryState<'db> {
     // ── WHERE helpers ──────────────────────────────────────────────────
 
     pub fn where_col_str(mut self, col_sql: &str, op: Op, val: BindValue) -> Self {
+        // NULL-safe: `col = NULL` never matches in SQL; use `IS NULL` / `IS NOT NULL` instead.
+        if val.is_null() {
+            let null_clause = match op {
+                Op::Eq => format!("{} IS NULL", col_sql),
+                Op::Ne => format!("{} IS NOT NULL", col_sql),
+                _ => {
+                    // For other ops (>, <, etc.) with NULL, just skip — these are no-ops in SQL.
+                    return self;
+                }
+            };
+            self.where_sql.push(null_clause);
+            return self;
+        }
         let idx = self.binds.len() + 1;
         self.where_sql
             .push(format!("{} {} ${}", col_sql, op.as_sql(), idx));
@@ -1137,6 +1150,20 @@ impl<'db> QueryState<'db> {
     }
 
     pub fn or_where_col_str(mut self, col_sql: &str, op: Op, val: BindValue) -> Self {
+        // NULL-safe: same logic as where_col_str for OR clauses.
+        if val.is_null() {
+            let null_clause = match op {
+                Op::Eq => format!("{} IS NULL", col_sql),
+                Op::Ne => format!("{} IS NOT NULL", col_sql),
+                _ => return self,
+            };
+            if let Some(last) = self.where_sql.pop() {
+                self.where_sql.push(format!("({} OR {})", last, null_clause));
+            } else {
+                self.where_sql.push(null_clause);
+            }
+            return self;
+        }
         let idx = self.binds.len() + 1;
         let clause = format!("{} {} ${}", col_sql, op.as_sql(), idx);
         if let Some(last) = self.where_sql.pop() {
@@ -1922,6 +1949,15 @@ impl<'db> PatchState<'db> {
     }
 
     pub fn where_col_str(mut self, col_sql: &str, op: Op, val: BindValue) -> Self {
+        if val.is_null() {
+            let null_clause = match op {
+                Op::Eq => format!("{} IS NULL", col_sql),
+                Op::Ne => format!("{} IS NOT NULL", col_sql),
+                _ => return self,
+            };
+            self.where_sql.push(null_clause);
+            return self;
+        }
         let idx = self.where_binds.len() + 1;
         self.where_sql
             .push(format!("{} {} ${}", col_sql, op.as_sql(), idx));

@@ -127,13 +127,22 @@ fn mount_frontend_dev(mut router: Router) -> Router {
     // Nested portals first (admin, merchant, etc.)
     router = mount_portal_dev(router, &ADMIN_PORTAL);
 
-    // Dev-mode static assets from frontend/public/ subdirectories.
+    // Dev-mode static assets from frontend/public/.
+    // Serve both subdirectories (icons/, pwa-screens/) and root-level files
+    // (logo.png, favicon.ico, robots.txt, etc.).
     // In production these live inside public/ and are served by static_assets_router.
-    if let Ok(entries) = std::fs::read_dir("frontend/public") {
-        for entry in entries.flatten() {
-            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                let mount = format!("/{}", entry.file_name().to_string_lossy());
-                router = router.nest_service(&mount, ServeDir::new(entry.path()));
+    let frontend_public = std::path::Path::new("frontend/public");
+    if frontend_public.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(frontend_public) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    let mount = format!("/{}", name);
+                    router = router.nest_service(&mount, ServeDir::new(entry.path()));
+                } else {
+                    let mount = format!("/{}", name);
+                    router = router.route_service(&mount, ServeFile::new(entry.path()));
+                }
             }
         }
     }

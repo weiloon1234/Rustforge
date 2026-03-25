@@ -75,6 +75,26 @@ pub enum BindValue {
     JsonOpt(Option<Value>),
 }
 
+impl BindValue {
+    /// Returns true if this value represents a SQL NULL (an `*Opt(None)` variant).
+    pub fn is_null(&self) -> bool {
+        matches!(
+            self,
+            Self::I16Opt(None)
+                | Self::I32Opt(None)
+                | Self::I64Opt(None)
+                | Self::F64Opt(None)
+                | Self::DecimalOpt(None)
+                | Self::BoolOpt(None)
+                | Self::StringOpt(None)
+                | Self::StringArrayOpt(None)
+                | Self::TimeOpt(None)
+                | Self::UuidOpt(None)
+                | Self::JsonOpt(None)
+        )
+    }
+}
+
 impl std::fmt::Display for BindValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
