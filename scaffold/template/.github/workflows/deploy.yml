@@ -35,7 +35,7 @@ jobs:
         run: cargo build --release --locked -p rustforge-starter --bin api-server --bin websocket-server --bin worker --bin console
 
       - name: Upload Rust binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: rust-binaries
           path: |
@@ -70,7 +70,7 @@ jobs:
         run: npm --prefix frontend run build
 
       - name: Upload frontend build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: frontend-build
           path: public/
@@ -96,13 +96,13 @@ jobs:
             .env.example
 
       - name: Download Rust binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.3.0
         with:
           name: rust-binaries
           path: target/release/
 
       - name: Download frontend build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.3.0
         with:
           name: frontend-build
           path: public/
