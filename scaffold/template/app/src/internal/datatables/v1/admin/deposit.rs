@@ -75,15 +75,17 @@ impl DepositDataTableHooks for DepositDataTableAppHooks {
                     Ok(Some(query))
                 }
             }
-            "f-user_id" => {
-                if let Ok(uid) = value.trim().parse::<i64>() {
-                    Ok(Some(
-                        query
-                            .where_col(DepositCol::OWNER_TYPE, Op::Eq, OwnerType::User)
-                            .where_col(DepositCol::OWNER_ID, Op::Eq, uid),
-                    ))
-                } else {
+            "f-username" => {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
                     Ok(Some(query))
+                } else {
+                    let pattern = format!("%{trimmed}%");
+                    Ok(Some(
+                        query.where_has(DepositRel::USER, |rq| {
+                            rq.where_col(UserCol::USERNAME, Op::Like, pattern)
+                        }),
+                    ))
                 }
             }
             _ => Ok(None),
@@ -117,7 +119,13 @@ impl DepositDataTableHooks for DepositDataTableAppHooks {
                 .map(|a| serde_json::Value::String(a.username.clone()))
                 .unwrap_or(serde_json::Value::Null),
         );
-        record.insert("owner_name".into(), serde_json::Value::Null);
+        record.insert(
+            "owner_name".into(),
+            row.user
+                .as_ref()
+                .map(|u| serde_json::Value::String(u.username.clone()))
+                .unwrap_or(serde_json::Value::Null),
+        );
         record.insert(
             "company_bank_account_name".into(),
             row.company_bank_account
@@ -141,13 +149,10 @@ fn apply_keyword_filter<'db>(query: Query<'db, DepositModel>, value: &str) -> Qu
     if trimmed.is_empty() {
         return query;
     }
-    // Try to parse as ID first
     if let Ok(id) = trimmed.parse::<i64>() {
         return query.where_col(DepositCol::ID, Op::Eq, id);
     }
-    // Otherwise search by related_key
-    let pattern = format!("%{trimmed}%");
-    query.where_col(DepositCol::RELATED_KEY, Op::Like, Some(pattern))
+    query
 }
 
 pub type AppDepositDataTable = DepositDataTable<DepositDataTableAppHooks>;

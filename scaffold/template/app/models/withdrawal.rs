@@ -44,6 +44,8 @@ pub struct Withdrawal {
     pub reviewed_at: Option<time::OffsetDateTime>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
+    #[rf(foreign_key = "owner_id")]
+    pub user: BelongsTo<User>,
     #[rf(foreign_key = "admin_id")]
     pub admin: BelongsTo<Admin>,
     #[rf(foreign_key = "bank_id")]

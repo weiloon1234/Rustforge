@@ -1,4 +1,8 @@
+use core_db::common::sql::{DbConn, Op};
 use core_realtime::{RealtimeEvent, RealtimeTarget};
+use generated::models::{
+    DepositCol, DepositModel, DepositStatus, WithdrawalCol, WithdrawalModel, WithdrawalStatus,
+};
 
 use crate::internal::api::state::AppApiState;
 
@@ -16,19 +20,21 @@ impl RealtimeEvent for NotificationCounts {
 
 /// Query current pending counts from the database.
 pub async fn get_pending_counts(db: &sqlx::PgPool) -> Result<NotificationCounts, sqlx::Error> {
-    let deposit: (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM deposits WHERE status = 1")
-            .fetch_one(db)
-            .await?;
-
-    let withdrawal: (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM withdrawals WHERE status IN (1, 2)")
-            .fetch_one(db)
-            .await?;
+    let (deposit, withdrawal) = tokio::try_join!(
+        DepositModel::query(DbConn::pool(db))
+            .where_col(DepositCol::STATUS, Op::Eq, DepositStatus::Pending)
+            .count(),
+        WithdrawalModel::query(DbConn::pool(db))
+            .where_in(
+                WithdrawalCol::STATUS,
+                [WithdrawalStatus::Pending, WithdrawalStatus::Processing],
+            )
+            .count(),
+    )?;
 
     Ok(NotificationCounts {
-        deposit: deposit.0,
-        withdrawal: withdrawal.0,
+        deposit,
+        withdrawal,
     })
 }
 

@@ -1,11 +1,11 @@
 use core_db::common::{
     auth::hash::verify_password,
-    sql::{generate_snowflake_i64, DbConn},
+    sql::{generate_snowflake_i64, DbConn, Op, OrderDir},
 };
 use core_i18n::t;
 use core_web::error::AppError;
 use generated::models::{
-    CreditType, CryptoNetworkModel, CryptoNetworkStatus, OwnerType, UserModel,
+    CreditType, CryptoNetworkCol, CryptoNetworkModel, CryptoNetworkStatus, OwnerType, UserModel,
     WithdrawalCol, WithdrawalMethod, WithdrawalModel, WithdrawalStatus,
 };
 use rust_decimal::Decimal;
@@ -92,20 +92,19 @@ pub async fn get_ledger(
 pub async fn get_crypto_networks(
     state: &AppApiState,
 ) -> Result<Vec<CryptoNetworkOption>, AppError> {
-    let rows = sqlx::query_as::<_, (i64, String, String)>(
-        "SELECT id, name, symbol FROM crypto_networks WHERE status = $1 ORDER BY sort_order ASC",
-    )
-    .bind(CryptoNetworkStatus::Enabled as i16)
-    .fetch_all(&state.db)
-    .await
-    .map_err(AppError::from)?;
+    let rows = CryptoNetworkModel::query(DbConn::pool(&state.db))
+        .where_col(CryptoNetworkCol::STATUS, Op::Eq, CryptoNetworkStatus::Enabled)
+        .order_by(CryptoNetworkCol::SORT_ORDER, OrderDir::Asc)
+        .all()
+        .await
+        .map_err(AppError::from)?;
 
     Ok(rows
         .into_iter()
-        .map(|(id, name, symbol)| CryptoNetworkOption {
-            id: id.into(),
-            name,
-            symbol,
+        .map(|r| CryptoNetworkOption {
+            id: r.id.into(),
+            name: r.name,
+            symbol: r.symbol,
         })
         .collect())
 }

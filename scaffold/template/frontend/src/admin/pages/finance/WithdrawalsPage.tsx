@@ -239,9 +239,9 @@ export default function WithdrawalsPage() {
           ),
         },
         {
-          key: "owner_id",
-          label: t("Owner"),
-          render: (row) => row.owner_name ?? row.owner_id,
+          key: "owner_name",
+          label: t("Username"),
+          render: (row) => row.owner_name ?? "\u2014",
         },
         {
           key: "credit_type",

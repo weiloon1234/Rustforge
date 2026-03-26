@@ -75,6 +75,19 @@ impl WithdrawalDataTableHooks for WithdrawalDataTableAppHooks {
                     Ok(Some(query))
                 }
             }
+            "f-username" => {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    Ok(Some(query))
+                } else {
+                    let pattern = format!("%{trimmed}%");
+                    Ok(Some(
+                        query.where_has(WithdrawalRel::USER, |rq| {
+                            rq.where_col(UserCol::USERNAME, Op::Like, pattern)
+                        }),
+                    ))
+                }
+            }
             _ => Ok(None),
         }
     }
@@ -106,7 +119,13 @@ impl WithdrawalDataTableHooks for WithdrawalDataTableAppHooks {
                 .map(|a| serde_json::Value::String(a.username.clone()))
                 .unwrap_or(serde_json::Value::Null),
         );
-        record.insert("owner_name".into(), serde_json::Value::Null);
+        record.insert(
+            "owner_name".into(),
+            row.user
+                .as_ref()
+                .map(|u| serde_json::Value::String(u.username.clone()))
+                .unwrap_or(serde_json::Value::Null),
+        );
         record.insert(
             "bank_name".into(),
             row.bank
@@ -136,8 +155,7 @@ fn apply_keyword_filter<'db>(
     if let Ok(id) = trimmed.parse::<i64>() {
         return query.where_col(WithdrawalCol::ID, Op::Eq, id);
     }
-    let pattern = format!("%{trimmed}%");
-    query.where_col(WithdrawalCol::RELATED_KEY, Op::Like, Some(pattern))
+    query
 }
 
 pub type AppWithdrawalDataTable = WithdrawalDataTable<WithdrawalDataTableAppHooks>;

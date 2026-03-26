@@ -65,7 +65,7 @@ impl DataTableScopedContract for AdminWithdrawalDataTableContract {
                     filter_key: "q".to_string(),
                     field_type: DataTableFilterFieldType::Text,
                     label: "Keyword".to_string(),
-                    placeholder: Some("Search owner username".to_string()),
+                    placeholder: Some("Search by ID".to_string()),
                     description: None,
                     secondary_filter_key: None,
                     options: None,
@@ -92,6 +92,16 @@ impl DataTableScopedContract for AdminWithdrawalDataTableContract {
                 },
             ],
             vec![
+                DataTableFilterFieldDto {
+                    field: "username".to_string(),
+                    filter_key: "f-username".to_string(),
+                    field_type: DataTableFilterFieldType::Text,
+                    label: "Username".to_string(),
+                    placeholder: Some("Filter by username".to_string()),
+                    description: None,
+                    secondary_filter_key: None,
+                    options: None,
+                },
                 DataTableFilterFieldDto {
                     field: "withdrawal_method".to_string(),
                     filter_key: "f-withdrawal_method".to_string(),
