@@ -1,5 +1,5 @@
 import type { ChangeEvent } from "react";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { availableCountries, defaultCountryIso2, findCountryByIso2 } from "@shared/countryRuntime";
