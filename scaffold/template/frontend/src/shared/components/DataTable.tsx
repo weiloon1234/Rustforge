@@ -458,7 +458,7 @@ function FilterField({
         <Select
           containerClassName="mb-0"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(v) => onChange(v)}
           className="py-1.5! text-sm!"
           options={[
             { value: "", label: translatedPlaceholder || t("All") },
@@ -474,7 +474,7 @@ function FilterField({
         <Select
           containerClassName="mb-0"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(v) => onChange(v)}
           className="py-1.5! text-sm!"
           options={[
             { value: "", label: translatedPlaceholder || t("All") },
@@ -1249,7 +1249,7 @@ export function DataTable<T>({
             <Select
               containerClassName="mb-0"
               value={String(perPage)}
-              onChange={(e) => handlePerPageChange(Number(e.target.value))}
+              onChange={(v) => handlePerPageChange(Number(v))}
               className="w-auto! py-1! pr-8! text-xs!"
               options={PER_PAGE_OPTIONS.map((n) => ({
                 value: String(n),

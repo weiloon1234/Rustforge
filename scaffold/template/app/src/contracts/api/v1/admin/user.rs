@@ -119,6 +119,18 @@ pub struct UserBanOutput {
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct UserSearchQuery {
+    pub q: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "admin/types/")]
+pub struct UserSearchItem {
+    pub username: String,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct BatchResolveInput {
     pub ids: Vec<String>,
 }

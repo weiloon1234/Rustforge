@@ -33,7 +33,26 @@ function AdjustCreditForm({
     url: "users/credits/adjust",
     method: "post",
     fields: (values) => [
-      { name: "username", type: "text", label: t("Username"), placeholder: t("Enter username"), required: true },
+      {
+        name: "username",
+        type: "select" as const,
+        label: t("Username"),
+        placeholder: t("Search username"),
+        required: true,
+        searchable: true,
+        options: [],
+        remoteSearch: {
+          url: "users/search",
+          mapResponse: (data: unknown) => {
+            const items = (data as { data: Array<{ username: string; name?: string | null }> }).data;
+            return items.map((u) => ({
+              value: u.username,
+              label: u.name ? `${u.username} (${u.name})` : u.username,
+            }));
+          },
+          minChars: 2,
+        },
+      },
       { name: "credit_type", type: "select", label: t("Credit Type"), required: true, placeholder: t("Select"), options: ADJUSTABLE_CREDIT_TYPES.map((value) => ({ value, label: t(ADJUSTABLE_CREDIT_TYPE_I18N[value] ?? value) })) },
       { name: "amount", type: "text", label: t("Amount"), placeholder: "e.g. 100 or -50", required: true },
       { name: "remark", type: "textarea", label: t("Remark"), placeholder: t("Enter remark") },

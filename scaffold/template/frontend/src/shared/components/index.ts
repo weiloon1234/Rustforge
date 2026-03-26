@@ -11,7 +11,7 @@ export { TextArea } from "@shared/components/TextArea";
 export type { TextAreaProps } from "@shared/components/TextArea";
 
 export { Select } from "@shared/components/Select";
-export type { SelectProps, SelectOption } from "@shared/components/Select";
+export type { SelectProps, SelectOption, RemoteSearchConfig } from "@shared/components/Select";
 
 export { Checkbox } from "@shared/components/Checkbox";
 export type { CheckboxProps } from "@shared/components/Checkbox";
@@ -54,6 +54,9 @@ export type {
   DataTableFilterSnapshot,
 } from "@shared/components/DataTable";
 export { DataTableApiProvider, useDataTableApi } from "@shared/components/DataTable";
+
+export { InfiniteList } from "@shared/components/InfiniteList";
+export type { InfiniteListProps, InfiniteListHandle } from "@shared/components/InfiniteList";
 
 export { useAutoForm } from "@shared/useAutoForm";
 export type {

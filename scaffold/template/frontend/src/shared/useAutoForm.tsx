@@ -47,7 +47,7 @@ type FieldVariant =
   | (FieldBase & { type: InputFieldType; label: string; placeholder?: string })
   | (FieldBase & { type: RichEditorFieldType; label: string; placeholder?: string; editorPreset?: TiptapPreset; imageFolder?: string })
   | (FieldBase & { type: "textarea"; label: string; placeholder?: string; rows?: number })
-  | (FieldBase & { type: "select"; label: string; options: SelectOption[]; placeholder?: string })
+  | (FieldBase & { type: "select"; label: string; options: SelectOption[]; placeholder?: string; searchable?: boolean; remoteSearch?: Omit<import("@shared/components/Select").RemoteSearchConfig, "api">; clearable?: boolean })
   | (FieldBase & { type: "checkbox"; label: string })
   | (FieldBase & { type: "checkboxGroup"; label: string; options: CheckboxGroupOption[]; columns?: number })
   | (FieldBase & { type: "radio"; label: string; options: RadioOption[] })
@@ -661,20 +661,25 @@ export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, con
           />
         );
       }
-      case "select":
+      case "select": {
+        const sf = field as any;
         return (
           <Select
             label={label}
-            options={(field as any).options}
+            options={sf.options}
             value={values[valueKey] ?? ""}
-            onChange={(e) => setValue(valueKey, e.target.value)}
+            onChange={(v) => setValue(valueKey, v)}
             errors={errors}
             notes={field.notes}
-            placeholder={(field as any).placeholder}
+            placeholder={sf.placeholder}
             required={field.required}
             disabled={field.disabled}
+            searchable={sf.searchable}
+            remoteSearch={sf.remoteSearch ? { ...sf.remoteSearch, api } : undefined}
+            clearable={sf.clearable}
           />
         );
+      }
       default: {
         const inputField = field as FieldDef<T> & { type: InputFieldType };
         return (
@@ -756,22 +761,27 @@ export function useAutoForm<T = Record<string, unknown>>(api: AxiosInstance, con
                 </div>
               );
 
-            case "select":
+            case "select": {
+              const sf = field as any;
               return (
                 <div key={field.name} style={style}>
                   <Select
                     label={field.label}
-                    options={field.options}
+                    options={sf.options}
                     value={values[field.name] ?? ""}
-                    onChange={(e) => setValue(field.name, e.target.value)}
+                    onChange={(v) => setValue(field.name, v)}
                     errors={errors}
                     notes={field.notes}
-                    placeholder={field.placeholder}
+                    placeholder={sf.placeholder}
                     required={field.required}
                     disabled={field.disabled}
+                    searchable={sf.searchable}
+                    remoteSearch={sf.remoteSearch ? { ...sf.remoteSearch, api } : undefined}
+                    clearable={sf.clearable}
                   />
                 </div>
               );
+            }
 
             case "checkbox":
               return (

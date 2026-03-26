@@ -17,7 +17,7 @@ use validator::Validate;
 use crate::{
     contracts::api::v1::admin::user::{
         BatchResolveEntry, BatchResolveInput, BatchResolveOutput, CreateUserInput, UpdateUserInput,
-        UserBanInput, UserBanOutput, UserManageOutput,
+        UserBanInput, UserBanOutput, UserManageOutput, UserSearchItem, UserSearchQuery,
     },
     internal::{api::state::AppApiState, workflows::user_manage as workflow},
 };
@@ -32,6 +32,19 @@ pub fn router(state: AppApiState) -> ApiRouter {
                 PermissionMode::Any,
                 [Permission::UserManage.as_str()],
                 |op| op.summary("Create user").tag("Admin User Management"),
+            ),
+        )
+        .api_route(
+            "/search",
+            with_permission_check_get_with(
+                search_users,
+                AdminGuard,
+                PermissionMode::Any,
+                [
+                    Permission::UserRead.as_str(),
+                    Permission::UserManage.as_str(),
+                ],
+                |op| op.summary("Search users by username").tag("Admin User Management"),
             ),
         )
         .api_route(
@@ -139,6 +152,15 @@ async fn set_ban(
         t("User unbanned")
     };
     Ok(ApiResponse::success(UserBanOutput { banned }, &message))
+}
+
+async fn search_users(
+    State(state): State<AppApiState>,
+    _auth: AuthUser<AdminGuard>,
+    axum::extract::Query(query): axum::extract::Query<UserSearchQuery>,
+) -> Result<ApiResponse<Vec<UserSearchItem>>, AppError> {
+    let results = workflow::search_users(&state, query.q.as_deref()).await?;
+    Ok(ApiResponse::success(results, "ok"))
 }
 
 async fn batch_resolve(

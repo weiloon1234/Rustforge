@@ -9,7 +9,7 @@ use generated::{
 };
 
 use crate::{
-    contracts::api::v1::admin::user::{CreateUserInput, UpdateUserInput},
+    contracts::api::v1::admin::user::{CreateUserInput, UpdateUserInput, UserSearchItem},
     internal::api::state::AppApiState,
 };
 
@@ -221,6 +221,32 @@ pub async fn set_ban(
     scope.commit().await.map_err(AppError::from)?;
 
     detail(state, id).await
+}
+
+pub async fn search_users(
+    state: &AppApiState,
+    q: Option<&str>,
+) -> Result<Vec<UserSearchItem>, AppError> {
+    let q = q.unwrap_or("").trim();
+    if q.len() < 2 {
+        return Ok(Vec::new());
+    }
+
+    let pattern = format!("%{q}%");
+    let users = UserModel::query(DbConn::pool(&state.db))
+        .where_col(UserCol::USERNAME, Op::ILike, pattern)
+        .limit(20)
+        .all()
+        .await
+        .map_err(AppError::from)?;
+
+    Ok(users
+        .into_iter()
+        .map(|u| UserSearchItem {
+            username: u.username,
+            name: u.name,
+        })
+        .collect())
 }
 
 pub async fn batch_resolve_usernames(
