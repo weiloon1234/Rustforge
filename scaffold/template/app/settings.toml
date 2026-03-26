@@ -1,0 +1,189 @@
+# ─── App ─────────────────────────────────────────────────────────────────────
+[app]
+name = "starter"
+env = "local"                          # local | dev | staging | production
+key = ""                               # Required. Generate: openssl rand -base64 32, prefix with "base64:"
+debug = false
+timezone = "+08:00"
+log_level = "info"
+# Empty = auto (false for local/dev/test, true otherwise)
+cookie_secure = ""
+default_per_page = 30
+datatable_unknown_filter_mode = "ignore"  # ignore | warn | error
+datatable_export_link_ttl_secs = 604800   # 7 days
+enable_framework_docs = false
+framework_docs_path = "/framework-documentation"
+framework_docs_dist_dir = "/public/framework-documentation"
+enable_openapi_docs = true
+openapi_docs_path = "/openapi"
+openapi_json_path = "/openapi.json"
+# Paths
+paths_migrations_dir = "migrations"
+paths_seeders_dir = "app/src/seeds"
+paths_public = "public"
+paths_i18n_dir = "i18n"
+
+# ─── Server ──────────────────────────────────────────────────────────────────
+[server]
+host = "127.0.0.1"
+port = 3000
+
+# ─── Database (Postgres) ────────────────────────────────────────────────────
+[database]
+url = "postgres://postgres:postgres@127.0.0.1:5432/starter"
+max_connections = 10
+connect_timeout_secs = 5
+snowflake_node_id = 1
+sql_profiler_enabled = false
+sql_profiler_retention_days = 7
+
+# ─── Redis ───────────────────────────────────────────────────────────────────
+[redis]
+url = "redis://127.0.0.1:6379/0"
+# Empty = auto-derives from app.name + app.env
+cache_prefix = ""
+
+# ─── Object Storage (S3/R2/MinIO) ───────────────────────────────────────────
+[s3]
+endpoint = ""
+region = "auto"
+bucket = ""
+access_key = ""
+secret_key = ""
+force_path_style = false
+# Public base URL for file access (CDN/CNAME)
+public_url = ""
+
+# ─── Auth ────────────────────────────────────────────────────────────────────
+[auth]
+default = "admin"
+
+[auth.guards.admin]
+provider = "admin"
+ttl_min = 120
+refresh_ttl_days = 30
+
+[auth.guards.user]
+provider = "user"
+ttl_min = 120
+refresh_ttl_days = 30
+
+# ─── Languages ───────────────────────────────────────────────────────────────
+[languages]
+default = "en"
+supported = ["en", "zh"]
+
+# ─── Realtime ────────────────────────────────────────────────────────────────
+[realtime]
+enabled = true
+host = "127.0.0.1"
+port = 3010
+require_auth = false
+heartbeat_secs = 20
+presence_ttl_secs = 60
+max_connections = 10000
+max_message_bytes = 65536
+max_frame_bytes = 65536
+max_messages_per_sec = 150
+send_queue_capacity = 1024
+checkpoint_enabled = false
+checkpoint_ttl_secs = 2592000
+delivery_mode = "at_most_once"    # at_most_once | durable
+stream_max_len = 100000
+stream_retention_secs = 0
+replay_limit_default = 200
+replay_limit_max = 1000
+replay_gap_alert_threshold = 100
+replay_gap_alert_window_secs = 60
+
+[realtime.channels.public]
+enabled = true
+guard = ""
+presence_enabled = false
+
+[realtime.channels.user]
+enabled = true
+guard = "user"
+presence_enabled = true
+
+[realtime.channels.admin]
+enabled = true
+guard = "admin"
+presence_enabled = false
+
+# ─── CORS ────────────────────────────────────────────────────────────────────
+[cors]
+allowed_origins = ["*"]
+allowed_methods = ["*"]
+allowed_headers = ["*"]
+exposed_headers = []
+max_age = 0
+supports_credentials = false
+
+# ─── Middleware ───────────────────────────────────────────────────────────────
+[middleware]
+rate_limit_per_second = 10
+rate_limit_burst = 100
+timeout_secs = 30
+body_limit_mb = 10
+
+# ─── Mail ────────────────────────────────────────────────────────────────────
+[mail]
+enable = false
+driver = "log"                         # smtp | log
+host = "smtp.mailtrap.io"
+port = 2525
+username = ""
+password = ""
+from_address = "hello@example.com"
+
+# ─── Worker ──────────────────────────────────────────────────────────────────
+[worker]
+enabled = false
+concurrency = 10
+sweep_interval = 30
+
+# ─── HTTP Logging ────────────────────────────────────────────────────────────
+[http_log]
+webhook_enabled = false
+webhook_paths = "/wh/,/webhook/"
+client_enabled = false
+retention_days = 7
+
+# ─── Finance ─────────────────────────────────────────────────────────────────
+[deposit]
+fee_percentage = 0.0
+fee_fixed = 0.0
+
+[withdrawal]
+fee_percentage = 0.0
+fee_fixed = 0.0
+min_amount = 0.0
+
+# ─── Attachment Types ────────────────────────────────────────────────────────
+[attachment_type.image]
+allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+max_size = 5242880
+
+# ─── Seeders ─────────────────────────────────────────────────────────────────
+[seeders]
+bootstrap_in_prod = false
+
+[seeders.developer]
+username = "developer"
+email = ""
+password = "password123"
+name = "Developer"
+
+[seeders.superadmin]
+username = "superadmin"
+email = ""
+password = "password123"
+name = "Super Admin"
+
+# ─── Frontend (public to browser) ───────────────────────────────────────────
+[frontend]
+app_name = ""
+s3_url = ""
+# Dev only: direct WebSocket URL (in production, nginx proxies /ws)
+realtime_url = "ws://127.0.0.1:3010/ws"

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 fn main() {
     let app_dir = std::path::Path::new("..").join("app");
-    let configs_path = app_dir.join("configs.toml");
+    let configs_path = app_dir.join("settings.toml");
     let permissions_path = app_dir.join("permissions.toml");
     let models_dir = app_dir.join("models");
     let framework_paths = db_gen::framework_model_source_paths_from_core_db();
@@ -99,7 +99,7 @@ fn hash_inputs(
     let mut hasher = DefaultHasher::new();
 
     std::fs::read(configs_path)
-        .expect("Failed to read configs.toml")
+        .expect("Failed to read settings.toml")
         .hash(&mut hasher);
     std::fs::read(permissions_path)
         .expect("Failed to read permissions.toml")

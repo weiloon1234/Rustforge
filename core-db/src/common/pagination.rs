@@ -32,11 +32,7 @@ pub fn resolve_per_page(per_page: i64) -> i64 {
     if per_page > 0 {
         return per_page;
     }
-    core_config::AppSettings::from_env()
-        .ok()
-        .and_then(|settings| i64::try_from(settings.default_per_page).ok())
-        .filter(|n| *n > 0)
-        .unwrap_or(30)
+    30
 }
 
 impl Pagination {

@@ -117,7 +117,7 @@ async fn upload_receipt(
         .await
         .map_err(AppError::from)?;
 
-    let base_url = std::env::var("S3_URL").ok();
+    let base_url = state.settings.cdn.base_url.clone();
     let receipt_url = build_attachment_url(&object_key, base_url.as_deref());
 
     let params = serde_json::json!({ "receipt_url": receipt_url, "receipt_path": object_key });

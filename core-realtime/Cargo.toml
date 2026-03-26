@@ -23,4 +23,5 @@ core-web = { path = "../core-web" }
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tokio-tungstenite = "0.28"
+toml = { workspace = true }
 core-i18n = { path = "../core-i18n" }

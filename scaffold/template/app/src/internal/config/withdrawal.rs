@@ -1,6 +1,7 @@
 use rust_decimal::Decimal;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct WithdrawalFeeConfig {
     /// Fee percentage (0.0 = no fee, 0.02 = 2%)
     pub fee_percentage: Decimal,

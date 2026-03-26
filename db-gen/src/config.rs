@@ -86,7 +86,7 @@ pub fn validate_locales(l: &Locales) {
     }
     if !l.supported.iter().any(|s| s == &l.default) {
         panic!(
-            "languages.default '{}' must appear in languages.supported (configs.toml)",
+            "languages.default '{}' must appear in languages.supported (settings.toml)",
             l.default
         );
     }

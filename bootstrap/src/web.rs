@@ -32,9 +32,9 @@ where
     let app_router = router_factory(ctx.clone()).await?;
 
     // 4. AUTOMATIC FRAMEWORK ROUTES
-    let app_router = if ctx.settings.app.enable_docs {
-        info!("Framework Docs Enabled at '{}'", ctx.settings.app.docs_path);
-        app_router.nest(&ctx.settings.app.docs_path, core_docs::router())
+    let app_router = if ctx.settings.app.enable_framework_docs {
+        info!("Framework Docs Enabled at '{}'", ctx.settings.app.framework_docs_path);
+        app_router.nest(&ctx.settings.app.framework_docs_path, core_docs::router())
     } else {
         info!("Framework Docs DISABLED");
         app_router

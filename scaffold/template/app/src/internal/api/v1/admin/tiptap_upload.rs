@@ -62,7 +62,7 @@ async fn upload_tiptap_image(
     )
     .await?;
 
-    let base_url = std::env::var("S3_URL").ok();
+    let base_url = state.settings.cdn.base_url.clone();
     let output = AdminTiptapImageUploadOutput {
         folder: payload.folder,
         path: attachment.path.clone(),

@@ -2093,7 +2093,7 @@ fn render_model(
     for att in &attachment_fields {
         if !cfgs.attachment_types.contains_key(att.typ.as_str()) {
             panic!(
-                "Attachment type '{}' on model '{}' field '{}' is not defined in configs.toml attachment_type.*",
+                "Attachment type '{}' on model '{}' field '{}' is not defined in settings.toml [attachment_type.*]",
                 att.typ, name, att.name
             );
         }

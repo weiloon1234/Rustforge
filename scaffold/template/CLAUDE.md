@@ -11,7 +11,7 @@ This is the scaffold root instruction index.
 
 - `app/models/*.rs` — model/enum definitions and generated View helpers.
 - `app/permissions.toml` — permission catalog.
-- `app/configs.toml` — auth/languages/realtime/CORS config.
+- `app/settings.toml` — all configuration (auth, languages, realtime, CORS, database, etc). Env vars override via SECTION_FIELD convention.
 - `i18n/*.json` — all user-facing translations.
 
 Generated outputs are overwritten by generation/build. Do not edit generated files directly.

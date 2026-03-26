@@ -108,8 +108,8 @@ impl Mailer {
         // For now, let's assume `relay` returns a builder that has `.port()`.
         builder = builder.port(settings.port);
 
-        if let (Some(u), Some(p)) = (&settings.username, &settings.password) {
-            builder = builder.credentials(Credentials::new(u.clone(), p.clone()));
+        if let (Some(u), Some(p)) = (settings.username_opt(), settings.password_opt()) {
+            builder = builder.credentials(Credentials::new(u.to_string(), p.to_string()));
         }
 
         Ok(Some(builder.build()))

@@ -117,7 +117,7 @@ impl From<generated::models::ContentPageRecord> for AdminContentPageUpdateOutput
 fn attachment_urls_from_localized_text(
     values: &generated::LocalizedText,
 ) -> generated::LocalizedText {
-    let base = std::env::var("S3_URL").ok();
+    let base = core_db::common::model_api::default_attachment_base_url();
     let mut mapped = values.to_map();
     for path in mapped.values_mut() {
         *path = build_attachment_url(path, base.as_deref());

@@ -126,7 +126,7 @@ pub fn register_attachment_rules_provider(p: impl AttachmentRulesProvider) {
     let _ = PROVIDER.set(Box::new(p));
 }
 
-/// Look up attachment rules by type name, as defined in `configs.toml`
+/// Look up attachment rules by type name, as defined in `settings.toml`
 /// under `[attachment_type.<name>]`.
 pub fn get_attachment_rules(name: &str) -> Option<AttachmentRules> {
     PROVIDER.get().and_then(|p| p.get_rules(name))

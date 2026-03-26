@@ -249,6 +249,7 @@ fn to_auth_output(
                     &tokens.refresh_token,
                     ttl,
                     REFRESH_COOKIE_PATH,
+                    state.settings.app.cookie_secure(),
                 );
             }
 
@@ -276,40 +277,20 @@ fn refresh_cookie_ttl(state: &AppApiState) -> Option<Duration> {
     Some(Duration::days(days))
 }
 
-fn bool_from_env(key: &str) -> Option<bool> {
-    let raw = std::env::var(key).ok()?;
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Some(true),
-        "0" | "false" | "no" | "off" => Some(false),
-        _ => None,
-    }
-}
-
-fn should_use_secure_cookie() -> bool {
-    if let Some(value) = bool_from_env("COOKIE_SECURE") {
-        return value;
-    }
-
-    let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "production".to_string());
-    !matches!(
-        app_env.trim().to_ascii_lowercase().as_str(),
-        "local" | "development" | "dev" | "test" | "testing"
-    )
-}
-
 fn set_guard_refresh_cookie(
     cookies: &Cookies,
     guard: &str,
     refresh_token: &str,
     ttl: Duration,
     path: &str,
+    secure: bool,
 ) {
     let mut refresh_cookie = Cookie::new(
         cookie::guard_refresh_cookie_name(guard),
         refresh_token.to_string(),
     );
     refresh_cookie.set_http_only(true);
-    refresh_cookie.set_secure(should_use_secure_cookie());
+    refresh_cookie.set_secure(secure);
     refresh_cookie.set_same_site(SameSite::Strict);
     refresh_cookie.set_path(path.to_string());
     refresh_cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(

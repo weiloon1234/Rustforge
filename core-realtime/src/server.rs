@@ -2066,7 +2066,7 @@ mod tests {
     use crate::AuthResolver;
     use axum::http::{HeaderMap, HeaderValue};
     use core_config::{
-        AppSettings, AuthSettings, CdnSettings, CorsSettings, DataTableUnknownFilterMode,
+        AppSettings, AuthSettings, CdnSettings, CorsSettings,
         DbSettings, GuardConfig, HttpLogSettings, MailSettings, MiddlewareSettings,
         RealtimeChannelConfig, RealtimeDeliveryMode, RealtimeSettings, RedisSettings, S3Settings,
         ServerSettings, Settings, WorkerSettings,
@@ -2078,17 +2078,10 @@ mod tests {
 
     fn test_app_settings() -> AppSettings {
         AppSettings {
-            name: "realtime-test".to_string(),
-            env: "test".to_string(),
-            key: "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_string(),
-            enable_docs: false,
-            docs_path: "/framework-documentation".to_string(),
-            enable_openapi_docs: false,
-            openapi_docs_path: "/openapi".to_string(),
-            openapi_json_path: "/openapi.json".to_string(),
-            default_per_page: 30,
-            datatable_unknown_filter_mode: DataTableUnknownFilterMode::Ignore,
-            datatable_export_link_ttl_secs: 604_800,
+            name: "realtime-test".into(),
+            env: "test".into(),
+            key: "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+            ..AppSettings::default()
         }
     }
 
@@ -2151,6 +2144,7 @@ mod tests {
                 url: "postgres://localhost/test".to_string(),
                 max_connections: 1,
                 connect_timeout: Duration::from_secs(1),
+                snowflake_node_id: 1,
                 sql_profiler_enabled: false,
                 sql_profiler_retention_days: 7,
             },
@@ -2158,14 +2152,7 @@ mod tests {
                 url: redis_url.to_string(),
                 prefix: None,
             },
-            s3: S3Settings {
-                endpoint: String::new(),
-                region: "auto".to_string(),
-                bucket: String::new(),
-                access_key: String::new(),
-                secret_key: String::new(),
-                force_path_style: false,
-            },
+            s3: S3Settings::default(),
             cdn: CdnSettings { base_url: None },
             worker: WorkerSettings {
                 enabled: false,
@@ -2189,22 +2176,10 @@ mod tests {
                 default_guard: "web".to_string(),
                 guards,
             },
-            mail: MailSettings {
-                enable: false,
-                driver: "log".to_string(),
-                host: String::new(),
-                port: 0,
-                username: None,
-                password: None,
-                from_address: "test@example.com".to_string(),
-            },
-            http_log: HttpLogSettings {
-                webhook_enabled: false,
-                webhook_paths: vec![],
-                client_enabled: false,
-                retention_days: 7,
-            },
+            mail: MailSettings::default(),
+            http_log: HttpLogSettings::default(),
             cors: test_cors_settings(),
+            tree: Arc::new(toml::Value::Table(toml::map::Map::new())),
         })
     }
 
