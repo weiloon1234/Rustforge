@@ -97,6 +97,9 @@ fn compute_diff(
     }
 }
 
+/// Tables excluded from audit logging.
+const EXCLUDED_TABLES: &[&str] = &["personal_access_tokens"];
+
 async fn write_log_raw(
     db: &sqlx::PgPool,
     admin_id: i64,
@@ -106,6 +109,9 @@ async fn write_log_raw(
     old_data: Option<serde_json::Value>,
     new_data: Option<serde_json::Value>,
 ) {
+    if EXCLUDED_TABLES.contains(&table_name) {
+        return;
+    }
     let insert = AuditLogModel::create(DbConn::pool(db))
         .set(AuditLogCol::ID, generate_snowflake_i64())
         .and_then(|create| create.set(AuditLogCol::ADMIN_ID, admin_id))
