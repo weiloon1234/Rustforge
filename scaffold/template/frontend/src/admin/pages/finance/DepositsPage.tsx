@@ -12,14 +12,10 @@ import {
   alertError,
   formatDateTime,
   moneyFormat,
+  normalizeErrorMessage,
 } from "@shared/components";
 
 import { api } from "@admin/api";
-
-function normalizeErrorMessage(error: unknown, fallback: string): string {
-  const maybe = error as { response?: { data?: { message?: string } } };
-  return maybe?.response?.data?.message ?? fallback;
-}
 
 function depositStatusColor(status: DepositStatus): string {
   switch (status) {

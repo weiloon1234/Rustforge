@@ -588,7 +588,7 @@ export function DataTable<T>({
   const rowKeyWarned = useRef(false);
   const onPreCallRef = useRef(onPreCall);
   const onPostCallRef = useRef(onPostCall);
-  const filterRowsRef = useRef(meta?.filter_rows);
+  const filterRowsRef = useRef<DataTableMetaDto["filter_rows"] | undefined>(undefined);
 
   const [sortColumn, setSortColumn] = useState("");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
@@ -622,7 +622,7 @@ export function DataTable<T>({
 
   useEffect(() => {
     filterRowsRef.current = meta?.filter_rows;
-  }, [meta?.filter_rows]);
+  }, [meta]);
 
   useEffect(() => {
     autoRefreshEnabledRef.current = autoRefreshEnabled;
@@ -657,16 +657,19 @@ export function DataTable<T>({
     ? sortDirection
     : ((meta?.defaults?.sorted ?? "desc") as "asc" | "desc");
 
-  const renderColumns: DataTableColumn<T>[] =
-    columns && columns.length > 0
-      ? columns
-      : metaColumns.map((col) => ({
-          key: col.name,
-          label: toColumnLabel(col),
-          sortable: col.sortable,
-        }));
+  const renderColumns = useMemo<DataTableColumn<T>[]>(
+    () =>
+      columns && columns.length > 0
+        ? columns
+        : metaColumns.map((col) => ({
+            key: col.name,
+            label: toColumnLabel(col),
+            sortable: col.sortable,
+          })),
+    [columns, metaColumns],
+  );
 
-  const indexSortColumn = (() => {
+  const indexSortColumn = useMemo(() => {
     const preferred = (meta?.defaults?.sorting_column ?? "").trim();
     const preferredMeta = preferred
       ? metaColumns.find((m) => m.name === preferred && m.sortable)
@@ -674,7 +677,7 @@ export function DataTable<T>({
     if (preferredMeta) return preferredMeta.name;
     const idMeta = metaColumns.find((m) => m.name === "id" && m.sortable);
     return idMeta?.name ?? "";
-  })();
+  }, [metaColumns, meta?.defaults?.sorting_column]);
   const indexSortable = Boolean(indexSortColumn);
 
   const isColumnSortable = useCallback(
@@ -859,36 +862,27 @@ export function DataTable<T>({
     t,
   ]);
 
-  useEffect(() => {
-    if (
-      !enableAutoRefresh ||
-      !autoRefreshEnabled ||
-      loading ||
-      countdownSeconds <= 0
-    ) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      setCountdownSeconds((prev) => (prev <= 1 ? 0 : prev - 1));
-    }, 1000);
-
-    return () => window.clearInterval(timer);
-  }, [autoRefreshEnabled, countdownSeconds, enableAutoRefresh, loading]);
+  const refreshRef = useRef(refresh);
+  useEffect(() => { refreshRef.current = refresh; }, [refresh]);
 
   useEffect(() => {
     if (!enableAutoRefresh || !autoRefreshEnabled || loading) return;
-    if (countdownSeconds !== 0) return;
-    if (autoRefreshRequestInFlightRef.current) return;
-    autoRefreshRequestInFlightRef.current = true;
-    void refresh();
-  }, [
-    autoRefreshEnabled,
-    countdownSeconds,
-    enableAutoRefresh,
-    loading,
-    refresh,
-  ]);
+
+    const timer = window.setInterval(() => {
+      setCountdownSeconds((prev) => {
+        if (prev <= 1) {
+          if (!autoRefreshRequestInFlightRef.current) {
+            autoRefreshRequestInFlightRef.current = true;
+            void refreshRef.current();
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [autoRefreshEnabled, enableAutoRefresh, loading]);
 
   const sumColumn = useCallback(
     (column: string, decimals = 2) => {
@@ -1186,14 +1180,14 @@ export function DataTable<T>({
             <tbody>
               {loading && !data && (
                 <tr>
-                  <td colSpan={99} className="rf-dt-empty-cell">
+                  <td colSpan={renderColumns.length + (showIndexColumn ? 1 : 0)} className="rf-dt-empty-cell">
                     {t("Loading…")}
                   </td>
                 </tr>
               )}
               {data && data.records.length === 0 && (
                 <tr>
-                  <td colSpan={99} className="rf-dt-empty-cell">
+                  <td colSpan={renderColumns.length + (showIndexColumn ? 1 : 0)} className="rf-dt-empty-cell">
                     {t("No records found.")}
                   </td>
                 </tr>

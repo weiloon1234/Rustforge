@@ -21,18 +21,12 @@ import {
   alertSuccess,
   alertError,
   formatDateTime,
+  normalizeErrorMessage,
 } from "@shared/components";
 import { formatFullPhoneNumber } from "@shared/countryRuntime";
 import type { DataTablePostCallEvent } from "@shared/components";
 import { useAuthStore } from "@admin/stores/auth";
 import { api } from "@admin/api";
-
-
-
-function normalizeErrorMessage(error: unknown, fallback: string): string {
-  const maybe = error as { response?: { data?: { message?: string } } };
-  return maybe?.response?.data?.message ?? fallback;
-}
 
 const BAN_COLORS: Record<UserBanStatus, { className: string; labelKey: string }> = {
   "0": { className: "bg-emerald-100 text-emerald-700", labelKey: USER_BAN_STATUS_I18N["0"] },

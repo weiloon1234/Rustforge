@@ -13,15 +13,11 @@ import {
   alertSuccess,
   formatDateTime,
   useAutoForm,
+  normalizeErrorMessage,
   useModalStore,
   type AutoFormDefaultValue,
 } from "@shared/components";
 import type { DataTableCellContext } from "@shared/components/DataTable";
-
-function normalizeErrorMessage(error: unknown, fallback: string): string {
-  const maybe = error as { response?: { data?: { message?: string } } };
-  return maybe?.response?.data?.message ?? fallback;
-}
 
 function statusColor(status: CryptoNetworkStatus): string {
   switch (status) {

@@ -13,6 +13,7 @@ import {
   alertSuccess,
   formatDateTime,
   useAutoForm,
+  normalizeErrorMessage,
   useModalStore,
 } from "@shared/components";
 
@@ -24,11 +25,6 @@ function statusBadgeClass(status: string): string {
     return "bg-emerald-100 text-emerald-700";
   }
   return "bg-gray-100 text-gray-700";
-}
-
-function normalizeErrorMessage(error: unknown, fallback: string): string {
-  const maybe = error as { response?: { data?: { message?: string } } };
-  return maybe?.response?.data?.message ?? fallback;
 }
 
 function EditCountryStatusForm({

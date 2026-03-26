@@ -13,16 +13,12 @@ import {
   alertSuccess,
   formatDateTime,
   useAutoForm,
+  normalizeErrorMessage,
   useModalStore,
   type AutoFormDefaultValue,
 } from "@shared/components";
 import type { DataTableCellContext } from "@shared/components/DataTable";
 import type { ApiResponse } from "@shared/types";
-
-function normalizeErrorMessage(error: unknown, fallback: string): string {
-  const maybe = error as { response?: { data?: { message?: string } } };
-  return maybe?.response?.data?.message ?? fallback;
-}
 
 function statusColor(status: CompanyBankAccountStatus): string {
   switch (status) {

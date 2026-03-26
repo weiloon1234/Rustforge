@@ -153,3 +153,8 @@ export function formatDateTime(value: string | null | undefined, format: string 
 
   return format.replace(/Y|m|d|H|h|i|s|A/g, (tok) => tokens[tok] ?? tok);
 }
+
+export function normalizeErrorMessage(error: unknown, fallback: string): string {
+  const maybe = error as { response?: { data?: { message?: string } } };
+  return maybe?.response?.data?.message ?? fallback;
+}

@@ -1,15 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Loader2, Search, Users } from "lucide-react";
-import { Button, TextInput, alertError } from "@shared/components";
+import { Button, TextInput, alertError, normalizeErrorMessage } from "@shared/components";
 import type { AdminDownlineNode, AdminDownlinesOutput, ResolvedUser } from "@admin/types";
 import type { ApiResponse } from "@shared/types";
 import { api } from "@admin/api";
-
-function normalizeErrorMessage(error: unknown, fallback: string): string {
-  const maybe = error as { response?: { data?: { message?: string } } };
-  return maybe?.response?.data?.message ?? fallback;
-}
 
 interface StackEntry {
   id: string;

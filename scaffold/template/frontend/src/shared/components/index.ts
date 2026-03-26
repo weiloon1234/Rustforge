@@ -84,4 +84,5 @@ export {
   moneyFormat,
   formatDateTime,
   attachmentUrl,
+  normalizeErrorMessage,
 } from "@shared/helpers";

@@ -13,14 +13,10 @@ import {
   alertError,
   alertSuccess,
   formatDateTime,
+  normalizeErrorMessage,
 } from "@shared/components";
 
 const CONTENT_PAGE_SYSTEM_YES: ContentPageSystemFlag = CONTENT_PAGE_SYSTEM_FLAG.YES;
-
-function normalizeErrorMessage(error: unknown, fallback: string): string {
-  const maybe = error as { response?: { data?: { message?: string } } };
-  return maybe?.response?.data?.message ?? fallback;
-}
 
 function toSystemLabel(value: ContentPageSystemFlag, t: (key: string) => string): string {
   if (value === CONTENT_PAGE_SYSTEM_YES) return t("System");
