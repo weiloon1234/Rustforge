@@ -1,4 +1,4 @@
-use core_db::common::model_observer::ModelEvent;
+use core_db::common::model_observer::{ModelEvent, FRAMEWORK_AUDIT_EXCLUDED_TABLES};
 use core_db::common::sql::{generate_snowflake_i64, DbConn};
 use generated::models::{AuditAction, AuditLogCol, AuditLogModel};
 
@@ -97,8 +97,8 @@ fn compute_diff(
     }
 }
 
-/// Tables excluded from audit logging.
-const EXCLUDED_TABLES: &[&str] = &["personal_access_tokens"];
+/// App-level tables excluded from audit logging (in addition to framework exclusions).
+const APP_AUDIT_EXCLUDED_TABLES: &[&str] = &["audit_logs"];
 
 async fn write_log_raw(
     db: &sqlx::PgPool,
@@ -109,7 +109,9 @@ async fn write_log_raw(
     old_data: Option<serde_json::Value>,
     new_data: Option<serde_json::Value>,
 ) {
-    if EXCLUDED_TABLES.contains(&table_name) {
+    if APP_AUDIT_EXCLUDED_TABLES.contains(&table_name)
+        || FRAMEWORK_AUDIT_EXCLUDED_TABLES.contains(&table_name)
+    {
         return;
     }
     let insert = AuditLogModel::create(DbConn::pool(db))

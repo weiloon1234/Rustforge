@@ -95,6 +95,11 @@ task_local! {
     static CURRENT_OBSERVER: Arc<dyn ModelObserver>;
 }
 
+/// Framework tables that should be excluded from audit logging.
+/// These are internal tables managed by the framework whose mutations
+/// generate noise in audit logs (e.g. token refreshes on every request).
+pub const FRAMEWORK_AUDIT_EXCLUDED_TABLES: &[&str] = &["personal_access_tokens"];
+
 /// Try to get the current task-local observer, if one is set.
 pub fn try_get_observer() -> Option<Arc<dyn ModelObserver>> {
     CURRENT_OBSERVER.try_with(|o| o.clone()).ok()

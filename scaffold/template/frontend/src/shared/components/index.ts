@@ -53,7 +53,7 @@ export type {
   DataTableFooterContext,
   DataTableFilterSnapshot,
 } from "@shared/components/DataTable";
-export { DataTableApiProvider, useDataTableApi } from "@shared/components/DataTable";
+export { DataTableApiProvider, useDataTableApi, buildDatatablePayload } from "@shared/components/DataTable";
 
 export { InfiniteList } from "@shared/components/InfiniteList";
 export type { InfiniteListProps, InfiniteListHandle } from "@shared/components/InfiniteList";

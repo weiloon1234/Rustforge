@@ -6,12 +6,52 @@ on:
       - 'v*'
 
 jobs:
-  build-and-deploy:
+  build-rust:
     runs-on: ubuntu-24.04
-
     steps:
       - name: Checkout source
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup sccache
+        uses: Mozilla-Actions/sccache-action@v0.0.9
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+
+      - name: Cache Cargo registry and build
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build Rust release binaries
+        env:
+          RUSTC_WRAPPER: sccache
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+        run: cargo build --release --locked -p rustforge-starter --bin api-server --bin websocket-server --bin worker --bin console
+
+      - name: Upload Rust binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-binaries
+          path: |
+            target/release/api-server
+            target/release/websocket-server
+            target/release/worker
+            target/release/console
+          retention-days: 1
+
+  build-frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
 
       - name: Setup Node 22
         uses: actions/setup-node@v5
@@ -23,35 +63,48 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --prefix frontend
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Setup sccache
-        uses: Mozilla-Actions/sccache-action@v0.0.9
-
-      - name: Cache Cargo registry and build
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: rust-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          cache-targets: true
-
-      - name: Install mold linker
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq mold
-
-      - name: Build Rust release binaries
-        env:
-          RUSTC_WRAPPER: sccache
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-        run: cargo build --release -p rustforge-starter --bin api-server --bin websocket-server --bin worker --bin console
-
       - name: Build frontend
         env:
           VITE_APP_NAME: ${{ secrets.VITE_APP_NAME }}
           VITE_S3_URL: ${{ secrets.VITE_S3_URL }}
         run: npm --prefix frontend run build
+
+      - name: Upload frontend build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: public/
+          retention-days: 1
+
+  package-and-deploy:
+    needs: [build-rust, build-frontend]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            bin
+            app/configs.toml
+            app/src/seeds
+            migrations
+            i18n
+            scripts
+            console
+            .env.example
+
+      - name: Download Rust binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-binaries
+          path: target/release/
+
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: public/
 
       - name: Get version from tag
         id: version

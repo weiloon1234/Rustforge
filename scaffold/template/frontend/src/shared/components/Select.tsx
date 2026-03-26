@@ -1,7 +1,8 @@
-import { useMemo, useState, useRef, useEffect, useCallback, useId } from "react";
+import { useMemo, useState, useRef, useEffect, useId } from "react";
 import { ChevronDown, X, Loader2 } from "lucide-react";
 import type { AxiosInstance } from "axios";
 import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
+import { useDropdown } from "@shared/hooks/useDropdown";
 
 export interface SelectOption {
   value: string;
@@ -59,16 +60,15 @@ export function Select({
   const autoId = useId();
   const id = externalId ?? autoId;
 
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [search, setSearch] = useState("");
+  const { dropdownOpen, setDropdownOpen, search, setSearch, close, containerRef, searchRef } = useDropdown();
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [remoteOptions, setRemoteOptions] = useState<SelectOption[]>([]);
   const [remoteLoading, setRemoteLoading] = useState(false);
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const remoteSearchRef = useRef(remoteSearch);
+  remoteSearchRef.current = remoteSearch;
 
   const isRemote = !!remoteSearch;
   const isSearchable = searchable || isRemote;
@@ -93,27 +93,6 @@ export function Select({
     return allOptions.find((o) => o.value === value)?.label;
   }, [value, staticOptions, remoteOptions, isRemote]);
 
-  // Close on outside click
-  const handleClickOutside = useCallback((e: MouseEvent) => {
-    if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-      setDropdownOpen(false);
-      setSearch("");
-      setHighlightedIndex(-1);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (dropdownOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      if (isSearchable) {
-        requestAnimationFrame(() => searchRef.current?.focus());
-      }
-    } else {
-      document.removeEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [dropdownOpen, handleClickOutside, isSearchable]);
-
   // Scroll highlighted item into view
   useEffect(() => {
     if (highlightedIndex >= 0 && listRef.current) {
@@ -132,10 +111,11 @@ export function Select({
 
     setRemoteLoading(true);
     const timer = setTimeout(() => {
-      remoteSearch!
-        .api.get(remoteSearch!.url, { params: { q: search.trim() } })
+      const rs = remoteSearchRef.current!;
+      rs.api
+        .get(rs.url, { params: { q: search.trim() } })
         .then((res) => {
-          setRemoteOptions(remoteSearch!.mapResponse(res.data));
+          setRemoteOptions(rs.mapResponse(res.data));
         })
         .catch(() => {
           setRemoteOptions([]);
@@ -149,12 +129,11 @@ export function Select({
       clearTimeout(timer);
       setRemoteLoading(false);
     };
-  }, [search, isRemote, dropdownOpen, minChars, debounceMs, remoteSearch]);
+  }, [search, isRemote, dropdownOpen, minChars, debounceMs]);
 
   const handleSelect = (optionValue: string) => {
     onChange?.(optionValue);
-    setDropdownOpen(false);
-    setSearch("");
+    close();
     setHighlightedIndex(-1);
     requestAnimationFrame(() => triggerRef.current?.focus());
   };
@@ -162,20 +141,21 @@ export function Select({
   const handleClear = (e: React.MouseEvent) => {
     e.stopPropagation();
     onChange?.("");
-    setSearch("");
+  };
+
+  const openDropdown = () => {
+    setHighlightedIndex(-1);
+    if (isRemote) setRemoteOptions([]);
+    setDropdownOpen(true);
   };
 
   const toggleDropdown = () => {
     if (disabled) return;
-    setDropdownOpen((prev) => {
-      if (!prev) {
-        setHighlightedIndex(-1);
-        if (isRemote) setRemoteOptions([]);
-      } else {
-        setSearch("");
-      }
-      return !prev;
-    });
+    if (dropdownOpen) {
+      close();
+    } else {
+      openDropdown();
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -183,15 +163,14 @@ export function Select({
 
     switch (e.key) {
       case "Escape":
-        setDropdownOpen(false);
-        setSearch("");
+        close();
         setHighlightedIndex(-1);
         triggerRef.current?.focus();
         break;
       case "ArrowDown":
         e.preventDefault();
         if (!dropdownOpen) {
-          setDropdownOpen(true);
+          openDropdown();
         } else {
           setHighlightedIndex((prev) => {
             const enabledOptions = filteredOptions.filter((o) => !o.disabled);
@@ -216,7 +195,7 @@ export function Select({
           const opt = filteredOptions[highlightedIndex];
           if (!opt.disabled) handleSelect(opt.value);
         } else if (!dropdownOpen) {
-          setDropdownOpen(true);
+          openDropdown();
         }
         break;
     }

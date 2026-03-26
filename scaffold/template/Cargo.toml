@@ -36,6 +36,10 @@ core-realtime = { git = "https://github.com/weiloon1234/Rustforge.git", branch =
 core-web = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 db-gen = { git = "https://github.com/weiloon1234/Rustforge.git", branch = "main" }
 
+[profile.release]
+strip = true          # strip debug symbols → smaller binary, faster link
+lto = "thin"          # thin LTO → better codegen with reasonable compile time
+
 [profile.dev.package.rustforge-starter-generated]
 opt-level = 0
 codegen-units = 256

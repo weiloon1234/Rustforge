@@ -1,9 +1,10 @@
 import type { ChangeEvent } from "react";
-import { useMemo, useState, useRef, useEffect, useCallback } from "react";
+import { useMemo, useRef } from "react";
 import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { availableCountries, defaultCountryIso2, findCountryByIso2 } from "@shared/countryRuntime";
 import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
+import { useDropdown } from "@shared/hooks/useDropdown";
 import type { CountryRuntime } from "@shared/types/platform";
 
 export interface ContactInputValue {
@@ -57,10 +58,7 @@ export function ContactInput({
   containerClassName,
 }: ContactInputProps) {
   const { t } = useTranslation();
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const containerRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
+  const { dropdownOpen, setDropdownOpen, search, setSearch, close, containerRef, searchRef } = useDropdown();
   const dropdownRef = useRef<HTMLDivElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
 
@@ -89,25 +87,6 @@ export function ContactInput({
 
   const hasError = hasFieldError(countryError, countryErrors) || hasFieldError(phoneError, phoneErrors);
 
-  // Close dropdown on outside click
-  const handleClickOutside = useCallback((e: MouseEvent) => {
-    if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-      setDropdownOpen(false);
-      setSearch("");
-    }
-  }, []);
-
-  useEffect(() => {
-    if (dropdownOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      // Focus search input when dropdown opens
-      requestAnimationFrame(() => searchRef.current?.focus());
-    } else {
-      document.removeEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [dropdownOpen, handleClickOutside]);
-
   // Scroll active item into view when dropdown opens
   useEffect(() => {
     if (dropdownOpen && dropdownRef.current) {
@@ -123,9 +102,7 @@ export function ContactInput({
       country_iso2: iso2.toUpperCase(),
       phone_number: value.phone_number,
     });
-    setDropdownOpen(false);
-    setSearch("");
-    // Focus phone input after selection
+    close();
     requestAnimationFrame(() => phoneRef.current?.focus());
   };
 
@@ -138,8 +115,11 @@ export function ContactInput({
 
   const toggleDropdown = () => {
     if (disabled || resolvedCountries.length === 0) return;
-    setDropdownOpen((prev) => !prev);
-    if (dropdownOpen) setSearch("");
+    if (dropdownOpen) {
+      close();
+    } else {
+      setDropdownOpen(true);
+    }
   };
 
   const isRequired = required || countryRequired || phoneRequired;
@@ -207,10 +187,7 @@ export function ContactInput({
                 placeholder={t("Search country")}
                 className="rf-contact-dropdown-search"
                 onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    setDropdownOpen(false);
-                    setSearch("");
-                  }
+                  if (e.key === "Escape") close();
                 }}
               />
             </div>
@@ -280,10 +257,7 @@ export function SearchCountryInput({
   containerClassName?: string;
 }) {
   const { t } = useTranslation();
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const containerRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
+  const { dropdownOpen, setDropdownOpen, search, setSearch, close, containerRef, searchRef } = useDropdown();
 
   const resolvedCountries = useMemo(
     () => countries ?? availableCountries(),
@@ -305,23 +279,6 @@ export function SearchCountryInput({
     );
   }, [resolvedCountries, search]);
 
-  const handleClickOutside = useCallback((e: MouseEvent) => {
-    if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-      setDropdownOpen(false);
-      setSearch("");
-    }
-  }, []);
-
-  useEffect(() => {
-    if (dropdownOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      requestAnimationFrame(() => searchRef.current?.focus());
-    } else {
-      document.removeEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [dropdownOpen, handleClickOutside]);
-
   return (
     <div className={`rf-field ${containerClassName ?? ""}`} ref={containerRef}>
       {label && (
@@ -332,7 +289,7 @@ export function SearchCountryInput({
       <div className="relative">
         <button
           type="button"
-          onClick={() => !disabled && setDropdownOpen((p) => !p)}
+          onClick={() => !disabled && (dropdownOpen ? close() : setDropdownOpen(true))}
           disabled={disabled}
           className={`rf-input flex items-center gap-2 text-left ${hasFieldError(error, errors) ? "rf-input-error" : ""}`}
         >
@@ -360,10 +317,7 @@ export function SearchCountryInput({
                 placeholder={t("Search country")}
                 className="rf-contact-dropdown-search"
                 onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    setDropdownOpen(false);
-                    setSearch("");
-                  }
+                  if (e.key === "Escape") close();
                 }}
               />
             </div>
@@ -376,8 +330,7 @@ export function SearchCountryInput({
                     type="button"
                     onClick={() => {
                       onChange(country.iso2);
-                      setDropdownOpen(false);
-                      setSearch("");
+                      close();
                     }}
                     className={`rf-contact-dropdown-item ${active ? "rf-contact-dropdown-item-active" : ""}`}
                   >

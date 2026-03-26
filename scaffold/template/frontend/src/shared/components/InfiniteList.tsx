@@ -10,12 +10,11 @@ import {
 } from "react";
 import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useDataTableApi } from "@shared/components/DataTable";
+import { useDataTableApi, buildDatatablePayload } from "@shared/components/DataTable";
 import { Button } from "@shared/components/Button";
 import type {
   ApiResponse,
   DataTableQueryResponse,
-  DataTableQueryRequestBase,
 } from "@shared/types";
 
 export interface InfiniteListProps<T> {
@@ -73,8 +72,7 @@ function InfiniteListInner<T>(
   const cursorRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
-
-  const filters = initialFilters ?? {};
+  const filtersRef = useRef(initialFilters ?? {});
 
   const fetchPage = useCallback(
     async (reset: boolean) => {
@@ -92,31 +90,17 @@ function InfiniteListInner<T>(
         setStatus("loadingMore");
       }
 
-      const base: DataTableQueryRequestBase = {
+      const payload = buildDatatablePayload({
         page: paginationMode === "offset" ? pageRef.current : undefined,
-        per_page: perPage,
-        include_meta: false,
-        pagination_mode: paginationMode,
-      };
-
-      if (paginationMode === "cursor" && cursorRef.current) {
-        base.cursor = cursorRef.current;
-      }
-
-      if (sortingColumn) {
-        base.sorting_column = sortingColumn;
-        base.sorting = sortingDirection;
-      }
-
-      const filterParams = Object.fromEntries(
-        Object.entries(filters).filter(([, v]) => v !== ""),
-      );
-
-      const payload = {
-        base,
-        ...(extraBody ?? {}),
-        ...filterParams,
-      };
+        perPage,
+        sortingColumn,
+        sortingDirection,
+        includeMeta: false,
+        filters: filtersRef.current,
+        extraBody,
+        paginationMode,
+        cursor: cursorRef.current,
+      });
 
       try {
         const res = await api.post<ApiResponse<DataTableQueryResponse<T>>>(url, payload, {
@@ -146,7 +130,7 @@ function InfiniteListInner<T>(
         setStatus("error");
       }
     },
-    [api, url, perPage, paginationMode, sortingColumn, sortingDirection, extraBody, filters],
+    [api, url, perPage, paginationMode, sortingColumn, sortingDirection, extraBody],
   );
 
   const refresh = useCallback(() => {
@@ -159,6 +143,9 @@ function InfiniteListInner<T>(
     }
   }, [status, hasMore, fetchPage]);
 
+  const loadMoreRef = useRef(loadMore);
+  useEffect(() => { loadMoreRef.current = loadMore; }, [loadMore]);
+
   useImperativeHandle(ref, () => ({ refresh }), [refresh]);
 
   // Initial load
@@ -167,14 +154,14 @@ function InfiniteListInner<T>(
     return () => abortRef.current?.abort();
   }, [fetchPage]);
 
-  // Intersection observer for auto-load
+  // Intersection observer for auto-load (stable — does not reconnect on status changes)
   useEffect(() => {
     if (loadTrigger !== "intersection" || !sentinelRef.current) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) {
-          loadMore();
+          loadMoreRef.current();
         }
       },
       { rootMargin: "200px" },
@@ -182,7 +169,7 @@ function InfiniteListInner<T>(
 
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
-  }, [loadTrigger, loadMore]);
+  }, [loadTrigger]);
 
   const isEmpty = status !== "loading" && records.length === 0 && !hasMore;
 

@@ -346,14 +346,16 @@ function writeAutoRefreshEnabled(enabled: boolean): void {
   }
 }
 
-function buildDatatablePayload(args: {
-  page: number;
+export function buildDatatablePayload(args: {
+  page?: number;
   perPage: number;
-  sortingColumn: string;
-  sortingDirection: "asc" | "desc";
+  sortingColumn?: string;
+  sortingDirection?: "asc" | "desc";
   includeMeta: boolean;
   filters: Record<string, string>;
   extraBody?: Record<string, unknown>;
+  paginationMode?: "offset" | "cursor";
+  cursor?: string | null;
 }): Record<string, unknown> {
   const base: DataTableQueryRequestBase = {
     page: args.page,
@@ -361,6 +363,12 @@ function buildDatatablePayload(args: {
     include_meta: args.includeMeta,
   };
 
+  if (args.paginationMode) {
+    base.pagination_mode = args.paginationMode;
+  }
+  if (args.cursor) {
+    base.cursor = args.cursor;
+  }
   if (args.sortingColumn) {
     base.sorting_column = args.sortingColumn;
     base.sorting = args.sortingDirection;

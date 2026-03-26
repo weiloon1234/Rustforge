@@ -296,7 +296,7 @@ function WithdrawalTab() {
           placeholder={t("Select a network")}
           required
           value={networkId}
-          onChange={(e) => setNetworkId(e.target.value)}
+          onChange={(v) => setNetworkId(v)}
           options={networks.map((n) => ({
             value: n.id,
             label: `${n.name} (${n.symbol})`,

@@ -239,7 +239,7 @@ export default function LogViewerPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Select
           value={selectedFile}
-          onChange={(e) => setSelectedFile(e.target.value)}
+          onChange={(v) => setSelectedFile(v)}
           options={files.map((f) => ({
             value: f.filename,
             label: `${f.filename} (${formatBytes(Number(f.size_bytes))})`,
@@ -279,7 +279,7 @@ export default function LogViewerPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Select
           value={minLevel}
-          onChange={(e) => setMinLevel(e.target.value)}
+          onChange={(v) => setMinLevel(v)}
           options={LOG_LEVELS.map((l) => ({ value: l, label: l }))}
           placeholder={t("All levels")}
           containerClassName="!mb-0 sm:min-w-[8rem] sm:max-w-[12rem]"
