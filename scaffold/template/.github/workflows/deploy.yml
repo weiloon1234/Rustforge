@@ -3,7 +3,7 @@ name: Build and Deploy
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   build-rust:
@@ -56,8 +56,8 @@ jobs:
       - name: Setup Node 22
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
@@ -87,6 +87,7 @@ jobs:
           sparse-checkout: |
             bin
             app/configs.toml
+            app/settings.toml
             app/src/seeds
             migrations
             i18n
@@ -126,6 +127,7 @@ jobs:
 
           # Runtime config
           cp app/configs.toml "${STAGING}/app/configs.toml"
+          cp app/settings.toml "${STAGING}/app/settings.toml"
 
           # Seeder source files
           cp -r app/src/seeds/* "${STAGING}/app/src/seeds/"
