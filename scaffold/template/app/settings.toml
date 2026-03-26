@@ -1,6 +1,6 @@
 # ─── App ─────────────────────────────────────────────────────────────────────
 [app]
-name = "starter"
+name = "{{PROJECT_NAME}}"
 env = "local"                          # local | dev | staging | production
 key = ""                               # Required. Generate: openssl rand -base64 32, prefix with "base64:"
 debug = false
@@ -30,7 +30,7 @@ port = 3000
 
 # ─── Database (Postgres) ────────────────────────────────────────────────────
 [database]
-url = "postgres://postgres:postgres@127.0.0.1:5432/starter"
+url = "postgres://postgres:postgres@127.0.0.1:5432/{{PROJECT_NAME}}"
 max_connections = 10
 connect_timeout_secs = 5
 snowflake_node_id = 1

@@ -78,7 +78,7 @@ dev: ensure-frontend-deps
 	@trap 'kill 0' EXIT; \
 	RUN_WORKER=true cargo watch -x "run -p rustforge-starter --bin api-server" & \
 	cargo run -p rustforge-starter --bin websocket-server & \
-	cargo watch -w app/models -w app/permissions.toml -w app/configs.toml -s "make gen" & \
+	cargo watch -w app/models -w app/permissions.toml -w app/settings.toml -s "make gen" & \
 	cargo watch -w app/src/contracts -s "make gen-types" & \
 	npm --prefix frontend run dev:user & \
 	npm --prefix frontend run dev:admin & \
@@ -157,7 +157,7 @@ release:
 	cargo build --release --workspace
 
 .PHONY: deploy
-deploy:
+deploy: check
 	@if [ -n "$$(git status --porcelain)" ]; then \
 		echo "Error: Working directory is not clean. Commit or stash changes first."; \
 		exit 1; \
