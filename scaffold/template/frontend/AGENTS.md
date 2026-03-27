@@ -39,7 +39,7 @@ frontend/
     │       ├── TextInput.tsx           # text, email, password, search, url, tel, number, money, atm, pin
     │       ├── TiptapInput.tsx         # tapbit/tiptap WYSIWYG HTML editor input
     │       ├── TextArea.tsx            # Multi-line text
-    │       ├── Select.tsx              # Dropdown with typed options
+    │       ├── Select.tsx              # Custom dropdown (searchable, remote search, clearable)
     │       ├── Checkbox.tsx            # Single checkbox
     │       └── Radio.tsx               # Radio group with typed options
     ├── user/
@@ -194,26 +194,57 @@ Don't:
 1. Trigger the same bootstrap fetch from multiple mount points.
 2. Couple fetch effects directly to fast-changing objects/functions without dedupe.
 
-## i18n (Shared with Rust)
+## i18n
 
-Frontend and Rust share the same `i18n/*.json` files. The Rust backend uses `:param` syntax; `src/shared/i18n.ts` transforms `:param` → `{{param}}` at init time so i18next can interpolate.
+See root `AGENTS.md` for complete i18n rules. Frontend summary:
 
-Hard rule: all user-facing frontend text must use `t(...)`.
+- All user-facing text must use `t(...)` — no hardcoded UI strings
+- If backend returns localized `message`, render directly
+- Parameter syntax: `t("Welcome :name", { name })` — `:param` is auto-converted to `{{param}}`
 
-- No hardcoded UI strings in TS/TSX for labels, button text, placeholders, table headers, empty states, validation messages, toasts, or modal content.
-- If backend already returns localized `message`, render it directly.
-- Hardcoded strings are only allowed for non-user-facing debug logs/telemetry keys.
+## TypeScript Types — Prefer Generated
+
+Import types from `@{portal}/types` and `@shared/types`. These are auto-generated from Rust contracts via `make gen-types`.
+
+- Avoid custom TS interfaces when a Rust contract already generates the type
+- When adding computed fields in datatable `row_to_record`, add them to the Rust contract Row struct too
+- Shared utilities: import `normalizeErrorMessage`, `moneyFormat`, `formatDateTime`, `attachmentUrl` from `@shared/components`
+
+## Shared Components
+
+### Select (custom dropdown)
+Custom dropdown replacing native `<select>`. Supports:
+- `searchable` — text search input in dropdown
+- `remoteSearch` — debounced API search (`{ api, url, mapResponse, minChars?, debounceMs? }`)
+- `clearable` — X button to clear selection
+- `onChange: (value: string) => void` — NOT an event object
 
 ```tsx
-import { useTranslation } from "react-i18next";
-
-function Greeting({ name }: { name: string }) {
-  const { t } = useTranslation();
-  return <p>{t("Welcome :name", { name })}</p>;
-}
+<Select
+  label={t("Username")}
+  value={username}
+  onChange={(v) => setUsername(v)}
+  searchable
+  remoteSearch={{ api, url: "users/search", mapResponse: (data) => ... }}
+  options={[]}
+/>
 ```
 
-The key is the English text itself — if no translation is found, the key is the fallback.
+In `useAutoForm`, select fields support `searchable`, `remoteSearch`, `clearable` props.
+
+### InfiniteList
+Infinite-scroll list using the same backend format as DataTable:
+```tsx
+<InfiniteList<ItemType>
+  url="datatable/my_scope/query"
+  renderItem={(item, idx) => <div key={item.id}>...</div>}
+  loadTrigger="intersection"  // or "button"
+  layout="list"               // or "grid" with gridClassName
+/>
+```
+
+### DataTable
+Import `buildDatatablePayload` from `@shared/components` for custom API calls using the datatable format.
 
 ### `en.json` rules — do NOT add redundant entries
 
@@ -399,7 +430,8 @@ This means portals can have completely different visual styles while sharing ide
 | `TextInput` | `TextInputProps` | Text, email, password, search, url, tel, number + special `money`, `atm`, and `pin` types |
 | `TiptapInput` (`TapbitInput`) | `TiptapInputProps` | Rich text (WYSIWYG HTML) editor input |
 | `TextArea` | `TextAreaProps` | Multi-line text input |
-| `Select` | `SelectProps`, `SelectOption` | Dropdown with typed options |
+| `Select` | `SelectProps`, `SelectOption`, `RemoteSearchConfig` | Custom dropdown — searchable, remote search, clearable. `onChange: (value: string) => void` |
+| `InfiniteList` | `InfiniteListProps`, `InfiniteListHandle` | Infinite-scroll list using DataTable backend format |
 | `Checkbox` | `CheckboxProps` | Single checkbox with label |
 | `Radio` | `RadioProps`, `RadioOption` | Radio group with typed options |
 
@@ -568,7 +600,8 @@ Each portal's `app.css` defines these `rf-*` classes using `@apply` with theme t
 | `rf-label-required` | All | Adds red asterisk via `::after` |
 | `rf-input` / `rf-input-error` | TextInput | Text input styling |
 | `rf-textarea` / `rf-textarea-error` | TextArea | Textarea styling |
-| `rf-select` / `rf-select-error` / `rf-select-placeholder` | Select | Select dropdown styling |
+| `rf-select-trigger` / `rf-select-error` / `rf-select-placeholder` | Select | Custom dropdown trigger styling |
+| `rf-select-dropdown` / `rf-select-dropdown-*` | Select | Dropdown panel, search, list, items |
 | `rf-checkbox-wrapper` / `rf-checkbox` / `rf-checkbox-error` / `rf-checkbox-label` | Checkbox | Checkbox layout and styling |
 | `rf-radio-group` / `rf-radio-wrapper` / `rf-radio` / `rf-radio-error` / `rf-radio-label` | Radio | Radio group layout and styling |
 | `rf-error-message` | All | Error text below input |

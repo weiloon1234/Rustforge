@@ -39,7 +39,7 @@ fn map_row(&self, row: &mut UserCreditTransactionRecord, ..) -> anyhow::Result<(
 Same pattern: call on the generated record directly.
 
 ```rust
-let identity = admin_view.identity();
+let identity = row.identity();
 ```
 
 ## Expose to API DTOs

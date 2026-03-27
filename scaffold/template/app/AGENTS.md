@@ -12,7 +12,7 @@ Design rules:
 
 - `models/*.rs` — schema-defined models/enums/helper methods for generated Views.
 - `permissions.toml` — permission catalog.
-- `configs.toml` — auth/language/realtime/CORS config.
+- `settings.toml` — all configuration (auth, languages, realtime, CORS, database, etc.)
 - `../i18n/*.json` — translation keys and values.
 
 Generated outputs are produced from these inputs (plus build-time codegen) and can be overwritten.
@@ -150,19 +150,19 @@ Frontend SSOT:
 See also:
 - `../docs/country-iso2-linkage.md` for migration-ready SQL and numeric-ID-to-ISO2 conversion steps.
 
-## Async Domain Actions: Jobs vs Events/Notifications
+## Async Domain Actions
 
-Canonical async runtime primitive is `jobs`.
+**`tokio::spawn`** — for lightweight fire-and-forget side effects (notifications, cache invalidation, realtime broadcasts, non-critical async work). Preferred when the work is fast and doesn't need retry/persistence.
 
-- Queueable execution units must be implemented as jobs in `src/internal/jobs/`.
-- Register jobs/schedules in `src/internal/jobs/mod.rs`.
-- Dispatch from workflows (not route glue).
+**Job queue** — for heavy, retriable, or durable work (sending emails, processing uploads, scheduled tasks). Jobs survive server restarts and have built-in retry.
 
-Domain concepts like "event" or "notification" are fine at naming/business level, but execution should still flow through jobs.
+- Jobs live in `src/internal/jobs/`. Register in `src/internal/jobs/mod.rs`.
+- Dispatch from workflows: `state.queue.dispatch(&MyJob { ... }).await?`
+- For `tokio::spawn`, call directly in workflows — no registration needed.
 
 ## Recipe: Realtime (WebSocket)
 
-1. Configure channels in `configs.toml` under `[realtime.channels.*]`.
+1. Configure channels in `settings.toml` under `[realtime.channels.*]`.
 2. Implement authorization/policy in `src/internal/realtime/`.
 3. Keep websocket startup in `src/bin/websocket-server.rs`.
 
@@ -176,16 +176,35 @@ Do not duplicate realtime access logic in unrelated layers.
 
 Keep middleware focused: auth/context enrichment/guardrails.
 
-## Configs Guide (`configs.toml`)
+## Config Guide (`settings.toml`)
 
-Common extension points:
-- `[languages]`
-- `[auth]` and `[auth.guards.*]`
-- `[realtime.channels.*]`
-- `[cors]`
-- `[attachment_type.*]`
+All configuration lives in `settings.toml`. Env vars override via `SECTION_FIELD` convention.
 
-When config changes require runtime state access, wire them via `AppApiState`.
+Framework sections: `[app]`, `[server]`, `[database]`, `[redis]`, `[s3]`, `[auth]`, `[languages]`, `[realtime]`, `[cors]`, `[middleware]`, `[mail]`, `[worker]`, `[http_log]`.
+
+App-specific sections: add any `[my_section]` and access via `settings.section::<T>("my_section")`.
+
+```rust
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[serde(default)]
+pub struct MyFeatureConfig {
+    pub enabled: bool,
+    pub max_retries: u32,
+}
+
+// In AppApiState::new():
+let config: MyFeatureConfig = ctx.settings.section("my_feature").unwrap_or_default();
+```
+
+Wire via `AppApiState` when runtime access is needed in handlers/workflows.
+
+## Audit Log Exclusion
+
+Tables excluded from audit logging:
+- Framework level: `FRAMEWORK_AUDIT_EXCLUDED_TABLES` in `core_db::common::model_observer` (e.g., `personal_access_tokens`)
+- App level: `APP_AUDIT_EXCLUDED_TABLES` in `src/internal/observers/audit.rs` (e.g., `audit_logs`)
+
+Add table names to the appropriate list to suppress audit entries.
 
 ## Permissions Guide (`permissions.toml`)
 
@@ -206,8 +225,7 @@ Admin-specific rule:
 After updates, run generation/checks:
 
 ```bash
-cargo build -p generated
-cargo check -p app
+make gen
 ```
 
 ## Type Export (Rust -> TS)
@@ -225,17 +243,9 @@ For contract types used by frontend:
 cargo run -p app --bin export-types
 ```
 
-## i18n Rule
+## i18n
 
-All user-facing strings must go through translation keys.
-
-- Rust side: use `core_i18n::t()` / `t_args()`.
-- The i18n key IS the English text — it serves as the automatic fallback when no translation is found.
-- **`en.json` must only contain entries where key ≠ value** (e.g., `"enum.credit_type.credit1": "Cash Point"`, `"Adjust Credits": "User Credit Manage"`). Do NOT add redundant `"Submit": "Submit"` entries — the key itself is already English.
-- `zh.json` (and other non-English locales) must contain ALL keys since every key needs a translation.
-- Permission/enum translations use non-English keys (e.g., `admin.read`, `enum.credit_type.credit1`) — these MUST exist in both `en.json` and `zh.json`.
-- When adding/updating permissions, add/update those permission-key translations in both `../i18n/en.json` and `../i18n/zh.json` in the same change.
-- Keep permission-key entries grouped together in a dedicated nearby block in each locale file (do not scatter or append randomly).
+See root `AGENTS.md` for complete i18n rules. Summary: keys are English text (fallback), `en.json` only when key ≠ value, `zh.json` needs every key. Use `core_i18n::t()` / `t_args()` in Rust.
 
 ## Seeder Recipe
 

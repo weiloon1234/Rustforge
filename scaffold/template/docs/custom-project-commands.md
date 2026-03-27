@@ -28,16 +28,6 @@ pub enum ProjectCommands {
         #[arg(long)]
         name: String,
     },
-
-    /// Nested subcommand group
-    #[command(subcommand)]
-    Cache(CacheCommands),
-}
-
-#[derive(Subcommand, Debug, Clone)]
-pub enum CacheCommands {
-    /// Flush application cache
-    Flush,
 }
 
 #[async_trait::async_trait]
@@ -47,10 +37,6 @@ impl bootstrap::console::ProjectCommand for ProjectCommands {
             Self::Ping => println!("pong"),
             Self::Demo { name } => {
                 println!("Hello {name} from {}", ctx.settings.app.name);
-            }
-            Self::Cache(CacheCommands::Flush) => {
-                ctx.redis.flush().await?;
-                println!("Cache flushed");
             }
         }
         Ok(())
@@ -78,6 +64,5 @@ cargo check -p app
 ./console --help
 ./console ping
 ./console demo --name test
-./console cache flush
 ```
 

@@ -13,7 +13,7 @@ Adding a portal touches:
 
 ## Backend Checklist (Rust)
 
-1. `app/configs.toml`
+1. `app/settings.toml`
 Add new guard config:
 `[auth.guards.{portal}]` with `provider`, `ttl_min`, `refresh_ttl_days`.
 
@@ -49,7 +49,7 @@ Add:
 Mount new routes in `app/src/internal/api/v1/mod.rs`.
 
 10. Datatable wiring (if used)
-Add portal executor under `app/src/internal/datatables/v1/{portal}/...` and register in `app/src/internal/api/state.rs`.
+Add datatable hooks under `app/src/internal/datatables/v1/{portal}/` and register in the catalog at `app/src/internal/datatables/v1/{portal}/mod.rs`.
 
 11. Seed data
 Add portal bootstrap seeder under `app/src/seeds/`.

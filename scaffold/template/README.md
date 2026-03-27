@@ -17,7 +17,7 @@ Build your product here. Keep framework changes in [Rustforge](https://github.co
 cp .env.example .env          # edit DB/Redis credentials
 
 # 2. Code generation
-cargo build -p generated
+make gen
 
 # 3. Database
 ./console migrate pump        # generate framework migrations
@@ -36,7 +36,7 @@ Open [http://localhost:5173](http://localhost:5173) for the user portal and [htt
 
 ```
 app/                    Rust application crate (API, websocket, worker, console)
-  configs.toml          Languages, auth guards, realtime, CORS
+  settings.toml         All configuration (env vars override via SECTION_FIELD)
   permissions.toml      Permission catalog
   models/*.rs           Model definitions, enums, helper DTOs, generated View methods
   src/
@@ -251,7 +251,7 @@ This script auto-detects whether Rust/Node are available and skips build steps i
 |-------------|-----------|
 | `app/models/*.rs` | Model structs, enums, repos, query builders, datatable skeletons, generated View methods |
 | `app/permissions.toml` | `Permission` enum |
-| `app/configs.toml` | Typed `Settings`, auth guards, localization artifacts |
+| `app/settings.toml` | Typed `Settings`, auth guards, localization artifacts |
 
 Generated code is output to `OUT_DIR` (inside `target/`) at build time — not to `generated/src/`. The `generated/src/lib.rs` uses `include!()` to pull in the generated modules. Never edit `generated/src/lib.rs` — put model-specific helper items and generated `View` / `WithRelations` methods in `app/models/*.rs`.
 

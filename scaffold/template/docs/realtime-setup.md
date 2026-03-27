@@ -6,7 +6,7 @@ Use this when the generated starter needs realtime behavior beyond the shipped b
 
 The starter already ships these pieces:
 
-- `app/configs.toml` realtime settings and channel config
+- `app/settings.toml` realtime settings and channel config
 - `app/src/bin/websocket-server.rs` websocket server binary entrypoint
 - `app/src/internal/realtime/mod.rs` app-owned realtime router/state builder
 - framework runtime in `core-realtime`
@@ -33,7 +33,7 @@ It builds `WsServerState` from configured channels and uses default allow-all ap
   - subscribe/publish authorization rules beyond the framework baseline
   - which workflows or jobs publish events
 
-## Step 1: Declare the channel in `app/configs.toml`
+## Step 1: Declare the channel in `app/settings.toml`
 
 ```toml
 [realtime.channels.public]
