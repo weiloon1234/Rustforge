@@ -1,108 +1,180 @@
 ---
 name: add-job
-description: Add a background job for async processing
+description: Add a background job, cron schedule, or outbox-dispatched task
 ---
 
 # Add a Background Job
 
-Follow these steps to add a background job for asynchronous processing.
+## When to use what
 
-## When to use a job queue vs tokio::spawn
+| Pattern | Use case | Persistence | Retries | Ordering |
+|---------|----------|-------------|---------|----------|
+| **Job queue** | Heavy work, retriable, durable | Redis + failed_jobs table | Yes (backoff) | Yes (group_id) |
+| **Outbox (JobBuffer)** | Job must be atomic with DB transaction | Postgres → Redis | Yes | No |
+| **Cron schedule** | Periodic tasks (cleanup, reports) | Redis dedup lock | Yes | No |
+| **`tokio::spawn`** | Fire-and-forget, fast, non-critical | None | No | No |
 
-- **Use the job queue** (this guide) when you need: persistence across restarts, retries on failure, delayed execution, or audit trail of job runs. This is the default for most background work.
-- **Use `tokio::spawn`** for fire-and-forget tasks that are cheap, non-critical, and do not need retries or persistence (e.g., sending a single log event, lightweight cache warming). If the task fails silently or is lost on restart, it should not matter.
+**Rule:** When in doubt, use the job queue. Use `tokio::spawn` only for truly lightweight, non-critical side effects (realtime broadcasts, cache invalidation).
 
-When in doubt, use the job queue.
+---
 
-## Step 1: Create the job file
+## Step 1: Create the job struct
 
 Create `app/src/internal/jobs/{name}.rs`:
 
 ```rust
-use rustforge_prelude::prelude::*;
 use async_trait::async_trait;
+use core_jobs::{Job, JobContext};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MyJob {
-    pub entity_id: i64,
-    pub payload: String,
+    pub record_id: i64,
 }
 
 #[async_trait]
 impl Job for MyJob {
-    const NAME: &'static str = "MyJob";
+    const NAME: &'static str = "my_job";
+    const QUEUE: &'static str = "default";  // or a custom queue name
 
     async fn handle(&self, ctx: &JobContext) -> anyhow::Result<()> {
-        let db = &ctx.state.db;
+        // ctx.db, ctx.redis, ctx.settings are available
+        // Business logic here...
+        Ok(())
+    }
 
-        // Job logic here
-        tracing::info!(entity_id = self.entity_id, "Processing MyJob");
+    fn max_retries(&self) -> u32 {
+        5  // Default. Override for custom retry count
+    }
 
-        // Example: fetch record, perform work, update status
-        // let record = MyDomainModel::find_by_id(self.entity_id).one(db).await?;
-        // ...
-
+    // Optional: called when all retries exhausted
+    async fn failed(&self, _ctx: &JobContext, error: &str) -> anyhow::Result<()> {
+        tracing::error!("Job {} failed permanently: {}", Self::NAME, error);
         Ok(())
     }
 }
 ```
 
 Conventions:
-- `NAME` must be a unique string identifier for the job.
-- The struct fields are the job payload -- they are serialized to JSON when dispatched and deserialized when processed.
-- Keep payload minimal: store IDs and fetch full data inside `handle()`.
-- Use `tracing` for structured logging inside jobs.
-- Return `Err(...)` to mark the job as failed (it may be retried depending on configuration).
+- `NAME` must be unique across all jobs
+- Payload fields are serialized to JSON — keep minimal, store IDs and fetch data in `handle()`
+- Use a dedicated `QUEUE` for isolation (e.g., `"image_generation"` for heavy processing)
+- Return `Err(...)` to trigger retry with backoff (5s → 30s → 1m → 5m → 10m)
 
-## Step 2: Register the job
+### Ordered/sequential jobs
 
-Update `app/src/internal/jobs/mod.rs`:
+Jobs with the same `group_id` are processed one at a time within that group:
 
 ```rust
-pub mod {name};
-
-// In the register function:
-pub fn register(worker: &mut Worker) {
-    // ... existing registrations
-    worker.register::<{name}::MyJob>();
+fn group_id(&self) -> Option<String> {
+    Some(format!("user:{}", self.user_id))
 }
 ```
 
-The job must be registered so the worker knows how to deserialize and handle it.
+## Step 2: Register the job
 
-## Step 3: Dispatch the job
-
-Dispatch the job from a workflow, handler, or observer:
+In `app/src/internal/jobs/mod.rs`:
 
 ```rust
-use crate::internal::jobs::{name}::MyJob;
+pub mod my_job;
 
-// In a workflow or handler:
-state.queue.dispatch(&MyJob {
-    entity_id: record.id,
-    payload: "some data".into(),
-}).await?;
+pub fn register_jobs(worker: &mut Worker) {
+    worker.register::<my_job::MyJob>();
+}
 ```
 
-To dispatch with a delay:
+## Step 3: Dispatch from a workflow
+
+### Standard dispatch (via Redis)
+
 ```rust
-state.queue.dispatch_delayed(
-    &MyJob { entity_id: record.id, payload: "data".into() },
-    chrono::Duration::minutes(5),
-).await?;
+// In workflow — dispatch to Redis queue directly
+my_job::MyJob { record_id: 123 }.dispatch(&state.queue).await?;
 ```
 
-## Step 4: Wire the module export
+### Transactional dispatch (via outbox)
 
-Ensure `pub mod {name};` is in `app/src/internal/jobs/mod.rs`.
+When the job MUST be atomic with a database transaction:
 
-## Step 5: Verify
+```rust
+use core_jobs::buffer::JobBuffer;
+
+let scope = db.begin_scope().await?;
+{
+    // Domain logic in same transaction
+    MyModel::create(scope.conn())
+        .set(MyCol::NAME, "test")
+        .save()
+        .await?;
+
+    // Buffer job — inserted to outbox_jobs table, NOT Redis yet
+    let mut buffer = JobBuffer::new(scope.conn());
+    buffer.push(my_job::MyJob { record_id: 123 }).await?;
+}
+scope.commit().await?;
+// Outbox sweeper flushes to Redis within [worker].sweep_interval seconds
+```
+
+If the transaction commits, the job WILL be processed. If it rolls back, the job is discarded.
+
+## Step 4 (optional): Add a cron schedule
+
+For periodic jobs (daily cleanup, hourly reports). The job must implement `Default + Clone`.
+
+```rust
+pub fn register_schedules(scheduler: &mut core_jobs::cron::Scheduler) {
+    // Daily at midnight
+    scheduler
+        .cron::<my_job::MyCleanupJob>("0 0 0 * * *")
+        .without_overlapping(300);  // 5-min TTL lock prevents overlap
+
+    // Every 5 minutes
+    scheduler.cron::<my_job::MyPollJob>("0 */5 * * * *");
+}
+```
+
+Cron expression format: `sec min hour day_of_month month day_of_week`
+
+## Step 5: Wire module export
+
+Add `pub mod my_job;` to `app/src/internal/jobs/mod.rs`.
+
+## Step 6: Verify
 
 ```bash
 cargo check
 ```
 
-Common issues:
-- Forgetting to register the job in the worker -- the job will be dispatched but never processed.
-- Payload struct not deriving both `Serialize` and `Deserialize`.
-- Using non-serializable types in the payload (use IDs instead of full structs).
+---
+
+## tokio::spawn (fire-and-forget)
+
+For lightweight, non-critical async work — no registration needed:
+
+```rust
+let realtime = state.realtime.clone();
+tokio::spawn(async move {
+    let _ = realtime.publish("admin", "notification", &payload).await;
+});
+```
+
+No persistence, no retries. If the server restarts, the work is lost.
+
+---
+
+## Configuration
+
+```toml
+[worker]
+enabled = true       # Enable job processing
+concurrency = 10     # Concurrent worker threads
+sweep_interval = 30  # Outbox sweeper interval (seconds)
+```
+
+## Notes
+
+- `JobContext` provides: `db`, `redis`, `settings`, `extensions`
+- Failed jobs → `failed_jobs` table after max retries
+- Retry backoff default: 5s → 30s → 1m → 5m → 10m (override via `fn backoff()`)
+- Management API at `/jobs` endpoint: list queues, peek jobs, retry failed
+- Common mistake: forgetting to register the job — it will dispatch but never process

@@ -152,13 +152,18 @@ See also:
 
 ## Async Domain Actions
 
-**`tokio::spawn`** — for lightweight fire-and-forget side effects (notifications, cache invalidation, realtime broadcasts, non-critical async work). Preferred when the work is fast and doesn't need retry/persistence.
+**`tokio::spawn`** — for lightweight fire-and-forget side effects (notifications, cache invalidation, realtime broadcasts). Preferred when the work is fast and doesn't need retry/persistence.
 
-**Job queue** — for heavy, retriable, or durable work (sending emails, processing uploads, scheduled tasks). Jobs survive server restarts and have built-in retry.
+**Job queue** — for heavy, retriable, or durable work (sending emails, processing uploads). Jobs survive server restarts and have built-in retry with backoff.
+
+**Outbox (JobBuffer)** — for jobs that MUST be atomic with a database transaction. `JobBuffer::push()` inserts into `outbox_jobs` table within the transaction scope. The outbox sweeper flushes to Redis periodically.
+
+**Cron scheduler** — for periodic tasks. Register in `src/internal/jobs/mod.rs` via `register_schedules()`.
 
 - Jobs live in `src/internal/jobs/`. Register in `src/internal/jobs/mod.rs`.
-- Dispatch from workflows: `state.queue.dispatch(&MyJob { ... }).await?`
-- For `tokio::spawn`, call directly in workflows — no registration needed.
+- Standard dispatch: `MyJob { ... }.dispatch(&state.queue).await?`
+- Transactional dispatch: `JobBuffer::new(scope.conn()).push(MyJob { ... }).await?`
+- See skill `add-job` for full patterns and decision guide.
 
 ## Recipe: Realtime (WebSocket)
 
