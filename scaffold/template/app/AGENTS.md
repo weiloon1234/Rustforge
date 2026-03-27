@@ -119,6 +119,95 @@ Validation input wrappers:
 
 Register new validation modules in `src/validation/mod.rs`.
 
+## Attachments (File Uploads)
+
+Framework-level polymorphic file storage. Attachments are stored in S3/R2 and linked to any model via `owner_type` + `owner_id` + `field`.
+
+### Declaring attachment fields on a model
+
+In `models/{model}.rs`:
+
+```rust
+#[rf_model(table = "my_models")]
+pub struct MyModel {
+    // ... fields ...
+    #[rf(kind = "image")]
+    pub logo: Attachment,         // single attachment
+    #[rf(kind = "image")]
+    pub photos: Attachments,      // multiple attachments
+}
+```
+
+The `kind` must match a key in `settings.toml` `[attachment_type.*]`:
+
+```toml
+[attachment_type.image]
+allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+max_size = 5242880
+```
+
+After `make gen`, the generated code provides:
+- **Record fields:** `logo: Option<Attachment>`, `logo_url: Option<String>`, `photos: Vec<Attachment>`, `photos_urls: Vec<String>`
+- **Create setters:** `set_attachment_logo(att: AttachmentInput)`, `add_attachment_photos(att: AttachmentInput)`
+- **Hydration:** attachments are batch-loaded from the `attachments` table automatically
+
+### Uploading files
+
+In handlers, use `FileUpload` from `core_web::extract::file_upload`:
+
+```rust
+let attachment = file_upload.upload(&*state.storage, "my_model", "logo").await?;
+// Returns AttachmentUploadDto with path, content_type, size, width, height
+```
+
+Then set on the model:
+
+```rust
+MyModel::create(conn)
+    .set(MyCol::NAME, "test")?
+    .set_attachment_logo(attachment)
+    .save()
+    .await?;
+```
+
+### Attachment meta
+
+Each attachment has an optional `meta: Option<serde_json::Value>` field for storing arbitrary JSON metadata (alt text, captions, processing status, original filename, etc.):
+
+```rust
+let attachment = file_upload
+    .upload(&*state.storage, "my_model", "logo")
+    .await?
+    .with_meta(serde_json::json!({
+        "alt": "Company logo",
+        "original_name": filename,
+    }));
+```
+
+TypeScript shape: `meta?: Record<string, unknown>` on both `Attachment` and `AttachmentUploadDto`.
+
+### Attachment URLs
+
+- `attachment.url_with_base(base)` builds full URL from path + CDN base
+- `default_attachment_base_url()` returns the global CDN base set at boot
+- `attachmentUrl(path)` helper in frontend (`@shared/helpers`)
+
+### Attachment type rules
+
+Defined in `settings.toml` under `[attachment_type.*]`:
+
+```toml
+[attachment_type.image]
+allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+max_size = 5242880    # 5MB
+
+[attachment_type.pdf]
+allowed = ["application/pdf"]
+max_size = 10485760   # 10MB
+```
+
+Validation happens automatically via `get_attachment_rules("image")` and `validate_attachment_allowed()`.
+
 ## Country Linkage Standard (`country_iso2`)
 
 Country is framework-level reference data keyed by `countries.iso2` (string key, no numeric country ID).

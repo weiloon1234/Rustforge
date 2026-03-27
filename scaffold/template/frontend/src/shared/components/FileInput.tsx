@@ -8,10 +8,12 @@ import {
   type ChangeEvent,
   type InputHTMLAttributes,
 } from "react";
-import { Download, Eye, FileText } from "lucide-react";
+import { Download, Eye, FileText, Music, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
 import { Button } from "@shared/components/Button";
+import { MediaLightbox, toLightboxType } from "@shared/components/MediaLightbox";
+import type { MediaLightboxItem } from "@shared/components/MediaLightbox";
 import { attachmentUrl } from "@shared/helpers";
 
 export interface FilePreviewItem {
@@ -32,19 +34,47 @@ export interface FileInputProps
   defaultFiles?: FilePreviewItem[];
   accepts?: string;
   maxFiles?: number;
+  /** Hide the file chooser input — preview-only mode */
+  hideInput?: boolean;
+  /** Called when user clicks remove on an item (index in combined preview list) */
+  onRemove?: (index: number, item: FilePreviewDisplayItem) => void;
 }
 
-interface FilePreviewDisplayItem extends FilePreviewItem {
+export interface FilePreviewDisplayItem extends FilePreviewItem {
   source: "selected" | "default";
 }
 
 const IMAGE_FILE_NAME_PATTERN = /\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|webp)$/i;
+const VIDEO_FILE_NAME_PATTERN = /\.(mp4|webm|ogg|mov|avi|mkv)$/i;
+const AUDIO_FILE_NAME_PATTERN = /\.(mp3|wav|ogg|flac|aac|m4a)$/i;
 
 function isImageFile(item: FilePreviewItem): boolean {
   if (item.mimeType?.startsWith("image/")) return true;
   if (IMAGE_FILE_NAME_PATTERN.test(item.name)) return true;
   if (item.url && IMAGE_FILE_NAME_PATTERN.test(item.url)) return true;
   return false;
+}
+
+function isVideoFile(item: FilePreviewItem): boolean {
+  if (item.mimeType?.startsWith("video/")) return true;
+  if (VIDEO_FILE_NAME_PATTERN.test(item.name)) return true;
+  if (item.url && VIDEO_FILE_NAME_PATTERN.test(item.url)) return true;
+  return false;
+}
+
+function isAudioFile(item: FilePreviewItem): boolean {
+  if (item.mimeType?.startsWith("audio/")) return true;
+  if (AUDIO_FILE_NAME_PATTERN.test(item.name)) return true;
+  if (item.url && AUDIO_FILE_NAME_PATTERN.test(item.url)) return true;
+  return false;
+}
+
+function resolveFileType(item: FilePreviewItem): "image" | "video" | "audio" | "file" {
+  if (item.mimeType) return toLightboxType(item.mimeType);
+  if (isImageFile(item)) return "image";
+  if (isVideoFile(item)) return "video";
+  if (isAudioFile(item)) return "audio";
+  return "file";
 }
 
 function resolveDefaultPreviewUrl(item: FilePreviewItem): string | undefined {
@@ -70,6 +100,8 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
       multiple,
       accepts,
       maxFiles,
+      hideInput,
+      onRemove,
       disabled,
       onChange,
       ...rest
@@ -81,6 +113,7 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
     const id = externalId ?? autoId;
     const inputRef = useRef<HTMLInputElement | null>(null);
     const [maxFilesWarning, setMaxFilesWarning] = useState<string | null>(null);
+    const [lightboxIndex, setLightboxIndex] = useState(-1);
     const resolvedAccept = accept ?? accepts;
     const previewItems = useMemo(() => {
       if (files.length > 0) {
@@ -112,9 +145,20 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
     const hasPreview = previewItems.length > 0;
     const hasFieldErrors = hasFieldError(error, errors);
 
-    const handlePreview = (item: FilePreviewDisplayItem) => {
-      if (!item.url || typeof window === "undefined") return;
-      window.open(item.url, "_blank", "noopener,noreferrer");
+    const lightboxItems: MediaLightboxItem[] = useMemo(
+      () =>
+        previewItems
+          .filter((item) => !!item.url)
+          .map((item) => ({
+            url: item.url!,
+            type: resolveFileType(item),
+            caption: item.name,
+          })),
+      [previewItems],
+    );
+
+    const handlePreview = (_item: FilePreviewDisplayItem, index: number) => {
+      setLightboxIndex(index);
     };
 
     const handleDownload = (item: FilePreviewDisplayItem) => {
@@ -153,95 +197,117 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
             {label}
           </label>
         )}
-        <div
-          className={`rf-input flex items-center gap-2 ${hasFieldErrors ? "rf-input-error" : ""} ${className ?? ""}`}
-        >
-          <Button
-            variant="secondary"
-            size="xs"
-            className="rounded-md"
-            onClick={() => inputRef.current?.click()}
-            disabled={disabled}
-          >
-            {selectLabel}
-          </Button>
-          <p className="min-w-0 flex-1 truncate text-sm text-muted">{selectedSummary}</p>
-        </div>
-        <input
-          ref={(node) => {
-            inputRef.current = node;
-            if (typeof ref === "function") {
-              ref(node);
-            } else if (ref) {
-              ref.current = node;
-            }
-          }}
-          id={id}
-          type="file"
-          required={required}
-          accept={resolvedAccept}
-          multiple={multiple}
-          disabled={disabled}
-          onChange={handleChange}
-          className="sr-only"
-          {...rest}
-        />
+        {!hideInput && (
+          <>
+            <div
+              className={`rf-input flex items-center gap-2 ${hasFieldErrors ? "rf-input-error" : ""} ${className ?? ""}`}
+            >
+              <Button
+                variant="secondary"
+                size="xs"
+                className="rounded-md"
+                onClick={() => inputRef.current?.click()}
+                disabled={disabled}
+              >
+                {selectLabel}
+              </Button>
+              <p className="min-w-0 flex-1 truncate text-sm text-muted">{selectedSummary}</p>
+            </div>
+            <input
+              ref={(node) => {
+                inputRef.current = node;
+                if (typeof ref === "function") {
+                  ref(node);
+                } else if (ref) {
+                  ref.current = node;
+                }
+              }}
+              id={id}
+              type="file"
+              required={required}
+              accept={resolvedAccept}
+              multiple={multiple}
+              disabled={disabled}
+              onChange={handleChange}
+              className="sr-only"
+              {...rest}
+            />
+          </>
+        )}
         {!hasFieldErrors && (
           <>
             {hasPreview && (
-              <div className="mt-2 space-y-2">
+              <div className={`${hideInput ? "" : "mt-2 "}space-y-2`}>
                 {previewItems.map((item, index) => {
-                  const imagePreview = isImageFile(item) && !!item.url;
-                  const canDownload = !!item.url;
+                  const fileType = resolveFileType(item);
+                  const hasUrl = !!item.url;
                   const key = `${item.source}-${item.name}-${index}`;
 
                   return (
                     <div key={key} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2">
-                      {imagePreview ? (
-                        <a
-                          href={item.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="overflow-hidden rounded border border-border"
-                          aria-label={t("Preview")}
-                        >
+                      <button
+                        type="button"
+                        className="shrink-0 cursor-pointer overflow-hidden rounded border border-border transition hover:ring-2 hover:ring-primary/40"
+                        onClick={() => hasUrl && handlePreview(item, index)}
+                        disabled={!hasUrl}
+                      >
+                        {fileType === "image" && hasUrl ? (
                           <img src={item.url} alt={item.name} className="h-12 w-12 object-cover" />
-                        </a>
-                      ) : (
-                        <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded bg-surface-hover text-muted">
-                          <FileText size={18} />
-                        </span>
-                      )}
+                        ) : fileType === "video" ? (
+                          <span className="flex h-12 w-12 items-center justify-center bg-surface-hover text-xs text-muted">▶ video</span>
+                        ) : fileType === "audio" ? (
+                          <span className="flex h-12 w-12 items-center justify-center bg-surface-hover text-muted">
+                            <Music size={18} />
+                          </span>
+                        ) : (
+                          <span className="flex h-12 w-12 items-center justify-center bg-surface-hover text-muted">
+                            <FileText size={18} />
+                          </span>
+                        )}
+                      </button>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{item.name}</p>
                         {typeof item.size === "number" && (
-                          <p className="text-xs text-muted">{item.size.toLocaleString()} bytes</p>
+                          <p className="text-xs text-muted">{(item.size / 1024).toFixed(0)} KB</p>
                         )}
                       </div>
                       <div className="flex items-center gap-1">
-                        {imagePreview && (
+                        {hasUrl && (
                           <Button
                             type="button"
                             variant="plain"
                             size="xs"
                             className="px-2 text-xs"
-                            onClick={() => handlePreview(item)}
+                            onClick={() => handlePreview(item, index)}
                           >
                             <Eye size={14} />
                             {t("Preview")}
                           </Button>
                         )}
-                        <Button
-                          type="button"
-                          variant="plain"
-                          size="xs"
-                          className="px-2 text-xs"
-                          onClick={() => handleDownload(item)}
-                          disabled={!canDownload}
-                        >
-                          <Download size={14} />
-                          {t("Download")}
-                        </Button>
+                        {hasUrl && (
+                          <Button
+                            type="button"
+                            variant="plain"
+                            size="xs"
+                            className="px-2 text-xs"
+                            onClick={() => handleDownload(item)}
+                          >
+                            <Download size={14} />
+                            {t("Download")}
+                          </Button>
+                        )}
+                        {onRemove && (
+                          <Button
+                            type="button"
+                            variant="plain"
+                            size="xs"
+                            className="px-2 text-xs text-destructive hover:text-destructive"
+                            onClick={() => onRemove(index, item)}
+                          >
+                            <X size={14} />
+                            {t("Remove")}
+                          </Button>
+                        )}
                       </div>
                     </div>
                   );
@@ -255,6 +321,14 @@ export const FileInput = forwardRef<HTMLInputElement, FileInputProps>(
           <p className="text-xs text-amber-500">{maxFilesWarning}</p>
         )}
         {notes && !hasFieldErrors && <p className="rf-note">{notes}</p>}
+        {lightboxIndex >= 0 && lightboxItems.length > 0 && (
+          <MediaLightbox
+            items={lightboxItems}
+            index={lightboxIndex}
+            onClose={() => setLightboxIndex(-1)}
+            onIndexChange={setLightboxIndex}
+          />
+        )}
       </div>
     );
   },

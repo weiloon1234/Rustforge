@@ -67,6 +67,7 @@ Generated outputs are overwritten by `make gen`. Do not edit generated files dir
 | `add-migration` | Creating a database migration |
 | `add-seeder` | Adding a database seeder |
 | `add-observer` | Adding model lifecycle hooks |
+| `add-attachment` | Adding file upload attachment fields to a model |
 
 ## Commands
 

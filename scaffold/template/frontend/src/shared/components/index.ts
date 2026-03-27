@@ -41,7 +41,7 @@ export type {
 } from "@shared/components/TiptapInput";
 
 export { FileInput } from "@shared/components/FileInput";
-export type { FileInputProps, FilePreviewItem } from "@shared/components/FileInput";
+export type { FileInputProps, FilePreviewItem, FilePreviewDisplayItem } from "@shared/components/FileInput";
 
 export { DataTable } from "@shared/components/DataTable";
 export type {
@@ -58,6 +58,15 @@ export { DataTableApiProvider, useDataTableApi, buildDatatablePayload } from "@s
 export { InfiniteList } from "@shared/components/InfiniteList";
 export type { InfiniteListProps, InfiniteListHandle } from "@shared/components/InfiniteList";
 
+export { default as ImageLightbox } from "@shared/components/ImageLightbox";
+export type { ImageLightboxProps } from "@shared/components/ImageLightbox";
+
+export { MediaLightbox, toLightboxType } from "@shared/components/MediaLightbox";
+export type { MediaLightboxProps, MediaLightboxItem } from "@shared/components/MediaLightbox";
+
+export { ColorInput } from "@shared/components/ColorInput";
+export type { ColorInputProps } from "@shared/components/ColorInput";
+
 export { useAutoForm } from "@shared/useAutoForm";
 export type {
   FieldDef,
@@ -69,6 +78,9 @@ export type {
 } from "@shared/useAutoForm";
 export { useLocaleStore } from "@shared/stores/locale";
 export { getRuntimeConfig } from "@shared/runtimeConfig";
+
+export { ModuleLayout } from "@shared/components/ModuleLayout";
+export type { ModuleLayoutProps } from "@shared/components/ModuleLayout";
 
 export { Modal } from "@shared/components/Modal";
 export { ModalOutlet } from "@shared/components/ModalOutlet";
