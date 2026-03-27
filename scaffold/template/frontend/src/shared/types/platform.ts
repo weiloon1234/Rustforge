@@ -34,6 +34,7 @@ export interface AttachmentUploadDto {
   size: number;
   width?: number | null;
   height?: number | null;
+  meta?: Record<string, unknown> | null;
 }
 
 export type AttachmentInput = AttachmentUploadDto;
@@ -46,6 +47,7 @@ export interface Attachment {
   size: number;
   width: number | null;
   height: number | null;
+  meta?: Record<string, unknown> | null;
   created_at: string;
 }
 

@@ -10,6 +10,7 @@ pub struct Attachment {
     pub size: i64,
     pub width: Option<i32>,
     pub height: Option<i32>,
+    pub meta: Option<serde_json::Value>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
 }

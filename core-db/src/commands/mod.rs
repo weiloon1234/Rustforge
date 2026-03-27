@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS attachments (
     size BIGINT NOT NULL,
     width INT,
     height INT,
+    meta JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ

@@ -420,6 +420,7 @@ fn render_load_owner_attachments_function() -> String {
                 size: row.size,
                 width: row.width,
                 height: row.height,
+                meta: row.meta.clone(),
                 created_at: row.created_at,
             });
     }

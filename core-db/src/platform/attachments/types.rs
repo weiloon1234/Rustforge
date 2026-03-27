@@ -31,6 +31,9 @@ pub struct Attachment {
     pub size: i64,
     pub width: Option<i32>,
     pub height: Option<i32>,
+    #[serde(default)]
+    #[ts(optional, type = "Record<string, unknown>")]
+    pub meta: Option<serde_json::Value>,
     #[schemars(with = "String")]
     #[ts(type = "string")]
     pub created_at: time::OffsetDateTime,
@@ -116,6 +119,9 @@ pub struct AttachmentUploadDto {
     #[serde(default)]
     #[ts(optional)]
     pub height: Option<i32>,
+    #[serde(default)]
+    #[ts(optional, type = "Record<string, unknown>")]
+    pub meta: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,6 +140,8 @@ struct AttachmentUploadDtoDe {
     width: Option<i32>,
     #[serde(default)]
     height: Option<i32>,
+    #[serde(default)]
+    meta: Option<serde_json::Value>,
 }
 
 impl<'de> Deserialize<'de> for AttachmentUploadDto {
@@ -154,6 +162,7 @@ impl<'de> Deserialize<'de> for AttachmentUploadDto {
             size: raw.size,
             width: raw.width,
             height: raw.height,
+            meta: raw.meta,
         })
     }
 }
@@ -174,6 +183,7 @@ impl AttachmentUploadDto {
             size,
             width,
             height,
+            meta: None,
         }
     }
 
@@ -184,6 +194,11 @@ impl AttachmentUploadDto {
 
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
+        self
+    }
+
+    pub fn with_meta(mut self, meta: serde_json::Value) -> Self {
+        self.meta = Some(meta);
         self
     }
 }
