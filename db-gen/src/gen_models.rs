@@ -3081,7 +3081,110 @@ fn render_model(
                     .unwrap();
                 }
                 writeln!(out, "        }}").unwrap();
-                writeln!(out, "        let _ = &nested_with;").unwrap();
+                // Nested relation loading
+                let target_model_snake = to_snake(&rel.target_model);
+                let target_pk_name = schema.models.get(&rel.target_model)
+                    .and_then(|m| m.pk.clone())
+                    .unwrap_or_else(|| "id".to_string());
+                let target_fields: Vec<_> = schema.models.get(&rel.target_model)
+                    .map(|m| parse_fields(m, &target_pk_name))
+                    .unwrap_or_default();
+                let target_relations: Vec<_> = schema.models.get(&rel.target_model)
+                    .map(|m| parse_relations(schema, m, &rel.target_model, &target_fields))
+                    .unwrap_or_default();
+                if !target_relations.is_empty() {
+                    writeln!(out, "        if !nested_with.is_empty() {{").unwrap();
+                    for sub_rel in &target_relations {
+                        let sub_rel_name = to_snake(&sub_rel.name);
+                        let sub_target_model_snake = to_snake(&sub_rel.target_model);
+                        let sub_target_title = to_title_case(&sub_rel.target_model);
+                        let sub_target_record = if sub_target_model_snake == target_model_snake {
+                            format!("{target_record}")
+                        } else {
+                            format!("crate::generated::models::{sub_target_model_snake}::{sub_target_title}Record")
+                        };
+                        let sub_target_row = if sub_target_model_snake == target_model_snake {
+                            format!("{}Row", to_title_case(&rel.target_model))
+                        } else {
+                            format!("crate::generated::models::{sub_target_model_snake}::{sub_target_title}Row")
+                        };
+                        let hydrate_fn = if sub_target_model_snake == target_model_snake {
+                            "hydrate_records".to_string()
+                        } else {
+                            format!("crate::generated::models::{sub_target_model_snake}::hydrate_records")
+                        };
+                        let target_pk_col = schema.models.get(&rel.target_model)
+                            .and_then(|m| m.pk.as_deref())
+                            .unwrap_or("id");
+
+                        writeln!(out, "            if nested_with.iter().any(|n| n.name == \"{sub_rel_name}\") {{").unwrap();
+
+                        match sub_rel.kind {
+                            RelationKind::BelongsTo => {
+                                let sub_fk = &sub_rel.foreign_key;
+                                let sub_target_pk = &sub_rel.target_pk;
+                                let sub_target_table = &sub_rel.target_table;
+                                let is_fk_optional = target_fields.iter().any(|f| f.name == *sub_fk && f.ty.starts_with("Option<"));
+
+                                writeln!(out, "                let __nw_fks: Vec<_> = map.values().flat_map(|v| v.iter()).filter_map(|r| {{").unwrap();
+                                if is_fk_optional {
+                                    writeln!(out, "                    r.{sub_fk}.clone()").unwrap();
+                                } else {
+                                    writeln!(out, "                    Some(r.{sub_fk}.clone())").unwrap();
+                                }
+                                writeln!(out, "                }}).collect();").unwrap();
+                                writeln!(out, "                if !__nw_fks.is_empty() {{").unwrap();
+                                writeln!(out, "                    let __nw_phs: Vec<String> = (1..=__nw_fks.len()).map(|i| format!(\"${{}}\", i)).collect();").unwrap();
+                                writeln!(out, "                    let __nw_sql = format!(\"SELECT * FROM {sub_target_table} WHERE {sub_target_pk} IN ({{}})\", __nw_phs.join(\", \"));").unwrap();
+                                writeln!(out, "                    let mut __nw_q = sqlx::query_as::<_, {sub_target_row}>(&__nw_sql);").unwrap();
+                                writeln!(out, "                    for __fk in &__nw_fks {{ __nw_q = bind(__nw_q, __fk.clone().into()); }}").unwrap();
+                                writeln!(out, "                    let __nw_rows = db.fetch_all(__nw_q).await?;").unwrap();
+                                writeln!(out, "                    let __nw_recs = {hydrate_fn}(db.clone(), &__nw_rows, base_url).await?;").unwrap();
+                                writeln!(out, "                    let __nw_by_pk: HashMap<_, _> = __nw_recs.into_iter().map(|r| (r.{sub_target_pk}.clone(), r)).collect();").unwrap();
+                                writeln!(out, "                    for records in map.values_mut() {{").unwrap();
+                                writeln!(out, "                        for record in records.iter_mut() {{").unwrap();
+                                if is_fk_optional {
+                                    writeln!(out, "                            record.{sub_rel_name} = record.{sub_fk}.as_ref().and_then(|fk| __nw_by_pk.get(fk).cloned()).map(Box::new);").unwrap();
+                                } else {
+                                    writeln!(out, "                            record.{sub_rel_name} = __nw_by_pk.get(&record.{sub_fk}).cloned().map(Box::new);").unwrap();
+                                }
+                                writeln!(out, "                        }}").unwrap();
+                                writeln!(out, "                    }}").unwrap();
+                                writeln!(out, "                }}").unwrap();
+                            }
+                            RelationKind::HasMany => {
+                                let sub_fk = &sub_rel.foreign_key;
+                                let sub_target_table = &sub_rel.target_table;
+
+                                writeln!(out, "                let __nw_pids: Vec<_> = map.values().flat_map(|v| v.iter()).map(|r| r.{target_pk_col}.clone()).collect();").unwrap();
+                                writeln!(out, "                if !__nw_pids.is_empty() {{").unwrap();
+                                writeln!(out, "                    let __nw_phs: Vec<String> = (1..=__nw_pids.len()).map(|i| format!(\"${{}}\", i)).collect();").unwrap();
+                                writeln!(out, "                    let __nw_sql = format!(\"SELECT * FROM {sub_target_table} WHERE {sub_fk} IN ({{}})\", __nw_phs.join(\", \"));").unwrap();
+                                writeln!(out, "                    let mut __nw_q = sqlx::query_as::<_, {sub_target_row}>(&__nw_sql);").unwrap();
+                                writeln!(out, "                    for __id in &__nw_pids {{ __nw_q = bind(__nw_q, __id.clone().into()); }}").unwrap();
+                                writeln!(out, "                    let __nw_rows = db.fetch_all(__nw_q).await?;").unwrap();
+                                writeln!(out, "                    let __nw_recs = {hydrate_fn}(db.clone(), &__nw_rows, base_url).await?;").unwrap();
+                                writeln!(out, "                    let mut __nw_by_fk: HashMap<_, Vec<_>> = HashMap::new();").unwrap();
+                                let sub_fk_optional = target_fields.iter().any(|f| f.name == *sub_fk && f.ty.starts_with("Option<"));
+                                if sub_fk_optional {
+                                    writeln!(out, "                    for r in __nw_recs {{ if let Some(ref fk) = r.{sub_fk} {{ __nw_by_fk.entry(fk.clone()).or_default().push(r); }} }}").unwrap();
+                                } else {
+                                    writeln!(out, "                    for r in __nw_recs {{ __nw_by_fk.entry(r.{sub_fk}.clone()).or_default().push(r); }}").unwrap();
+                                }
+                                writeln!(out, "                    for records in map.values_mut() {{").unwrap();
+                                writeln!(out, "                        for record in records.iter_mut() {{").unwrap();
+                                writeln!(out, "                            record.{sub_rel_name} = __nw_by_fk.remove(&record.{target_pk_col}).unwrap_or_default();").unwrap();
+                                writeln!(out, "                        }}").unwrap();
+                                writeln!(out, "                    }}").unwrap();
+                                writeln!(out, "                }}").unwrap();
+                            }
+                        }
+                        writeln!(out, "            }}").unwrap();
+                    }
+                    writeln!(out, "        }}").unwrap();
+                } else {
+                    writeln!(out, "        let _ = &nested_with;").unwrap();
+                }
                 writeln!(out, "        Ok(map)").unwrap();
                 writeln!(out, "    }}").unwrap();
             }
