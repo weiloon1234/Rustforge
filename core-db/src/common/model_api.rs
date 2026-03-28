@@ -723,7 +723,7 @@ pub trait FeaturePersistenceModel: ModelDef {
 /// ```
 #[macro_export]
 macro_rules! impl_feature_persistence_delegates {
-    (@single $localized_mod:path, localized) => {
+    ($localized_mod:path, localized) => {
         fn upsert_localized_many<'db>(
             db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
             field: &'static str, values: std::collections::HashMap<String, String>,
@@ -731,7 +731,7 @@ macro_rules! impl_feature_persistence_delegates {
             Box::pin(async move { $localized_mod::upsert_localized_many(db, owner_type, owner_id, field, &values).await })
         }
     };
-    (@single $localized_mod:path, meta) => {
+    ($localized_mod:path, meta) => {
         fn upsert_meta_many<'db>(
             db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
             values: std::collections::HashMap<String, serde_json::Value>,
@@ -739,7 +739,7 @@ macro_rules! impl_feature_persistence_delegates {
             Box::pin(async move { $localized_mod::upsert_meta_many(db, owner_type, owner_id, &values).await })
         }
     };
-    (@single $localized_mod:path, attachment) => {
+    ($localized_mod:path, attachment) => {
         fn clear_attachment_field<'db>(
             db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64, field: &'static str,
         ) -> $crate::common::model_api::BoxModelFuture<'db, ()> {
@@ -764,8 +764,22 @@ macro_rules! impl_feature_persistence_delegates {
             Box::pin(async move { $localized_mod::delete_attachment_ids(db, owner_type, owner_id, field, &ids).await })
         }
     };
-    ($localized_mod:path, $($feature:ident),+ $(,)?) => {
-        $($crate::impl_feature_persistence_delegates!(@single $localized_mod, $feature);)+
+    ($localized_mod:path, localized, meta) => {
+        $crate::impl_feature_persistence_delegates!($localized_mod, localized);
+        $crate::impl_feature_persistence_delegates!($localized_mod, meta);
+    };
+    ($localized_mod:path, localized, attachment) => {
+        $crate::impl_feature_persistence_delegates!($localized_mod, localized);
+        $crate::impl_feature_persistence_delegates!($localized_mod, attachment);
+    };
+    ($localized_mod:path, meta, attachment) => {
+        $crate::impl_feature_persistence_delegates!($localized_mod, meta);
+        $crate::impl_feature_persistence_delegates!($localized_mod, attachment);
+    };
+    ($localized_mod:path, localized, meta, attachment) => {
+        $crate::impl_feature_persistence_delegates!($localized_mod, localized);
+        $crate::impl_feature_persistence_delegates!($localized_mod, meta);
+        $crate::impl_feature_persistence_delegates!($localized_mod, attachment);
     };
 }
 
