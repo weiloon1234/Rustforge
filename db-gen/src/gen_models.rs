@@ -965,26 +965,18 @@ fn render_feature_persistence_model_impl(
         writeln!(out, "    }}").unwrap();
     }
 
-    // Emit macro invocation for delegation methods instead of per-model boilerplate
-    {
-        let mut features: Vec<&str> = Vec::new();
-        if !localized_fields.is_empty() {
-            features.push("localized");
-        }
-        if has_meta {
-            features.push("meta");
-        }
-        if has_attachments {
-            features.push("attachment");
-        }
-        if !features.is_empty() {
-            writeln!(
-                out,
-                "    core_db::impl_feature_persistence_delegates!(localized, {});",
-                features.join(", ")
-            )
-            .unwrap();
-        }
+    // Emit compact one-liner delegation methods for feature persistence
+    if !localized_fields.is_empty() {
+        writeln!(out, "    fn upsert_localized_many<'db>(db: DbConn<'db>, ot: &'static str, oid: i64, f: &'static str, v: HashMap<String, String>) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{ Box::pin(async move {{ localized::upsert_localized_many(db, ot, oid, f, &v).await }}) }}").unwrap();
+    }
+    if has_meta {
+        writeln!(out, "    fn upsert_meta_many<'db>(db: DbConn<'db>, ot: &'static str, oid: i64, v: HashMap<String, serde_json::Value>) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{ Box::pin(async move {{ localized::upsert_meta_many(db, ot, oid, &v).await }}) }}").unwrap();
+    }
+    if has_attachments {
+        writeln!(out, "    fn clear_attachment_field<'db>(db: DbConn<'db>, ot: &'static str, oid: i64, f: &'static str) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{ Box::pin(async move {{ localized::clear_attachment_field(db, ot, oid, f).await }}) }}").unwrap();
+        writeln!(out, "    fn replace_single_attachment<'db>(db: DbConn<'db>, ot: &'static str, oid: i64, f: &'static str, v: AttachmentInput) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{ Box::pin(async move {{ localized::replace_single_attachment(db, ot, oid, f, &v).await }}) }}").unwrap();
+        writeln!(out, "    fn add_attachments<'db>(db: DbConn<'db>, ot: &'static str, oid: i64, f: &'static str, v: Vec<AttachmentInput>) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{ Box::pin(async move {{ localized::add_attachments(db, ot, oid, f, &v).await }}) }}").unwrap();
+        writeln!(out, "    fn delete_attachment_ids<'db>(db: DbConn<'db>, ot: &'static str, oid: i64, f: &'static str, ids: Vec<uuid::Uuid>) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{ Box::pin(async move {{ localized::delete_attachment_ids(db, ot, oid, f, &ids).await }}) }}").unwrap();
     }
 
     if !touch_targets.is_empty() {
