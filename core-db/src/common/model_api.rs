@@ -5181,7 +5181,8 @@ impl<'db> QueryState<'db> {
         self
     }
 
-    pub fn where_exists_raw(mut self, clause: String, raw_binds: Vec<BindValue>) -> Self {
+    pub fn where_exists_raw(mut self, mut clause: String, raw_binds: Vec<BindValue>) -> Self {
+        normalize_raw_placeholders(&mut clause);
         self.filters.push(FilterExpr::ExistsRaw {
             clause,
             binds: raw_binds,

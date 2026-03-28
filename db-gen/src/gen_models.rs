@@ -67,6 +67,13 @@ struct RelationPathSpec {
 }
 
 #[derive(Debug, Clone)]
+struct TouchTargetSpec {
+    fk: String,
+    target_pk: String,
+    target_table: String,
+}
+
+#[derive(Debug, Clone)]
 struct EnumExplainedFieldSpec {
     name: String,
     explained_name: String,
@@ -664,7 +671,7 @@ fn render_patch_model_impl(
     localized_fields: &[String],
     has_meta: bool,
     has_attachments: bool,
-    touch_targets: &[(String, String, String, String, String, String)],
+    touch_targets: &[TouchTargetSpec],
     table: &str,
     pk: &str,
 ) -> String {
@@ -884,7 +891,7 @@ fn render_feature_persistence_model_impl(
     localized_fields: &[String],
     has_meta: bool,
     has_attachments: bool,
-    touch_targets: &[(String, String, String, String, String, String)],
+    touch_targets: &[TouchTargetSpec],
     table: &str,
     pk: &str,
 ) -> String {
@@ -987,10 +994,11 @@ fn render_feature_persistence_model_impl(
         )
         .unwrap();
         writeln!(out, "        &[").unwrap();
-        for (fk, _target_snake, _target_title, target_pk, _target_pk_ty, target_table) in touch_targets {
+        for tt in touch_targets {
             writeln!(
                 out,
-                "            core_db::common::model_api::TouchTarget {{ fk_col: \"{fk}\", parent_table: \"{target_table}\", parent_pk: \"{target_pk}\" }},"
+                "            core_db::common::model_api::TouchTarget {{ fk_col: \"{fk}\", parent_table: \"{table}\", parent_pk: \"{pk}\" }},",
+                fk = tt.fk, table = tt.target_table, pk = tt.target_pk,
             )
             .unwrap();
         }
@@ -1004,7 +1012,8 @@ fn render_feature_persistence_model_impl(
         )
         .unwrap();
         writeln!(out, "        vec![").unwrap();
-        for (fk, _target_snake, _target_title, _target_pk, _target_pk_ty, _target_table) in touch_targets {
+        for tt in touch_targets {
+            let fk = &tt.fk;
             writeln!(
                 out,
                 "            (\"{fk}\", row.{fk}.map(|v| v as i64)),"
@@ -1260,7 +1269,7 @@ struct ModelCtx<'a> {
     skip_profiler: bool,
     relations: Vec<RelationSpec>,
     relation_paths: Vec<RelationPathSpec>,
-    touch_targets: Vec<(String, String, String, String, String, String)>,
+    touch_targets: Vec<TouchTargetSpec>,
     schema: &'a Schema,
     cfgs: &'a ConfigsFile,
     options: GenerateModelsOptions,
@@ -1300,13 +1309,13 @@ impl<'a> ModelCtx<'a> {
         }
         let single_attachments: Vec<AttachmentFieldSpec> = attachment_fields
             .iter()
-            .cloned()
             .filter(|a| !a.multiple)
+            .cloned()
             .collect();
         let multi_attachments: Vec<AttachmentFieldSpec> = attachment_fields
             .iter()
-            .cloned()
             .filter(|a| a.multiple)
+            .cloned()
             .collect();
         let has_attachments = !attachment_fields.is_empty();
         let localized_fields: Vec<String> = cfg
@@ -1379,23 +1388,18 @@ impl<'a> ModelCtx<'a> {
             .map(|s| to_snake(&s))
             .collect();
 
-        let mut touch_targets: Vec<(String, String, String, String, String, String)> = Vec::new();
+        let mut touch_targets: Vec<TouchTargetSpec> = Vec::new();
         if let Some(touches) = &cfg.touch {
             for rel_name in touches {
                 if let Some(rel) = relations
                     .iter()
                     .find(|r| &r.name == rel_name && matches!(r.kind, RelationKind::BelongsTo))
                 {
-                    let target_snake = to_snake(&rel.target_model);
-                    let target_title = to_title_case(&rel.target_model);
-                    touch_targets.push((
-                        rel.foreign_key.clone(),
-                        target_snake,
-                        target_title,
-                        rel.target_pk.clone(),
-                        rel.target_pk_ty.clone(),
-                        rel.target_table.clone(),
-                    ));
+                    touch_targets.push(TouchTargetSpec {
+                        fk: rel.foreign_key.clone(),
+                        target_pk: rel.target_pk.clone(),
+                        target_table: rel.target_table.clone(),
+                    });
                 } else {
                     panic!(
                         "Model '{}' configures touch='{}' but no such belongs_to relation found.",
