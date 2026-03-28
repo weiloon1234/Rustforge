@@ -192,9 +192,9 @@ impl GeneratedTableAdapter for CountryTableAdapter {
     {
         let db = self.db.clone();
         Box::pin(async move {
-            let base_query = CountryModel::query(DbConn::pool(&db));
+            let base_query = CountryModel::query();
             let filtered_query = apply_country_filters(base_query, &query);
-            Ok(filtered_query.count().await?)
+            Ok(filtered_query.count(DbConn::pool(&db)).await?)
         })
     }
 
@@ -213,7 +213,7 @@ impl GeneratedTableAdapter for CountryTableAdapter {
             let safe_per_page = per_page.max(1);
             let offset = (safe_page - 1) * safe_per_page;
 
-            let base_query = CountryModel::query(DbConn::pool(&db));
+            let base_query = CountryModel::query();
             let filtered_query = apply_default_country_sort(apply_country_sort(
                 apply_country_filters(base_query, &query),
                 query.sorting_column,
@@ -222,7 +222,7 @@ impl GeneratedTableAdapter for CountryTableAdapter {
             .offset(offset)
             .limit(safe_per_page);
 
-            let rows = filtered_query.all().await?;
+            let rows = filtered_query.all(DbConn::pool(&db)).await?;
             let out = rows
                 .into_iter()
                 .map(|row: CountryRecord| CountryDatatableRow {

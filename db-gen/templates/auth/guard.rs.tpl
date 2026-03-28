@@ -28,21 +28,21 @@ impl Guard for {{struct_name}} {
 
 pub async fn list_tokens<'a>(db: DbConn<'a>, subject_id: &str) -> anyhow::Result<Vec<PersonalAccessTokenRecord>> {
     let tokenable_type = <{{struct_name}} as Guard>::tokenable_type().unwrap_or(<{{struct_name}} as Guard>::name());
-    let rows = PersonalAccessTokenModel::query(db)
+    let rows = PersonalAccessTokenModel::query()
         .where_col(PersonalAccessTokenCol::TOKENABLE_TYPE, Op::Eq, tokenable_type.to_string())
         .where_col(PersonalAccessTokenCol::TOKENABLE_ID, Op::Eq, subject_id.to_string())
-        .all()
+        .all(db)
         .await?;
     Ok(rows)
 }
 
 pub async fn revoke_tokens<'a>(db: DbConn<'a>, subject_id: &str) -> anyhow::Result<u64> {
     let tokenable_type = <{{struct_name}} as Guard>::tokenable_type().unwrap_or(<{{struct_name}} as Guard>::name());
-    PersonalAccessTokenModel::query(db)
+    PersonalAccessTokenModel::query()
         .where_col(PersonalAccessTokenCol::TOKENABLE_TYPE, Op::Eq, tokenable_type.to_string())
         .where_col(PersonalAccessTokenCol::TOKENABLE_ID, Op::Eq, subject_id.to_string())
         .patch()
         .assign(PersonalAccessTokenCol::REVOKED_AT, Some(time::OffsetDateTime::now_utc()))?
-        .save()
+        .save(db)
         .await
 }

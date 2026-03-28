@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::{
-    Attribute, Expr, ExprLit, Fields, GenericArgument, ImplItem, ImplItemFn, Item, ItemEnum,
+    Attribute, Expr, ExprLit, Fields, FnArg, GenericArgument, ImplItem, ImplItemFn, Item, ItemEnum,
     ItemImpl, ItemStruct, Lit, Meta, ReturnType, Token, Type,
 };
 
@@ -54,6 +54,7 @@ pub struct ModelSpec {
     pub helper_items: Vec<String>,
     pub record_impl_items: Vec<String>,
     pub model_impl_items: Vec<String>,
+    pub model_method_signatures: Vec<ModelMethodSignature>,
 }
 
 impl Default for ModelSpec {
@@ -81,8 +82,17 @@ impl Default for ModelSpec {
             helper_items: Vec::new(),
             record_impl_items: Vec::new(),
             model_impl_items: Vec::new(),
+            model_method_signatures: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelMethodSignature {
+    pub name: String,
+    pub has_receiver: bool,
+    pub input_types: Vec<String>,
+    pub output_type: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +169,7 @@ pub struct ComputedFieldSpec {
 pub enum RelationKind {
     BelongsTo,
     HasMany,
+    HasOne,
 }
 
 #[derive(Debug, Clone)]
@@ -168,6 +179,7 @@ pub struct RelationSpec {
     pub target_model: String,
     pub foreign_key: String,
     pub local_key: String,
+    pub scope: Option<String>,
     pub target_table: String,
     pub target_pk: String,
     pub target_pk_ty: String,
@@ -187,6 +199,7 @@ enum ParsedFieldKind {
         target_model: String,
         foreign_key: String,
         local_key: Option<String>,
+        scope: Option<String>,
         touch: bool,
     },
 }
@@ -200,6 +213,7 @@ struct ParsedFieldOptions {
     kind: Option<String>,
     foreign_key: Option<String>,
     local_key: Option<String>,
+    scope: Option<String>,
     touch: bool,
 }
 
@@ -222,6 +236,7 @@ struct ParsedCustomImpl {
     target: CustomImplTarget,
     items: Vec<String>,
     computed: Vec<String>,
+    method_signatures: Vec<ModelMethodSignature>,
 }
 
 #[derive(Debug, Clone)]
@@ -479,6 +494,9 @@ fn parse_model_source(raw: &str, source: &Path) -> anyhow::Result<Schema> {
                     );
                 }
                 model.model_impl_items.extend(parsed.items);
+                model
+                    .model_method_signatures
+                    .extend(parsed.method_signatures);
                 if !parsed.computed.is_empty() {
                     bail!(
                         "#[rf_computed] methods are only supported inside #[rf_record_impl] blocks (file: {})",
@@ -495,6 +513,7 @@ fn parse_model_source(raw: &str, source: &Path) -> anyhow::Result<Schema> {
     if !computed.is_empty() {
         model.computed = Some(computed);
     }
+    validate_relation_scopes(&model, source)?;
 
     let mut models = BTreeMap::new();
     models.insert(model_key, model);
@@ -608,23 +627,30 @@ fn parse_model_struct(item: &ItemStruct, source: &Path) -> anyhow::Result<(Strin
                 target_model,
                 foreign_key,
                 local_key,
+                scope,
                 touch: should_touch,
             } => {
                 let relation_kind = match kind {
                     RelationKind::BelongsTo => "belongs_to",
                     RelationKind::HasMany => "has_many",
+                    RelationKind::HasOne => "has_one",
                 };
                 let resolved_local_key = local_key.clone().unwrap_or_else(|| {
-                    if matches!(kind, RelationKind::HasMany) {
+                    if matches!(kind, RelationKind::HasMany | RelationKind::HasOne) {
                         pk_name.clone()
                     } else {
                         "id".to_string()
                     }
                 });
-                relations.push(format!(
+                let mut raw = format!(
                     "{}:{}:{}:{}:{}",
                     field.name, relation_kind, target_model, foreign_key, resolved_local_key
-                ));
+                );
+                if let Some(scope) = scope {
+                    raw.push(':');
+                    raw.push_str(scope);
+                }
+                relations.push(raw);
                 if *should_touch {
                     touch.push(field.name.clone());
                 }
@@ -667,7 +693,6 @@ fn parse_model_struct(item: &ItemStruct, source: &Path) -> anyhow::Result<(Strin
         touch.dedup();
         model.touch = Some(touch);
     }
-
     Ok((model_key, model))
 }
 
@@ -778,6 +803,9 @@ fn parse_field_options(
                 Meta::NameValue(nv) if nv.path.is_ident("local_key") => {
                     out.local_key = Some(expr_to_string(&nv.value)?);
                 }
+                Meta::NameValue(nv) if nv.path.is_ident("scope") => {
+                    out.scope = Some(expr_to_string(&nv.value)?);
+                }
                 Meta::List(list) if list.path.is_ident("pk") => {
                     out.pk = true;
                     for nested in parse_meta_list_tokens(&list.tokens)? {
@@ -874,6 +902,7 @@ fn classify_field_kind(
                     .clone()
                     .unwrap_or_else(|| format!("{}_id", field_name)),
                 local_key: options.local_key.clone(),
+                scope: options.scope.clone(),
                 touch: options.touch,
             })
         }
@@ -892,6 +921,26 @@ fn classify_field_kind(
                     .clone()
                     .unwrap_or_else(|| format!("{}_id", model_key)),
                 local_key: options.local_key.clone(),
+                scope: options.scope.clone(),
+                touch: false,
+            })
+        }
+        "HasOne" => {
+            let target_model = to_snake(&single_generic_type(
+                last_segment,
+                source,
+                model_name,
+                field_name,
+            )?);
+            Ok(ParsedFieldKind::Relation {
+                kind: RelationKind::HasOne,
+                target_model,
+                foreign_key: options
+                    .foreign_key
+                    .clone()
+                    .unwrap_or_else(|| format!("{}_id", model_key)),
+                local_key: options.local_key.clone(),
+                scope: options.scope.clone(),
                 touch: false,
             })
         }
@@ -1073,6 +1122,7 @@ fn parse_custom_impl(
 
     let mut items = Vec::new();
     let mut computed = Vec::new();
+    let mut method_signatures = Vec::new();
 
     for impl_item in item_impl.items {
         match impl_item {
@@ -1086,6 +1136,25 @@ fn parse_custom_impl(
                         ReturnType::Default => unreachable!(),
                     };
                     computed.push(format!("{}:{}", method.sig.ident, ty));
+                }
+                if matches!(kind, CustomImplKind::Model) {
+                    method_signatures.push(ModelMethodSignature {
+                        name: method.sig.ident.to_string(),
+                        has_receiver: method.sig.receiver().is_some(),
+                        input_types: method
+                            .sig
+                            .inputs
+                            .iter()
+                            .filter_map(|input| match input {
+                                FnArg::Typed(arg) => Some(type_to_compact_string(&arg.ty)),
+                                FnArg::Receiver(_) => None,
+                            })
+                            .collect(),
+                        output_type: match &method.sig.output {
+                            ReturnType::Type(_, ty) => Some(type_to_compact_string(ty)),
+                            ReturnType::Default => None,
+                        },
+                    });
                 }
                 items.push(method.into_token_stream().to_string());
             }
@@ -1103,6 +1172,7 @@ fn parse_custom_impl(
         target,
         items,
         computed,
+        method_signatures,
     })
 }
 
@@ -1151,6 +1221,71 @@ fn parse_meta_list_tokens(tokens: &proc_macro2::TokenStream) -> anyhow::Result<V
         .parse2(tokens.clone())?
         .into_iter()
         .collect())
+}
+
+fn validate_relation_scopes(model: &ModelSpec, source: &Path) -> anyhow::Result<()> {
+    let Some(relations) = &model.relations else {
+        return Ok(());
+    };
+
+    for relation in relations {
+        let parts: Vec<&str> = relation.split(':').collect();
+        if parts.len() < 6 {
+            continue;
+        }
+        let target_model = parts[2].trim();
+        let scope = parts[5].trim();
+        if scope.is_empty() {
+            continue;
+        }
+        let target_model_title = to_title_case(target_model);
+        let method = model
+            .model_method_signatures
+            .iter()
+            .find(|method| method.name == scope)
+            .ok_or_else(|| {
+                anyhow!(
+                    "relation scope '{}' referenced in '{}' is missing a matching #[rf_model_impl] method in '{}'",
+                    scope,
+                    relation,
+                    source.display()
+                )
+            })?;
+
+        if !matches_relation_scope_signature(method, &target_model_title) {
+            bail!(
+                "relation scope '{}' in '{}' must have signature fn {}(query: Query<{}Model>) -> Query<{}Model> in '{}'",
+                scope,
+                relation,
+                scope,
+                target_model_title,
+                target_model_title,
+                source.display()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn matches_relation_scope_signature(
+    method: &ModelMethodSignature,
+    target_model_title: &str,
+) -> bool {
+    if method.has_receiver || method.input_types.len() != 1 {
+        return false;
+    }
+    if !matches_model_query_type_str(&method.input_types[0], target_model_title) {
+        return false;
+    }
+    let Some(output_type) = method.output_type.as_ref() else {
+        return false;
+    };
+    matches_model_query_type_str(output_type, target_model_title)
+}
+
+fn matches_model_query_type_str(raw: &str, target_model_title: &str) -> bool {
+    raw.ends_with(&format!("Query<{target_model_title}Model>"))
 }
 
 fn has_attr(attrs: &[Attribute], name: &str) -> bool {
@@ -1532,15 +1667,20 @@ pub fn parse_relations(
                 raw
             );
         }
-        let name = parts[0].trim().to_string();
+        let name = to_snake(parts[0].trim());
         let kind = match parts[1].trim() {
             "belongs_to" => RelationKind::BelongsTo,
             "has_many" => RelationKind::HasMany,
+            "has_one" => RelationKind::HasOne,
             other => panic!("Unknown relation kind '{}' in '{}'", other, raw),
         };
         let target_model = parts[2].trim().to_string();
         let foreign_key = parts[3].trim().to_string();
         let local_key = parts[4].trim().to_string();
+        let scope = parts
+            .get(5)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
 
         let target_cfg = schema.models.get(&target_model).unwrap_or_else(|| {
             panic!(
@@ -1571,6 +1711,7 @@ pub fn parse_relations(
             target_model,
             foreign_key,
             local_key,
+            scope,
             target_table,
             target_pk,
             target_pk_ty,

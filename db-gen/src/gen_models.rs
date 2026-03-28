@@ -1,7 +1,7 @@
 use crate::config::ConfigsFile;
 use crate::schema::{
     parse_attachments, parse_computed, parse_fields, parse_meta, parse_relations, to_snake,
-    to_title_case, AttachmentFieldSpec, EnumOrOther, EnumSpec, FieldSpec, MetaFieldSpec, MetaType,
+    to_title_case, AttachmentFieldSpec, EnumOrOther, EnumSpec, FieldSpec, MetaType,
     ModelSpec, RelationKind, RelationSpec, Schema, SpecialType,
 };
 use crate::template::{render_template, TemplateContext};
@@ -341,305 +341,6 @@ fn build_nested_where_has_expr(
     render(schema, root_model_name, path, leaf_expr_template, root_var)
 }
 
-fn render_insert_field_setters(db_fields: &[FieldSpec], _col_ident: &str) -> String {
-    let mut out = String::new();
-    for f in db_fields {
-        let fn_name = format!("set_{}", to_snake(&f.name));
-        let col_sql = to_snake(&f.name);
-        if let Some(SpecialType::Hashed) = f.special_type {
-            writeln!(
-                out,
-                "    pub fn {fn_name}(mut self, val: &str) -> anyhow::Result<Self> {{",
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        let hashed = core_db::common::auth::hash::hash_password(val)?;"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.state = self.state.set_col(\"{col_sql}\", hashed.into());"
-            )
-            .unwrap();
-            writeln!(out, "        Ok(self)").unwrap();
-            writeln!(out, "    }}").unwrap();
-
-            let fn_name_raw = format!("{}_raw", fn_name);
-            writeln!(
-                out,
-                "    pub fn {fn_name_raw}(mut self, val: String) -> Self {{",
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.state = self.state.set_col(\"{col_sql}\", val.into());"
-            )
-            .unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-        } else {
-            writeln!(
-                out,
-                "    pub fn {fn_name}(mut self, val: {typ}) -> Self {{",
-                typ = f.ty
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.state = self.state.set_col(\"{col_sql}\", val.into());"
-            )
-            .unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-        }
-    }
-    out
-}
-
-fn render_localized_setters(localized_fields: &[String], cfgs: &ConfigsFile) -> String {
-    let mut out = String::new();
-    for f in localized_fields {
-        let fn_name = format!("set_{}_lang", to_snake(f));
-        writeln!(
-            out,
-            "    pub fn {fn_name}(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        self.translations.entry(\"{f}\").or_default().insert(locale.into(), val.into());"
-        )
-        .unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-
-        let fn_name_bulk = format!("set_{}_langs", to_snake(f));
-        writeln!(
-            out,
-            "    pub fn {fn_name_bulk}(mut self, langs: localized::LocalizedText) -> Self {{"
-        )
-        .unwrap();
-        for lang in &cfgs.languages.supported {
-            let variant = to_title_case(lang);
-            writeln!(
-                out,
-                "        if !langs.{lang}.is_empty() {{ self = self.{fn_name}(localized::Locale::{variant}, langs.{lang}); }}"
-            )
-            .unwrap();
-        }
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-
-        let fn_name_input = format!("set_{}_input", to_snake(f));
-        writeln!(
-            out,
-            "    pub fn {fn_name_input}(mut self, input: Option<localized::LocalizedInput>) -> Self {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        let Some(input) = input else {{ return self; }};"
-        )
-        .unwrap();
-        writeln!(out, "        if input.is_empty() {{ return self; }}").unwrap();
-        writeln!(out, "        let map = input.to_hashmap();").unwrap();
-        writeln!(out, "        for (locale, val) in map {{").unwrap();
-        writeln!(
-            out,
-            "            self.translations.entry(\"{f}\").or_default().insert(locale, val);"
-        )
-        .unwrap();
-        writeln!(out, "        }}").unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-    }
-    out
-}
-
-fn render_meta_setters(meta_fields: &[MetaFieldSpec]) -> String {
-    let mut out = String::new();
-    for m in meta_fields {
-        let fn_name = format!("set_meta_{}", m.name);
-        match &m.ty {
-            MetaType::String => {
-                writeln!(
-                    out,
-                    "    pub fn {fn_name}(mut self, val: impl Into<String>) -> Self {{"
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::String(val.into()));",
-                    name = m.name
-                )
-                .unwrap();
-                writeln!(out, "        self").unwrap();
-                writeln!(out, "    }}").unwrap();
-            }
-            MetaType::Bool => {
-                writeln!(out, "    pub fn {fn_name}(mut self, val: bool) -> Self {{").unwrap();
-                writeln!(
-                    out,
-                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::Bool(val));",
-                    name = m.name
-                )
-                .unwrap();
-                writeln!(out, "        self").unwrap();
-                writeln!(out, "    }}").unwrap();
-            }
-            MetaType::I32 => {
-                writeln!(out, "    pub fn {fn_name}(mut self, val: i32) -> Self {{").unwrap();
-                writeln!(
-                    out,
-                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val));",
-                    name = m.name
-                )
-                .unwrap();
-                writeln!(out, "        self").unwrap();
-                writeln!(out, "    }}").unwrap();
-            }
-            MetaType::I64 => {
-                writeln!(out, "    pub fn {fn_name}(mut self, val: i64) -> Self {{").unwrap();
-                writeln!(
-                    out,
-                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val));",
-                    name = m.name
-                )
-                .unwrap();
-                writeln!(out, "        self").unwrap();
-                writeln!(out, "    }}").unwrap();
-            }
-            MetaType::F64 => {
-                writeln!(out, "    pub fn {fn_name}(mut self, val: f64) -> Self {{").unwrap();
-                writeln!(
-                    out,
-                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val));",
-                    name = m.name
-                )
-                .unwrap();
-                writeln!(out, "        self").unwrap();
-                writeln!(out, "    }}").unwrap();
-            }
-            MetaType::Decimal => {
-                writeln!(
-                    out,
-                    "    pub fn {fn_name}(mut self, val: rust_decimal::Decimal) -> Self {{"
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::from(val.to_string()));",
-                    name = m.name
-                )
-                .unwrap();
-                writeln!(out, "        self").unwrap();
-                writeln!(out, "    }}").unwrap();
-            }
-            MetaType::Json => {
-                writeln!(
-                    out,
-                    "    pub fn {fn_name}(mut self, val: JsonValue) -> Self {{"
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "        self.meta.insert(\"{name}\".to_string(), val);",
-                    name = m.name
-                )
-                .unwrap();
-                writeln!(out, "        self").unwrap();
-                writeln!(out, "    }}").unwrap();
-                let typed_fn_name = format!("set_meta_{}_as", m.name);
-                writeln!(
-                    out,
-                    "    pub fn {typed_fn_name}<T: serde::Serialize>(mut self, val: &T) -> anyhow::Result<Self> {{"
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "        self.meta.insert(\"{name}\".to_string(), serde_json::to_value(val)?);",
-                    name = m.name
-                )
-                .unwrap();
-                writeln!(out, "        Ok(self)").unwrap();
-                writeln!(out, "    }}").unwrap();
-            }
-            MetaType::DateTime => {
-                writeln!(
-                    out,
-                    "    pub fn {fn_name}(mut self, val: time::OffsetDateTime) -> Self {{"
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "        self.meta.insert(\"{name}\".to_string(), JsonValue::String(val.to_string()));",
-                    name = m.name
-                )
-                .unwrap();
-                writeln!(out, "        self").unwrap();
-                writeln!(out, "    }}").unwrap();
-            }
-            MetaType::Custom(ty) => {
-                writeln!(
-                    out,
-                    "    pub fn {fn_name}(mut self, val: &{ty}) -> anyhow::Result<Self> {{",
-                    ty = ty
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "        self.meta.insert(\"{name}\".to_string(), serde_json::to_value(val)?);",
-                    name = m.name
-                )
-                .unwrap();
-                writeln!(out, "        Ok(self)").unwrap();
-                writeln!(out, "    }}").unwrap();
-            }
-        }
-    }
-    out
-}
-
-fn render_insert_attachment_setters(
-    single_attachments: &[AttachmentFieldSpec],
-    multi_attachments: &[AttachmentFieldSpec],
-) -> String {
-    let mut out = String::new();
-    for a in single_attachments {
-        let fn_name = format!("set_attachment_{}", to_snake(&a.name));
-        writeln!(
-            out,
-            "    pub fn {fn_name}(mut self, att: AttachmentInput) -> Self {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        self.attachments_single.insert(\"{name}\", att);",
-            name = a.name
-        )
-        .unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-    }
-    for a in multi_attachments {
-        let fn_name = format!("add_attachment_{}", to_snake(&a.name));
-        writeln!(
-            out,
-            "    pub fn {fn_name}(mut self, att: AttachmentInput) -> Self {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        self.attachments_multi.entry(\"{name}\").or_default().push(att);",
-            name = a.name
-        )
-        .unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-    }
-    out
-}
 
 fn is_incrementable_type(ty: &str) -> bool {
     matches!(ty, "i16" | "i32" | "i64" | "f64" | "rust_decimal::Decimal")
@@ -689,161 +390,6 @@ fn render_public_column_namespace(
     out
 }
 
-fn render_update_field_setters(db_fields: &[FieldSpec], col_ident: &str) -> String {
-    let mut out = String::new();
-    for f in db_fields {
-        let fn_name = format!("set_{}", to_snake(&f.name));
-        let col_variant = to_title_case(&f.name);
-        if let Some(SpecialType::Hashed) = f.special_type {
-            writeln!(
-                out,
-                "    pub fn {fn_name}(mut self, val: &str) -> anyhow::Result<Self> {{",
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        let hashed = core_db::common::auth::hash::hash_password(val)?;"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.state = self.state.assign_col({col_ident}::{col_variant}.as_sql(), hashed.into());",
-            )
-            .unwrap();
-            writeln!(out, "        Ok(self)").unwrap();
-            writeln!(out, "    }}").unwrap();
-
-            let fn_name_raw = format!("{}_raw", fn_name);
-            writeln!(
-                out,
-                "    pub fn {fn_name_raw}(mut self, val: String) -> Self {{",
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.state = self.state.assign_col({col_ident}::{col_variant}.as_sql(), val.into());",
-            )
-            .unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-        } else {
-            writeln!(
-                out,
-                "    pub fn {fn_name}(mut self, val: {typ}) -> Self {{",
-                typ = f.ty
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "        self.state = self.state.assign_col({col_ident}::{col_variant}.as_sql(), val.into());",
-            )
-            .unwrap();
-            writeln!(out, "        self").unwrap();
-            writeln!(out, "    }}").unwrap();
-
-            // Generate increment/decrement for non-optional numeric fields
-            if is_incrementable_type(&f.ty) {
-                let snake = to_snake(&f.name);
-                let inc_fn = format!("increment_{snake}");
-                let dec_fn = format!("decrement_{snake}");
-                writeln!(
-                    out,
-                    "    pub fn {inc_fn}(mut self, val: {typ}) -> Self {{",
-                    typ = f.ty
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "        self.state = self.state.increment_col({col_ident}::{col_variant}.as_sql(), val.into());",
-                )
-                .unwrap();
-                writeln!(out, "        self").unwrap();
-                writeln!(out, "    }}").unwrap();
-
-                writeln!(
-                    out,
-                    "    pub fn {dec_fn}(mut self, val: {typ}) -> Self {{",
-                    typ = f.ty
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "        self.state = self.state.decrement_col({col_ident}::{col_variant}.as_sql(), val.into());",
-                )
-                .unwrap();
-                writeln!(out, "        self").unwrap();
-                writeln!(out, "    }}").unwrap();
-            }
-        }
-    }
-    out
-}
-
-fn render_update_attachment_setters(
-    single_attachments: &[AttachmentFieldSpec],
-    multi_attachments: &[AttachmentFieldSpec],
-) -> String {
-    let mut out = String::new();
-    for a in single_attachments {
-        let fn_name = format!("set_attachment_{}", to_snake(&a.name));
-        writeln!(
-            out,
-            "    pub fn {fn_name}(mut self, att: AttachmentInput) -> Self {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        self.attachments_single.insert(\"{name}\", att);",
-            name = a.name
-        )
-        .unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-
-        let clear_fn = format!("clear_attachment_{}", to_snake(&a.name));
-        writeln!(out, "    pub fn {clear_fn}(mut self) -> Self {{").unwrap();
-        writeln!(
-            out,
-            "        if !self.attachments_clear_single.contains(&\"{name}\") {{ self.attachments_clear_single.push(\"{name}\"); }}",
-            name = a.name
-        )
-        .unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-    }
-    for a in multi_attachments {
-        let add_fn = format!("add_attachment_{}", to_snake(&a.name));
-        writeln!(
-            out,
-            "    pub fn {add_fn}(mut self, att: AttachmentInput) -> Self {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        self.attachments_multi.entry(\"{name}\").or_default().push(att);",
-            name = a.name
-        )
-        .unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-
-        let del_fn = format!("delete_attachment_{}", to_snake(&a.name));
-        writeln!(
-            out,
-            "    pub fn {del_fn}(mut self, ids: impl IntoIterator<Item = Uuid>) -> Self {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "        self.attachments_delete_multi.entry(\"{name}\").or_default().extend(ids);",
-            name = a.name
-        )
-        .unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-    }
-    out
-}
 
 fn render_support_data_loaders(
     model_snake: &str,
@@ -914,786 +460,13 @@ fn build_hydrate_record_expr(
     }
 }
 
-fn render_record_collection_build_no_relations(
-    out_ident: &str,
-    row_var: &str,
-    rows_ident: &str,
-    localized_fields: &[String],
-    has_meta: bool,
-    has_attachments: bool,
-    base_url_expr: &str,
-) -> String {
-    let mut out = String::new();
-    writeln!(
-        out,
-        "        let mut {out_ident} = Vec::with_capacity({rows_ident}.len());"
-    )
-    .unwrap();
-    writeln!(out, "        for {row_var} in {rows_ident} {{").unwrap();
-    writeln!(
-        out,
-        "            {out_ident}.push({});",
-        build_hydrate_record_expr(
-            row_var,
-            localized_fields,
-            has_meta,
-            has_attachments,
-            base_url_expr
-        )
-    )
-    .unwrap();
-    writeln!(out, "        }}").unwrap();
-    out
-}
-
-fn render_record_collection_build(
-    relations: &[RelationSpec],
-    _model_snake: &str,
-    pk: &str,
-    rows_ident: &str,
-    row_var: &str,
-    out_ident: &str,
-    localized_fields: &[String],
-    has_meta: bool,
-    has_attachments: bool,
-    base_url_expr: &str,
-) -> String {
-    let mut out = String::new();
-    writeln!(
-        out,
-        "        let mut {out_ident} = Vec::with_capacity({rows_ident}.len());"
-    )
-    .unwrap();
-    writeln!(out, "        for {row_var} in {rows_ident} {{").unwrap();
-    writeln!(out, "            let key = {row_var}.{pk}.clone();").unwrap();
-    writeln!(
-        out,
-        "            let mut record = {};",
-        build_hydrate_record_expr(
-            &format!("{row_var}.clone()"),
-            localized_fields,
-            has_meta,
-            has_attachments,
-            base_url_expr
-        )
-    )
-    .unwrap();
-    for rel in relations {
-        let field = to_snake(&rel.name);
-        match rel.kind {
-            RelationKind::HasMany => {
-                writeln!(
-                    out,
-                    "            record.{field} = {field}.get(&key).cloned().unwrap_or_default();"
-                )
-                .unwrap();
-            }
-            RelationKind::BelongsTo => {
-                writeln!(
-                    out,
-                    "            record.{field} = {field}.get(&key).cloned().unwrap_or(None).map(Box::new);"
-                )
-                .unwrap();
-            }
-        }
-    }
-    writeln!(out, "            {out_ident}.push(record);").unwrap();
-    writeln!(out, "        }}").unwrap();
-    out
-}
-
-/// Generate the `let __profiler_start = ...` line.
-/// When `skip` is true (model has `profile = false`), returns empty.
-fn render_profiler_start(skip: bool) -> String {
-    if skip {
-        return String::new();
-    }
-    "        let __profiler_start = std::time::Instant::now();\n".to_string()
-}
-
-/// Generate the profiler log block. `sql_var` is the variable name holding the SQL string,
-/// `binds_expr` is the expression for the bind values to display.
-/// When `skip` is true (model has `profile = false`), returns empty.
-fn render_profiler_log(
-    table: &str,
-    op: &str,
-    sql_var: &str,
-    binds_expr: &str,
-    skip: bool,
-) -> String {
-    if skip {
-        return String::new();
-    }
-    let mut out = String::new();
-    writeln!(out, "        record_profiled_query(\"{table}\", \"{op}\", {sql_var}, {binds_expr}, __profiler_start.elapsed());").unwrap();
-    out
-}
-
-/// Generate the body of `query_all` that uses QueryState::to_select_sql + hydration.
-/// Returns the code inside the `Box::pin(async move { ... })` block.
-fn render_query_all_body(
-    model_title: &str,
-    row_ident: &str,
-    has_soft_delete: bool,
-    table: &str,
-    model_snake: &str,
-    pk: &str,
-    parent_pk_ty: &str,
-    relations: &[RelationSpec],
-    localized_fields: &[String],
-    has_meta: bool,
-    has_attachments: bool,
-    skip_profiler: bool,
-) -> String {
-    let mut out = String::new();
-    let _soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
-    writeln!(
-        out,
-        "            let (sql, binds) = state.to_select_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);"
-    )
-    .unwrap();
-    if !skip_profiler {
-        writeln!(out, "            let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
-        writeln!(
-            out,
-            "            let __profiler_start = std::time::Instant::now();"
-        )
-        .unwrap();
-    }
-    writeln!(
-        out,
-        "            let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
-    )
-    .unwrap();
-    writeln!(out, "            for b in binds {{ q = bind(q, b); }}").unwrap();
-    writeln!(out, "            let rows = state.db.fetch_all(q).await?;").unwrap();
-    if !skip_profiler {
-        writeln!(out, "            record_profiled_query(\"{table}\", \"SELECT\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
-    }
-    if !relations.is_empty() {
-        // Relation loader bindings use `db.clone()` - we need a db ref
-        writeln!(out, "            let db = state.db.clone();").unwrap();
-        for rel in relations {
-            let rel_name = to_snake(&rel.name);
-            writeln!(
-                out,
-                "            let {rel_name} = if core_db::common::model_api::should_load_relation(\"{rel_name}\", &state.with_relations) {{ let __ew = core_db::common::model_api::get_relation_extra_where(\"{rel_name}\", &state.with_relations); let __nw = core_db::common::model_api::get_relation_nested(\"{rel_name}\", &state.with_relations); load_{rel_name}(db.clone(), &rows, state.base_url.as_deref(), __ew.map(|(w, _)| w), __ew.map(|(_, b)| b).unwrap_or(&[]), __nw).await? }} else {{ HashMap::new() }};"
-            )
-            .unwrap();
-        }
-    }
-    // Support data loaders (localized, meta, attachments)
-    let db_expr = if relations.is_empty() {
-        "state.db.clone()"
-    } else {
-        "db.clone()"
-    };
-    // Indent: render_support_data_loaders generates 8-space indented code, we need 12
-    let support_loaders = render_support_data_loaders(
-        &model_snake,
-        &pk,
-        &parent_pk_ty,
-        &localized_fields,
-        has_meta,
-        has_attachments,
-        "rows",
-        db_expr,
-    );
-    // Re-indent from 8 to 12 spaces
-    for line in support_loaders.lines() {
-        if line.trim().is_empty() {
-            writeln!(out).unwrap();
-        } else {
-            writeln!(out, "    {}", line).unwrap();
-        }
-    }
-    // Record collection build
-    let base_url_expr = "state.base_url.as_deref()";
-    if !relations.is_empty() {
-        let build = render_record_collection_build(
-            relations,
-            model_snake,
-            pk,
-            "rows",
-            "r",
-            "out_vec",
-            localized_fields,
-            has_meta,
-            has_attachments,
-            base_url_expr,
-        );
-        for line in build.lines() {
-            if line.trim().is_empty() {
-                writeln!(out).unwrap();
-            } else {
-                writeln!(out, "    {}", line).unwrap();
-            }
-        }
-    } else {
-        let build = render_record_collection_build_no_relations(
-            "out_vec",
-            "r",
-            "rows",
-            localized_fields,
-            has_meta,
-            has_attachments,
-            base_url_expr,
-        );
-        for line in build.lines() {
-            if line.trim().is_empty() {
-                writeln!(out).unwrap();
-            } else {
-                writeln!(out, "    {}", line).unwrap();
-            }
-        }
-        writeln!(
-            out,
-            "            let out_vec: Vec<{model_title}Record> = out_vec;"
-        )
-        .unwrap();
-    }
-    // Relation counts: execute count queries for with_count() relations
-    let has_many_rels: Vec<_> = relations
-        .iter()
-        .filter(|r| matches!(r.kind, RelationKind::HasMany))
-        .collect();
-    if !has_many_rels.is_empty() {
-        writeln!(out, "            if !state.count_relations.is_empty() {{").unwrap();
-        writeln!(out, "                let parent_ids: Vec<core_db::common::sql::BindValue> = out_vec.iter().map(|r| r.{pk}.clone().into()).collect();").unwrap();
-        let db_ref = if relations.is_empty() { "state.db" } else { "db" };
-        writeln!(out, "                let counts = core_db::common::model_api::execute_relation_counts(&{db_ref}, &parent_ids, &state.count_relations).await?;").unwrap();
-        writeln!(out, "                for record in &mut out_vec {{").unwrap();
-        writeln!(out, "                    for (rel_name, by_fk) in &counts {{").unwrap();
-        writeln!(out, "                        if let Some(&cnt) = by_fk.get(&record.{pk}) {{").unwrap();
-        writeln!(out, "                            record.__relation_counts.insert(rel_name.clone(), cnt);").unwrap();
-        writeln!(out, "                        }}").unwrap();
-        writeln!(out, "                    }}").unwrap();
-        writeln!(out, "                }}").unwrap();
-        writeln!(out, "            }}").unwrap();
-    }
-    writeln!(out, "            Ok(out_vec)").unwrap();
-    out
-}
-
-/// Generate the body of `query_count` using QueryState::to_count_sql.
-fn render_query_count_body(has_soft_delete: bool, table: &str, skip_profiler: bool) -> String {
-    let mut out = String::new();
-    let _soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
-    writeln!(
-        out,
-        "            let (sql, binds) = state.to_count_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);"
-    )
-    .unwrap();
-    if !skip_profiler {
-        writeln!(out, "            let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
-        writeln!(
-            out,
-            "            let __profiler_start = std::time::Instant::now();"
-        )
-        .unwrap();
-    }
-    writeln!(
-        out,
-        "            let mut q = sqlx::query_scalar::<_, i64>(&sql);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            for b in binds {{ q = bind_scalar(q, b); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            let count = state.db.fetch_scalar(q).await?;"
-    )
-    .unwrap();
-    if !skip_profiler {
-        writeln!(out, "            record_profiled_query(\"{table}\", \"COUNT\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
-    }
-    writeln!(out, "            Ok(count)").unwrap();
-    out
-}
-
-/// Generate the body of `query_paginate` using QueryState.
-fn render_query_paginate_body(
-    model_title: &str,
-    row_ident: &str,
-    has_soft_delete: bool,
-    table: &str,
-    model_snake: &str,
-    pk: &str,
-    parent_pk_ty: &str,
-    relations: &[RelationSpec],
-    localized_fields: &[String],
-    has_meta: bool,
-    has_attachments: bool,
-    skip_profiler: bool,
-) -> String {
-    let mut out = String::new();
-    let _soft_delete_col = if has_soft_delete { "deleted_at" } else { "" };
-    writeln!(
-        out,
-        "            let page = if page < 1 {{ 1 }} else {{ page }};"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            let per_page = resolve_per_page(per_page);"
-    )
-    .unwrap();
-    // Count query
-    writeln!(
-        out,
-        "            let (count_sql, count_binds) = state.to_count_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);"
-    )
-    .unwrap();
-    if !skip_profiler {
-        writeln!(out, "            let __profiler_binds = if is_sql_profiler_enabled() {{ count_binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
-        writeln!(
-            out,
-            "            let __profiler_start = std::time::Instant::now();"
-        )
-        .unwrap();
-    }
-    writeln!(
-        out,
-        "            let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            for b in count_binds {{ count_q = bind_scalar(count_q, b); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            let total: i64 = state.db.fetch_scalar(count_q).await?;"
-    )
-    .unwrap();
-    if !skip_profiler {
-        writeln!(out, "            record_profiled_query(\"{table}\", \"COUNT\", &count_sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
-    }
-    writeln!(
-        out,
-        "            let last_page = ((total + per_page - 1) / per_page).max(1);"
-    )
-    .unwrap();
-    writeln!(out, "            let current_page = page.min(last_page);").unwrap();
-    writeln!(
-        out,
-        "            let offset_val = (current_page - 1) * per_page;"
-    )
-    .unwrap();
-    // Data query - override offset/limit on state
-    writeln!(out, "            let mut state = state;").unwrap();
-    writeln!(out, "            state.offset = Some(offset_val);").unwrap();
-    writeln!(out, "            state.limit = Some(per_page);").unwrap();
-    writeln!(
-        out,
-        "            let (sql, binds) = state.to_select_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);"
-    )
-    .unwrap();
-    if !skip_profiler {
-        writeln!(
-            out,
-            "            let __profiler_start = std::time::Instant::now();"
-        )
-        .unwrap();
-    }
-    writeln!(
-        out,
-        "            let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
-    )
-    .unwrap();
-    writeln!(out, "            for b in binds {{ q = bind(q, b); }}").unwrap();
-    writeln!(out, "            let rows = state.db.fetch_all(q).await?;").unwrap();
-    if !skip_profiler {
-        writeln!(out, "            record_profiled_query(\"{table}\", \"SELECT\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
-    }
-    // Hydration (same as query_all)
-    if !relations.is_empty() {
-        writeln!(out, "            let db = state.db.clone();").unwrap();
-        for rel in relations {
-            let rel_name = to_snake(&rel.name);
-            writeln!(
-                out,
-                "            let {rel_name} = if core_db::common::model_api::should_load_relation(\"{rel_name}\", &state.with_relations) {{ let __ew = core_db::common::model_api::get_relation_extra_where(\"{rel_name}\", &state.with_relations); let __nw = core_db::common::model_api::get_relation_nested(\"{rel_name}\", &state.with_relations); load_{rel_name}(db.clone(), &rows, state.base_url.as_deref(), __ew.map(|(w, _)| w), __ew.map(|(_, b)| b).unwrap_or(&[]), __nw).await? }} else {{ HashMap::new() }};"
-            )
-            .unwrap();
-        }
-    }
-    let db_expr = if relations.is_empty() {
-        "state.db.clone()"
-    } else {
-        "db.clone()"
-    };
-    let support_loaders = render_support_data_loaders(
-        &model_snake,
-        &pk,
-        &parent_pk_ty,
-        &localized_fields,
-        has_meta,
-        has_attachments,
-        "rows",
-        db_expr,
-    );
-    for line in support_loaders.lines() {
-        if line.trim().is_empty() {
-            writeln!(out).unwrap();
-        } else {
-            writeln!(out, "    {}", line).unwrap();
-        }
-    }
-    let base_url_expr = "state.base_url.as_deref()";
-    if !relations.is_empty() {
-        let build = render_record_collection_build(
-            relations,
-            model_snake,
-            pk,
-            "rows",
-            "r",
-            "data",
-            localized_fields,
-            has_meta,
-            has_attachments,
-            base_url_expr,
-        );
-        for line in build.lines() {
-            if line.trim().is_empty() {
-                writeln!(out).unwrap();
-            } else {
-                writeln!(out, "    {}", line).unwrap();
-            }
-        }
-    } else {
-        let build = render_record_collection_build_no_relations(
-            "data",
-            "r",
-            "rows",
-            localized_fields,
-            has_meta,
-            has_attachments,
-            base_url_expr,
-        );
-        for line in build.lines() {
-            if line.trim().is_empty() {
-                writeln!(out).unwrap();
-            } else {
-                writeln!(out, "    {}", line).unwrap();
-            }
-        }
-        writeln!(
-            out,
-            "            let data: Vec<{model_title}Record> = data;"
-        )
-        .unwrap();
-    }
-    // Relation counts for paginate (same logic as query_all)
-    let has_many_rels_p: Vec<_> = relations
-        .iter()
-        .filter(|r| matches!(r.kind, RelationKind::HasMany))
-        .collect();
-    if !has_many_rels_p.is_empty() {
-        writeln!(out, "            if !state.count_relations.is_empty() {{").unwrap();
-        writeln!(out, "                let parent_ids: Vec<core_db::common::sql::BindValue> = data.iter().map(|r| r.{pk}.clone().into()).collect();").unwrap();
-        let db_ref = if relations.is_empty() { "state.db" } else { "db" };
-        writeln!(out, "                let counts = core_db::common::model_api::execute_relation_counts(&{db_ref}, &parent_ids, &state.count_relations).await?;").unwrap();
-        writeln!(out, "                for record in &mut data {{").unwrap();
-        writeln!(out, "                    for (rel_name, by_fk) in &counts {{").unwrap();
-        writeln!(out, "                        if let Some(&cnt) = by_fk.get(&record.{pk}) {{").unwrap();
-        writeln!(out, "                            record.__relation_counts.insert(rel_name.clone(), cnt);").unwrap();
-        writeln!(out, "                        }}").unwrap();
-        writeln!(out, "                    }}").unwrap();
-        writeln!(out, "                }}").unwrap();
-        writeln!(out, "            }}").unwrap();
-    }
-    writeln!(
-        out,
-        "            Ok(core_db::common::model_api::Page {{ data, total, per_page, current_page, last_page }})"
-    )
-    .unwrap();
-    out
-}
-
-/// Generate the body of `query_delete` using state fields directly.
-/// Handles observer hooks and soft-delete logic.
-fn render_query_delete_body(
-    table: &str,
-    model_key: &str,
-    col_ident: &str,
-    has_soft_delete: bool,
-    emit_hooks: bool,
-    row_ident: &str,
-    pk_snake: &str,
-    skip_profiler: bool,
-    parent_pk_ty: &str,
-) -> String {
-    let mut out = String::new();
-    writeln!(out, "            if state.limit.is_some() {{").unwrap();
-    writeln!(
-        out,
-        "                anyhow::bail!(\"delete() does not support limit; add where clauses\");"
-    )
-    .unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "            let db = state.db;").unwrap();
-    writeln!(out, "            let mut where_sql = state.where_sql;").unwrap();
-    writeln!(out, "            let binds = state.binds;").unwrap();
-    if has_soft_delete {
-        writeln!(out, "            let with_deleted = state.with_deleted;").unwrap();
-        writeln!(out, "            let only_deleted = state.only_deleted;").unwrap();
-    }
-    writeln!(
-        out,
-        "            if where_sql.is_empty() {{ anyhow::bail!(\"delete(): no conditions set\"); }}"
-    )
-    .unwrap();
-    writeln!(out, "            let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
-    if emit_hooks {
-        writeln!(
-            out,
-            "            let __observer_active = try_get_observer().is_some();"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "            let __old_rows: Vec<{row_ident}> = if __observer_active {{"
-        )
-        .unwrap();
-        writeln!(out, "                let select_sql = format!(\"SELECT * FROM {table} WHERE {{}}\", where_sql.join(\" AND \"));").unwrap();
-        writeln!(
-            out,
-            "                let mut fq = sqlx::query_as::<_, {row_ident}>(&select_sql);"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                for b in &binds {{ fq = bind(fq, b.clone()); }}"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                let rows: Vec<{row_ident}> = db.fetch_all(fq).await.unwrap_or_default();"
-        )
-        .unwrap();
-        writeln!(out, "                rows").unwrap();
-        writeln!(out, "            }} else {{").unwrap();
-        writeln!(out, "                Vec::new()").unwrap();
-        writeln!(out, "            }};").unwrap();
-        writeln!(out, "            if !__old_rows.is_empty() {{").unwrap();
-        writeln!(
-            out,
-            "                if let Some(observer) = try_get_observer() {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    let old_data = serde_json::to_value(&__old_rows)?;"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    let event = ModelEvent {{ model: \"{model_key}\", table: \"{table}\", record_key: None }};"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    let action = observer.on_deleting(&event, &old_data).await?;"
-        )
-        .unwrap();
-        writeln!(out, "                    match action {{").unwrap();
-        writeln!(
-            out,
-            "                        ObserverAction::Prevent(err) => return Err(err),"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                        ObserverAction::Modify(overrides) => {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                            let ids: Vec<{parent_pk_ty}> = __old_rows.iter().map(|r| r.{pk_snake}.clone()).collect();"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                            let affected = Self::convert_delete_to_update(&db, &ids, overrides).await?;"
-        )
-        .unwrap();
-        writeln!(out, "                            return Ok(affected);").unwrap();
-        writeln!(out, "                        }}").unwrap();
-        writeln!(
-            out,
-            "                        ObserverAction::Continue => {{}}"
-        )
-        .unwrap();
-        writeln!(out, "                    }}").unwrap();
-        writeln!(out, "                }}").unwrap();
-        writeln!(out, "            }}").unwrap();
-    }
-    if has_soft_delete {
-        writeln!(out, "            if HAS_SOFT_DELETE {{").unwrap();
-        writeln!(out, "                if only_deleted {{").unwrap();
-        writeln!(
-            out,
-            "                    where_sql.push(format!(\"{{}} IS NOT NULL\", {col_ident}::DeletedAt.as_sql()));"
-        )
-        .unwrap();
-        writeln!(out, "                }} else if !with_deleted {{").unwrap();
-        writeln!(
-            out,
-            "                    where_sql.push(format!(\"{{}} IS NULL\", {col_ident}::DeletedAt.as_sql()));"
-        )
-        .unwrap();
-        writeln!(out, "                }}").unwrap();
-        writeln!(out, "                let idx = binds.len() + 1;").unwrap();
-        writeln!(
-            out,
-            "                let mut sql = format!(\"UPDATE {table} SET {{}} = ${{}}\", {col_ident}::DeletedAt.as_sql(), idx);"
-        )
-        .unwrap();
-        writeln!(out, "                if !where_sql.is_empty() {{").unwrap();
-        writeln!(out, "                    sql.push_str(\" WHERE \");").unwrap();
-        writeln!(
-            out,
-            "                    sql.push_str(&where_sql.join(\" AND \"));"
-        )
-        .unwrap();
-        writeln!(out, "                }}").unwrap();
-        if !skip_profiler {
-            writeln!(
-                out,
-                "                let __profiler_start = std::time::Instant::now();"
-            )
-            .unwrap();
-        }
-        writeln!(out, "                let mut q = sqlx::query(&sql);").unwrap();
-        writeln!(
-            out,
-            "                for b in binds {{ q = bind_query(q, b); }}"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                q = bind_query(q, time::OffsetDateTime::now_utc().into());"
-        )
-        .unwrap();
-        writeln!(out, "                let res = db.execute(q).await?;").unwrap();
-        if !skip_profiler {
-            writeln!(out, "                record_profiled_query(\"{table}\", \"UPDATE\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
-        }
-        if emit_hooks {
-            writeln!(
-                out,
-                "                if !__old_rows.is_empty() && res.rows_affected() > 0 {{"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "                    if let Some(observer) = try_get_observer() {{"
-            )
-            .unwrap();
-            writeln!(out, "                        for old_row in &__old_rows {{").unwrap();
-            writeln!(
-                out,
-                "                            let event = ModelEvent {{ model: \"{model_key}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", old_row.{pk_snake})) }};"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "                            match serde_json::to_value(old_row) {{"
-            )
-            .unwrap();
-            writeln!(out, "                                Ok(old_data) => {{").unwrap();
-            writeln!(out, "                                    if let Err(err) = observer.on_deleted(&event, &old_data).await {{").unwrap();
-            writeln!(out, "                                        log_observer_error(\"deleted\", \"{model_key}\", &err);").unwrap();
-            writeln!(out, "                                    }}").unwrap();
-            writeln!(out, "                                }}").unwrap();
-            writeln!(out, "                                Err(err) => log_observer_error(\"deleted\", \"{model_key}\", &err),").unwrap();
-            writeln!(out, "                            }}").unwrap();
-            writeln!(out, "                        }}").unwrap();
-            writeln!(out, "                    }}").unwrap();
-            writeln!(out, "                }}").unwrap();
-        }
-        writeln!(out, "                return Ok(res.rows_affected());").unwrap();
-        writeln!(out, "            }}").unwrap();
-    }
-    // Hard delete path
-    writeln!(
-        out,
-        "            let mut sql = String::from(\"DELETE FROM {table}\");"
-    )
-    .unwrap();
-    writeln!(out, "            if !where_sql.is_empty() {{").unwrap();
-    writeln!(out, "                sql.push_str(\" WHERE \");").unwrap();
-    writeln!(
-        out,
-        "                sql.push_str(&where_sql.join(\" AND \"));"
-    )
-    .unwrap();
-    writeln!(out, "            }}").unwrap();
-    if !skip_profiler {
-        writeln!(
-            out,
-            "            let __profiler_start = std::time::Instant::now();"
-        )
-        .unwrap();
-    }
-    writeln!(out, "            let mut q = sqlx::query(&sql);").unwrap();
-    writeln!(
-        out,
-        "            for b in binds {{ q = bind_query(q, b); }}"
-    )
-    .unwrap();
-    writeln!(out, "            let res = db.execute(q).await?;").unwrap();
-    if !skip_profiler {
-        writeln!(out, "            record_profiled_query(\"{table}\", \"DELETE\", &sql, &__profiler_binds, __profiler_start.elapsed());").unwrap();
-    }
-    if emit_hooks {
-        writeln!(
-            out,
-            "            if !__old_rows.is_empty() && res.rows_affected() > 0 {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                if let Some(observer) = try_get_observer() {{"
-        )
-        .unwrap();
-        writeln!(out, "                    for old_row in &__old_rows {{").unwrap();
-        writeln!(
-            out,
-            "                        let event = ModelEvent {{ model: \"{model_key}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", old_row.{pk_snake})) }};"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                        match serde_json::to_value(old_row) {{"
-        )
-        .unwrap();
-        writeln!(out, "                            Ok(old_data) => {{").unwrap();
-        writeln!(out, "                                if let Err(err) = observer.on_deleted(&event, &old_data).await {{").unwrap();
-        writeln!(out, "                                    log_observer_error(\"deleted\", \"{model_key}\", &err);").unwrap();
-        writeln!(out, "                                }}").unwrap();
-        writeln!(out, "                            }}").unwrap();
-        writeln!(out, "                            Err(err) => log_observer_error(\"deleted\", \"{model_key}\", &err),").unwrap();
-        writeln!(out, "                        }}").unwrap();
-        writeln!(out, "                    }}").unwrap();
-        writeln!(out, "                }}").unwrap();
-        writeln!(out, "            }}").unwrap();
-    }
-    writeln!(out, "            Ok(res.rows_affected())").unwrap();
-    out
-}
-
 fn render_create_model_impl(
     model_title: &str,
-    insert_ident: &str,
-    _query_ident: &str,
     pk: &str,
-    table: &str,
+    _table: &str,
+    db_fields: &[FieldSpec],
+    enum_specs: &BTreeMap<String, EnumSpec>,
+    use_snowflake_id: bool,
 ) -> String {
     let mut out = String::new();
     writeln!(
@@ -1703,28 +476,83 @@ fn render_create_model_impl(
     .unwrap();
     writeln!(
         out,
-        "    fn create_save<'db>(state: CreateState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {{"
+        "    const USE_SNOWFLAKE_ID: bool = {use_snowflake_id};"
     )
     .unwrap();
-    writeln!(out, "        Box::pin(async move {{").unwrap();
     writeln!(
         out,
-        "            let builder = {insert_ident}::from_state(state);"
+        "    fn build_create_input(state: &CreateState<'_>) -> anyhow::Result<Self::Create> {{"
     )
     .unwrap();
-    writeln!(out, "            let db = builder.state.db.clone();").unwrap();
     writeln!(
         out,
-        "            let base_url = builder.state.base_url.clone();"
+        "        let mut input = {model_title}Create::default();"
     )
     .unwrap();
-    writeln!(out, "            let created = builder.save().await?;").unwrap();
+    writeln!(out, "        for assignment in &state.assignments {{").unwrap();
+    writeln!(out, "            let bind = &assignment.value;").unwrap();
+    writeln!(out, "            match assignment.col_sql {{").unwrap();
+    for f in db_fields {
+        let decode_expr = render_bind_decode_expr(&f.ty, "bind", enum_specs);
+        writeln!(out, "                \"{}\" => {{", f.name).unwrap();
+        writeln!(out, "                    let value = {decode_expr};").unwrap();
+        writeln!(
+            out,
+            "                    input.{} = FieldInput::Set(value);",
+            f.name
+        )
+        .unwrap();
+        writeln!(out, "                }}").unwrap();
+    }
+    writeln!(out, "                _ => {{}}").unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        Ok(input)").unwrap();
+    writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "            Query::<{model_title}Model>::new_with_base_url(db, base_url).find(created.{pk}.clone()).await?.ok_or_else(|| anyhow::anyhow!(\"{table}: created record not found\"))"
+        "    fn apply_create_overrides(mut state: CreateState<'_>, overrides: serde_json::Value) -> anyhow::Result<CreateState<'_>> {{"
     )
     .unwrap();
-    writeln!(out, "        }})").unwrap();
+    writeln!(out, "        let map = overrides.as_object()").unwrap();
+    writeln!(
+        out,
+        "            .ok_or_else(|| anyhow::anyhow!(\"observer overrides must be a JSON object\"))?;"
+    )
+    .unwrap();
+    writeln!(out, "        for (key, val) in map {{").unwrap();
+    writeln!(out, "            match key.as_str() {{").unwrap();
+    for f in db_fields {
+        let deser_ty = json_deser_type_for_field(&f.ty, enum_specs);
+        writeln!(out, "                \"{}\" => {{", f.name).unwrap();
+        writeln!(
+            out,
+            "                    let v: {deser_ty} = serde_json::from_value(val.clone())?;"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                    state = state.set_col(\"{}\", v.into());",
+            f.name
+        )
+        .unwrap();
+        writeln!(out, "                }}").unwrap();
+    }
+    writeln!(
+        out,
+        "                other => anyhow::bail!(\"unknown column '{{}}' in observer create overrides\", other),"
+    )
+    .unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        Ok(state)").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn created_row_key(row: &<Self as core_db::common::model_api::RuntimeModel>::Row) -> String {{"
+    )
+    .unwrap();
+    writeln!(out, "        row.{pk}.to_string()").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
@@ -1798,15 +626,19 @@ fn render_create_conflict_field_impl(model_title: &str, col_ident: &str) -> Stri
 
 fn render_patch_model_impl(
     model_title: &str,
-    _query_ident: &str,
-    update_ident: &str,
-    col_ident: &str,
-    pk_col_variant: &str,
-    parent_pk_ty: &str,
+    model_snake: &str,
+    db_fields: &[FieldSpec],
+    enum_specs: &BTreeMap<String, EnumSpec>,
+    localized_fields: &[String],
+    has_meta: bool,
+    has_attachments: bool,
+    touch_targets: &[(String, String, String, String, String)],
     table: &str,
-    has_soft_delete: bool,
+    pk: &str,
 ) -> String {
     let mut out = String::new();
+    let pk_snake = to_snake(pk);
+    let model_snake_upper = model_snake.to_uppercase();
     writeln!(
         out,
         "impl core_db::common::model_api::PatchModel for {model_title}Model {{"
@@ -1814,124 +646,233 @@ fn render_patch_model_impl(
     .unwrap();
     writeln!(
         out,
-        "    fn patch_from_query<'db>(mut state: QueryState<'db>) -> PatchState<'db> {{"
+        "    fn build_patch_changes(state: &PatchState<'_>) -> anyhow::Result<Self::Changes> {{"
     )
     .unwrap();
-    writeln!(out, "        let db = state.db.clone();").unwrap();
-    writeln!(out, "        let base_url = state.base_url.clone();").unwrap();
-    writeln!(
-        out,
-        "        state.select_sql = Some({col_ident}::{pk_col_variant}.as_sql().to_string());"
-    )
-    .unwrap();
-    writeln!(out, "        let (scope_sql, binds) = state.to_sql();").unwrap();
-    writeln!(
-        out,
-        "        let mut ps = PatchState::new(db, base_url, \"{table}\");"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        ps.where_sql.push(format!(\"{{}} IN ({{}})\", {col_ident}::{pk_col_variant}.as_sql(), scope_sql));"
-    )
-    .unwrap();
-    writeln!(out, "        ps.where_binds = binds;").unwrap();
-    writeln!(out, "        ps").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn patch_save<'db>(state: PatchState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {{"
-    )
-    .unwrap();
-    writeln!(out, "        Box::pin(async move {{").unwrap();
-    writeln!(
-        out,
-        "            let builder = {update_ident}::from_state(state);"
-    )
-    .unwrap();
-    writeln!(out, "            builder.save().await").unwrap();
-    writeln!(out, "        }})").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    fn patch_fetch<'db>(state: PatchState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {{"
-    )
-    .unwrap();
-    writeln!(out, "        Box::pin(async move {{").unwrap();
-    writeln!(out, "            if state.where_sql.is_empty() {{").unwrap();
-    writeln!(
-        out,
-        "                anyhow::bail!(\"update: no conditions set\");"
-    )
-    .unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "            let db = state.db.clone();").unwrap();
-    writeln!(out, "            let base_url = state.base_url.clone();").unwrap();
-    writeln!(
-        out,
-        "            let mut select_sql = format!(\"SELECT {{}} FROM {table}\", {col_ident}::{pk_col_variant}.as_sql());"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            select_sql.push_str(&format!(\" WHERE {{}}\", state.where_sql.join(\" AND \")));"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            let mut select_q = sqlx::query_scalar::<_, {parent_pk_ty}>(&select_sql);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            for bind_value in &state.where_binds {{ select_q = bind_scalar(select_q, bind_value.clone()); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            let target_ids = db.fetch_all_scalar(select_q).await?;"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "            let builder = {update_ident}::from_state(state);"
-    )
-    .unwrap();
-    writeln!(out, "            builder.save().await?;").unwrap();
-    writeln!(out, "            if target_ids.is_empty() {{").unwrap();
-    writeln!(out, "                return Ok(Vec::new());").unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(
-        out,
-        "            let query = Query::<{model_title}Model>::new_with_base_url(db, base_url);"
-    )
-    .unwrap();
-    if has_soft_delete {
+    writeln!(out, "        let mut changes = Self::Changes::default();").unwrap();
+    writeln!(out, "        for assignment in &state.assignments {{").unwrap();
+    writeln!(out, "            let bind = &assignment.value;").unwrap();
+    writeln!(out, "            let mode = &assignment.mode;").unwrap();
+    writeln!(out, "            match assignment.col_sql {{").unwrap();
+    for f in db_fields {
+        let decode_expr = render_bind_decode_expr(&f.ty, "bind", enum_specs);
+        writeln!(out, "                \"{}\" => {{", f.name).unwrap();
+        writeln!(out, "                    let value = {decode_expr};").unwrap();
         writeln!(
             out,
-            "            let mut state = query.into_inner().with_deleted();"
-        )
-        .unwrap();
-        writeln!(out, "            let binds: Vec<BindValue> = target_ids.iter().cloned().map(Into::into).collect();").unwrap();
-        writeln!(
-            out,
-            "            state = state.where_in_str({col_ident}::{pk_col_variant}.as_sql(), &binds);"
+            "                    changes.{} = Some(match mode {{",
+            f.name
         )
         .unwrap();
         writeln!(
             out,
-            "            <Self as core_db::common::model_api::QueryModel>::query_all(state).await"
+            "                        SetMode::Assign => FieldChange::Assign(value),"
         )
         .unwrap();
-    } else {
-        writeln!(out, "            let binds: Vec<BindValue> = target_ids.iter().cloned().map(Into::into).collect();").unwrap();
-        writeln!(out, "            let state = query.into_inner().where_in_str({col_ident}::{pk_col_variant}.as_sql(), &binds);").unwrap();
         writeln!(
             out,
-            "            <Self as core_db::common::model_api::QueryModel>::query_all(state).await"
+            "                        SetMode::Increment => FieldChange::Increment(value),"
         )
         .unwrap();
+        writeln!(
+            out,
+            "                        SetMode::Decrement => FieldChange::Decrement(value),"
+        )
+        .unwrap();
+        writeln!(out, "                    }});").unwrap();
+        writeln!(out, "                }}").unwrap();
     }
+    writeln!(out, "                _ => {{}}").unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        Ok(changes)").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn apply_patch_overrides<'db>(mut state: PatchState<'db>, overrides: serde_json::Value) -> anyhow::Result<PatchState<'db>> {{"
+    )
+    .unwrap();
+    writeln!(out, "        let map = overrides.as_object()").unwrap();
+    writeln!(
+        out,
+        "            .ok_or_else(|| anyhow::anyhow!(\"observer overrides must be a JSON object\"))?;"
+    )
+    .unwrap();
+    writeln!(out, "        for (key, val) in map {{").unwrap();
+    writeln!(out, "            match key.as_str() {{").unwrap();
+    for f in db_fields {
+        let deser_ty = json_deser_type_for_field(&f.ty, enum_specs);
+        writeln!(out, "                \"{}\" => {{", f.name).unwrap();
+        writeln!(
+            out,
+            "                    let v: {deser_ty} = serde_json::from_value(val.clone())?;"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                    state = state.assign_col(\"{}\", v.into());",
+            f.name
+        )
+        .unwrap();
+        writeln!(out, "                }}").unwrap();
+    }
+    writeln!(
+        out,
+        "                other => anyhow::bail!(\"unknown column '{{}}' in observer update overrides\", other),"
+    )
+    .unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        Ok(state)").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn row_pk(row: &<Self as core_db::common::model_api::RuntimeModel>::Row) -> Self::Pk {{"
+    )
+    .unwrap();
+    writeln!(out, "        row.{pk_snake}.clone()").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn row_pk_text(row: &<Self as core_db::common::model_api::RuntimeModel>::Row) -> String {{"
+    )
+    .unwrap();
+    writeln!(out, "        row.{pk_snake}.to_string()").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn persist_patch_state<'db>(db: DbConn<'db>, target_ids: Vec<Self::Pk>, state: PatchState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{"
+    )
+    .unwrap();
+    writeln!(out, "        Box::pin(async move {{").unwrap();
+    writeln!(out, "            if target_ids.is_empty() {{").unwrap();
+    writeln!(out, "                return Ok(());").unwrap();
+    writeln!(out, "            }}").unwrap();
+    if !touch_targets.is_empty() {
+        writeln!(out, "            fn to_params(len: usize) -> String {{").unwrap();
+        writeln!(out, "                (1..=len).map(|i| format!(\"${{}}\", i)).collect::<Vec<_>>().join(\", \")").unwrap();
+        writeln!(out, "            }}").unwrap();
+        for (fk, target_snake, target_title, target_pk, target_pk_ty) in touch_targets {
+            writeln!(out, "            let placeholders = to_params(target_ids.len());").unwrap();
+            writeln!(
+                out,
+                "            let sql = format!(\"SELECT DISTINCT {} FROM {} WHERE {} IN ({{}})\", placeholders);",
+                fk, table, pk
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "            let mut q = sqlx::query_scalar::<_, {target_pk_ty}>(&sql);"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "            for id in &target_ids {{ q = bind_scalar(q, id.clone()); }}"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "            let parent_ids: Vec<{target_pk_ty}> = db.fetch_all_scalar(q).await?;"
+            )
+            .unwrap();
+            writeln!(out, "            for pid in parent_ids {{").unwrap();
+            writeln!(
+                out,
+                "                crate::generated::models::{}::{}::query()",
+                target_snake, target_title
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                    .where_col(crate::generated::models::{}::{}Col::{}, Op::Eq, pid)",
+                target_snake,
+                target_title,
+                to_snake(target_pk).to_uppercase()
+            )
+            .unwrap();
+            writeln!(out, "                    .patch()").unwrap();
+            writeln!(
+                out,
+                "                    .assign(crate::generated::models::{}::{}Col::UPDATED_AT, time::OffsetDateTime::now_utc())?",
+                target_snake, target_title
+            )
+            .unwrap();
+            writeln!(out, "                    .save(db.clone()).await?;").unwrap();
+            writeln!(out, "            }}").unwrap();
+        }
+    }
+    if !localized_fields.is_empty() {
+        writeln!(out, "            if !state.translations.is_empty() {{").unwrap();
+        writeln!(out, "                let supported = localized::SUPPORTED_LOCALES;").unwrap();
+        for f in localized_fields {
+            writeln!(out, "                if let Some(map) = state.translations.get(\"{f}\") {{").unwrap();
+            writeln!(out, "                    let mut filtered = HashMap::new();").unwrap();
+            writeln!(out, "                    for (loc, val) in map {{").unwrap();
+            writeln!(out, "                        if supported.contains(&loc.as_str()) {{ filtered.insert(loc.clone(), val.clone()); }}").unwrap();
+            writeln!(out, "                    }}").unwrap();
+            writeln!(out, "                    if !filtered.is_empty() {{").unwrap();
+            writeln!(out, "                        for id in &target_ids {{").unwrap();
+            writeln!(
+                out,
+                "                            localized::upsert_localized_many(db.clone(), localized::{}_OWNER_TYPE, id.clone(), \"{f}\", &filtered).await?;",
+                model_snake_upper
+            )
+            .unwrap();
+            writeln!(out, "                        }}").unwrap();
+            writeln!(out, "                    }}").unwrap();
+            writeln!(out, "                }}").unwrap();
+        }
+        writeln!(out, "            }}").unwrap();
+    }
+    if has_meta {
+        writeln!(out, "            if !state.meta.is_empty() {{").unwrap();
+        writeln!(out, "                for id in &target_ids {{").unwrap();
+        writeln!(
+            out,
+            "                    localized::upsert_meta_many(db.clone(), localized::{}_OWNER_TYPE, id.clone(), &state.meta).await?;",
+            model_snake_upper
+        )
+        .unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
+    }
+    if has_attachments {
+        writeln!(out, "            for id in &target_ids {{").unwrap();
+        writeln!(out, "                for field in &state.attachments_clear_single {{").unwrap();
+        writeln!(
+            out,
+            "                    localized::clear_attachment_field(db.clone(), localized::{}_OWNER_TYPE, id.clone(), field).await?;",
+            model_snake_upper
+        )
+        .unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "                for (field, att) in &state.attachments_single {{").unwrap();
+        writeln!(
+            out,
+            "                    localized::replace_single_attachment(db.clone(), localized::{}_OWNER_TYPE, id.clone(), field, att).await?;",
+            model_snake_upper
+        )
+        .unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "                for (field, list) in &state.attachments_multi {{").unwrap();
+        writeln!(
+            out,
+            "                    localized::add_attachments(db.clone(), localized::{}_OWNER_TYPE, id.clone(), field, list).await?;",
+            model_snake_upper
+        )
+        .unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "                for (field, ids) in &state.attachments_delete_multi {{").unwrap();
+        writeln!(
+            out,
+            "                    localized::delete_attachment_ids(db.clone(), localized::{}_OWNER_TYPE, id.clone(), field, ids).await?;",
+            model_snake_upper
+        )
+        .unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
+    }
+    writeln!(out, "            Ok(())").unwrap();
     writeln!(out, "        }})").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
@@ -1941,6 +882,344 @@ fn render_patch_model_impl(
     .unwrap();
     writeln!(out, "        Self::_transform_patch_value(col, value)").unwrap();
     writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}\n").unwrap();
+    out
+}
+
+fn render_feature_persistence_model_impl(
+    model_title: &str,
+    model_snake: &str,
+    parent_pk_ty: &str,
+    localized_fields: &[String],
+    has_meta: bool,
+    has_attachments: bool,
+    touch_targets: &[(String, String, String, String, String)],
+    table: &str,
+    pk: &str,
+) -> String {
+    let mut out = String::new();
+    let model_snake_upper = model_snake.to_uppercase();
+    let pk_snake = to_snake(pk);
+    let has_feature_owner = !localized_fields.is_empty() || has_meta || has_attachments;
+
+    writeln!(
+        out,
+        "impl core_db::common::model_api::FeaturePersistenceModel for {model_title}Model {{"
+    )
+    .unwrap();
+
+    if has_feature_owner && parent_pk_ty == "i64" {
+        writeln!(
+            out,
+            "    fn create_owner_id(row: &<Self as core_db::common::model_api::RuntimeModel>::Row) -> Option<i64> {{"
+        )
+        .unwrap();
+        writeln!(out, "        Some(row.{pk_snake}.clone())").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
+            out,
+            "    fn patch_owner_id(pk: &Self::Pk) -> Option<i64> {{"
+        )
+        .unwrap();
+        writeln!(out, "        Some(pk.clone())").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+
+    if !localized_fields.is_empty() {
+        writeln!(
+            out,
+            "    fn supported_locales() -> &'static [&'static str] {{"
+        )
+        .unwrap();
+        writeln!(out, "        localized::SUPPORTED_LOCALES").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
+            out,
+            "    fn localized_owner_type() -> Option<&'static str> {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        Some(localized::{model_snake_upper}_OWNER_TYPE)"
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
+            out,
+            "    fn upsert_localized_many<'db>("
+        )
+        .unwrap();
+        writeln!(out, "        db: DbConn<'db>,").unwrap();
+        writeln!(out, "        owner_type: &'static str,").unwrap();
+        writeln!(out, "        owner_id: i64,").unwrap();
+        writeln!(out, "        field: &'static str,").unwrap();
+        writeln!(out, "        values: HashMap<String, String>,").unwrap();
+        writeln!(
+            out,
+            "    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        Box::pin(async move {{ localized::upsert_localized_many(db, owner_type, owner_id, field, &values).await }})"
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+
+    if has_meta {
+        writeln!(
+            out,
+            "    fn meta_owner_type() -> Option<&'static str> {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        Some(localized::{model_snake_upper}_OWNER_TYPE)"
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
+            out,
+            "    fn upsert_meta_many<'db>("
+        )
+        .unwrap();
+        writeln!(out, "        db: DbConn<'db>,").unwrap();
+        writeln!(out, "        owner_type: &'static str,").unwrap();
+        writeln!(out, "        owner_id: i64,").unwrap();
+        writeln!(out, "        values: HashMap<String, serde_json::Value>,").unwrap();
+        writeln!(
+            out,
+            "    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        Box::pin(async move {{ localized::upsert_meta_many(db, owner_type, owner_id, &values).await }})"
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+
+    if has_attachments {
+        writeln!(
+            out,
+            "    fn attachment_owner_type() -> Option<&'static str> {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        Some(localized::{model_snake_upper}_OWNER_TYPE)"
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
+            out,
+            "    fn clear_attachment_field<'db>("
+        )
+        .unwrap();
+        writeln!(out, "        db: DbConn<'db>,").unwrap();
+        writeln!(out, "        owner_type: &'static str,").unwrap();
+        writeln!(out, "        owner_id: i64,").unwrap();
+        writeln!(out, "        field: &'static str,").unwrap();
+        writeln!(
+            out,
+            "    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        Box::pin(async move {{ localized::clear_attachment_field(db, owner_type, owner_id, field).await }})"
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
+            out,
+            "    fn replace_single_attachment<'db>("
+        )
+        .unwrap();
+        writeln!(out, "        db: DbConn<'db>,").unwrap();
+        writeln!(out, "        owner_type: &'static str,").unwrap();
+        writeln!(out, "        owner_id: i64,").unwrap();
+        writeln!(out, "        field: &'static str,").unwrap();
+        writeln!(out, "        value: AttachmentInput,").unwrap();
+        writeln!(
+            out,
+            "    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        Box::pin(async move {{ localized::replace_single_attachment(db, owner_type, owner_id, field, &value).await }})"
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
+            out,
+            "    fn add_attachments<'db>("
+        )
+        .unwrap();
+        writeln!(out, "        db: DbConn<'db>,").unwrap();
+        writeln!(out, "        owner_type: &'static str,").unwrap();
+        writeln!(out, "        owner_id: i64,").unwrap();
+        writeln!(out, "        field: &'static str,").unwrap();
+        writeln!(out, "        values: Vec<AttachmentInput>,").unwrap();
+        writeln!(
+            out,
+            "    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        Box::pin(async move {{ localized::add_attachments(db, owner_type, owner_id, field, &values).await }})"
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(
+            out,
+            "    fn delete_attachment_ids<'db>("
+        )
+        .unwrap();
+        writeln!(out, "        db: DbConn<'db>,").unwrap();
+        writeln!(out, "        owner_type: &'static str,").unwrap();
+        writeln!(out, "        owner_id: i64,").unwrap();
+        writeln!(out, "        field: &'static str,").unwrap();
+        writeln!(out, "        ids: Vec<uuid::Uuid>,").unwrap();
+        writeln!(
+            out,
+            "    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        Box::pin(async move {{ localized::delete_attachment_ids(db, owner_type, owner_id, field, &ids).await }})"
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+
+    if !touch_targets.is_empty() {
+        writeln!(
+            out,
+            "    fn persist_create_related<'db>("
+        )
+        .unwrap();
+        writeln!(out, "        db: DbConn<'db>,").unwrap();
+        writeln!(
+            out,
+            "        row: <Self as core_db::common::model_api::RuntimeModel>::Row,"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{"
+        )
+        .unwrap();
+        writeln!(out, "        Box::pin(async move {{").unwrap();
+        for (fk, target_snake, target_title, target_pk, _target_pk_ty) in touch_targets {
+            writeln!(out, "            if let Some(parent_id) = row.{fk} {{").unwrap();
+            writeln!(
+                out,
+                "                crate::generated::models::{}::{}::query()",
+                target_snake, target_title
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                    .where_col(crate::generated::models::{}::{}Col::{}, Op::Eq, parent_id)",
+                target_snake,
+                target_title,
+                to_snake(target_pk).to_uppercase()
+            )
+            .unwrap();
+            writeln!(out, "                    .patch()").unwrap();
+            writeln!(
+                out,
+                "                    .assign(crate::generated::models::{}::{}Col::UPDATED_AT, time::OffsetDateTime::now_utc())?",
+                target_snake, target_title
+            )
+            .unwrap();
+            writeln!(out, "                    .save(db.clone()).await?;").unwrap();
+            writeln!(out, "            }}").unwrap();
+        }
+        writeln!(out, "            Ok(())").unwrap();
+        writeln!(out, "        }})").unwrap();
+        writeln!(out, "    }}").unwrap();
+
+        writeln!(
+            out,
+            "    fn persist_patch_related<'db>("
+        )
+        .unwrap();
+        writeln!(out, "        db: DbConn<'db>,").unwrap();
+        writeln!(out, "        target_ids: Vec<Self::Pk>,").unwrap();
+        writeln!(
+            out,
+            "    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {{"
+        )
+        .unwrap();
+        writeln!(out, "        Box::pin(async move {{").unwrap();
+        writeln!(out, "            if target_ids.is_empty() {{").unwrap();
+        writeln!(out, "                return Ok(());").unwrap();
+        writeln!(out, "            }}").unwrap();
+        writeln!(
+            out,
+            "            fn to_params(len: usize) -> String {{ (1..=len).map(|i| format!(\"${{}}\", i)).collect::<Vec<_>>().join(\", \") }}"
+        )
+        .unwrap();
+        for (fk, target_snake, target_title, target_pk, target_pk_ty) in touch_targets {
+            writeln!(out, "            let placeholders = to_params(target_ids.len());").unwrap();
+            writeln!(
+                out,
+                "            let sql = format!(\"SELECT DISTINCT {} FROM {} WHERE {} IN ({{}})\", placeholders);",
+                fk, table, pk
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "            let mut q = sqlx::query_scalar::<_, {target_pk_ty}>(&sql);"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "            for id in target_ids {{ q = bind_scalar(q, id.clone()); }}"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "            let parent_ids: Vec<{target_pk_ty}> = db.fetch_all_scalar(q).await?;"
+            )
+            .unwrap();
+            writeln!(out, "            for pid in parent_ids {{").unwrap();
+            writeln!(
+                out,
+                "                crate::generated::models::{}::{}::query()",
+                target_snake, target_title
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "                    .where_col(crate::generated::models::{}::{}Col::{}, Op::Eq, pid)",
+                target_snake,
+                target_title,
+                to_snake(target_pk).to_uppercase()
+            )
+            .unwrap();
+            writeln!(out, "                    .patch()").unwrap();
+            writeln!(
+                out,
+                "                    .assign(crate::generated::models::{}::{}Col::UPDATED_AT, time::OffsetDateTime::now_utc())?",
+                target_snake, target_title
+            )
+            .unwrap();
+            writeln!(out, "                    .save(db.clone()).await?;").unwrap();
+            writeln!(out, "            }}").unwrap();
+        }
+        writeln!(out, "            Ok(())").unwrap();
+        writeln!(out, "        }})").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+
     writeln!(out, "}}\n").unwrap();
     out
 }
@@ -2115,14 +1394,10 @@ fn render_model(
     let record_ident = format!("{}Record", model_title);
     let col_ident = format!("{}DbCol", model_title);
     let public_col_ident = format!("{}Col", model_title);
-    let query_ident = format!("{}QueryInner", model_title);
-    let insert_ident = format!("{}CreateInner", model_title);
-    let update_ident = format!("{}PatchInner", model_title);
     let model_snake_upper = model_snake.to_uppercase();
 
     let table = cfg.table.as_deref().unwrap_or(&model_snake).to_string();
     let pk = cfg.pk.clone().unwrap_or_else(|| "id".to_string());
-    let pk_col_variant = to_title_case(&pk);
 
     let fields = parse_fields(cfg, &pk);
     let meta_fields = parse_meta(cfg);
@@ -2210,10 +1485,6 @@ fn render_model(
     let has_updated_at = fields.iter().any(|f| f.name == "updated_at");
     let has_soft_delete = fields.iter().any(|f| f.name == "deleted_at");
     let relations = parse_relations(schema, cfg, name, &fields);
-    let has_many_rels: Vec<_> = relations
-        .iter()
-        .filter(|relation| matches!(relation.kind, RelationKind::HasMany))
-        .collect();
     let max_rel_depth = cfg
         .datatable_rel_depth
         .unwrap_or(DATATABLE_REL_FILTER_MAX_DEPTH);
@@ -2260,9 +1531,7 @@ fn render_model(
 
     let mut imports = String::new();
     writeln!(imports, "use anyhow::Result;").unwrap();
-    if !relations.is_empty() || !localized_fields.is_empty() || has_meta || has_attachments {
-        writeln!(imports, "use std::collections::HashMap;").unwrap();
-    }
+    writeln!(imports, "use std::collections::HashMap;").unwrap();
     if has_meta {
         writeln!(imports, "use serde_json::Value as JsonValue;").unwrap();
     }
@@ -2342,7 +1611,12 @@ fn render_model(
                 writeln!(
                     imports,
                     "use crate::generated::models::{}::{{{}DbCol, {}Model, {}Record, {}Row{}}};",
-                    target_mod, target_title, target_title, target_title, target_title, target_rel_import
+                    target_mod,
+                    target_title,
+                    target_title,
+                    target_title,
+                    target_title,
+                    target_rel_import
                 )
                 .unwrap();
             }
@@ -2365,7 +1639,12 @@ fn render_model(
                 writeln!(
                     imports,
                     "use crate::generated::models::{}::{{{}DbCol, {}Model, {}Record, {}Row{}}};",
-                    target_mod, target_title, target_title, target_title, target_title, target_rel_import
+                    target_mod,
+                    target_title,
+                    target_title,
+                    target_title,
+                    target_title,
+                    target_rel_import
                 )
                 .unwrap();
             }
@@ -2519,19 +1798,21 @@ fn render_model(
             RelationKind::HasMany => {
                 record_fields.push(format!("    pub {rel_field}: Vec<{target_record}>,"));
             }
-            RelationKind::BelongsTo => {
+            RelationKind::BelongsTo | RelationKind::HasOne => {
                 record_fields.push(format!(
                     "    pub {rel_field}: Option<Box<{target_record}>>,",
                 ));
             }
         }
     }
-    if !has_many_rels.is_empty() {
-        record_fields.push("    #[serde(skip)]".to_string());
-        record_fields.push("    #[schemars(skip)]".to_string());
-        record_fields
-            .push("    pub __relation_counts: std::collections::HashMap<String, i64>,".to_string());
-    }
+    record_fields.push("    #[serde(skip)]".to_string());
+    record_fields.push("    #[schemars(skip)]".to_string());
+    record_fields
+        .push("    pub __relation_counts: std::collections::HashMap<String, i64>,".to_string());
+    record_fields.push("    #[serde(skip)]".to_string());
+    record_fields.push("    #[schemars(skip)]".to_string());
+    record_fields
+        .push("    pub __relation_aggregates: std::collections::HashMap<String, f64>,".to_string());
     writeln!(
         out,
         "#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]"
@@ -2546,12 +1827,12 @@ fn render_model(
     writeln!(out, "impl {record_ident} {{").unwrap();
     writeln!(
         out,
-        "    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, {model_title}Model> {{"
+        "    pub fn update<'db>(&self) -> Patch<'db, {model_title}Model> {{"
     )
     .unwrap();
     writeln!(
         out,
-        "        {model_title}Model::query(db.into()).where_col({col_ident}::{pk_variant}, Op::Eq, self.{pk}.clone()).patch()",
+        "        {model_title}Model::query().where_col({col_ident}::{pk_variant}, Op::Eq, self.{pk}.clone()).patch()",
         pk = to_snake(&pk),
         pk_variant = to_title_case(&pk)
     )
@@ -2762,14 +2043,13 @@ fn render_model(
             RelationKind::HasMany => {
                 writeln!(out, "        {rel_field}: Vec::new(),").unwrap();
             }
-            RelationKind::BelongsTo => {
+            RelationKind::BelongsTo | RelationKind::HasOne => {
                 writeln!(out, "        {rel_field}: None,").unwrap();
             }
         }
     }
-    if !has_many_rels.is_empty() {
-        writeln!(out, "        __relation_counts: HashMap::new(),").unwrap();
-    }
+    writeln!(out, "        __relation_counts: HashMap::new(),").unwrap();
+    writeln!(out, "        __relation_aggregates: HashMap::new(),").unwrap();
     writeln!(out, "    }};").unwrap();
     for f in &localized_fields {
         writeln!(
@@ -2863,6 +2143,37 @@ fn render_model(
     writeln!(out, "    Ok(records)").unwrap();
     writeln!(out, "}}\n").unwrap();
 
+    writeln!(
+        out,
+        "impl core_db::common::model_api::RelationMetricRecord for {record_ident} {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    fn relation_counts(&self) -> &std::collections::HashMap<String, i64> {{"
+    )
+    .unwrap();
+    writeln!(out, "        &self.__relation_counts").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn relation_aggregates(&self) -> &std::collections::HashMap<String, f64> {{"
+    )
+    .unwrap();
+    writeln!(out, "        &self.__relation_aggregates").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn relation_counts_mut(&mut self) -> &mut std::collections::HashMap<String, i64> {{"
+    )
+    .unwrap();
+    writeln!(out, "        &mut self.__relation_counts").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "    fn relation_aggregates_mut(&mut self) -> &mut std::collections::HashMap<String, f64> {{").unwrap();
+    writeln!(out, "        &mut self.__relation_aggregates").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}\n").unwrap();
+
     if !relations.is_empty() {
         writeln!(out, "impl {record_ident} {{").unwrap();
         writeln!(
@@ -2893,10 +2204,33 @@ fn render_model(
         writeln!(out, "    {{").unwrap();
         writeln!(out, "        R::get(relation, self)").unwrap();
         writeln!(out, "    }}").unwrap();
-        if !has_many_rels.is_empty() {
+        writeln!(
+            out,
+            "    pub fn count<R>(&self, relation: R) -> Option<i64>"
+        )
+        .unwrap();
+        writeln!(out, "    where").unwrap();
+        writeln!(
+            out,
+            "        R: core_db::common::model_api::CountRelation<{model_title}Model>,"
+        )
+        .unwrap();
+        writeln!(out, "    {{").unwrap();
+        writeln!(
+            out,
+            "        self.__relation_counts.get(R::name(relation)).copied()"
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
+        for (fn_name, kind) in [
+            ("sum", "Sum"),
+            ("avg", "Avg"),
+            ("min", "Min"),
+            ("max", "Max"),
+        ] {
             writeln!(
                 out,
-                "    pub fn count<R>(&self, relation: R) -> Option<i64>"
+                "    pub fn {fn_name}<R, A>(&self, relation: R, target: A) -> Option<f64>"
             )
             .unwrap();
             writeln!(out, "    where").unwrap();
@@ -2905,14 +2239,35 @@ fn render_model(
                 "        R: core_db::common::model_api::CountRelation<{model_title}Model>,"
             )
             .unwrap();
+            writeln!(
+                out,
+                "        A: Into<core_db::common::model_api::AggregateTarget<R::TargetModel>>,",
+            )
+            .unwrap();
             writeln!(out, "    {{").unwrap();
             writeln!(
                 out,
-                "        self.__relation_counts.get(R::name(relation)).copied()"
+                "        let key = core_db::common::model_api::relation_aggregate_lookup_key("
             )
             .unwrap();
+            writeln!(out, "            R::name(relation),").unwrap();
+            writeln!(
+                out,
+                "            core_db::common::model_api::RelationAggregateKind::{kind},"
+            )
+            .unwrap();
+            writeln!(out, "            &target.into().into_spec(),").unwrap();
+            writeln!(out, "        );").unwrap();
+            writeln!(out, "        self.__relation_aggregates.get(&key).copied()").unwrap();
             writeln!(out, "    }}").unwrap();
         }
+        writeln!(
+            out,
+            "    pub fn aggregate(&self, key: &str) -> Option<f64> {{"
+        )
+        .unwrap();
+        writeln!(out, "        self.__relation_aggregates.get(key).copied()").unwrap();
+        writeln!(out, "    }}").unwrap();
         writeln!(out, "}}\n").unwrap();
     }
 
@@ -2980,7 +2335,7 @@ fn render_model(
             let target_title = to_title_case(&rel.target_model);
             let target_record_ident = format!("{target_title}Record");
             let rel_ty = match rel.kind {
-                RelationKind::BelongsTo => {
+                RelationKind::BelongsTo | RelationKind::HasOne => {
                     format!("OneRelation<{model_title}Model, {target_record_ident}, {rel_idx}>")
                 }
                 RelationKind::HasMany => {
@@ -2988,7 +2343,7 @@ fn render_model(
                 }
             };
             let rel_value = match rel.kind {
-                RelationKind::BelongsTo => format!(
+                RelationKind::BelongsTo | RelationKind::HasOne => format!(
                     "OneRelation::<{model_title}Model, {target_record_ident}, {rel_idx}>::new(\"{rel_name}\")",
                     rel_name = rel.name
                 ),
@@ -3019,259 +2374,116 @@ fn render_model(
 
     // localized setters are provided on insert/update builders via *_lang methods
     for rel in &relations {
-        let fn_name = format!("load_{}", to_snake(&rel.name));
+        let rel_name = to_snake(&rel.name);
+        let rel_upper = rel_name.to_uppercase();
+        let runtime_ident = format!("REL_RUNTIME_{rel_upper}");
         let target_title = to_title_case(&rel.target_model);
-        let target_row = format!("{}Row", target_title);
-        let target_record = format!("{}Record", target_title);
-        let target_model_snake = to_snake(&rel.target_model);
-        let target_hydrate_records_expr = if rel.target_model == name {
-            "hydrate_records(db.clone(), &rows, base_url).await?".to_string()
-        } else {
-            format!(
-                "crate::generated::models::{target_model_snake}::hydrate_records(db.clone(), &rows, base_url).await?"
-            )
-        };
         match rel.kind {
             RelationKind::HasMany => {
-                let target_fk_optional = relation_target_field_is_optional(schema, rel);
-                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}], base_url: Option<&str>, extra_where: Option<&str>, extra_binds: &[core_db::common::sql::BindValue], nested_with: &[core_db::common::model_api::WithRelationSpec]) -> Result<HashMap<{parent_pk_ty}, Vec<{target_record}>>> {{").unwrap();
-                writeln!(
-                    out,
-                    "        if parents.is_empty() {{ return Ok(HashMap::new()); }}"
-                )
-                .unwrap();
-                writeln!(out, "        let ids: Vec<{parent_pk_ty}> = parents.iter().map(|p| p.{pk}.clone()).collect();").unwrap();
-                writeln!(out, "        let mut bind_idx: usize = 1;").unwrap();
-                writeln!(out, "        let placeholders: Vec<String> = ids.iter().map(|_| {{ let p = format!(\"${{}}\", bind_idx); bind_idx += 1; p }}).collect();").unwrap();
-                writeln!(out, "        let extra_clause = match extra_where {{ Some(clause) => {{ let mut r = clause.to_string(); for (i, _) in extra_binds.iter().enumerate().rev() {{ r = r.replace(&format!(\"${{}}\", i + 1), &format!(\"${{}}\", bind_idx + i)); }} format!(\" {{}}\", r) }} None => String::new() }};").unwrap();
-                writeln!(out, "        let sql = format!(\"SELECT * FROM {rel_table} WHERE {fk} IN ({{}}){{}}\", placeholders.join(\", \"), extra_clause);", rel_table = rel.target_table, fk = rel.foreign_key).unwrap();
-                writeln!(
-                    out,
-                    "        let mut q = sqlx::query_as::<_, {target_row}>(&sql);"
-                )
-                .unwrap();
-                writeln!(out, "        for id in ids {{ q = bind(q, id.into()); }}").unwrap();
-                writeln!(out, "        for b in extra_binds {{ q = bind(q, b.clone()); }}").unwrap();
-                writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-                writeln!(
-                    out,
-                    "        let records = {target_hydrate_records_expr};"
-                )
-                .unwrap();
-                writeln!(out, "        let mut map: HashMap<{parent_pk_ty}, Vec<{target_record}>> = HashMap::new();").unwrap();
-                writeln!(out, "        for record in records {{").unwrap();
-                if target_fk_optional {
-                    writeln!(
-                        out,
-                        "            if let Some(fk_val) = record.{fk}.clone() {{ map.entry(fk_val).or_default().push(record); }}",
-                        fk = rel.foreign_key
-                    )
-                    .unwrap();
+                let parent_key_fn = format!("rel_{rel_name}_parent_key");
+                let child_key_fn = format!("rel_{rel_name}_child_key");
+                let assign_fn = format!("rel_{rel_name}_assign");
+                let target_fk_expr = if relation_target_field_is_optional(schema, rel) {
+                    format!("record.{}.clone()", rel.foreign_key)
                 } else {
-                    writeln!(
-                        out,
-                        "            let fk_val = record.{fk}.clone();",
-                        fk = rel.foreign_key
-                    )
-                    .unwrap();
-                    writeln!(
-                        out,
-                        "            map.entry(fk_val).or_default().push(record);"
-                    )
-                    .unwrap();
-                }
-                writeln!(out, "        }}").unwrap();
-                // Nested relation loading
-                let target_model_snake = to_snake(&rel.target_model);
-                let target_pk_name = schema.models.get(&rel.target_model)
-                    .and_then(|m| m.pk.clone())
-                    .unwrap_or_else(|| "id".to_string());
-                let target_fields: Vec<_> = schema.models.get(&rel.target_model)
-                    .map(|m| parse_fields(m, &target_pk_name))
-                    .unwrap_or_default();
-                let target_relations: Vec<_> = schema.models.get(&rel.target_model)
-                    .map(|m| parse_relations(schema, m, &rel.target_model, &target_fields))
-                    .unwrap_or_default();
-                if !target_relations.is_empty() {
-                    writeln!(out, "        if !nested_with.is_empty() {{").unwrap();
-                    for sub_rel in &target_relations {
-                        let sub_rel_name = to_snake(&sub_rel.name);
-                        let sub_target_model_snake = to_snake(&sub_rel.target_model);
-                        let sub_target_title = to_title_case(&sub_rel.target_model);
-                        let sub_target_record = if sub_target_model_snake == target_model_snake {
-                            format!("{target_record}")
-                        } else {
-                            format!("crate::generated::models::{sub_target_model_snake}::{sub_target_title}Record")
-                        };
-                        let sub_target_row = if sub_target_model_snake == target_model_snake {
-                            format!("{}Row", to_title_case(&rel.target_model))
-                        } else {
-                            format!("crate::generated::models::{sub_target_model_snake}::{sub_target_title}Row")
-                        };
-                        let hydrate_fn = if sub_target_model_snake == target_model_snake {
-                            "hydrate_records".to_string()
-                        } else {
-                            format!("crate::generated::models::{sub_target_model_snake}::hydrate_records")
-                        };
-                        let target_pk_col = schema.models.get(&rel.target_model)
-                            .and_then(|m| m.pk.as_deref())
-                            .unwrap_or("id");
-
-                        writeln!(out, "            if nested_with.iter().any(|n| n.name == \"{sub_rel_name}\") {{").unwrap();
-
-                        match sub_rel.kind {
-                            RelationKind::BelongsTo => {
-                                let sub_fk = &sub_rel.foreign_key;
-                                let sub_target_pk = &sub_rel.target_pk;
-                                let sub_target_table = &sub_rel.target_table;
-                                let is_fk_optional = target_fields.iter().any(|f| f.name == *sub_fk && f.ty.starts_with("Option<"));
-
-                                writeln!(out, "                let __nw_fks: Vec<_> = map.values().flat_map(|v| v.iter()).filter_map(|r| {{").unwrap();
-                                if is_fk_optional {
-                                    writeln!(out, "                    r.{sub_fk}.clone()").unwrap();
-                                } else {
-                                    writeln!(out, "                    Some(r.{sub_fk}.clone())").unwrap();
-                                }
-                                writeln!(out, "                }}).collect();").unwrap();
-                                writeln!(out, "                if !__nw_fks.is_empty() {{").unwrap();
-                                writeln!(out, "                    let __nw_phs: Vec<String> = (1..=__nw_fks.len()).map(|i| format!(\"${{}}\", i)).collect();").unwrap();
-                                writeln!(out, "                    let __nw_sql = format!(\"SELECT * FROM {sub_target_table} WHERE {sub_target_pk} IN ({{}})\", __nw_phs.join(\", \"));").unwrap();
-                                writeln!(out, "                    let mut __nw_q = sqlx::query_as::<_, {sub_target_row}>(&__nw_sql);").unwrap();
-                                writeln!(out, "                    for __fk in &__nw_fks {{ __nw_q = bind(__nw_q, __fk.clone().into()); }}").unwrap();
-                                writeln!(out, "                    let __nw_rows = db.fetch_all(__nw_q).await?;").unwrap();
-                                writeln!(out, "                    let __nw_recs = {hydrate_fn}(db.clone(), &__nw_rows, base_url).await?;").unwrap();
-                                writeln!(out, "                    let __nw_by_pk: HashMap<_, _> = __nw_recs.into_iter().map(|r| (r.{sub_target_pk}.clone(), r)).collect();").unwrap();
-                                writeln!(out, "                    for records in map.values_mut() {{").unwrap();
-                                writeln!(out, "                        for record in records.iter_mut() {{").unwrap();
-                                if is_fk_optional {
-                                    writeln!(out, "                            record.{sub_rel_name} = record.{sub_fk}.as_ref().and_then(|fk| __nw_by_pk.get(fk).cloned()).map(Box::new);").unwrap();
-                                } else {
-                                    writeln!(out, "                            record.{sub_rel_name} = __nw_by_pk.get(&record.{sub_fk}).cloned().map(Box::new);").unwrap();
-                                }
-                                writeln!(out, "                        }}").unwrap();
-                                writeln!(out, "                    }}").unwrap();
-                                writeln!(out, "                }}").unwrap();
-                            }
-                            RelationKind::HasMany => {
-                                let sub_fk = &sub_rel.foreign_key;
-                                let sub_target_table = &sub_rel.target_table;
-
-                                writeln!(out, "                let __nw_pids: Vec<_> = map.values().flat_map(|v| v.iter()).map(|r| r.{target_pk_col}.clone()).collect();").unwrap();
-                                writeln!(out, "                if !__nw_pids.is_empty() {{").unwrap();
-                                writeln!(out, "                    let __nw_phs: Vec<String> = (1..=__nw_pids.len()).map(|i| format!(\"${{}}\", i)).collect();").unwrap();
-                                writeln!(out, "                    let __nw_sql = format!(\"SELECT * FROM {sub_target_table} WHERE {sub_fk} IN ({{}})\", __nw_phs.join(\", \"));").unwrap();
-                                writeln!(out, "                    let mut __nw_q = sqlx::query_as::<_, {sub_target_row}>(&__nw_sql);").unwrap();
-                                writeln!(out, "                    for __id in &__nw_pids {{ __nw_q = bind(__nw_q, __id.clone().into()); }}").unwrap();
-                                writeln!(out, "                    let __nw_rows = db.fetch_all(__nw_q).await?;").unwrap();
-                                writeln!(out, "                    let __nw_recs = {hydrate_fn}(db.clone(), &__nw_rows, base_url).await?;").unwrap();
-                                writeln!(out, "                    let mut __nw_by_fk: HashMap<_, Vec<_>> = HashMap::new();").unwrap();
-                                let sub_fk_optional = target_fields.iter().any(|f| f.name == *sub_fk && f.ty.starts_with("Option<"));
-                                if sub_fk_optional {
-                                    writeln!(out, "                    for r in __nw_recs {{ if let Some(ref fk) = r.{sub_fk} {{ __nw_by_fk.entry(fk.clone()).or_default().push(r); }} }}").unwrap();
-                                } else {
-                                    writeln!(out, "                    for r in __nw_recs {{ __nw_by_fk.entry(r.{sub_fk}.clone()).or_default().push(r); }}").unwrap();
-                                }
-                                writeln!(out, "                    for records in map.values_mut() {{").unwrap();
-                                writeln!(out, "                        for record in records.iter_mut() {{").unwrap();
-                                writeln!(out, "                            record.{sub_rel_name} = __nw_by_fk.remove(&record.{target_pk_col}).unwrap_or_default();").unwrap();
-                                writeln!(out, "                        }}").unwrap();
-                                writeln!(out, "                    }}").unwrap();
-                                writeln!(out, "                }}").unwrap();
-                            }
-                        }
-                        writeln!(out, "            }}").unwrap();
-                    }
-                    writeln!(out, "        }}").unwrap();
+                    format!("Some(record.{}.clone())", rel.foreign_key)
+                };
+                writeln!(out, "fn {parent_key_fn}(record: &{record_ident}) -> Option<{parent_pk_ty}> {{ Some(record.{pk}.clone()) }}").unwrap();
+                writeln!(out, "fn {child_key_fn}(record: &{target_title}Record) -> Option<{parent_pk_ty}> {{ {target_fk_expr} }}").unwrap();
+                writeln!(out, "fn {assign_fn}(record: &mut {record_ident}, children: Vec<{target_title}Record>) {{ record.{rel_name} = children; }}").unwrap();
+                writeln!(out, "static {runtime_ident}: core_db::common::model_api::HasManyRuntime<{model_title}Model, {target_title}Model, {parent_pk_ty}> = core_db::common::model_api::HasManyRuntime {{").unwrap();
+                writeln!(out, "    name: \"{rel_name}\",").unwrap();
+                writeln!(out, "    target_table: \"{}\",", rel.target_table).unwrap();
+                writeln!(out, "    target_pk: \"{}\",", rel.target_pk).unwrap();
+                writeln!(out, "    foreign_key: \"{}\",", rel.foreign_key).unwrap();
+                writeln!(out, "    parent_key: {parent_key_fn},").unwrap();
+                writeln!(out, "    child_foreign_key: {child_key_fn},").unwrap();
+                writeln!(out, "    assign: {assign_fn},").unwrap();
+                writeln!(out, "}};\n").unwrap();
+            }
+            RelationKind::HasOne => {
+                let parent_key_fn = format!("rel_{rel_name}_parent_key");
+                let child_key_fn = format!("rel_{rel_name}_child_key");
+                let assign_fn = format!("rel_{rel_name}_assign");
+                let target_fk_expr = if relation_target_field_is_optional(schema, rel) {
+                    format!("record.{}.clone()", rel.foreign_key)
                 } else {
-                    writeln!(out, "        let _ = &nested_with;").unwrap();
-                }
-                writeln!(out, "        Ok(map)").unwrap();
-                writeln!(out, "    }}").unwrap();
+                    format!("Some(record.{}.clone())", rel.foreign_key)
+                };
+                writeln!(out, "fn {parent_key_fn}(record: &{record_ident}) -> Option<{parent_pk_ty}> {{ Some(record.{pk}.clone()) }}").unwrap();
+                writeln!(out, "fn {child_key_fn}(record: &{target_title}Record) -> Option<{parent_pk_ty}> {{ {target_fk_expr} }}").unwrap();
+                writeln!(out, "fn {assign_fn}(record: &mut {record_ident}, child: Option<{target_title}Record>) {{ record.{rel_name} = child.map(Box::new); }}").unwrap();
+                writeln!(out, "static {runtime_ident}: core_db::common::model_api::HasOneRuntime<{model_title}Model, {target_title}Model, {parent_pk_ty}> = core_db::common::model_api::HasOneRuntime {{").unwrap();
+                writeln!(out, "    name: \"{rel_name}\",").unwrap();
+                writeln!(out, "    target_table: \"{}\",", rel.target_table).unwrap();
+                writeln!(out, "    target_pk: \"{}\",", rel.target_pk).unwrap();
+                writeln!(out, "    foreign_key: \"{}\",", rel.foreign_key).unwrap();
+                writeln!(out, "    parent_key: {parent_key_fn},").unwrap();
+                writeln!(out, "    child_foreign_key: {child_key_fn},").unwrap();
+                writeln!(out, "    assign: {assign_fn},").unwrap();
+                writeln!(out, "}};\n").unwrap();
             }
             RelationKind::BelongsTo => {
-                let is_fk_optional = fields
+                let parent_key_fn = format!("rel_{rel_name}_parent_key");
+                let target_key_fn = format!("rel_{rel_name}_target_key");
+                let assign_fn = format!("rel_{rel_name}_assign");
+                let parent_fk_expr = if fields
                     .iter()
-                    .any(|f| f.name == rel.foreign_key && f.ty.starts_with("Option<"));
-                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}], base_url: Option<&str>, _extra_where: Option<&str>, _extra_binds: &[core_db::common::sql::BindValue], _nested_with: &[core_db::common::model_api::WithRelationSpec]) -> Result<HashMap<{parent_pk_ty}, Option<{target_record}>>> {{").unwrap();
-                writeln!(
-                    out,
-                    "        if parents.is_empty() {{ return Ok(HashMap::new()); }}"
-                )
-                .unwrap();
-                writeln!(out, "        let mut fk_vals = Vec::new();").unwrap();
-                writeln!(out, "        let mut parent_pairs = Vec::new();").unwrap();
-                writeln!(out, "        for p in parents {{").unwrap();
-                if is_fk_optional {
-                    writeln!(
-                        out,
-                        "            if let Some(fk_val) = p.{fk}.clone() {{ fk_vals.push(fk_val); parent_pairs.push((p.{pk}.clone(), Some(fk_val))); }} else {{ parent_pairs.push((p.{pk}.clone(), None)); }}",
-                        fk = rel.foreign_key,
-                        pk = pk
-                    )
-                    .unwrap();
+                    .any(|f| f.name == rel.foreign_key && f.ty.starts_with("Option<"))
+                {
+                    format!("record.{}.clone()", rel.foreign_key)
                 } else {
-                    writeln!(
-                        out,
-                        "            fk_vals.push(p.{fk}.clone());",
-                        fk = rel.foreign_key
-                    )
-                    .unwrap();
-                    writeln!(
-                        out,
-                        "            parent_pairs.push((p.{pk}.clone(), Some(p.{fk}.clone())));",
-                        pk = pk,
-                        fk = rel.foreign_key
-                    )
-                    .unwrap();
-                }
-                writeln!(out, "        }}").unwrap();
-                writeln!(
-                    out,
-                    "        if fk_vals.is_empty() {{ return Ok(HashMap::new()); }}"
-                )
-                .unwrap();
-                writeln!(out, "        let placeholders: Vec<String> = (1..=fk_vals.len()).map(|i| format!(\"${{}}\", i)).collect();").unwrap();
-                writeln!(out, "        let sql = format!(\"SELECT * FROM {rel_table} WHERE {target_pk} IN ({{}})\", placeholders.join(\", \"));", rel_table = rel.target_table, target_pk = rel.target_pk).unwrap();
-                writeln!(
-                    out,
-                    "        let mut q = sqlx::query_as::<_, {target_row}>(&sql);"
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "        for fk in fk_vals {{ q = bind(q, fk.into()); }}"
-                )
-                .unwrap();
-                writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
-                writeln!(
-                    out,
-                    "        let records = {target_hydrate_records_expr};"
-                )
-                .unwrap();
-                writeln!(out, "        let mut by_pk: HashMap<{target_pk_ty}, {target_record}> = HashMap::new();", target_pk_ty = rel.target_pk_ty).unwrap();
-                writeln!(out, "        for record in records {{").unwrap();
-                writeln!(
-                    out,
-                    "            let key = record.{target_pk}.clone();",
-                    target_pk = rel.target_pk
-                )
-                .unwrap();
-                writeln!(out, "            by_pk.insert(key, record);").unwrap();
-                writeln!(out, "        }}").unwrap();
-                writeln!(out, "        let mut out = HashMap::new();").unwrap();
-                writeln!(out, "        for (pid, fk) in parent_pairs {{").unwrap();
-                writeln!(
-                    out,
-                    "            out.insert(pid, fk.and_then(|k| by_pk.get(&k).cloned()));"
-                )
-                .unwrap();
-                writeln!(out, "        }}").unwrap();
-                writeln!(out, "        Ok(out)").unwrap();
-                writeln!(out, "    }}").unwrap();
+                    format!("Some(record.{}.clone())", rel.foreign_key)
+                };
+                writeln!(out, "fn {parent_key_fn}(record: &{record_ident}) -> Option<{}> {{ {parent_fk_expr} }}", rel.target_pk_ty).unwrap();
+                writeln!(out, "fn {target_key_fn}(record: &{target_title}Record) -> {} {{ record.{}.clone() }}", rel.target_pk_ty, rel.target_pk).unwrap();
+                writeln!(out, "fn {assign_fn}(record: &mut {record_ident}, child: Option<{target_title}Record>) {{ record.{rel_name} = child.map(Box::new); }}").unwrap();
+                writeln!(out, "static {runtime_ident}: core_db::common::model_api::BelongsToRuntime<{model_title}Model, {target_title}Model, {}> = core_db::common::model_api::BelongsToRuntime {{", rel.target_pk_ty).unwrap();
+                writeln!(out, "    name: \"{rel_name}\",").unwrap();
+                writeln!(out, "    target_table: \"{}\",", rel.target_table).unwrap();
+                writeln!(out, "    target_key_sql: \"{}\",", rel.target_pk).unwrap();
+                writeln!(out, "    parent_foreign_key: {parent_key_fn},").unwrap();
+                writeln!(out, "    target_key: {target_key_fn},").unwrap();
+                writeln!(out, "    assign: {assign_fn},").unwrap();
+                writeln!(out, "}};\n").unwrap();
             }
         }
     }
-    writeln!(out).unwrap();
+
+    writeln!(
+        out,
+        "impl core_db::common::model_api::RuntimeModel for {model_title}Model {{"
+    )
+    .unwrap();
+    writeln!(out, "    type Row = {row_ident};").unwrap();
+    writeln!(out, "    fn hydrate_records<'db>(db: DbConn<'db>, rows: Vec<Self::Row>, base_url: Option<String>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {{").unwrap();
+    writeln!(out, "        Box::pin(async move {{ crate::generated::models::{model_snake}::hydrate_records(db, &rows, base_url.as_deref()).await }})").unwrap();
+    writeln!(out, "    }}").unwrap();
+    if parent_pk_ty == "i64" {
+        writeln!(
+            out,
+            "    fn record_pk_i64(record: &Self::Record) -> Option<i64> {{"
+        )
+        .unwrap();
+        writeln!(out, "        Some(record.{pk}.clone())").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+    if relations.is_empty() {
+        writeln!(out, "    fn relation_runtimes() -> &'static [&'static dyn core_db::common::model_api::ErasedRelationRuntime<Self>] {{").unwrap();
+        writeln!(out, "        &[]").unwrap();
+        writeln!(out, "    }}").unwrap();
+    } else {
+        writeln!(out, "    fn relation_runtimes() -> &'static [&'static dyn core_db::common::model_api::ErasedRelationRuntime<Self>] {{").unwrap();
+        writeln!(out, "        static RELATIONS: [&'static dyn core_db::common::model_api::ErasedRelationRuntime<{model_title}Model>; {}] = [", relations.len()).unwrap();
+        for rel in &relations {
+            let runtime_ident = format!("REL_RUNTIME_{}", to_snake(&rel.name).to_uppercase());
+            writeln!(out, "            &{runtime_ident},").unwrap();
+        }
+        writeln!(out, "        ];").unwrap();
+        writeln!(out, "        &RELATIONS").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+    writeln!(out, "}}\n").unwrap();
 
     let column_model_section = out;
 
@@ -3305,552 +2517,9 @@ fn render_model(
         .insert("unsafe_query_section", unsafe_query_section)
         .unwrap();
     let query_section = render_template("models/query.rs.tpl", &query_context).unwrap();
-    let mut out = String::new();
-
-    // Insert builder — wraps CreateState for SQL, adds model-specific extension fields
-    writeln!(out, "pub struct {insert_ident}<'db> {{").unwrap();
-    writeln!(
-        out,
-        "    pub(crate) state: core_db::common::model_api::CreateState<'db>,"
-    )
-    .unwrap();
-    if !localized_fields.is_empty() {
-        writeln!(
-            out,
-            "    translations: HashMap<&'static str, HashMap<String, String>>,"
-        )
-        .unwrap();
-    }
-    if has_meta {
-        writeln!(out, "    meta: HashMap<String, JsonValue>,").unwrap();
-    }
-    if has_attachments {
-        writeln!(
-            out,
-            "    attachments_single: HashMap<&'static str, AttachmentInput>,"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "    attachments_multi: HashMap<&'static str, Vec<AttachmentInput>>,"
-        )
-        .unwrap();
-    }
-    writeln!(out, "}}\n").unwrap();
-
-    writeln!(out, "impl<'db> {insert_ident}<'db> {{").unwrap();
-    writeln!(
-        out,
-        "    pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        Self {{").unwrap();
-    writeln!(out, "            state: core_db::common::model_api::CreateState::new(db, base_url, \"{table}\"),").unwrap();
-    if !localized_fields.is_empty() {
-        writeln!(out, "            translations: HashMap::new(),").unwrap();
-    }
-    if has_meta {
-        writeln!(out, "            meta: HashMap::new(),").unwrap();
-    }
-    if has_attachments {
-        writeln!(out, "            attachments_single: HashMap::new(),").unwrap();
-        writeln!(out, "            attachments_multi: HashMap::new(),").unwrap();
-    }
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    pub fn from_state(state: core_db::common::model_api::CreateState<'db>) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        Self {{").unwrap();
-    writeln!(out, "            state,").unwrap();
-    if !localized_fields.is_empty() {
-        writeln!(out, "            translations: HashMap::new(),").unwrap();
-    }
-    if has_meta {
-        writeln!(out, "            meta: HashMap::new(),").unwrap();
-    }
-    if has_attachments {
-        writeln!(out, "            attachments_single: HashMap::new(),").unwrap();
-        writeln!(out, "            attachments_multi: HashMap::new(),").unwrap();
-    }
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    let insert_struct_section = out;
-    let mut out = String::new();
-
-    out.push_str(&render_insert_field_setters(&db_fields, &col_ident));
-    if !localized_fields.is_empty() {
-        out.push_str(&render_localized_setters(&localized_fields, cfgs));
-    }
-    if has_meta {
-        out.push_str(&render_meta_setters(&meta_fields));
-    }
-    if has_attachments {
-        out.push_str(&render_insert_attachment_setters(
-            &single_attachments,
-            &multi_attachments,
-        ));
-    }
-
-    // on_conflict_do_nothing - INSERT ... ON CONFLICT DO NOTHING
-    writeln!(
-        out,
-        "    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[{col_ident}]) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        self.state = self.state.on_conflict_do_nothing(&conflict_cols.iter().map(|c| c.as_sql()).collect::<Vec<_>>());").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    // on_conflict_update - INSERT ... ON CONFLICT (cols) DO UPDATE SET ...
-    writeln!(
-        out,
-        "    pub fn on_conflict_update(mut self, conflict_cols: &[{col_ident}]) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        self.state = self.state.on_conflict_update(&conflict_cols.iter().map(|c| c.as_sql()).collect::<Vec<_>>());").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    fn to_create_input(&self) -> Result<{create_input_struct_ident}> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut input = {create_input_struct_ident}::default();"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        for (col_name, bind) in self.state.col_names.iter().zip(self.state.binds.iter()) {{"
-    )
-    .unwrap();
-    writeln!(out, "            match *col_name {{").unwrap();
-    for f in &db_fields {
-        let decode_expr = render_bind_decode_expr(&f.ty, "bind", &enum_specs);
-        writeln!(out, "                \"{}\" => {{", f.name).unwrap();
-        writeln!(out, "                    let value = {decode_expr};").unwrap();
-        writeln!(
-            out,
-            "                    input.{} = FieldInput::Set(value);",
-            f.name
-        )
-        .unwrap();
-        writeln!(out, "                }}").unwrap();
-    }
-    writeln!(out, "                _ => {{}}").unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        Ok(input)").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    if emit_hooks {
-        writeln!(out).unwrap();
-        writeln!(
-            out,
-            "    fn apply_create_overrides(mut state: CreateState<'_>, overrides: serde_json::Value) -> Result<CreateState<'_>> {{"
-        )
-        .unwrap();
-        writeln!(out, "        let map = overrides.as_object()").unwrap();
-        writeln!(
-            out,
-            "            .ok_or_else(|| anyhow::anyhow!(\"observer overrides must be a JSON object\"))?;"
-        )
-        .unwrap();
-        writeln!(out, "        for (key, val) in map {{").unwrap();
-        writeln!(out, "            match key.as_str() {{").unwrap();
-        for f in &db_fields {
-            let deser_ty = json_deser_type_for_field(&f.ty, &enum_specs);
-            writeln!(out, "                \"{}\" => {{", f.name).unwrap();
-            writeln!(
-                out,
-                "                    let v: {deser_ty} = serde_json::from_value(val.clone())?;"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "                    state = state.set_col(\"{}\", v.into());",
-                f.name
-            )
-            .unwrap();
-            writeln!(out, "                }}").unwrap();
-        }
-        writeln!(
-            out,
-            "                other => anyhow::bail!(\"unknown column '{{}}' in observer create overrides\", other),"
-        )
-        .unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-        writeln!(out, "        Ok(state)").unwrap();
-        writeln!(out, "    }}").unwrap();
-    }
-
-    let insert_builder_methods_section = out;
-    let mut out = String::new();
-
-    writeln!(
-        out,
-        "    pub async fn save(mut self) -> Result<{record_ident}> {{"
-    )
-    .unwrap();
-    if emit_hooks {
-        writeln!(
-            out,
-            "        let __create_input = if try_get_observer().is_some() {{"
-        )
-        .unwrap();
-        writeln!(out, "            Some(self.to_create_input()?)").unwrap();
-        writeln!(out, "        }} else {{").unwrap();
-        writeln!(out, "            None").unwrap();
-        writeln!(out, "        }};").unwrap();
-        writeln!(out, "        if let Some(observer) = try_get_observer() {{").unwrap();
-        writeln!(
-            out,
-            "            if let Some(create_input) = __create_input.as_ref() {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                let event = ModelEvent {{ model: \"{model_snake}\", table: \"{table}\", record_key: None }};"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                let data = serde_json::to_value(create_input)?;"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                let action = observer.on_creating(&event, &data).await?;"
-        )
-        .unwrap();
-        writeln!(out, "                match action {{").unwrap();
-        writeln!(
-            out,
-            "                    ObserverAction::Prevent(err) => return Err(err),"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    ObserverAction::Modify(overrides) => {{"
-        )
-        .unwrap();
-        writeln!(out, "                        self.state = Self::apply_create_overrides(self.state, overrides)?;").unwrap();
-        writeln!(out, "                    }}").unwrap();
-        writeln!(out, "                    ObserverAction::Continue => {{}}").unwrap();
-        writeln!(out, "                }}").unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(out, "        let db_conn = self.state.db.clone();").unwrap();
-    writeln!(out, "        match db_conn {{").unwrap();
-    writeln!(out, "            DbConn::Pool(pool) => {{").unwrap();
-    writeln!(out, "                let tx = pool.begin().await?;").unwrap();
-    writeln!(
-        out,
-        "                let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));"
-    )
-    .unwrap();
-    writeln!(out, "                let (record, row) = {{").unwrap();
-    writeln!(
-        out,
-        "                    let db = DbConn::tx(tx_lock.clone());"
-    )
-    .unwrap();
-    writeln!(out, "                    self.save_with_db(db).await?").unwrap();
-    writeln!(out, "                }};").unwrap();
-    writeln!(
-        out,
-        "                let tx = std::sync::Arc::try_unwrap(tx_lock)"
-    )
-    .unwrap();
-    writeln!(out, "                    .map_err(|_| anyhow::anyhow!(\"transaction scope still has active handles\"))?")
-        .unwrap();
-    writeln!(out, "                    .into_inner();").unwrap();
-    writeln!(out, "                tx.commit().await?;").unwrap();
-    if emit_hooks {
-        writeln!(
-            out,
-            "                if let Some(observer) = try_get_observer() {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    let event = ModelEvent {{ model: \"{model_snake}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", row.{pk_snake})) }};",
-            pk_snake = to_snake(&pk)
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    match serde_json::to_value(&row) {{"
-        )
-        .unwrap();
-        writeln!(out, "                        Ok(data) => {{").unwrap();
-        writeln!(
-            out,
-            "                            if let Err(err) = observer.on_created(&event, &data).await {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                                log_observer_error(\"created\", \"{model_snake}\", &err);"
-        )
-        .unwrap();
-        writeln!(out, "                            }}").unwrap();
-        writeln!(out, "                        }}").unwrap();
-        writeln!(
-            out,
-            "                        Err(err) => log_observer_error(\"created\", \"{model_snake}\", &err),"
-        )
-        .unwrap();
-        writeln!(out, "                    }}").unwrap();
-        writeln!(out, "                }}").unwrap();
-    }
-    writeln!(out, "                Ok(record)").unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "            DbConn::Tx(_) => {{").unwrap();
-    writeln!(
-        out,
-        "                let (record, row) = self.save_with_db(db_conn).await?;"
-    )
-    .unwrap();
-    if emit_hooks {
-        writeln!(
-            out,
-            "                if let Some(observer) = try_get_observer() {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    let event = ModelEvent {{ model: \"{model_snake}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", row.{pk_snake})) }};",
-            pk_snake = to_snake(&pk)
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    match serde_json::to_value(&row) {{"
-        )
-        .unwrap();
-        writeln!(out, "                        Ok(data) => {{").unwrap();
-        writeln!(
-            out,
-            "                            if let Err(err) = observer.on_created(&event, &data).await {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                                log_observer_error(\"created\", \"{model_snake}\", &err);"
-        )
-        .unwrap();
-        writeln!(out, "                            }}").unwrap();
-        writeln!(out, "                        }}").unwrap();
-        writeln!(
-            out,
-            "                        Err(err) => log_observer_error(\"created\", \"{model_snake}\", &err),"
-        )
-        .unwrap();
-        writeln!(out, "                    }}").unwrap();
-        writeln!(out, "                }}").unwrap();
-    }
-    writeln!(out, "                Ok(record)").unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out).unwrap();
-    writeln!(
-        out,
-        "    async fn save_with_db<'tx>(mut self, db: DbConn<'tx>) -> Result<({record_ident}, {row_ident})> {{"
-    )
-    .unwrap();
-    if use_snowflake_id {
-        writeln!(
-            out,
-            "        if !self.state.col_names.contains(&\"{pk}\") {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "            self.state = self.state.set_col(\"{pk}\", generate_snowflake_i64().into());"
-        )
-        .unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    if has_created_at {
-        writeln!(
-            out,
-            "        if HAS_CREATED_AT && !self.state.col_names.contains(&\"created_at\") {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "            self.state = self.state.set_col(\"created_at\", time::OffsetDateTime::now_utc().into());"
-        )
-        .unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    if has_updated_at {
-        writeln!(
-            out,
-            "        if HAS_UPDATED_AT && !self.state.col_names.contains(&\"updated_at\") {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "            self.state = self.state.set_col(\"updated_at\", time::OffsetDateTime::now_utc().into());"
-        )
-        .unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(out, "        if self.state.col_names.is_empty() {{").unwrap();
-    writeln!(
-        out,
-        "            anyhow::bail!(\"insert: no columns set\");"
-    )
-    .unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        let base_url = self.state.base_url.clone();").unwrap();
-    writeln!(
-        out,
-        "        let (sql, binds) = self.state.build_insert_sql();"
-    )
-    .unwrap();
-    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
-    out.push_str(&render_profiler_start(skip_profiler));
-    writeln!(
-        out,
-        "        let mut q = sqlx::query_as::<_, {row_ident}>(&sql);"
-    )
-    .unwrap();
-    writeln!(out, "        for b in binds {{").unwrap();
-    writeln!(out, "            q = bind(q, b);").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        let row = db.fetch_one(q).await?;").unwrap();
-    out.push_str(&render_profiler_log(
-        &table,
-        "INSERT",
-        "&sql",
-        "&__profiler_binds",
-        skip_profiler,
-    ));
-    if !localized_fields.is_empty() {
-        writeln!(out, "        if !self.translations.is_empty() {{").unwrap();
-        writeln!(
-            out,
-            "            let supported = localized::SUPPORTED_LOCALES;"
-        )
-        .unwrap();
-        for f in &localized_fields {
-            writeln!(
-                out,
-                "            if let Some(map) = self.translations.get(\"{f}\") {{"
-            )
-            .unwrap();
-            writeln!(out, "                let mut filtered = HashMap::new();").unwrap();
-            writeln!(out, "                for (loc, val) in map {{").unwrap();
-            writeln!(out, "                    if supported.contains(&loc.as_str()) {{ filtered.insert(loc.clone(), val.clone()); }}").unwrap();
-            writeln!(out, "                }}").unwrap();
-            writeln!(out, "                if !filtered.is_empty() {{").unwrap();
-            writeln!(out, "                    localized::upsert_localized_many(db.clone(), localized::{}_OWNER_TYPE, row.{pk}, \"{f}\", &filtered).await?;", model_snake.to_uppercase()).unwrap();
-            writeln!(out, "                }}").unwrap();
-            writeln!(out, "            }}").unwrap();
-        }
-        writeln!(out, "        }}").unwrap();
-    }
-    if has_meta {
-        writeln!(out, "        if !self.meta.is_empty() {{").unwrap();
-        writeln!(out, "            localized::upsert_meta_many(db.clone(), localized::{model_snake_upper}_OWNER_TYPE, row.{pk}, &self.meta).await?;", model_snake_upper = model_snake.to_uppercase()).unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    if has_attachments {
-        writeln!(out, "        if !self.attachments_single.is_empty() || !self.attachments_multi.is_empty() {{").unwrap();
-        writeln!(
-            out,
-            "            for (field, att) in &self.attachments_single {{"
-        )
-        .unwrap();
-        writeln!(out, "                localized::replace_single_attachment(db.clone(), localized::{}_OWNER_TYPE, row.{pk}, field, att).await?;", model_snake_upper).unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(
-            out,
-            "            for (field, list) in &self.attachments_multi {{"
-        )
-        .unwrap();
-        writeln!(out, "                localized::add_attachments(db.clone(), localized::{}_OWNER_TYPE, row.{pk}, field, list).await?;", model_snake_upper).unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    // touch parent timestamps
-    for (fk, target_snake, target_title, target_pk, _target_pk_ty) in &touch_targets {
-        writeln!(out, "        if let Some(parent_id) = row.{} {{", fk).unwrap();
-        writeln!(
-            out,
-            "            crate::generated::models::{}::{}::new(db.clone()).update()",
-            target_snake, target_title
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                .where_{target_pk}(Op::Eq, parent_id)",
-            target_pk = target_pk
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                .set_updated_at(time::OffsetDateTime::now_utc())"
-        )
-        .unwrap();
-        writeln!(out, "                .save().await?;").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    if localized_fields.is_empty() {
-        writeln!(out, "        let localized = LocalizedMap::default();").unwrap();
-    } else {
-        writeln!(out, "        let localized = localized::load_{model_snake}_localized(db, &[row.{pk}]).await?;").unwrap();
-    }
-    if has_attachments {
-        writeln!(out, "        let attachments = localized::load_{model_snake}_attachments(db, &[row.{pk}]).await?;").unwrap();
-    }
-    if has_meta {
-        writeln!(
-            out,
-            "        let meta_map = localized::load_{model_snake}_meta(db, &[row.{pk}]).await?;"
-        )
-        .unwrap();
-        match has_attachments {
-            true => writeln!(out, "        let record = hydrate_record(row.clone(), &localized, &meta_map, &attachments, base_url.as_deref());").unwrap(),
-            false => writeln!(out, "        let record = hydrate_record(row.clone(), &localized, &meta_map, base_url.as_deref());").unwrap(),
-        }
-    } else {
-        match has_attachments {
-            true => writeln!(
-                out,
-                "        let record = hydrate_record(row.clone(), &localized, &attachments, base_url.as_deref());"
-            )
-            .unwrap(),
-            false => {
-                if localized_fields.is_empty() {
-                    writeln!(out, "        let record = hydrate_record(row.clone(), &LocalizedMap::default(), base_url.as_deref());").unwrap();
-                } else {
-                    writeln!(
-                        out,
-                        "        let record = hydrate_record(row.clone(), &localized, base_url.as_deref());"
-                    )
-                    .unwrap();
-                }
-            }
-        }
-    }
-    writeln!(out, "        Ok((record, row))").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out, "}}").unwrap();
-
-    let insert_save_methods_section = out;
+    let insert_struct_section = String::new();
+    let insert_builder_methods_section = String::new();
+    let insert_save_methods_section = String::new();
     let mut insert_context = TemplateContext::new();
     insert_context
         .insert(
@@ -3871,653 +2540,9 @@ fn render_model(
         )
         .unwrap();
     let insert_section = render_template("models/insert.rs.tpl", &insert_context).unwrap();
-    let mut out = String::new();
-
-    // Update builder — wraps PatchState for SQL, adds model-specific extension fields
-    writeln!(out, "pub struct {update_ident}<'db> {{").unwrap();
-    writeln!(
-        out,
-        "    pub(crate) state: core_db::common::model_api::PatchState<'db>,"
-    )
-    .unwrap();
-    if !localized_fields.is_empty() {
-        writeln!(
-            out,
-            "    translations: HashMap<&'static str, HashMap<String, String>>,"
-        )
-        .unwrap();
-    }
-    if has_meta {
-        writeln!(out, "    meta: HashMap<String, JsonValue>,").unwrap();
-    }
-    if has_attachments {
-        writeln!(
-            out,
-            "    attachments_single: HashMap<&'static str, AttachmentInput>,"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "    attachments_multi: HashMap<&'static str, Vec<AttachmentInput>>,"
-        )
-        .unwrap();
-        writeln!(out, "    attachments_clear_single: Vec<&'static str>,").unwrap();
-        writeln!(
-            out,
-            "    attachments_delete_multi: HashMap<&'static str, Vec<Uuid>>,"
-        )
-        .unwrap();
-    }
-    writeln!(out, "}}\n").unwrap();
-
-    writeln!(out, "impl<'db> {update_ident}<'db> {{").unwrap();
-    writeln!(
-        out,
-        "    pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        Self {{").unwrap();
-    writeln!(out, "            state: core_db::common::model_api::PatchState::new(db, base_url, \"{table}\"),").unwrap();
-    if !localized_fields.is_empty() {
-        writeln!(out, "            translations: HashMap::new(),").unwrap();
-    }
-    if has_meta {
-        writeln!(out, "            meta: HashMap::new(),").unwrap();
-    }
-    if has_attachments {
-        writeln!(out, "            attachments_single: HashMap::new(),").unwrap();
-        writeln!(out, "            attachments_multi: HashMap::new(),").unwrap();
-        writeln!(out, "            attachments_clear_single: Vec::new(),").unwrap();
-        writeln!(out, "            attachments_delete_multi: HashMap::new(),").unwrap();
-    }
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(
-        out,
-        "    pub fn from_state(state: core_db::common::model_api::PatchState<'db>) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        Self {{").unwrap();
-    writeln!(out, "            state,").unwrap();
-    if !localized_fields.is_empty() {
-        writeln!(out, "            translations: HashMap::new(),").unwrap();
-    }
-    if has_meta {
-        writeln!(out, "            meta: HashMap::new(),").unwrap();
-    }
-    if has_attachments {
-        writeln!(out, "            attachments_single: HashMap::new(),").unwrap();
-        writeln!(out, "            attachments_multi: HashMap::new(),").unwrap();
-        writeln!(out, "            attachments_clear_single: Vec::new(),").unwrap();
-        writeln!(out, "            attachments_delete_multi: HashMap::new(),").unwrap();
-    }
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-    let update_struct_section = out;
-    let mut out = String::new();
-
-    out.push_str(&render_update_field_setters(&db_fields, &col_ident));
-    if !localized_fields.is_empty() {
-        out.push_str(&render_localized_setters(&localized_fields, cfgs));
-    }
-    if has_meta {
-        out.push_str(&render_meta_setters(&meta_fields));
-    }
-    if has_attachments {
-        out.push_str(&render_update_attachment_setters(
-            &single_attachments,
-            &multi_attachments,
-        ));
-    }
-
-    for f in &db_fields {
-        let fn_name = format!("where_{}", to_snake(&f.name));
-        writeln!(
-            out,
-            "    pub fn {fn_name}(mut self, op: Op, val: {typ}) -> Self {{",
-            typ = f.ty
-        )
-        .unwrap();
-        writeln!(out, "        let idx = self.state.where_binds.len() + 1;").unwrap();
-        writeln!(
-            out,
-            "        self.state.where_sql.push(format!(\"{{}} {{}} ${{}}\", {col_ident}::{}.as_sql(), op.as_sql(), idx));",
-            to_title_case(&f.name)
-        )
-        .unwrap();
-        writeln!(out, "        self.state.where_binds.push(val.into());").unwrap();
-        writeln!(out, "        self").unwrap();
-        writeln!(out, "    }}").unwrap();
-    }
-
-    writeln!(
-        out,
-        "    pub fn where_col<T: Into<BindValue>>(mut self, col: {col_ident}, op: Op, val: T) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        let idx = self.state.where_binds.len() + 1;").unwrap();
-    writeln!(
-        out,
-        "        self.state.where_sql.push(format!(\"{{}} {{}} ${{}}\", col.as_sql(), op.as_sql(), idx));"
-    )
-    .unwrap();
-    writeln!(out, "        self.state.where_binds.push(val.into());").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    fn where_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {{"
-    )
-    .unwrap();
-    writeln!(out, "        let mut clause = clause.into();").unwrap();
-    writeln!(
-        out,
-        "        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut idx = self.state.where_binds.len() + 1;"
-    )
-    .unwrap();
-    writeln!(out, "        while let Some(pos) = clause.find('?') {{").unwrap();
-    writeln!(out, "            let ph = format!(\"${{}}\", idx);").unwrap();
-    writeln!(out, "            clause.replace_range(pos..pos + 1, &ph);").unwrap();
-    writeln!(out, "            idx += 1;").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        self.state.where_sql.push(clause);").unwrap();
-    writeln!(out, "        self.state.where_binds.extend(incoming);").unwrap();
-    writeln!(out, "        self").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    writeln!(
-        out,
-        "    fn to_update_changes(&self) -> Result<{update_changes_struct_ident}> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let mut changes = {update_changes_struct_ident}::default();"
-    )
-    .unwrap();
-    writeln!(out, "        for ((col, bind), mode) in self.state.set_cols.iter().zip(self.state.set_binds.iter()).zip(self.state.set_modes.iter()) {{").unwrap();
-    writeln!(out, "            match *col {{").unwrap();
-    for f in &db_fields {
-        let decode_expr = render_bind_decode_expr(&f.ty, "bind", &enum_specs);
-        writeln!(out, "                \"{}\" => {{", f.name).unwrap();
-        writeln!(out, "                    let value = {decode_expr};").unwrap();
-        writeln!(
-            out,
-            "                    changes.{} = Some(match mode {{",
-            f.name
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                        SetMode::Assign => FieldChange::Assign(value),"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                        SetMode::Increment => FieldChange::Increment(value),"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                        SetMode::Decrement => FieldChange::Decrement(value),"
-        )
-        .unwrap();
-        writeln!(out, "                    }});").unwrap();
-        writeln!(out, "                }}").unwrap();
-    }
-    writeln!(out, "                _ => {{}}").unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "        Ok(changes)").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    if emit_hooks {
-        writeln!(out).unwrap();
-        writeln!(
-            out,
-            "    fn apply_update_overrides(mut state: PatchState<'_>, overrides: serde_json::Value) -> Result<PatchState<'_>> {{"
-        )
-        .unwrap();
-        writeln!(out, "        let map = overrides.as_object()").unwrap();
-        writeln!(
-            out,
-            "            .ok_or_else(|| anyhow::anyhow!(\"observer overrides must be a JSON object\"))?;"
-        )
-        .unwrap();
-        writeln!(out, "        for (key, val) in map {{").unwrap();
-        writeln!(out, "            match key.as_str() {{").unwrap();
-        for f in &db_fields {
-            let deser_ty = json_deser_type_for_field(&f.ty, &enum_specs);
-            writeln!(out, "                \"{}\" => {{", f.name).unwrap();
-            writeln!(
-                out,
-                "                    let v: {deser_ty} = serde_json::from_value(val.clone())?;"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "                    state = state.assign_col(\"{}\", v.into());",
-                f.name
-            )
-            .unwrap();
-            writeln!(out, "                }}").unwrap();
-        }
-        writeln!(
-            out,
-            "                other => anyhow::bail!(\"unknown column '{{}}' in observer update overrides\", other),"
-        )
-        .unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-        writeln!(out, "        Ok(state)").unwrap();
-        writeln!(out, "    }}").unwrap();
-    }
-
-    let update_builder_methods_section = out;
-    let mut out = String::new();
-
-    writeln!(out, "    pub async fn save(self) -> Result<u64> {{").unwrap();
-    writeln!(
-        out,
-        "        if self.state.set_cols.is_empty() {{ anyhow::bail!(\"update: no columns set\"); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if self.state.where_sql.is_empty() {{ anyhow::bail!(\"update: no conditions set\"); }}"
-    )
-    .unwrap();
-    if emit_hooks {
-        writeln!(
-            out,
-            "        let observer_changes = if try_get_observer().is_some() {{"
-        )
-        .unwrap();
-        writeln!(out, "            Some(self.to_update_changes()?)").unwrap();
-        writeln!(out, "        }} else {{").unwrap();
-        writeln!(out, "            None").unwrap();
-        writeln!(out, "        }};").unwrap();
-    }
-    writeln!(out, "        let db_conn = self.state.db.clone();").unwrap();
-    writeln!(out, "        match db_conn {{").unwrap();
-    writeln!(out, "            DbConn::Pool(pool) => {{").unwrap();
-    writeln!(out, "                let tx = pool.begin().await?;").unwrap();
-    writeln!(
-        out,
-        "                let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));"
-    )
-    .unwrap();
-    writeln!(out, "                let affected = {{").unwrap();
-    writeln!(
-        out,
-        "                    let db = DbConn::tx(tx_lock.clone());"
-    )
-    .unwrap();
-    if emit_hooks {
-        writeln!(
-            out,
-            "                    self.save_with_db(db, observer_changes.clone()).await?"
-        )
-        .unwrap();
-    } else {
-        writeln!(
-            out,
-            "                    self.save_with_db(db, None).await?"
-        )
-        .unwrap();
-    }
-    writeln!(out, "                }};").unwrap();
-    writeln!(
-        out,
-        "                let tx = std::sync::Arc::try_unwrap(tx_lock)"
-    )
-    .unwrap();
-    writeln!(out, "                    .map_err(|_| anyhow::anyhow!(\"transaction scope still has active handles\"))?")
-        .unwrap();
-    writeln!(out, "                    .into_inner();").unwrap();
-    writeln!(out, "                tx.commit().await?;").unwrap();
-    writeln!(out, "                Ok(affected)").unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(
-        out,
-        "            DbConn::Tx(_) => {tx_body},",
-        tx_body = if emit_hooks {
-            "self.save_with_db(db_conn, observer_changes).await"
-        } else {
-            "self.save_with_db(db_conn, None).await"
-        }
-    )
-    .unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out).unwrap();
-    writeln!(
-        out,
-        "    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<{update_changes_struct_ident}>) -> Result<u64> {{"
-    )
-    .unwrap();
-    writeln!(out, "        let mut state = self.state;").unwrap();
-    if has_updated_at {
-        writeln!(out, "        if HAS_UPDATED_AT && !state.set_cols.contains(&{col_ident}::UpdatedAt.as_sql()) {{").unwrap();
-        writeln!(
-            out,
-            "            let now = time::OffsetDateTime::now_utc();"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "            state = state.assign_col({col_ident}::UpdatedAt.as_sql(), now.into());"
-        )
-        .unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(out, "        // find target ids for localized updates").unwrap();
-    writeln!(out, "        let select_sql = format!(\"SELECT {pk} FROM {table} WHERE {{}}\", state.where_sql.join(\" AND \"));").unwrap();
-    writeln!(
-        out,
-        "        let mut select_q = sqlx::query_scalar::<_, {parent_pk_ty}>(&select_sql);"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        for b in &state.where_binds {{ select_q = bind_scalar(select_q, b.clone()); }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let target_ids = db.fetch_all_scalar(select_q).await?;"
-    )
-    .unwrap();
-    if emit_hooks {
-        writeln!(
-            out,
-            "        let __observer_active = try_get_observer().is_some();"
-        )
-        .unwrap();
-        writeln!(out, "        let __old_rows: Vec<{row_ident}> = if __observer_active && !target_ids.is_empty() {{").unwrap();
-        writeln!(out, "            let phs: Vec<String> = (1..=target_ids.len()).map(|i| format!(\"${{}}\", i)).collect();").unwrap();
-        writeln!(out, "            let fetch_sql = format!(\"SELECT * FROM {table} WHERE {pk} IN ({{}})\", phs.join(\", \"));").unwrap();
-        writeln!(
-            out,
-            "            let mut fq = sqlx::query_as::<_, {row_ident}>(&fetch_sql);"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "            for id in &target_ids {{ fq = fq.bind(id); }}"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "            let rows: Vec<{row_ident}> = db.fetch_all(fq).await.unwrap_or_default();"
-        )
-        .unwrap();
-        writeln!(out, "            rows").unwrap();
-        writeln!(out, "        }} else {{").unwrap();
-        writeln!(out, "            Vec::new()").unwrap();
-        writeln!(out, "        }};").unwrap();
-        writeln!(out, "        if !__old_rows.is_empty() {{").unwrap();
-        writeln!(
-            out,
-            "            if let Some(observer) = try_get_observer() {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                if let Some(changes) = observer_changes.as_ref() {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    let changes_data = serde_json::to_value(changes)?;"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    let old_data = serde_json::to_value(&__old_rows)?;"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    let event = ModelEvent {{ model: \"{model_snake}\", table: \"{table}\", record_key: None }};"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    let action = observer.on_updating(&event, &old_data, &changes_data).await?;"
-        )
-        .unwrap();
-        writeln!(out, "                    match action {{").unwrap();
-        writeln!(
-            out,
-            "                        ObserverAction::Prevent(err) => return Err(err),"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                        ObserverAction::Modify(overrides) => {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                            state = Self::apply_update_overrides(state, overrides)?;"
-        )
-        .unwrap();
-        writeln!(out, "                        }}").unwrap();
-        writeln!(
-            out,
-            "                        ObserverAction::Continue => {{}}"
-        )
-        .unwrap();
-        writeln!(out, "                    }}").unwrap();
-        writeln!(out, "                }}").unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(
-        out,
-        "        let (sql, all_binds) = state.build_update_sql();"
-    )
-    .unwrap();
-    writeln!(out, "        let set_binds = &state.set_binds;").unwrap();
-    writeln!(out, "        let mut q = sqlx::query(&sql);").unwrap();
-    // touch parent timestamps
-    if !touch_targets.is_empty() {
-        writeln!(out, "        if !target_ids.is_empty() {{").unwrap();
-        writeln!(out, "            fn to_params(len: usize) -> String {{ (1..=len).map(|i| format!(\"${{}}\", i)).collect::<Vec<_>>().join(\", \") }}").unwrap();
-        for (fk, target_snake, target_title, target_pk, target_pk_ty) in &touch_targets {
-            writeln!(
-                out,
-                "            let placeholders = to_params(target_ids.len());"
-            )
-            .unwrap();
-            writeln!(out, "            let sql = format!(\"SELECT DISTINCT {} FROM {} WHERE {{}} IN ({{}})\", \"{pk}\", placeholders);", fk, table).unwrap();
-            writeln!(
-                out,
-                "            let mut q = sqlx::query_scalar::<_, {target_pk_ty}>(&sql);"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "            for id in &target_ids {{ q = bind_scalar(q, id.clone()); }}"
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "            let parent_ids: Vec<{target_pk_ty}> = db.fetch_all_scalar(q).await?;"
-            )
-            .unwrap();
-            writeln!(out, "            for pid in parent_ids {{").unwrap();
-            writeln!(
-                out,
-                "                crate::generated::models::{}::{}::new(db.clone()).update()",
-                target_snake, target_title
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "                    .where_{target_pk}(Op::Eq, pid)",
-                target_pk = target_pk
-            )
-            .unwrap();
-            writeln!(
-                out,
-                "                    .set_updated_at(time::OffsetDateTime::now_utc())"
-            )
-            .unwrap();
-            writeln!(out, "                    .save().await?;").unwrap();
-            writeln!(out, "            }}").unwrap();
-        }
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(out, "        let __profiler_binds = if is_sql_profiler_enabled() {{ all_binds.iter().map(|b| format!(\"{{}}\", b)).collect::<Vec<_>>().join(\", \") }} else {{ String::new() }};").unwrap();
-    out.push_str(&render_profiler_start(skip_profiler));
-    writeln!(
-        out,
-        "        for b in &all_binds {{ q = bind_query(q, b.clone()); }}"
-    )
-    .unwrap();
-    writeln!(out, "        let res = db.execute(q).await?;").unwrap();
-    out.push_str(&render_profiler_log(
-        &table,
-        "UPDATE",
-        "&sql",
-        "&__profiler_binds",
-        skip_profiler,
-    ));
-    if !localized_fields.is_empty() {
-        writeln!(out, "        if res.rows_affected() > 0 && !self.translations.is_empty() && !target_ids.is_empty() {{").unwrap();
-        writeln!(
-            out,
-            "            let supported = localized::SUPPORTED_LOCALES;"
-        )
-        .unwrap();
-        for f in &localized_fields {
-            writeln!(
-                out,
-                "            if let Some(map) = self.translations.get(\"{f}\") {{"
-            )
-            .unwrap();
-            writeln!(out, "                let mut filtered = HashMap::new();").unwrap();
-            writeln!(out, "                for (loc, val) in map {{").unwrap();
-            writeln!(out, "                    if supported.contains(&loc.as_str()) {{ filtered.insert(loc.clone(), val.clone()); }}").unwrap();
-            writeln!(out, "                }}").unwrap();
-            writeln!(out, "                if !filtered.is_empty() {{").unwrap();
-            writeln!(out, "                    for id in &target_ids {{").unwrap();
-            writeln!(out, "                        localized::upsert_localized_many(db.clone(), localized::{}_OWNER_TYPE, id.clone(), \"{f}\", &filtered).await?;", model_snake.to_uppercase()).unwrap();
-            writeln!(out, "                    }}").unwrap();
-            writeln!(out, "                }}").unwrap();
-            writeln!(out, "            }}").unwrap();
-        }
-        writeln!(out, "        }}").unwrap();
-    }
-    if has_meta {
-        writeln!(out, "        if res.rows_affected() > 0 && !self.meta.is_empty() && !target_ids.is_empty() {{").unwrap();
-        writeln!(out, "            for id in &target_ids {{").unwrap();
-        writeln!(out, "                localized::upsert_meta_many(db.clone(), localized::{model_snake_upper}_OWNER_TYPE, id.clone(), &self.meta).await?;", model_snake_upper = model_snake.to_uppercase()).unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    if has_attachments {
-        writeln!(
-            out,
-            "        if res.rows_affected() > 0 && !target_ids.is_empty() {{"
-        )
-        .unwrap();
-        writeln!(out, "            for id in &target_ids {{").unwrap();
-        writeln!(
-            out,
-            "                for field in &self.attachments_clear_single {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    localized::clear_attachment_field(db.clone(), localized::{}_OWNER_TYPE, id.clone(), field).await?;",
-            model_snake_upper
-        )
-        .unwrap();
-        writeln!(out, "                }}").unwrap();
-        writeln!(
-            out,
-            "                for (field, att) in &self.attachments_single {{"
-        )
-        .unwrap();
-        writeln!(out, "                    localized::replace_single_attachment(db.clone(), localized::{}_OWNER_TYPE, id.clone(), field, att).await?;", model_snake_upper).unwrap();
-        writeln!(out, "                }}").unwrap();
-        writeln!(
-            out,
-            "                for (field, list) in &self.attachments_multi {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                    localized::add_attachments(db.clone(), localized::{}_OWNER_TYPE, id.clone(), field, list).await?;",
-            model_snake_upper
-        )
-        .unwrap();
-        writeln!(out, "                }}").unwrap();
-        writeln!(
-            out,
-            "                for (field, ids) in &self.attachments_delete_multi {{"
-        )
-        .unwrap();
-        writeln!(out, "                    localized::delete_attachment_ids(db.clone(), localized::{}_OWNER_TYPE, id.clone(), field, ids).await?;", model_snake_upper).unwrap();
-        writeln!(out, "                }}").unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    if emit_hooks {
-        let pk_snake = to_snake(&pk);
-        writeln!(
-            out,
-            "        if !__old_rows.is_empty() && res.rows_affected() > 0 {{"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "            if let Some(observer) = try_get_observer() {{"
-        )
-        .unwrap();
-        writeln!(out, "                for old_row in &__old_rows {{").unwrap();
-        writeln!(out, "                    let fetch_sql = format!(\"SELECT * FROM {table} WHERE {pk} = $1\");").unwrap();
-        writeln!(out, "                    match db.fetch_optional(sqlx::query_as::<_, {row_ident}>(&fetch_sql).bind(old_row.{pk_snake}.clone())).await {{").unwrap();
-        writeln!(out, "                        Ok(Some(new_row)) => {{").unwrap();
-        writeln!(out, "                            match (serde_json::to_value(old_row), serde_json::to_value(&new_row)) {{").unwrap();
-        writeln!(
-            out,
-            "                                (Ok(old_data), Ok(new_data)) => {{"
-        )
-        .unwrap();
-        writeln!(out, "                                    let event = ModelEvent {{ model: \"{model_snake}\", table: \"{table}\", record_key: Some(format!(\"{{}}\", old_row.{pk_snake})) }};").unwrap();
-        writeln!(out, "                                    if let Err(err) = observer.on_updated(&event, &old_data, &new_data).await {{").unwrap();
-        writeln!(out, "                                        log_observer_error(\"updated\", \"{model_snake}\", &err);").unwrap();
-        writeln!(out, "                                    }}").unwrap();
-        writeln!(out, "                                }}").unwrap();
-        writeln!(out, "                                (Err(err), _) | (_, Err(err)) => log_observer_error(\"updated\", \"{model_snake}\", &err),").unwrap();
-        writeln!(out, "                            }}").unwrap();
-        writeln!(out, "                        }}").unwrap();
-        writeln!(out, "                        Ok(None) => {{}}").unwrap();
-        writeln!(out, "                        Err(err) => log_observer_error(\"updated\", \"{model_snake}\", &err),").unwrap();
-        writeln!(out, "                    }}").unwrap();
-        writeln!(out, "                }}").unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-    }
-    writeln!(out, "        Ok(res.rows_affected())").unwrap();
-    writeln!(out, "    }}").unwrap();
-
-    // returning_row/returning_view intentionally omitted.
-    // save() is the single mutation path with side-effect parity and atomic behavior.
-
-    writeln!(out, "}}").unwrap();
-
-    let update_save_methods_section = out;
+    let update_struct_section = String::new();
+    let update_builder_methods_section = String::new();
+    let update_save_methods_section = String::new();
     let unsafe_update_section = String::new();
     let mut update_context = TemplateContext::new();
     update_context
@@ -4569,7 +2594,9 @@ fn render_model(
             }
         };
 
-        writeln!(out, "pub struct {table_adapter_ident};").unwrap();
+        writeln!(out, "pub struct {table_adapter_ident} {{").unwrap();
+        writeln!(out, "    db: sqlx::PgPool,").unwrap();
+        writeln!(out, "}}").unwrap();
         writeln!(out, "impl {table_adapter_ident} {{").unwrap();
         writeln!(
             out,
@@ -5628,7 +3655,7 @@ fn render_model(
     .unwrap();
         writeln!(
             out,
-            "        Box::pin(async move {{ query.count().await }})"
+            "        let db = self.db.clone(); Box::pin(async move {{ query.count(&db).await }})"
         )
         .unwrap();
         writeln!(out, "    }}").unwrap();
@@ -5640,7 +3667,7 @@ fn render_model(
     .unwrap();
         writeln!(
             out,
-            "        Box::pin(async move {{ Ok(query.paginate(page, per_page).await?.data) }})"
+            "        let db = self.db.clone(); Box::pin(async move {{ Ok(query.paginate(&db, page, per_page).await?.data) }})"
         )
         .unwrap();
         writeln!(out, "    }}").unwrap();
@@ -5843,14 +3870,14 @@ fn render_model(
         .unwrap();
         writeln!(out, "    pub fn new(db: sqlx::PgPool) -> Self {{").unwrap();
         writeln!(out, "        Self {{").unwrap();
-        writeln!(out, "            db,").unwrap();
+        writeln!(out, "            db: db.clone(),").unwrap();
         writeln!(out, "            hooks: {default_data_table_hooks_ident},").unwrap();
         writeln!(
             out,
             "            config: {data_table_config_ident}::default(),"
         )
         .unwrap();
-        writeln!(out, "            adapter: {table_adapter_ident},").unwrap();
+        writeln!(out, "            adapter: {table_adapter_ident} {{ db }},").unwrap();
         writeln!(out, "        }}").unwrap();
         writeln!(out, "    }}").unwrap();
         writeln!(out, "}}").unwrap();
@@ -5866,10 +3893,14 @@ fn render_model(
     )
     .unwrap();
         writeln!(out, "        {data_table_ident} {{").unwrap();
-        writeln!(out, "            db: self.db,").unwrap();
+        writeln!(out, "            db: self.db.clone(),").unwrap();
         writeln!(out, "            hooks,").unwrap();
         writeln!(out, "            config: self.config,").unwrap();
-        writeln!(out, "            adapter: {table_adapter_ident},").unwrap();
+        writeln!(
+            out,
+            "            adapter: {table_adapter_ident} {{ db: self.db }},"
+        )
+        .unwrap();
         writeln!(out, "        }}").unwrap();
         writeln!(out, "    }}").unwrap();
         writeln!(
@@ -5900,7 +3931,7 @@ fn render_model(
     .unwrap();
         writeln!(
             out,
-            "        self.hooks.scope({model_title}Model::query(&self.db), input, ctx)"
+            "        self.hooks.scope({model_title}Model::query(), input, ctx)"
         )
         .unwrap();
         writeln!(out, "    }}").unwrap();
@@ -6003,45 +4034,45 @@ fn render_model(
     writeln!(out, "    pub const PK: &'static str = \"{pk}\";").unwrap();
     writeln!(
         out,
-        "    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, {model_title}Model> {{"
+        "    pub fn query<'db>() -> Query<'db, {model_title}Model> {{"
     )
     .unwrap();
-    writeln!(out, "        Query::new(db)").unwrap();
+    writeln!(out, "        Query::new()").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, {model_title}Model> {{"
+        "    pub fn query_with_base_url<'db>(base_url: Option<String>) -> Query<'db, {model_title}Model> {{"
     )
     .unwrap();
-    writeln!(out, "        Query::new_with_base_url(db, base_url)").unwrap();
+    writeln!(out, "        Query::new_with_base_url(base_url)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, {model_title}Model> {{"
+        "    pub fn create<'db>() -> Create<'db, {model_title}Model> {{"
     )
     .unwrap();
-    writeln!(out, "        Create::new(db)").unwrap();
+    writeln!(out, "        Create::new()").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, {model_title}Model> {{"
+        "    pub fn create_with_base_url<'db>(base_url: Option<String>) -> Create<'db, {model_title}Model> {{"
     )
     .unwrap();
-    writeln!(out, "        Create::new_with_base_url(db, base_url)").unwrap();
+    writeln!(out, "        Create::new_with_base_url(base_url)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, {model_title}Model> {{"
+        "    pub fn patch<'db>() -> Patch<'db, {model_title}Model> {{"
     )
     .unwrap();
-    writeln!(out, "        Patch::new(db)").unwrap();
+    writeln!(out, "        Patch::new()").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, {model_title}Model> {{"
+        "    pub fn patch_with_base_url<'db>(base_url: Option<String>) -> Patch<'db, {model_title}Model> {{"
     )
     .unwrap();
-    writeln!(out, "        Patch::new_with_base_url(db, base_url)").unwrap();
+    writeln!(out, "        Patch::new_with_base_url(base_url)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
@@ -6050,7 +4081,7 @@ fn render_model(
     .unwrap();
     writeln!(
         out,
-        "        Query::<{model_title}Model>::new(db).find(id).await"
+        "        Query::<{model_title}Model>::new().find(db, id).await"
     )
     .unwrap();
     writeln!(out, "    }}").unwrap();
@@ -6243,119 +4274,71 @@ fn render_model(
     }
     writeln!(out, "    const HAS_CREATED_AT: bool = {has_created_at};").unwrap();
     writeln!(out, "    const HAS_UPDATED_AT: bool = {has_updated_at};").unwrap();
+    writeln!(out, "    const PROFILE_QUERIES: bool = {};", !skip_profiler).unwrap();
+    writeln!(out, "    const OBSERVE_HOOKS: bool = {emit_hooks};").unwrap();
+    writeln!(out, "}}\n").unwrap();
     writeln!(
         out,
-        "    fn query_all<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {{"
+        "impl core_db::common::model_api::ChunkModel for {model_title}Model {{"
     )
     .unwrap();
-    writeln!(out, "        Box::pin(async move {{").unwrap();
-    out.push_str(&render_query_all_body(
-        &model_title,
-        &row_ident,
-        has_soft_delete,
-        &table,
-        &model_snake,
-        &pk,
-        &parent_pk_ty,
-        &relations,
-        &localized_fields,
-        has_meta,
-        has_attachments,
-        skip_profiler,
-    ));
-    writeln!(out, "        }})").unwrap();
+    writeln!(
+        out,
+        "    fn record_pk(record: &Self::Record) -> Self::Pk {{"
+    )
+    .unwrap();
+    writeln!(out, "        record.{pk}.clone()").unwrap();
     writeln!(out, "    }}").unwrap();
-    // query_first: limit(1) + query_all
+    writeln!(out, "}}\n").unwrap();
     writeln!(
         out,
-        "    fn query_first<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {{"
+        "impl core_db::common::model_api::DeleteModel for {model_title}Model {{"
     )
     .unwrap();
-    writeln!(out, "        Box::pin(async move {{").unwrap();
-    writeln!(
-        out,
-        "            let mut v = Self::query_all(state.limit(1)).await?;"
-    )
-    .unwrap();
-    writeln!(out, "            Ok(v.pop())").unwrap();
-    writeln!(out, "        }})").unwrap();
+    writeln!(out, "    fn row_pk(row: &Self::Row) -> Self::Pk {{").unwrap();
+    writeln!(out, "        row.{pk}.clone()").unwrap();
     writeln!(out, "    }}").unwrap();
-    // query_find: where_col_str + query_first
-    writeln!(
-        out,
-        "    fn query_find<'db>(state: QueryState<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        Box::pin(async move {{ Self::query_first(state.where_col_str(\"{pk}\", Op::Eq, id.into())).await }})"
-    )
-    .unwrap();
+    writeln!(out, "    fn row_pk_text(row: &Self::Row) -> String {{").unwrap();
+    writeln!(out, "        row.{pk}.to_string()").unwrap();
     writeln!(out, "    }}").unwrap();
-    // query_count: use to_count_sql
     writeln!(
         out,
-        "    fn query_count<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {{"
+        "    fn delete_override_update<'db>(db: DbConn<'db>, ids: Vec<Self::Pk>, overrides: serde_json::Value) -> core_db::common::model_api::BoxModelFuture<'db, u64> {{"
     )
     .unwrap();
-    writeln!(out, "        Box::pin(async move {{").unwrap();
-    out.push_str(&render_query_count_body(
-        has_soft_delete,
-        &table,
-        skip_profiler,
-    ));
-    writeln!(out, "        }})").unwrap();
-    writeln!(out, "    }}").unwrap();
-    // query_delete: inline with observer hooks and soft-delete
-    writeln!(
-        out,
-        "    fn query_delete<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {{"
-    )
-    .unwrap();
-    writeln!(out, "        Box::pin(async move {{").unwrap();
-    out.push_str(&render_query_delete_body(
-        &table,
-        &model_snake,
-        &col_ident,
-        has_soft_delete,
-        emit_hooks,
-        &row_ident,
-        &to_snake(&pk),
-        skip_profiler,
-        &parent_pk_ty,
-    ));
-    writeln!(out, "        }})").unwrap();
-    writeln!(out, "    }}").unwrap();
-    // query_paginate: inline using to_count_sql + to_select_sql
-    writeln!(
-        out,
-        "    fn query_paginate<'db>(state: QueryState<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {{"
-    )
-    .unwrap();
-    writeln!(out, "        Box::pin(async move {{").unwrap();
-    out.push_str(&render_query_paginate_body(
-        &model_title,
-        &row_ident,
-        has_soft_delete,
-        &table,
-        &model_snake,
-        &pk,
-        &parent_pk_ty,
-        &relations,
-        &localized_fields,
-        has_meta,
-        has_attachments,
-        skip_profiler,
-    ));
-    writeln!(out, "        }})").unwrap();
+    if emit_hooks {
+        writeln!(
+            out,
+            "        Box::pin(async move {{ {model_title}Model::convert_delete_to_update(&db, &ids, overrides).await }})"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            out,
+            "        Box::pin(async move {{ let _ = (db, ids, overrides); anyhow::bail!(\"delete observer overrides are not enabled for {{}}\", <Self as core_db::common::model_api::ModelDef>::TABLE) }})"
+        )
+        .unwrap();
+    }
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}\n").unwrap();
     out.push_str(&render_create_model_impl(
         &model_title,
-        &insert_ident,
-        &query_ident,
         &pk,
         &table,
+        &db_fields,
+        &enum_specs,
+        use_snowflake_id,
+    ));
+    out.push_str(&render_feature_persistence_model_impl(
+        &model_title,
+        &model_snake,
+        &parent_pk_ty,
+        &localized_fields,
+        has_meta,
+        has_attachments,
+        &touch_targets,
+        &table,
+        &pk,
     ));
     out.push_str(&render_create_field_impl(
         &model_title,
@@ -6365,13 +4348,15 @@ fn render_model(
     out.push_str(&render_create_conflict_field_impl(&model_title, &col_ident));
     out.push_str(&render_patch_model_impl(
         &model_title,
-        &query_ident,
-        &update_ident,
-        &col_ident,
-        &pk_col_variant,
-        &parent_pk_ty,
+        &model_snake,
+        &db_fields,
+        &enum_specs,
+        &localized_fields,
+        has_meta,
+        has_attachments,
+        &touch_targets,
         &table,
-        has_soft_delete,
+        &pk,
     ));
     out.push_str(&render_patch_assign_field_impl(
         &model_title,
@@ -6455,43 +4440,81 @@ fn render_model(
         let model_query_ty = "QueryState<'db>".to_string();
         for (rel_idx, rel) in relations.iter().enumerate() {
             let rel_snake = to_snake(&rel.name);
+            let rel_name = to_snake(&rel.name);
+            let target_table = rel.target_table.clone();
+            let target_pk = rel.target_pk.clone();
+            let foreign_key = rel.foreign_key.clone();
             let target_model_title = to_title_case(&rel.target_model);
             let target_record_ident = format!("{target_model_title}Record");
+            let target_soft_delete = schema
+                .models
+                .get(&rel.target_model)
+                .map(|m| m.soft_delete)
+                .unwrap_or(false);
+            let local_key = rel.local_key.clone();
+            let scope_query_expr = if let Some(scope_name) = rel.scope.as_ref() {
+                format!(
+                    "{target_model_title}Model::{scope_name}({target_model_title}Model::query_with_base_url(state.base_url.clone()))"
+                )
+            } else {
+                format!("{target_model_title}Model::query_with_base_url(state.base_url.clone())")
+            };
             let rel_ty = match rel.kind {
-                RelationKind::BelongsTo => {
+                RelationKind::BelongsTo | RelationKind::HasOne => {
                     format!("OneRelation<{model_title}Model, {target_record_ident}, {rel_idx}>")
                 }
                 RelationKind::HasMany => {
                     format!("ManyRelation<{model_title}Model, {target_record_ident}, {rel_idx}>")
                 }
             };
+            let rel_kind = match rel.kind {
+                RelationKind::BelongsTo => "belongs_to",
+                RelationKind::HasMany => "has_many",
+                RelationKind::HasOne => "has_one",
+            };
             writeln!(
                 out,
                 "impl core_db::common::model_api::IncludeRelation<{model_title}Model> for {rel_ty} {{"
             )
             .unwrap();
-            writeln!(
-                out,
-                "    fn include<'db>(relation: Self, mut state: {model_query_ty}) -> {model_query_ty} {{"
-            )
-            .unwrap();
-            let rel_name = to_snake(&rel.name);
-            writeln!(out, "        let list = state.with_relations.get_or_insert_with(Vec::new);").unwrap();
-            writeln!(out, "        if !list.iter().any(|s| s.name == \"{rel_name}\") {{ list.push(core_db::common::model_api::WithRelationSpec {{ name: \"{rel_name}\", extra_where: None, extra_binds: vec![], nested: vec![] }}); }}").unwrap();
-            writeln!(out, "        state").unwrap();
-            writeln!(out, "    }}").unwrap();
+            if let Some(scope_name) = rel.scope.as_ref() {
+                writeln!(
+                    out,
+                    "    fn load_spec<'db>(_relation: Self, base_url: Option<String>) -> core_db::common::model_api::WithRelationSpec {{"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "        let scoped = {target_model_title}Model::{scope_name}({target_model_title}Model::query_with_base_url(base_url));"
+                )
+                .unwrap();
+                writeln!(out, "        let inner = scoped.into_inner();").unwrap();
+                writeln!(
+                    out,
+                    "        let selects = if inner.selects == core_db::common::model_api::parse_select_list(<{target_model_title}Model as core_db::common::model_api::QueryModel>::DEFAULT_SELECT) {{ Vec::new() }} else {{ inner.selects.clone() }};"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "        core_db::common::model_api::WithRelationSpec {{ name: \"{rel_name}\", kind: \"{rel_kind}\", target_table: \"{target_table}\", target_pk: \"{target_pk}\", foreign_key: \"{foreign_key}\", local_key: \"{local_key}\", has_soft_delete: {target_soft_delete}, selects, filters: inner.filters, orders: inner.orders, limit: inner.limit, offset: inner.offset, with_deleted: inner.with_deleted, only_deleted: inner.only_deleted, nested: vec![], counts: inner.count_relations, aggregates: inner.aggregate_relations }}"
+                )
+                .unwrap();
+                writeln!(out, "    }}").unwrap();
+            } else {
+                writeln!(
+                    out,
+                    "    fn load_spec<'db>(_relation: Self, _base_url: Option<String>) -> core_db::common::model_api::WithRelationSpec {{"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "        core_db::common::model_api::WithRelationSpec {{ name: \"{rel_name}\", kind: \"{rel_kind}\", target_table: \"{target_table}\", target_pk: \"{target_pk}\", foreign_key: \"{foreign_key}\", local_key: \"{local_key}\", has_soft_delete: {target_soft_delete}, selects: vec![], filters: vec![], orders: vec![], limit: None, offset: None, with_deleted: false, only_deleted: false, nested: vec![], counts: vec![], aggregates: vec![] }}"
+                )
+                .unwrap();
+                writeln!(out, "    }}").unwrap();
+            }
             writeln!(out, "}}\n").unwrap();
 
-            let link_clause = match rel.kind {
-                RelationKind::HasMany => format!(
-                    "{}.{} = {}.{}",
-                    rel.target_table, rel.foreign_key, table, rel.local_key
-                ),
-                RelationKind::BelongsTo => format!(
-                    "{}.{} = {}.{}",
-                    rel.target_table, rel.target_pk, table, rel.foreign_key
-                ),
-            };
             writeln!(
                 out,
                 "impl core_db::common::model_api::WhereHasRelation<{model_title}Model> for {rel_ty} {{"
@@ -6510,38 +4533,28 @@ fn render_model(
             )
             .unwrap();
             writeln!(out, "    {{").unwrap();
-            writeln!(out, "        let start_idx = state.binds.len() + 1;").unwrap();
+            writeln!(out, "        let scoped = scope({scope_query_expr});").unwrap();
             writeln!(
                 out,
-                "        let scoped = scope({target_model_title}Model::query_with_base_url(state.db.clone(), state.base_url.clone()));"
+                "        let relation_spec = <Self as core_db::common::model_api::IncludeRelation<{model_title}Model>>::load_spec(_relation, state.base_url.clone());"
             )
             .unwrap();
             writeln!(
                 out,
-                "        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();"
+                "        match core_db::common::model_api::relation_exists_from_query_state(relation_spec, scoped.into_inner(), <{target_model_title}Model as core_db::common::model_api::QueryModel>::DEFAULT_SELECT) {{"
             )
             .unwrap();
             writeln!(
                 out,
-                "        sub_where.insert(0, \"{link_clause}\".to_string());"
+                "            Ok(node) => state.push_relation_exists(core_db::common::model_api::ExistenceBoolean::And, node),"
             )
             .unwrap();
             writeln!(
                 out,
-                "        let mut clause = String::from(\"EXISTS (SELECT 1 FROM {rel_table} WHERE \");",
-                rel_table = rel.target_table
+                "            Err(err) => state.defer_error(err.to_string()),"
             )
             .unwrap();
-            writeln!(out, "        clause.push_str(&sub_where.join(\" AND \"));").unwrap();
-            writeln!(out, "        clause.push(')');").unwrap();
-            writeln!(
-                out,
-                "        let clause = renumber_placeholders(&clause, start_idx);"
-            )
-            .unwrap();
-            writeln!(out, "        state.where_sql.push(clause);").unwrap();
-            writeln!(out, "        state.binds.extend(sub_binds);").unwrap();
-            writeln!(out, "        state").unwrap();
+            writeln!(out, "        }}").unwrap();
             writeln!(out, "    }}").unwrap();
             writeln!(
                 out,
@@ -6555,51 +4568,33 @@ fn render_model(
             )
             .unwrap();
             writeln!(out, "    {{").unwrap();
-            writeln!(out, "        let start_idx = state.binds.len() + 1;").unwrap();
+            writeln!(out, "        let scoped = scope({scope_query_expr});").unwrap();
             writeln!(
                 out,
-                "        let scoped = scope({target_model_title}Model::query_with_base_url(state.db.clone(), state.base_url.clone()));"
+                "        let relation_spec = <Self as core_db::common::model_api::IncludeRelation<{model_title}Model>>::load_spec(_relation, state.base_url.clone());"
             )
             .unwrap();
             writeln!(
                 out,
-                "        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();"
+                "        match core_db::common::model_api::relation_exists_from_query_state(relation_spec, scoped.into_inner(), <{target_model_title}Model as core_db::common::model_api::QueryModel>::DEFAULT_SELECT) {{"
             )
             .unwrap();
             writeln!(
                 out,
-                "        sub_where.insert(0, \"{link_clause}\".to_string());"
+                "            Ok(node) => state.push_relation_exists(core_db::common::model_api::ExistenceBoolean::Or, node),"
             )
             .unwrap();
             writeln!(
                 out,
-                "        let mut clause = String::from(\"EXISTS (SELECT 1 FROM {rel_table} WHERE \");",
-                rel_table = rel.target_table
+                "            Err(err) => state.defer_error(err.to_string()),"
             )
             .unwrap();
-            writeln!(out, "        clause.push_str(&sub_where.join(\" AND \"));").unwrap();
-            writeln!(out, "        clause.push(')');").unwrap();
-            writeln!(
-                out,
-                "        let clause = renumber_placeholders(&clause, start_idx);"
-            )
-            .unwrap();
-            writeln!(out, "        if let Some(last) = state.where_sql.pop() {{").unwrap();
-            writeln!(
-                out,
-                "            state.where_sql.push(format!(\"({{}} OR {{}})\", last, clause));"
-            )
-            .unwrap();
-            writeln!(out, "        }} else {{").unwrap();
-            writeln!(out, "            state.where_sql.push(clause);").unwrap();
             writeln!(out, "        }}").unwrap();
-            writeln!(out, "        state.binds.extend(sub_binds);").unwrap();
-            writeln!(out, "        state").unwrap();
             writeln!(out, "    }}").unwrap();
             writeln!(out, "}}\n").unwrap();
 
             match rel.kind {
-                RelationKind::BelongsTo => {
+                RelationKind::BelongsTo | RelationKind::HasOne => {
                     writeln!(
                         out,
                         "impl core_db::common::model_api::RecordOneRelation<{model_title}Model> for {rel_ty} {{"
@@ -6630,6 +4625,44 @@ fn render_model(
                     writeln!(out, "        &record.{rel_snake}").unwrap();
                     writeln!(out, "    }}").unwrap();
                     writeln!(out, "}}\n").unwrap();
+
+                    if let Some(scope_name) = rel.scope.as_ref() {
+                        writeln!(
+                            out,
+                            "impl core_db::common::model_api::CountRelation<{model_title}Model> for {rel_ty} {{"
+                        )
+                        .unwrap();
+                        writeln!(out, "    type TargetModel = {target_model_title}Model;").unwrap();
+                        writeln!(
+                            out,
+                            "    fn name(relation: Self) -> &'static str {{ relation.name() }}"
+                        )
+                        .unwrap();
+                        writeln!(
+                            out,
+                            "    fn spec<'db>(_relation: Self, base_url: Option<String>) -> core_db::common::model_api::CountRelationSpec {{ let scoped = {target_model_title}Model::{scope_name}({target_model_title}Model::query_with_base_url(base_url)); let inner = scoped.into_inner(); core_db::common::model_api::CountRelationSpec {{ name: \"{rel_name}\", target_table: \"{target_table}\", target_pk: \"{target_pk}\", foreign_key: \"{foreign_key}\", has_soft_delete: {target_soft_delete}, filters: inner.filters, with_deleted: inner.with_deleted, only_deleted: inner.only_deleted }} }}"
+                        )
+                        .unwrap();
+                        writeln!(out, "}}\n").unwrap();
+                    } else {
+                        writeln!(
+                            out,
+                            "impl core_db::common::model_api::CountRelation<{model_title}Model> for {rel_ty} {{"
+                        )
+                        .unwrap();
+                        writeln!(out, "    type TargetModel = {target_model_title}Model;").unwrap();
+                        writeln!(
+                            out,
+                            "    fn name(relation: Self) -> &'static str {{ relation.name() }}"
+                        )
+                        .unwrap();
+                        writeln!(
+                            out,
+                            "    fn spec<'db>(_relation: Self, _base_url: Option<String>) -> core_db::common::model_api::CountRelationSpec {{ core_db::common::model_api::CountRelationSpec {{ name: \"{rel_name}\", target_table: \"{target_table}\", target_pk: \"{target_pk}\", foreign_key: \"{foreign_key}\", has_soft_delete: {target_soft_delete}, filters: vec![], with_deleted: false, only_deleted: false }} }}"
+                        )
+                        .unwrap();
+                        writeln!(out, "}}\n").unwrap();
+                    }
                 }
             }
         }

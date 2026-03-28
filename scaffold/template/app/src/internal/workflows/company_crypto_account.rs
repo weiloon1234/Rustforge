@@ -23,9 +23,9 @@ pub async fn detail(
 }
 
 async fn validate_crypto_network(state: &AppApiState, network_id: i64) -> Result<(), AppError> {
-    let network = CryptoNetworkModel::query(DbConn::pool(&state.db))
+    let network = CryptoNetworkModel::query()
         .where_col(CryptoNetworkCol::ID, Op::Eq, network_id)
-        .first()
+        .first(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::BadRequest(t("Crypto network not found")))?;
@@ -45,7 +45,7 @@ pub async fn create(
     validate_crypto_network(state, network_id).await?;
 
     let now = OffsetDateTime::now_utc();
-    let row = CompanyCryptoAccountModel::create(DbConn::pool(&state.db))
+    let row = CompanyCryptoAccountModel::create()
         .set(CompanyCryptoAccountCol::CRYPTO_NETWORK_ID, network_id)
         .map_err(AppError::from)?
         .set(CompanyCryptoAccountCol::WALLET_ADDRESS, req.wallet_address)
@@ -60,7 +60,7 @@ pub async fn create(
         .map_err(AppError::from)?
         .set(CompanyCryptoAccountCol::UPDATED_AT, now)
         .map_err(AppError::from)?
-        .save()
+        .save(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 
@@ -75,7 +75,7 @@ pub async fn update(
     let network_id: i64 = req.crypto_network_id.into();
     validate_crypto_network(state, network_id).await?;
 
-    let affected = CompanyCryptoAccountModel::query(DbConn::pool(&state.db))
+    let affected = CompanyCryptoAccountModel::query()
         .where_col(CompanyCryptoAccountCol::ID, Op::Eq, id)
         .patch()
         .assign(CompanyCryptoAccountCol::CRYPTO_NETWORK_ID, network_id)
@@ -90,7 +90,7 @@ pub async fn update(
         .map_err(AppError::from)?
         .assign(CompanyCryptoAccountCol::UPDATED_AT, OffsetDateTime::now_utc())
         .map_err(AppError::from)?
-        .save()
+        .save(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 
@@ -102,9 +102,9 @@ pub async fn update(
 }
 
 pub async fn delete(state: &AppApiState, id: i64) -> Result<(), AppError> {
-    let affected = CompanyCryptoAccountModel::query(DbConn::pool(&state.db))
+    let affected = CompanyCryptoAccountModel::query()
         .where_col(CompanyCryptoAccountCol::ID, Op::Eq, id)
-        .delete()
+        .delete(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 

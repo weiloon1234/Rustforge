@@ -46,7 +46,7 @@ pub async fn review_deposit(
             let conn = scope.conn();
 
             // Update deposit status
-            DepositModel::query(conn.clone())
+            DepositModel::query()
                 .where_col(DepositCol::ID, Op::Eq, deposit_id)
                 .patch()
                 .assign(DepositCol::STATUS, DepositStatus::Approved)
@@ -57,14 +57,14 @@ pub async fn review_deposit(
                 .map_err(AppError::from)?
                 .assign(DepositCol::REVIEWED_AT, Some(now))
                 .map_err(AppError::from)?
-                .save()
+                .save(conn.clone())
                 .await
                 .map_err(AppError::from)?;
 
             // Credit the owner (for User owner_type)
             if deposit.owner_type == OwnerType::User {
                 // Insert credit transaction
-                UserCreditTransactionModel::create(conn.clone())
+                UserCreditTransactionModel::create()
                     .set(UserCreditTransactionCol::USER_ID, deposit.owner_id)?
                     .set(UserCreditTransactionCol::ADMIN_ID, Some(admin_id))?
                     .set(UserCreditTransactionCol::CREDIT_TYPE, deposit.credit_type)?
@@ -82,24 +82,24 @@ pub async fn review_deposit(
                         Some(format!("Deposit #{}", deposit_id)),
                     )?
                     .set(UserCreditTransactionCol::CUSTOM_DESCRIPTION, false)?
-                    .save()
+                    .save(conn.clone())
                     .await
                     .map_err(AppError::from)?;
 
                 // Increment user balance atomically
                 let update = match deposit.credit_type {
-                    CreditType::Credit1 => UserModel::query(conn.clone())
+                    CreditType::Credit1 => UserModel::query()
                         .where_col(UserCol::ID, Op::Eq, deposit.owner_id)
                         .patch()
                         .increment(UserCol::CREDIT_1, deposit.net_amount),
-                    CreditType::Credit2 => UserModel::query(conn.clone())
+                    CreditType::Credit2 => UserModel::query()
                         .where_col(UserCol::ID, Op::Eq, deposit.owner_id)
                         .patch()
                         .increment(UserCol::CREDIT_2, deposit.net_amount),
                 };
                 update
                     .map_err(AppError::from)?
-                    .save()
+                    .save(conn.clone())
                     .await
                     .map_err(AppError::from)?;
             }
@@ -107,7 +107,7 @@ pub async fn review_deposit(
             scope.commit().await.map_err(AppError::from)?;
         }
         DepositReviewAction::Reject => {
-            DepositModel::query(DbConn::pool(&state.db))
+            DepositModel::query()
                 .where_col(DepositCol::ID, Op::Eq, deposit_id)
                 .patch()
                 .assign(DepositCol::STATUS, DepositStatus::Rejected)
@@ -118,7 +118,7 @@ pub async fn review_deposit(
                 .map_err(AppError::from)?
                 .assign(DepositCol::REVIEWED_AT, Some(now))
                 .map_err(AppError::from)?
-                .save()
+                .save(DbConn::pool(&state.db))
                 .await
                 .map_err(AppError::from)?;
         }

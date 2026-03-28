@@ -186,23 +186,23 @@ pub async fn build_admin_summary_output(
     input: &DataTableInput,
     ctx: &DataTableContext,
 ) -> anyhow::Result<AdminDatatableSummaryOutput> {
-    let scoped = apply_actor_scope(AdminModel::query(db), ctx);
+    let scoped = apply_actor_scope(AdminModel::query(), ctx);
     let filtered = apply_summary_filters(scoped, input);
 
-    let total_filtered = filtered.clone().count().await?;
+    let total_filtered = filtered.clone().count(db).await?;
     let developer_count = filtered
         .clone()
         .where_col(AdminCol::ADMIN_TYPE, Op::Eq, AdminType::Developer)
-        .count()
+        .count(db)
         .await?;
     let superadmin_count = filtered
         .clone()
         .where_col(AdminCol::ADMIN_TYPE, Op::Eq, AdminType::SuperAdmin)
-        .count()
+        .count(db)
         .await?;
     let admin_count = filtered
         .where_col(AdminCol::ADMIN_TYPE, Op::Eq, AdminType::Admin)
-        .count()
+        .count(db)
         .await?;
 
     Ok(AdminDatatableSummaryOutput {

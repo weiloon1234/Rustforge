@@ -105,6 +105,10 @@ pub fn try_get_observer() -> Option<Arc<dyn ModelObserver>> {
     CURRENT_OBSERVER.try_with(|o| o.clone()).ok()
 }
 
+pub fn log_observer_error(action: &str, model: &str, err: &impl std::fmt::Display) {
+    tracing::error!("model observer {action} hook failed for '{model}': {err}");
+}
+
 /// Run an async block with a model observer set in task-local context.
 ///
 /// Typically called in admin middleware to enable audit logging for the request scope.

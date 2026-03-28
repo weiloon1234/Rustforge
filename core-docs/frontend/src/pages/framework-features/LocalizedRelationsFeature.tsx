@@ -67,7 +67,7 @@ let article = article_model
         en: "Typed-first DX".to_string(),
         zh: "类型优先 DX".to_string(),
     })
-    .save()
+    .save(db)
     .await?;
 
 println!("title = {:?}", article.title);
@@ -84,27 +84,31 @@ println!("title translations = {:?}", article.title_translations);`}</code>
                 <h2>Relation runtime surface</h2>
                 <ul>
                     <li>
-                        Query predicates such as <code>where_has_*</code> and <code>where_doesnt_have_*</code>
+                        Query predicates such as <code>where_has(Rel::X, ...)</code>
                     </li>
                     <li>
-                        Batch loaders and relation-aware retrieval like <code>get_with_relations()</code>
+                        Batch loaders and relation-aware retrieval like <code>.with(Rel::X).all(db)</code>
                     </li>
                     <li>
-                        Count helpers such as <code>with_counts()</code> for has-many relations
+                        Count and aggregate helpers such as <code>with_count(...)</code> and <code>with_sum(...)</code> for relation trees
                     </li>
                 </ul>
 
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-xs">
-                    <code className="language-rust">{`use core_db::common::sql::Op;
+                    <code className="language-rust">{`use core_db::common::sql::{Op, OrderDir};
 
-let rows = article_model
-    .query()
-    .where_has_comments(|q| q.where_status(Op::Eq, CommentStatus::Published))
-    .get_with_relations()
+let rows = ArticleModel::query()
+    .where_has(ArticleRel::COMMENTS, |q| {
+        q.where_col(CommentCol::STATUS, Op::Eq, CommentStatus::Published)
+    })
+    .with_scope(ArticleRel::COMMENTS, |q| {
+        q.order_by(CommentCol::CREATED_AT, OrderDir::Desc).limit(5)
+    })
+    .all(db)
     .await?;
 
 for item in rows {
-    println!("article id = {}", item.row.id);
+    println!("article id = {}", item.id);
     println!("author = {:?}", item.author);
     println!("comments count = {}", item.comments.len());
 }`}</code>

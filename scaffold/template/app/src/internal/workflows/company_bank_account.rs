@@ -23,9 +23,9 @@ pub async fn detail(
 }
 
 async fn validate_bank(state: &AppApiState, bank_id: i64) -> Result<(), AppError> {
-    let bank = BankModel::query(DbConn::pool(&state.db))
+    let bank = BankModel::query()
         .where_col(BankCol::ID, Op::Eq, bank_id)
-        .first()
+        .first(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::BadRequest(t("Bank not found")))?;
@@ -45,7 +45,7 @@ pub async fn create(
     validate_bank(state, bank_id).await?;
 
     let now = OffsetDateTime::now_utc();
-    let row = CompanyBankAccountModel::create(DbConn::pool(&state.db))
+    let row = CompanyBankAccountModel::create()
         .set(CompanyBankAccountCol::BANK_ID, bank_id)
         .map_err(AppError::from)?
         .set(CompanyBankAccountCol::ACCOUNT_NAME, req.account_name)
@@ -60,7 +60,7 @@ pub async fn create(
         .map_err(AppError::from)?
         .set(CompanyBankAccountCol::UPDATED_AT, now)
         .map_err(AppError::from)?
-        .save()
+        .save(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 
@@ -75,7 +75,7 @@ pub async fn update(
     let bank_id: i64 = req.bank_id.into();
     validate_bank(state, bank_id).await?;
 
-    let affected = CompanyBankAccountModel::query(DbConn::pool(&state.db))
+    let affected = CompanyBankAccountModel::query()
         .where_col(CompanyBankAccountCol::ID, Op::Eq, id)
         .patch()
         .assign(CompanyBankAccountCol::BANK_ID, bank_id)
@@ -90,7 +90,7 @@ pub async fn update(
         .map_err(AppError::from)?
         .assign(CompanyBankAccountCol::UPDATED_AT, OffsetDateTime::now_utc())
         .map_err(AppError::from)?
-        .save()
+        .save(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 
@@ -102,9 +102,9 @@ pub async fn update(
 }
 
 pub async fn delete(state: &AppApiState, id: i64) -> Result<(), AppError> {
-    let affected = CompanyBankAccountModel::query(DbConn::pool(&state.db))
+    let affected = CompanyBankAccountModel::query()
         .where_col(CompanyBankAccountCol::ID, Op::Eq, id)
-        .delete()
+        .delete(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 

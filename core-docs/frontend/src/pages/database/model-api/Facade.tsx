@@ -66,8 +66,8 @@ export function ModelApiFacade() {
 let article = Article::new(&state.db, Some(state.cdn_base.clone()));
 
 let one = article.find_or_fail(article_id).await?;
-let rows = article.query().latest().limit(20).get().await?;
-let created = article.insert().set_title("Hello".to_string()).save().await?;`}</code>
+let rows = article.query().latest().limit(20).all(db).await?;
+let created = article.insert().set_title("Hello".to_string()).save(db).await?;`}</code>
                 </pre>
 
                 <h2>Practical rule</h2>

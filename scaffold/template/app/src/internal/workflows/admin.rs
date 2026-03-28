@@ -30,7 +30,7 @@ pub async fn create(
 
     let abilities = ensure_assignable_permissions(auth, &req.abilities)?;
 
-    let mut insert = AdminModel::create(DbConn::pool(&state.db))
+    let mut insert = AdminModel::create()
         .set(AdminCol::ID, generate_snowflake_i64())
         .map_err(AppError::from)?
         .set(AdminCol::USERNAME, username)
@@ -50,7 +50,7 @@ pub async fn create(
             .map_err(AppError::from)?;
     }
 
-    let created = insert.save().await.map_err(AppError::from)?;
+    let created = insert.save(DbConn::pool(&state.db)).await.map_err(AppError::from)?;
     Ok(created)
 }
 
@@ -68,7 +68,7 @@ pub async fn update(
 
     let existing = detail(state, id).await?;
     let mut update = Ok(
-        AdminModel::query(DbConn::pool(&state.db))
+        AdminModel::query()
             .where_col(AdminCol::ID, Op::Eq, id)
             .patch(),
     );
@@ -121,7 +121,7 @@ pub async fn update(
 
     let affected = update
         .map_err(AppError::from)?
-        .save()
+        .save(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
     if affected == 0 {
@@ -153,9 +153,9 @@ pub async fn remove(
         )));
     }
 
-    let affected = AdminModel::query(DbConn::pool(&state.db))
+    let affected = AdminModel::query()
         .where_col(generated::models::AdminCol::ID, Op::Eq, id)
-        .delete()
+        .delete(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
     if affected == 0 {

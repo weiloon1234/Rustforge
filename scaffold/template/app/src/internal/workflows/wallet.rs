@@ -92,10 +92,10 @@ pub async fn get_ledger(
 pub async fn get_crypto_networks(
     state: &AppApiState,
 ) -> Result<Vec<CryptoNetworkOption>, AppError> {
-    let rows = CryptoNetworkModel::query(DbConn::pool(&state.db))
+    let rows = CryptoNetworkModel::query()
         .where_col(CryptoNetworkCol::STATUS, Op::Eq, CryptoNetworkStatus::Enabled)
         .order_by(CryptoNetworkCol::SORT_ORDER, OrderDir::Asc)
-        .all()
+        .all(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 
@@ -159,7 +159,7 @@ pub async fn create_withdrawal(
 
     // Insert withdrawal record
     let withdrawal_id = generate_snowflake_i64();
-    WithdrawalModel::create(DbConn::pool(&state.db))
+    WithdrawalModel::create()
         .set(WithdrawalCol::ID, withdrawal_id)?
         .set(WithdrawalCol::OWNER_TYPE, OwnerType::User)?
         .set(WithdrawalCol::OWNER_ID, user_id)?
@@ -171,7 +171,7 @@ pub async fn create_withdrawal(
         .set(WithdrawalCol::AMOUNT, amount)?
         .set(WithdrawalCol::FEE, fee)?
         .set(WithdrawalCol::NET_AMOUNT, net_amount)?
-        .save()
+        .save(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 

@@ -25,10 +25,10 @@ impl<'a> JobBuffer<'a> {
         };
         let payload_json = serde_json::to_value(payload)?;
 
-        OutboxJobModel::create(self.db.clone())
+        OutboxJobModel::create()
             .set(OutboxJobCol::QUEUE, J::QUEUE.to_string())?
             .set(OutboxJobCol::PAYLOAD, payload_json)?
-            .save()
+            .save(self.db.clone())
             .await?;
 
         Ok(())
@@ -46,11 +46,11 @@ impl OutboxFlusher {
 
         let count = {
             let conn = scope.conn();
-            let rows = OutboxJobModel::query(conn.clone())
+            let rows = OutboxJobModel::query()
                 .order_by(OutboxJobCol::CREATED_AT, OrderDir::Asc)
                 .for_update_skip_locked()
                 .limit(100)
-                .all()
+                .all(conn.clone())
                 .await?;
 
             if rows.is_empty() {
@@ -72,9 +72,9 @@ impl OutboxFlusher {
                 let _: () = pipe.query_async(&mut redis_conn).await?;
 
                 for id in ids {
-                    OutboxJobModel::query(conn.clone())
+                    OutboxJobModel::query()
                         .where_col(OutboxJobCol::ID, Op::Eq, id)
-                        .delete()
+                        .delete(conn.clone())
                         .await?;
                 }
                 count

@@ -28,7 +28,7 @@ impl Seeder for CountriesSeeder {
                 CountryIsDefault::No
             };
 
-            CountryModel::create(DbConn::pool(db))
+            CountryModel::create()
                 .set(CountryCol::ISO2, seed.iso2)?
                 .set(CountryCol::ISO3, seed.iso3)?
                 .set(CountryCol::ISO_NUMERIC, seed.iso_numeric)?
@@ -54,7 +54,7 @@ impl Seeder for CountriesSeeder {
                 .set(CountryCol::UN_MEMBER, seed.un_member)?
                 .set(CountryCol::FLAG_EMOJI, seed.flag_emoji)?
                 .on_conflict_update(&[CountryCol::ISO2])
-                .save()
+                .save(DbConn::pool(db))
                 .await?;
         }
         Ok(())

@@ -87,7 +87,7 @@ impl AdminRecord {
 
                 <h2>Example</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`let admin = AdminModel::query(db).find(1001).await?.unwrap();
+                    <code className="language-rust">{`let admin = AdminModel::query().find(db, 1001).await?.unwrap();
 
 let display_name = admin.identity();
 let featured = admin.meta_is_featured().unwrap_or(false);

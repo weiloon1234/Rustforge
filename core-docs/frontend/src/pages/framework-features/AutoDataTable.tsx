@@ -348,10 +348,10 @@ async fn build_admin_summary(
     let scoped = apply_actor_scope(Admin::new(db, None).query(), ctx);
     let filtered = apply_summary_filters(scoped, input);
 
-    let total_filtered = filtered.clone().count().await?;
-    let developer_count = filtered.clone().where_admin_type(Op::Eq, AdminType::Developer).count().await?;
-    let superadmin_count = filtered.clone().where_admin_type(Op::Eq, AdminType::SuperAdmin).count().await?;
-    let admin_count = filtered.where_admin_type(Op::Eq, AdminType::Admin).count().await?;
+    let total_filtered = filtered.clone().count(db).await?;
+    let developer_count = filtered.clone().where_admin_type(Op::Eq, AdminType::Developer).count(db).await?;
+    let superadmin_count = filtered.clone().where_admin_type(Op::Eq, AdminType::SuperAdmin).count(db).await?;
+    let admin_count = filtered.where_admin_type(Op::Eq, AdminType::Admin).count(db).await?;
 
     Ok(serde_json::to_value(AdminDatatableSummary {
         total_admin_counts: total_filtered,

@@ -44,12 +44,12 @@ pub async fn update(
         .map_err(AppError::from)?;
     let conn = scope.conn();
 
-    let affected = ContentPageModel::query(conn.clone())
+    let affected = ContentPageModel::query()
         .where_col(generated::models::ContentPageCol::ID, Op::Eq, id)
         .patch()
         .assign(generated::models::ContentPageCol::TAG, tag)
         .map_err(AppError::from)?
-        .save()
+        .save(conn.clone())
         .await
         .map_err(AppError::from)?;
 
@@ -81,9 +81,9 @@ pub async fn remove(state: &AppApiState, id: i64) -> Result<(), AppError> {
         return Err(AppError::Forbidden(t("Cannot delete system page")));
     }
 
-    let affected = ContentPageModel::query(DbConn::pool(&state.db))
+    let affected = ContentPageModel::query()
         .where_col(generated::models::ContentPageCol::ID, Op::Eq, id)
-        .delete()
+        .delete(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
     if affected == 0 {

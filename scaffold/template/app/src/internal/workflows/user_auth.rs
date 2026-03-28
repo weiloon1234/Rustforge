@@ -24,9 +24,9 @@ pub async fn login(
     password: &str,
 ) -> Result<(UserRecord, IssuedTokenPair), AppError> {
     let username = username.trim().to_ascii_lowercase();
-    let user = UserModel::query(DbConn::pool(&state.db))
+    let user = UserModel::query()
         .where_col(UserCol::USERNAME, Op::Eq, username)
-        .first()
+        .first(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::Unauthorized(t("Invalid credentials")))?;
@@ -59,9 +59,9 @@ pub async fn register(
     let uuid = generate_unique_uuid(state).await?;
 
     let introducer_user_id = if let Some(ref referral_code) = req.referral_code {
-        let introducer = UserModel::query(DbConn::pool(&state.db))
+        let introducer = UserModel::query()
             .where_col(UserCol::UUID, Op::Eq, referral_code.clone())
-            .first()
+            .first(DbConn::pool(&state.db))
             .await
             .map_err(AppError::from)?
             ;
@@ -70,7 +70,7 @@ pub async fn register(
         None
     };
 
-    let mut insert = UserModel::create(DbConn::pool(&state.db))
+    let mut insert = UserModel::create()
         .set(UserCol::ID, id)
         .map_err(AppError::from)?
         .set(UserCol::UUID, uuid)
@@ -106,7 +106,7 @@ pub async fn register(
             .map_err(AppError::from)?;
     }
 
-    let user = insert.save().await.map_err(AppError::from)?;
+    let user = insert.save(DbConn::pool(&state.db)).await.map_err(AppError::from)?;
 
     let tokens = auth::issue_guard_session::<UserGuard>(
         &state.db,
@@ -124,9 +124,9 @@ pub async fn register(
 async fn generate_unique_uuid(state: &AppApiState) -> Result<String, AppError> {
     for _ in 0..10 {
         let uuid = nanoid::nanoid!(8);
-        let existing = UserModel::query(DbConn::pool(&state.db))
+        let existing = UserModel::query()
             .where_col(UserCol::UUID, Op::Eq, uuid.clone())
-            .first()
+            .first(DbConn::pool(&state.db))
             .await
             .map_err(AppError::from)?;
         if existing.is_none() {
@@ -140,9 +140,9 @@ pub async fn resolve_referral(
     state: &AppApiState,
     code: &str,
 ) -> Result<Option<(String, Option<String>)>, AppError> {
-    let user = UserModel::query(DbConn::pool(&state.db))
+    let user = UserModel::query()
         .where_col(UserCol::UUID, Op::Eq, code.to_string())
-        .first()
+        .first(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
     Ok(user.map(|u| (u.username, u.name)))
@@ -171,7 +171,7 @@ pub async fn profile_update(
     req: UserProfileUpdateInput,
 ) -> Result<UserRecord, AppError> {
     let mut update = Ok(
-        UserModel::query(DbConn::pool(&state.db))
+        UserModel::query()
             .where_col(UserCol::ID, Op::Eq, user_id)
             .patch(),
     );
@@ -218,7 +218,7 @@ pub async fn profile_update(
 
     let affected = update
         .map_err(AppError::from)?
-        .save()
+        .save(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
     if affected == 0 {
@@ -244,12 +244,12 @@ pub async fn locale_update(
         .cloned()
         .ok_or_else(|| AppError::BadRequest(t("Unsupported locale")))?;
 
-    let affected = UserModel::query(DbConn::pool(&state.db))
+    let affected = UserModel::query()
         .where_col(UserCol::ID, Op::Eq, user_id)
         .patch()
         .assign(UserCol::LOCALE, Some(normalized.to_string()))
         .map_err(AppError::from)?
-        .save()
+        .save(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 
@@ -275,12 +275,12 @@ pub async fn password_update(
         return Err(AppError::Unauthorized(t("Current password is incorrect")));
     }
 
-    let affected = UserModel::query(DbConn::pool(&state.db))
+    let affected = UserModel::query()
         .where_col(UserCol::ID, Op::Eq, user_id)
         .patch()
         .assign(UserCol::PASSWORD, req.password.to_string())
         .map_err(AppError::from)?
-        .save()
+        .save(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
     if affected == 0 {

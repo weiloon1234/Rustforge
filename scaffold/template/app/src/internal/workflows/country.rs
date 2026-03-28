@@ -29,14 +29,14 @@ pub async fn update_status(
     let status_enum = GeneratedCountryStatus::from_storage(status)
         .ok_or_else(|| AppError::BadRequest(t("Invalid country status")))?;
 
-    let affected = CountryModel::query(DbConn::pool(&state.db))
+    let affected = CountryModel::query()
         .where_col(CountryCol::ISO2, Op::Eq, iso2.clone())
         .patch()
         .assign(CountryCol::STATUS, status_enum)
         .map_err(AppError::from)?
         .assign(CountryCol::UPDATED_AT, time::OffsetDateTime::now_utc())
         .map_err(AppError::from)?
-        .save()
+        .save(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 
@@ -44,9 +44,9 @@ pub async fn update_status(
         return Err(AppError::NotFound(t("Country not found")));
     }
 
-    let updated = CountryModel::query(DbConn::pool(&state.db))
+    let updated = CountryModel::query()
         .where_col(CountryCol::ISO2, Op::Eq, iso2)
-        .first()
+        .first(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(t("Country not found")))?;
@@ -64,11 +64,11 @@ pub async fn list_enabled_for_bootstrap(state: &AppApiState) -> Result<Vec<Count
             BOOTSTRAP_COUNTRIES_CACHE_KEY,
             BOOTSTRAP_COUNTRIES_CACHE_TTL_SECS,
             move || async move {
-                let rows = CountryModel::query(DbConn::pool(&db))
+                let rows = CountryModel::query()
                     .where_col(CountryCol::STATUS, Op::Eq, GeneratedCountryStatus::Enabled)
                     .order_by(CountryCol::NAME, OrderDir::Asc)
                     .order_by(CountryCol::ISO2, OrderDir::Asc)
-                    .all()
+                    .all(DbConn::pool(&db))
                     .await?;
                 Ok(rows
                     .into_iter()
@@ -97,26 +97,26 @@ pub async fn set_default(
     let conn = scope.conn();
 
     // Clear all defaults first
-    CountryModel::query(conn.clone())
+    CountryModel::query()
         .where_col(CountryCol::IS_DEFAULT, Op::Eq, CountryIsDefault::Yes)
         .patch()
         .assign(CountryCol::IS_DEFAULT, CountryIsDefault::No)
         .map_err(AppError::from)?
         .assign(CountryCol::UPDATED_AT, time::OffsetDateTime::now_utc())
         .map_err(AppError::from)?
-        .save()
+        .save(conn.clone())
         .await
         .map_err(AppError::from)?;
 
     // Set the target as default
-    let affected = CountryModel::query(conn.clone())
+    let affected = CountryModel::query()
         .where_col(CountryCol::ISO2, Op::Eq, iso2.clone())
         .patch()
         .assign(CountryCol::IS_DEFAULT, CountryIsDefault::Yes)
         .map_err(AppError::from)?
         .assign(CountryCol::UPDATED_AT, time::OffsetDateTime::now_utc())
         .map_err(AppError::from)?
-        .save()
+        .save(conn.clone())
         .await
         .map_err(AppError::from)?;
 
@@ -124,9 +124,9 @@ pub async fn set_default(
         return Err(AppError::NotFound(t("Country not found")));
     }
 
-    let updated = CountryModel::query(conn)
+    let updated = CountryModel::query()
         .where_col(CountryCol::ISO2, Op::Eq, iso2)
-        .first()
+        .first(conn)
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(t("Country not found")))?;

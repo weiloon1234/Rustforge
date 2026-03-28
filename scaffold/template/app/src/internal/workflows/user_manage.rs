@@ -24,7 +24,7 @@ pub async fn create(state: &AppApiState, req: CreateUserInput) -> Result<UserRec
     let username = req.username.trim().to_ascii_lowercase();
     let uuid = generate_unique_uuid(state).await?;
 
-    let mut insert = UserModel::create(DbConn::pool(&state.db))
+    let mut insert = UserModel::create()
         .set(UserCol::ID, generate_snowflake_i64())
         .map_err(AppError::from)?
         .set(UserCol::UUID, uuid)
@@ -37,9 +37,9 @@ pub async fn create(state: &AppApiState, req: CreateUserInput) -> Result<UserRec
         .map_err(AppError::from)?;
 
     if let Some(ref introducer_username) = req.introducer_username {
-        let introducer = UserModel::query(DbConn::pool(&state.db))
+        let introducer = UserModel::query()
             .where_col(UserCol::USERNAME, Op::Eq, introducer_username.clone())
-            .first()
+            .first(DbConn::pool(&state.db))
             .await
             .map_err(AppError::from)?
             .ok_or_else(|| AppError::NotFound(t("Introducer not found")))?;
@@ -69,7 +69,10 @@ pub async fn create(state: &AppApiState, req: CreateUserInput) -> Result<UserRec
             .map_err(AppError::from)?;
     }
 
-    let created = insert.save().await.map_err(AppError::from)?;
+    let created = insert
+        .save(DbConn::pool(&state.db))
+        .await
+        .map_err(AppError::from)?;
     Ok(created)
 }
 
@@ -85,7 +88,7 @@ pub async fn update(
         .map_err(AppError::from)?;
     let conn = scope.conn();
     let mut update = Ok(
-        UserModel::query(conn.clone())
+        UserModel::query()
             .where_col(UserCol::ID, Op::Eq, id)
             .patch(),
     );
@@ -174,7 +177,7 @@ pub async fn update(
 
     let affected = update
         .map_err(AppError::from)?
-        .save()
+        .save(conn.clone())
         .await
         .map_err(AppError::from)?;
     if affected == 0 {
@@ -202,12 +205,12 @@ pub async fn set_ban(
         .map_err(AppError::from)?;
     let conn = scope.conn();
 
-    let affected = UserModel::query(conn.clone())
+    let affected = UserModel::query()
         .where_col(UserCol::ID, Op::Eq, id)
         .patch()
         .assign(UserCol::BAN, ban)
         .map_err(AppError::from)?
-        .save()
+        .save(conn.clone())
         .await
         .map_err(AppError::from)?;
 
@@ -233,10 +236,10 @@ pub async fn search_users(
     }
 
     let pattern = format!("%{q}%");
-    let users = UserModel::query(DbConn::pool(&state.db))
+    let users = UserModel::query()
         .where_col(UserCol::USERNAME, Op::ILike, pattern)
         .limit(20)
-        .all()
+        .all(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 
@@ -257,9 +260,9 @@ pub async fn batch_resolve_usernames(
         return Ok(Vec::new());
     }
 
-    let users = UserModel::query(DbConn::pool(&state.db))
+    let users = UserModel::query()
         .where_in(UserCol::ID, ids.iter().copied())
-        .all()
+        .all(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 
@@ -272,9 +275,9 @@ pub async fn batch_resolve_usernames(
 async fn generate_unique_uuid(state: &AppApiState) -> Result<String, AppError> {
     for _ in 0..10 {
         let uuid = nanoid::nanoid!(8);
-        let existing = UserModel::query(DbConn::pool(&state.db))
+        let existing = UserModel::query()
             .where_col(UserCol::UUID, Op::Eq, uuid.clone())
-            .first()
+            .first(DbConn::pool(&state.db))
             .await
             .map_err(AppError::from)?;
         if existing.is_none() {

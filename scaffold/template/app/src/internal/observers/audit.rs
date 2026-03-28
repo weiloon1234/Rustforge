@@ -114,7 +114,7 @@ async fn write_log_raw(
     {
         return;
     }
-    let insert = AuditLogModel::create(DbConn::pool(db))
+    let insert = AuditLogModel::create()
         .set(AuditLogCol::ID, generate_snowflake_i64())
         .and_then(|create| create.set(AuditLogCol::ADMIN_ID, admin_id))
         .and_then(|create| create.set(AuditLogCol::ACTION, action))
@@ -134,6 +134,6 @@ async fn write_log_raw(
     };
 
     if let Ok(insert) = insert {
-        let _ = insert.save().await;
+        let _ = insert.save(DbConn::pool(db)).await;
     }
 }

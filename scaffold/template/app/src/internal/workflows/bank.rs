@@ -12,10 +12,10 @@ use crate::{
 };
 
 pub async fn list_options(state: &AppApiState) -> Result<Vec<BankRecord>, AppError> {
-    BankModel::query(DbConn::pool(&state.db))
+    BankModel::query()
         .where_col(BankCol::STATUS, Op::Eq, BankStatus::Enabled)
         .order_by(BankCol::SORT_ORDER, OrderDir::Asc)
-        .all()
+        .all(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)
 }
@@ -32,9 +32,9 @@ pub async fn create(
     req: AdminBankInput,
     logo: Option<AttachmentInput>,
 ) -> Result<BankRecord, AppError> {
-    let country_exists = CountryModel::query(DbConn::pool(&state.db))
+    let country_exists = CountryModel::query()
         .where_col(CountryCol::ISO2, Op::Eq, req.country_iso2.clone())
-        .count()
+        .count(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)? > 0;
 
@@ -49,7 +49,7 @@ pub async fn create(
         .map_err(AppError::from)?;
     let conn = scope.conn();
 
-    let row = BankModel::create(conn.clone())
+    let row = BankModel::create()
         .set(BankCol::COUNTRY_ISO2, req.country_iso2)?
         .set(BankCol::NAME, req.name)?
         .set(BankCol::CODE, req.code)?
@@ -57,7 +57,7 @@ pub async fn create(
         .set(BankCol::SORT_ORDER, req.sort_order.unwrap_or(0))?
         .set(BankCol::CREATED_AT, now)?
         .set(BankCol::UPDATED_AT, now)?
-        .save()
+        .save(conn.clone())
         .await
         .map_err(AppError::from)?;
 
@@ -79,9 +79,9 @@ pub async fn update(
     req: AdminBankInput,
     logo: Option<AttachmentInput>,
 ) -> Result<BankRecord, AppError> {
-    let country_exists = CountryModel::query(DbConn::pool(&state.db))
+    let country_exists = CountryModel::query()
         .where_col(CountryCol::ISO2, Op::Eq, req.country_iso2.clone())
-        .count()
+        .count(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)? > 0;
 
@@ -95,7 +95,7 @@ pub async fn update(
         .map_err(AppError::from)?;
     let conn = scope.conn();
 
-    let affected = BankModel::query(conn.clone())
+    let affected = BankModel::query()
         .where_col(BankCol::ID, Op::Eq, id)
         .patch()
         .assign(BankCol::COUNTRY_ISO2, req.country_iso2)?
@@ -104,7 +104,7 @@ pub async fn update(
         .assign(BankCol::STATUS, req.status)?
         .assign(BankCol::SORT_ORDER, req.sort_order.unwrap_or(0))?
         .assign(BankCol::UPDATED_AT, OffsetDateTime::now_utc())?
-        .save()
+        .save(conn.clone())
         .await
         .map_err(AppError::from)?;
 
@@ -125,9 +125,9 @@ pub async fn update(
 }
 
 pub async fn delete(state: &AppApiState, id: i64) -> Result<(), AppError> {
-    let affected = BankModel::query(DbConn::pool(&state.db))
+    let affected = BankModel::query()
         .where_col(BankCol::ID, Op::Eq, id)
-        .delete()
+        .delete(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 

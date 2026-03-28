@@ -171,7 +171,7 @@ async fn upload_receipt(
     let receipt_url = build_attachment_url(&object_key, base_url.as_deref());
 
     let params = serde_json::json!({ "receipt_url": receipt_url, "receipt_path": object_key });
-    generated::models::WithdrawalModel::query(core_db::common::sql::DbConn::pool(&state.db))
+    generated::models::WithdrawalModel::query()
         .where_col(
             generated::models::WithdrawalCol::ID,
             core_db::common::sql::Op::Eq,
@@ -180,7 +180,7 @@ async fn upload_receipt(
         .patch()
         .assign(generated::models::WithdrawalCol::PARAMS, Some(params.clone()))
         .map_err(AppError::from)?
-        .save()
+        .save(core_db::common::sql::DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 

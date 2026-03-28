@@ -40,9 +40,9 @@ export function ModelApiUpdate() {
                             notes: 'Attachment mutation helpers that keep attachment side tables in sync.',
                         },
                         {
-                            method: 'unsafe_sql()',
-                            returns: 'XxxUnsafeUpdate',
-                            notes: 'Explicit raw escape hatch for the narrow cases the typed surface does not cover.',
+                            method: 'where_raw(...) / returning_raw(...)',
+                            returns: 'Self / PatchReturningJson',
+                            notes: 'Prefer clause-level raw escapes for the narrow parts the typed update surface does not cover.',
                         },
                         {
                             method: 'save()',
@@ -68,13 +68,14 @@ export function ModelApiUpdate() {
                     <li>Target-row handling follows the model-source PK type. Update-side helper flows must not assume numeric IDs.</li>
                     <li>Bulk updates are supported, but app workflows should still own domain rules such as who is allowed to mutate which rows.</li>
                     <li>If update semantics need omitted vs null vs value distinction, keep that in request contracts with <a href="#/requests"><code>Patch&lt;T&gt;</code></a>; <code>XxxUpdate</code> is the model mutation layer, not the HTTP contract layer.</li>
+                    <li>For mixed typed/raw updates, prefer raw clauses like <code>where_raw(...)</code> or <code>returning_raw(...)</code> instead of switching the whole flow to a separate raw builder.</li>
                 </ul>
 
                 <h2>Cross-links</h2>
                 <ul>
                     <li><a href="#/requests">Requests &amp; Validation</a> for <code>Option&lt;T&gt;</code> vs <code>Patch&lt;T&gt;</code> at the contract boundary.</li>
                     <li><a href="#/model-api-query">`XxxQuery`</a> for the shared filter vocabulary used before mutation.</li>
-                    <li><a href="#/model-api-unsafe">Unsafe SQL</a> for the intentionally narrow raw update path.</li>
+                    <li><a href="#/model-api-unsafe">Raw SQL Clauses</a> for the intentionally narrow raw clause path.</li>
                 </ul>
             </div>
         </div>

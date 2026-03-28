@@ -401,9 +401,9 @@ pub async fn normalize_phone_by_country_iso2(
         return Ok(None);
     };
 
-    let Some(country) = CountryModel::query(DbConn::pool(db))
+    let Some(country) = CountryModel::query()
         .where_col(CountryCol::ISO2, Op::Eq, country_iso2)
-        .first()
+        .first(DbConn::pool(db))
         .await?
     else {
         return Ok(None);
@@ -444,10 +444,10 @@ impl AsyncRule for IsEnabledCountryIso2 {
         let Some(iso2) = normalize_country_iso2(&self.value) else {
             return Ok(false);
         };
-        let exists = CountryModel::query(DbConn::pool(db))
+        let exists = CountryModel::query()
             .where_col(CountryCol::ISO2, Op::Eq, iso2)
             .where_col(CountryCol::STATUS, Op::Eq, GeneratedCountryStatus::Enabled)
-            .first()
+            .first(DbConn::pool(db))
             .await?
             .is_some();
         Ok(exists)

@@ -1,5 +1,8 @@
 use core_datatable::{DataTableContext, DataTableInput, DataTableRegistry};
-use core_db::common::{model_api::Query, sql::{Op, RawClause}};
+use core_db::common::{
+    model_api::Query,
+    sql::{Op, RawClause},
+};
 use core_web::authz::{has_required_permissions, PermissionMode};
 use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
@@ -56,7 +59,11 @@ impl UserDataTableHooks for UserDataTableAppHooks {
                 if t.is_empty() {
                     Ok(Some(query))
                 } else {
-                    Ok(Some(query.where_col(UserCol::COUNTRY_ISO2, Op::Eq, t.to_uppercase())))
+                    Ok(Some(query.where_col(
+                        UserCol::COUNTRY_ISO2,
+                        Op::Eq,
+                        t.to_uppercase(),
+                    )))
                 }
             }
             _ => Ok(None),
@@ -148,8 +155,7 @@ fn apply_summary_filters<'db>(
                     "introducer_user_id IN (SELECT id FROM users WHERE username LIKE ?)",
                     [pattern],
                 ) {
-                    let (sql, binds) = clause.into_parts();
-                    query = query.unsafe_sql().where_raw(sql, binds).done();
+                    query = query.where_raw(clause);
                 }
             }
             "f-date-from-created_at" => {
@@ -180,33 +186,52 @@ pub async fn build_user_summary_output(
     input: &DataTableInput,
     _ctx: &DataTableContext,
 ) -> anyhow::Result<UserDatatableSummaryOutput> {
-    let base = UserModel::query(db);
+    let base = UserModel::query();
     let filtered = apply_summary_filters(base, input);
 
-    let total_filtered = filtered.clone().count().await?;
+    let total_filtered = filtered.clone().count(db).await?;
     let banned_count = filtered
+        .clone()
         .where_col(UserCol::BAN, Op::Eq, UserBanStatus::Yes)
-        .count()
+        .count(db)
         .await?;
 
-    let total_credit_1: rust_decimal::Decimal = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(credit_1), 0) FROM users",
-    )
-    .fetch_one(db)
-    .await
-    .unwrap_or(rust_decimal::Decimal::ZERO);
+    let aggregated_rows = filtered
+        .clone()
+        .with_sum(UserRel::DOWNLINES, UserCol::CREDIT_1)
+        .with_sum_scope(UserRel::DOWNLINES, UserCol::CREDIT_2, |q| {
+            q.where_col(UserCol::BAN, Op::Eq, UserBanStatus::No)
+        })
+        .all(db)
+        .await?;
 
-    let total_credit_2: rust_decimal::Decimal = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(credit_2), 0) FROM users",
-    )
-    .fetch_one(db)
-    .await
-    .unwrap_or(rust_decimal::Decimal::ZERO);
+    let total_downline_credit_1 = aggregated_rows
+        .iter()
+        .filter_map(|record| record.sum(UserRel::DOWNLINES, UserCol::CREDIT_1))
+        .sum::<f64>();
+    let unbanned_downline_credit_2 = aggregated_rows
+        .iter()
+        .filter_map(|record| record.sum(UserRel::DOWNLINES, UserCol::CREDIT_2))
+        .sum::<f64>();
+
+    let total_credit_1: rust_decimal::Decimal =
+        sqlx::query_scalar("SELECT COALESCE(SUM(credit_1), 0) FROM users")
+            .fetch_one(db)
+            .await
+            .unwrap_or(rust_decimal::Decimal::ZERO);
+
+    let total_credit_2: rust_decimal::Decimal =
+        sqlx::query_scalar("SELECT COALESCE(SUM(credit_2), 0) FROM users")
+            .fetch_one(db)
+            .await
+            .unwrap_or(rust_decimal::Decimal::ZERO);
 
     Ok(UserDatatableSummaryOutput {
         total_user_count: total_filtered,
         total_filtered,
         banned_count,
+        total_downline_credit_1,
+        unbanned_downline_credit_2,
         total_credit_1: total_credit_1.into(),
         total_credit_2: total_credit_2.into(),
     })

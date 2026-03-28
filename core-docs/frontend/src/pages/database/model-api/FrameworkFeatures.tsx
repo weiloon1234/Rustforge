@@ -33,7 +33,7 @@ let extra = view.meta_extra()?;
 let payload = view.meta_debug_blob_as::<serde_json::Value>()?;
 
 article.insert().set_meta_extra(&payload)?;
-article.update().set_meta_priority(10).save().await?;`}</code>
+article.update().set_meta_priority(10).save(db).await?;`}</code>
                 </pre>
 
                 <h2>Attachments</h2>
@@ -50,8 +50,8 @@ pub struct Article {
 }`}</code>
                 </pre>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`article.insert().set_attachment_cover(input).save().await?;
-article.update().add_attachment_gallery(input).save().await?;
+                    <code className="language-rust">{`article.insert().set_attachment_cover(input).save(db).await?;
+article.update().add_attachment_gallery(input).save(db).await?;
 
 let cover_url = view.cover_url.clone();
 let gallery_urls = view.gallery_urls.clone();`}</code>
@@ -73,7 +73,7 @@ pub struct Article {
     .insert()
     .set_title_lang(localized::Locale::En, "Hello")
     .set_title_lang(localized::Locale::Zh, "你好")
-    .save()
+    .save(db)
     .await?;`}</code>
                 </pre>
 

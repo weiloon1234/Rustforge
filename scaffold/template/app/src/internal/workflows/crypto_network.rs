@@ -14,10 +14,10 @@ use crate::{
 };
 
 pub async fn list_options(state: &AppApiState) -> Result<Vec<CryptoNetworkRecord>, AppError> {
-    CryptoNetworkModel::query(DbConn::pool(&state.db))
+    CryptoNetworkModel::query()
         .where_col(CryptoNetworkCol::STATUS, Op::Eq, CryptoNetworkStatus::Enabled)
         .order_by(CryptoNetworkCol::SORT_ORDER, OrderDir::Asc)
-        .all()
+        .all(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)
 }
@@ -41,14 +41,14 @@ pub async fn create(
         .map_err(AppError::from)?;
     let conn = scope.conn();
 
-    let row = CryptoNetworkModel::create(conn.clone())
+    let row = CryptoNetworkModel::create()
         .set(CryptoNetworkCol::NAME, req.name)?
         .set(CryptoNetworkCol::SYMBOL, req.symbol)?
         .set(CryptoNetworkCol::STATUS, req.status)?
         .set(CryptoNetworkCol::SORT_ORDER, req.sort_order.unwrap_or(0))?
         .set(CryptoNetworkCol::CREATED_AT, now)?
         .set(CryptoNetworkCol::UPDATED_AT, now)?
-        .save()
+        .save(conn.clone())
         .await
         .map_err(AppError::from)?;
 
@@ -82,7 +82,7 @@ pub async fn update(
         .map_err(AppError::from)?;
     let conn = scope.conn();
 
-    let affected = CryptoNetworkModel::query(conn.clone())
+    let affected = CryptoNetworkModel::query()
         .where_col(CryptoNetworkCol::ID, Op::Eq, id)
         .patch()
         .assign(CryptoNetworkCol::NAME, req.name)?
@@ -90,7 +90,7 @@ pub async fn update(
         .assign(CryptoNetworkCol::STATUS, req.status)?
         .assign(CryptoNetworkCol::SORT_ORDER, req.sort_order.unwrap_or(0))?
         .assign(CryptoNetworkCol::UPDATED_AT, OffsetDateTime::now_utc())?
-        .save()
+        .save(conn.clone())
         .await
         .map_err(AppError::from)?;
 
@@ -117,9 +117,9 @@ pub async fn update(
 }
 
 pub async fn delete(state: &AppApiState, id: i64) -> Result<(), AppError> {
-    let affected = CryptoNetworkModel::query(DbConn::pool(&state.db))
+    let affected = CryptoNetworkModel::query()
         .where_col(CryptoNetworkCol::ID, Op::Eq, id)
-        .delete()
+        .delete(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 

@@ -52,12 +52,12 @@ impl PersonalAccessTokenModel {
         token_id: uuid::Uuid,
     ) -> Result<u64> {
         let db = db.into();
-        Query::<PersonalAccessTokenModel>::new(db.clone())
+        Query::<PersonalAccessTokenModel>::new()
             .where_col(PersonalAccessTokenCol::ID, Op::Eq, token_id)
             .where_null(PersonalAccessTokenCol::REVOKED_AT)
             .patch()
             .assign(PersonalAccessTokenCol::REVOKED_AT, time::OffsetDateTime::now_utc())?
-            .save()
+            .save(db)
             .await
     }
 
@@ -67,12 +67,12 @@ impl PersonalAccessTokenModel {
         family_id: uuid::Uuid,
     ) -> Result<u64> {
         let db = db.into();
-        Query::<PersonalAccessTokenModel>::new(db.clone())
+        Query::<PersonalAccessTokenModel>::new()
             .where_col(PersonalAccessTokenCol::FAMILY_ID, Op::Eq, family_id)
             .where_null(PersonalAccessTokenCol::REVOKED_AT)
             .patch()
             .assign(PersonalAccessTokenCol::REVOKED_AT, time::OffsetDateTime::now_utc())?
-            .save()
+            .save(db)
             .await
     }
 
@@ -83,13 +83,13 @@ impl PersonalAccessTokenModel {
         tokenable_id: &str,
     ) -> Result<u64> {
         let db = db.into();
-        Query::<PersonalAccessTokenModel>::new(db.clone())
+        Query::<PersonalAccessTokenModel>::new()
             .where_col(PersonalAccessTokenCol::TOKENABLE_TYPE, Op::Eq, tokenable_type.to_string())
             .where_col(PersonalAccessTokenCol::TOKENABLE_ID, Op::Eq, tokenable_id.to_string())
             .where_null(PersonalAccessTokenCol::REVOKED_AT)
             .patch()
             .assign(PersonalAccessTokenCol::REVOKED_AT, time::OffsetDateTime::now_utc())?
-            .save()
+            .save(db)
             .await
     }
 
@@ -99,11 +99,11 @@ impl PersonalAccessTokenModel {
         token_id: uuid::Uuid,
     ) -> Result<u64> {
         let db = db.into();
-        Query::<PersonalAccessTokenModel>::new(db.clone())
+        Query::<PersonalAccessTokenModel>::new()
             .where_col(PersonalAccessTokenCol::ID, Op::Eq, token_id)
             .patch()
             .assign(PersonalAccessTokenCol::LAST_USED_AT, time::OffsetDateTime::now_utc())?
-            .save()
+            .save(db)
             .await
     }
 
@@ -114,14 +114,14 @@ impl PersonalAccessTokenModel {
     ) -> Result<Option<PersonalAccessTokenRecord>> {
         let db = db.into();
         let now = time::OffsetDateTime::now_utc();
-        Query::<PersonalAccessTokenModel>::new(db)
+        Query::<PersonalAccessTokenModel>::new()
             .where_col(PersonalAccessTokenCol::TOKEN, Op::Eq, token_hash.to_string())
             .where_null(PersonalAccessTokenCol::REVOKED_AT)
             .where_group(|q| {
                 q.where_null(PersonalAccessTokenCol::EXPIRES_AT)
                     .or_where_col(PersonalAccessTokenCol::EXPIRES_AT, Op::Gt, now)
             })
-            .first()
+            .first(db)
             .await
     }
 }

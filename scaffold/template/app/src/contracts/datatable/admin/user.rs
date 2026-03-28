@@ -40,6 +40,10 @@ pub struct UserDatatableSummaryOutput {
     pub total_filtered: i64,
     #[ts(type = "number")]
     pub banned_count: i64,
+    #[ts(type = "number")]
+    pub total_downline_credit_1: f64,
+    #[ts(type = "number")]
+    pub unbanned_downline_credit_2: f64,
     pub total_credit_1: Decimal,
     pub total_credit_2: Decimal,
 }

@@ -11,7 +11,7 @@ export function ModelApiRelations() {
             <div className="prose prose-orange max-w-none">
                 <h2>Where relation helpers come from</h2>
                 <p>
-                    Relation behavior is generated from relation fields in Rust model sources. Use <code>BelongsTo&lt;T&gt;</code> or <code>HasMany&lt;T&gt;</code> plus <code>#[rf(foreign_key = ...)]</code>; that metadata drives relation preload helpers, <code>where_has_*</code> filters, and <code>with_*</code> read flows.
+                    Relation behavior is generated from relation fields in Rust model sources. Use <code>BelongsTo&lt;T&gt;</code>, <code>HasOne&lt;T&gt;</code>, or <code>HasMany&lt;T&gt;</code> plus <code>#[rf(foreign_key = ...)]</code>; that metadata drives typed preload helpers, scoped relation trees, and relation-aware existence filters.
                 </p>
 
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
@@ -24,6 +24,8 @@ pub struct Article {
     pub author: BelongsTo<User>,
     #[rf(foreign_key = "article_id")]
     pub comments: HasMany<Comment>,
+    #[rf(foreign_key = "article_id")]
+    pub cover_image: HasOne<ArticleImage>,
     #[rf(foreign_key = "country_iso2")]
     pub country: BelongsTo<Country>,
 }`}</code>
@@ -31,38 +33,26 @@ pub struct Article {
 
                 <h2>What the generator gives you</h2>
                 <ul>
-                    <li><code>with_author()</code>, <code>with_comments()</code>, and related preload helpers</li>
-                    <li><code>where_has_comments(...)</code> and similar relation-aware filter helpers</li>
-                    <li><code>get_with_relations()</code> app-facing read surfaces</li>
+                    <li><code>.with(Rel::NAME)</code> and <code>.with_scope(Rel::NAME, ...)</code> preload helpers</li>
+                    <li><code>.where_has(Rel::NAME, ...)</code> and <code>.or_where_has(...)</code> existence filters</li>
+                    <li>tree-based nested relation loads, counts, and aggregates</li>
                     <li>relation metadata aligned with the real field names and PK/FK types from model source</li>
                 </ul>
 
                 <h2>Usage example</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`let rows = article
-    .query()
-    .where_has_comments(|comments| comments.where_is_spam(Op::Eq, false))
-    .with_author()
-    .get_with_relations()
-    .await?;
-
-let users = user
-    .query()
-    .where_has_country(|country| country.where_status(Op::Eq, CountryStatus::Enabled))
-    .get()
+                    <code className="language-rust">{`let rows = ArticleModel::query()
+    .where_has(ArticleRel::COMMENTS, |q| {
+        q.where_col(CommentCol::IS_SPAM, Op::Eq, false)
+    })
+    .with_scope(ArticleRel::COMMENTS, |q| {
+        q.order_by(CommentCol::CREATED_AT, OrderDir::Desc)
+            .limit(3)
+    })
+    .with(ArticleRel::AUTHOR)
+    .all(db)
     .await?;`}</code>
                 </pre>
-
-                <h2>WithRelations and serialization</h2>
-                <p>
-                    All query methods (<code>.get()</code>, <code>.find()</code>, <code>.first()</code>, etc.) return <code>ModelWithRelations</code>. This struct wraps the inner <code>ModelView</code> with <code>#[serde(flatten)]</code> and implements <code>Deref&lt;Target=ModelView&gt;</code>.
-                </p>
-                <ul>
-                    <li><strong>Rust access</strong>: field access is transparent via <code>Deref</code> — <code>row.username</code> works directly without <code>row.row.username</code>.</li>
-                    <li><strong>JSON serialization</strong>: <code>#[serde(flatten)]</code> ensures fields are at the top level — <code>{`{"id": 1, "username": "john"}`}</code>, not <code>{`{"row": {"id": 1, ...}}`}</code>.</li>
-                    <li><strong>Unwrap to View</strong>: use <code>.into_row()</code> when you need the plain <code>ModelView</code> (e.g., for API response DTOs).</li>
-                    <li><strong>Move fields</strong>: since <code>Deref</code> returns a reference, moving <code>String</code>/<code>Option</code> fields out requires <code>.clone()</code>. Alternatively, call <code>.into_row()</code> first to take ownership.</li>
-                </ul>
 
                 <h2>Current framework conventions</h2>
                 <ul>

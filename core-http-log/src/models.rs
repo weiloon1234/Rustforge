@@ -24,7 +24,7 @@ impl WebhookLog {
         response_body: Option<&str>,
         duration_ms: Option<i32>,
     ) -> anyhow::Result<Uuid> {
-        let row = WebhookLogModel::create(DbConn::pool(pool))
+        let row = WebhookLogModel::create()
             .set(WebhookLogCol::REQUEST_URL, request_url.to_string())?
             .set(WebhookLogCol::REQUEST_METHOD, request_method.to_string())?
             .set(WebhookLogCol::REQUEST_HEADERS, request_headers)?
@@ -32,7 +32,7 @@ impl WebhookLog {
             .set(WebhookLogCol::RESPONSE_STATUS, response_status)?
             .set(WebhookLogCol::RESPONSE_BODY, response_body.map(str::to_string))?
             .set(WebhookLogCol::DURATION_MS, duration_ms)?
-            .save()
+            .save(DbConn::pool(pool))
             .await?;
 
         Ok(row.id)
@@ -55,7 +55,7 @@ impl HttpClientLog {
         response_body: Option<&str>,
         duration_ms: Option<i32>,
     ) -> anyhow::Result<Uuid> {
-        let row = HttpClientLogModel::create(DbConn::pool(pool))
+        let row = HttpClientLogModel::create()
             .set(HttpClientLogCol::REQUEST_URL, request_url.to_string())?
             .set(HttpClientLogCol::REQUEST_METHOD, request_method.to_string())?
             .set(HttpClientLogCol::REQUEST_HEADERS, request_headers)?
@@ -64,7 +64,7 @@ impl HttpClientLog {
             .set(HttpClientLogCol::RESPONSE_HEADERS, response_headers)?
             .set(HttpClientLogCol::RESPONSE_BODY, response_body.map(str::to_string))?
             .set(HttpClientLogCol::DURATION_MS, duration_ms)?
-            .save()
+            .save(DbConn::pool(pool))
             .await?;
 
         Ok(row.id)

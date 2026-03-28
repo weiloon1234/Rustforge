@@ -11,14 +11,11 @@ use core_web::datatable::{
     routes_for_scoped_contract_with_options, DataTableRouteOptions, DataTableRouteState,
 };
 use core_web::openapi::ApiRouter;
-use generated::models::{
-    AuditAction, AuditLogCol, AuditLogModel, AuditLogRecord,
-};
+use generated::models::{AuditAction, AuditLogCol, AuditLogModel, AuditLogRecord, AuditLogRel};
 use generated::permissions::Permission;
 
 use crate::contracts::datatable::admin::audit_log::{
-    AdminAuditLogDataTableContract, AuditLogDatatableRow,
-    ROUTE_PREFIX, SCOPED_KEY,
+    AdminAuditLogDataTableContract, AuditLogDatatableRow, ROUTE_PREFIX, SCOPED_KEY,
 };
 use crate::internal::datatables::v1::admin::authorize_with_optional_export;
 
@@ -188,9 +185,9 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
     {
         let db = self.db.clone();
         Box::pin(async move {
-            let base = AuditLogModel::query(DbConn::pool(&db));
+            let base = AuditLogModel::query();
             let filtered = apply_audit_log_filters(base, &query);
-            Ok(filtered.count().await?)
+            Ok(filtered.count(DbConn::pool(&db)).await?)
         })
     }
 
@@ -209,7 +206,7 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
             let safe_per_page = per_page.max(1);
             let offset = (safe_page - 1) * safe_per_page;
 
-            let base = AuditLogModel::query(DbConn::pool(&db));
+            let base = AuditLogModel::query().with(AuditLogRel::ADMIN);
             let filtered = apply_default_audit_log_sort(apply_audit_log_sort(
                 apply_audit_log_filters(base, &query),
                 query.sorting_column,
@@ -218,12 +215,14 @@ impl GeneratedTableAdapter for AuditLogTableAdapter {
             .offset(offset)
             .limit(safe_per_page);
 
-            let rows = filtered.all().await?;
+            let rows = filtered.all(DbConn::pool(&db)).await?;
 
             let out = rows
                 .into_iter()
                 .map(|r: AuditLogRecord| {
-                    let admin_username = r.admin.as_ref()
+                    let admin_username = r
+                        .admin
+                        .as_ref()
                         .map(|a| a.username.clone())
                         .unwrap_or_else(|| r.admin_id.to_string());
                     AuditLogDatatableRow {
@@ -395,8 +394,7 @@ fn apply_audit_log_filters<'db>(
                 "(old_data::text ILIKE ? OR new_data::text ILIKE ? OR table_name ILIKE ?)",
                 [pattern.clone(), pattern.clone(), pattern],
             ) {
-                let (sql, binds) = clause.into_parts();
-                query = query.unsafe_sql().where_raw(sql, binds).done();
+                query = query.where_raw(clause);
             }
         }
     }

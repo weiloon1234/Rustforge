@@ -52,7 +52,7 @@ export function ModelApiQuery() {
                             notes: 'Typed ordering and pagination-building helpers.',
                         },
                         {
-                            method: 'with_<relation>() / where_has_<relation>(...)',
+                            method: 'with(Rel::X) / with_scope(Rel::X, ...) / where_has(Rel::X, ...)',
                             returns: 'Self',
                             notes: 'Relation-aware query helpers generated from model-source relations.',
                         },
@@ -63,28 +63,28 @@ export function ModelApiQuery() {
                 <MethodTable
                     rows={[
                         {
-                            method: 'get() / get_with_relations()',
-                            returns: 'Result<Vec<XxxView>> / Result<Vec<XxxWithRelations>>',
-                            notes: 'Normal list readers. Relation preload uses generated relation metadata rather than handwritten joins.',
+                            method: 'all(db)',
+                            returns: 'Result<Vec<XxxRecord>>',
+                            notes: 'Normal list reader. Relation preload uses generated relation metadata rather than handwritten joins.',
                         },
                         {
-                            method: 'first() / first_or_fail()',
-                            returns: 'Result<Option<XxxView>> / Result<XxxView>',
+                            method: 'first(db) / first_or_fail(db)',
+                            returns: 'Result<Option<XxxRecord>> / Result<XxxRecord>',
                             notes: 'Single-row readers for workflows and handlers.',
                         },
                         {
-                            method: 'find(id) / find_or_fail(id)',
-                            returns: 'Result<Option<XxxView>> / Result<XxxView>',
+                            method: 'find(db, id) / find_or_fail(db, id)',
+                            returns: 'Result<Option<XxxRecord>> / Result<XxxRecord>',
                             notes: 'Primary-key lookup helpers that respect the actual PK type.',
                         },
                         {
-                            method: 'exists() / count() / pluck_ids()',
-                            returns: 'Result<bool> / Result<i64> / Result<Vec<PkType>>',
-                            notes: 'Fast terminal checks and ID reads without dropping to raw SQL.',
+                            method: 'exists(db) / count(db)',
+                            returns: 'Result<bool> / Result<i64>',
+                            notes: 'Fast terminal checks without dropping to raw SQL.',
                         },
                         {
-                            method: 'paginate(page, per_page)',
-                            returns: 'Result<Page<XxxView>>',
+                            method: 'paginate(db, page, per_page)',
+                            returns: 'Result<Page<XxxRecord>>',
                             notes: 'Offset pagination with the same filtering/order pipeline as normal reads.',
                         },
                         {
@@ -97,15 +97,21 @@ export function ModelApiQuery() {
 
                 <h2>Usage example</h2>
                 <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                    <code className="language-rust">{`let q = article
-    .query()
-    .where_status(Op::Eq, ArticleStatus::Published)
-    .where_has_author(|author| author.where_is_active(Op::Eq, true))
+                    <code className="language-rust">{`let q = ArticleModel::query()
+    .where_col(ArticleCol::STATUS, Op::Eq, ArticleStatus::Published)
+    .where_has(ArticleRel::AUTHOR, |author| {
+        author.where_col(UserCol::IS_ACTIVE, Op::Eq, true)
+    })
     .latest();
 
-let first = q.clone().first_or_fail().await?;
-let page = q.clone().paginate(1, 20).await?;
-let rows = q.with_author().get_with_relations().await?;`}</code>
+let first = q.clone().first_or_fail(db).await?;
+let page = q.clone().paginate(db, 1, 20).await?;
+let rows = q
+    .with_scope(ArticleRel::COMMENTS, |comments| {
+        comments.order_by(CommentCol::CREATED_AT, OrderDir::Desc).limit(5)
+    })
+    .all(db)
+    .await?;`}</code>
                 </pre>
 
                 <h2>Customization boundary</h2>

@@ -75,11 +75,17 @@ pub struct ArticleRecord {
     pub meta: std::collections::HashMap<String, JsonValue>,
     #[serde(default)]
     pub author: Option<Box<UserRecord>>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub __relation_counts: std::collections::HashMap<String, i64>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub __relation_aggregates: std::collections::HashMap<String, f64>,
 }
 
 impl ArticleRecord {
-    pub fn update<'db>(&self, db: impl Into<DbConn<'db>>) -> Patch<'db, ArticleModel> {
-        ArticleModel::query(db.into()).where_col(ArticleDbCol::Id, Op::Eq, self.id.clone()).patch()
+    pub fn update<'db>(&self) -> Patch<'db, ArticleModel> {
+        ArticleModel::query().where_col(ArticleDbCol::Id, Op::Eq, self.id.clone()).patch()
     }
     pub fn meta_flags(&self) -> Option<bool> { self.meta.get("flags").and_then(|v| v.as_bool()) }
     pub fn meta_extra_as<T: serde::de::DeserializeOwned>(&self) -> anyhow::Result<Option<T>> { match self.meta.get("extra") { None => Ok(None), Some(v) => Ok(Some(serde_json::from_value(v.clone())?)), } }
@@ -109,6 +115,8 @@ pub(crate) fn hydrate_record(row: ArticleRow, loc: &LocalizedMap, meta: &MetaMap
         hero_url: None,
         meta: HashMap::new(),
         author: None,
+        __relation_counts: HashMap::new(),
+        __relation_aggregates: HashMap::new(),
     };
     let ml_title = loc.get_localized_text("title", record.id);
     if let Some(ref ml) = ml_title {
@@ -134,6 +142,21 @@ pub(crate) async fn hydrate_records<'db>(db: DbConn<'db>, rows: &[ArticleRow], b
     Ok(records)
 }
 
+impl core_db::common::model_api::RelationMetricRecord for ArticleRecord {
+    fn relation_counts(&self) -> &std::collections::HashMap<String, i64> {
+        &self.__relation_counts
+    }
+    fn relation_aggregates(&self) -> &std::collections::HashMap<String, f64> {
+        &self.__relation_aggregates
+    }
+    fn relation_counts_mut(&mut self) -> &mut std::collections::HashMap<String, i64> {
+        &mut self.__relation_counts
+    }
+    fn relation_aggregates_mut(&mut self) -> &mut std::collections::HashMap<String, f64> {
+        &mut self.__relation_aggregates
+    }
+}
+
 impl ArticleRecord {
     pub fn one<R>(&self, relation: R) -> Option<&R::Target>
     where
@@ -146,6 +169,63 @@ impl ArticleRecord {
         R: core_db::common::model_api::RecordManyRelation<ArticleModel>,
     {
         R::get(relation, self)
+    }
+    pub fn count<R>(&self, relation: R) -> Option<i64>
+    where
+        R: core_db::common::model_api::CountRelation<ArticleModel>,
+    {
+        self.__relation_counts.get(R::name(relation)).copied()
+    }
+    pub fn sum<R, A>(&self, relation: R, target: A) -> Option<f64>
+    where
+        R: core_db::common::model_api::CountRelation<ArticleModel>,
+        A: Into<core_db::common::model_api::AggregateTarget<R::TargetModel>>,
+    {
+        let key = core_db::common::model_api::relation_aggregate_lookup_key(
+            R::name(relation),
+            core_db::common::model_api::RelationAggregateKind::Sum,
+            &target.into().into_spec(),
+        );
+        self.__relation_aggregates.get(&key).copied()
+    }
+    pub fn avg<R, A>(&self, relation: R, target: A) -> Option<f64>
+    where
+        R: core_db::common::model_api::CountRelation<ArticleModel>,
+        A: Into<core_db::common::model_api::AggregateTarget<R::TargetModel>>,
+    {
+        let key = core_db::common::model_api::relation_aggregate_lookup_key(
+            R::name(relation),
+            core_db::common::model_api::RelationAggregateKind::Avg,
+            &target.into().into_spec(),
+        );
+        self.__relation_aggregates.get(&key).copied()
+    }
+    pub fn min<R, A>(&self, relation: R, target: A) -> Option<f64>
+    where
+        R: core_db::common::model_api::CountRelation<ArticleModel>,
+        A: Into<core_db::common::model_api::AggregateTarget<R::TargetModel>>,
+    {
+        let key = core_db::common::model_api::relation_aggregate_lookup_key(
+            R::name(relation),
+            core_db::common::model_api::RelationAggregateKind::Min,
+            &target.into().into_spec(),
+        );
+        self.__relation_aggregates.get(&key).copied()
+    }
+    pub fn max<R, A>(&self, relation: R, target: A) -> Option<f64>
+    where
+        R: core_db::common::model_api::CountRelation<ArticleModel>,
+        A: Into<core_db::common::model_api::AggregateTarget<R::TargetModel>>,
+    {
+        let key = core_db::common::model_api::relation_aggregate_lookup_key(
+            R::name(relation),
+            core_db::common::model_api::RelationAggregateKind::Max,
+            &target.into().into_spec(),
+        );
+        self.__relation_aggregates.get(&key).copied()
+    }
+    pub fn aggregate(&self, key: &str) -> Option<f64> {
+        self.__relation_aggregates.get(key).copied()
     }
 }
 
@@ -196,686 +276,37 @@ impl ArticleRel {
     pub const AUTHOR: OneRelation<ArticleModel, UserRecord, 0> = OneRelation::<ArticleModel, UserRecord, 0>::new("author");
 }
 
-async fn load_author<'db>(db: DbConn<'db>, parents: &[ArticleRow], base_url: Option<&str>) -> Result<HashMap<i64, Option<UserRecord>>> {
-        if parents.is_empty() { return Ok(HashMap::new()); }
-        let mut fk_vals = Vec::new();
-        let mut parent_pairs = Vec::new();
-        for p in parents {
-            fk_vals.push(p.author_id.clone());
-            parent_pairs.push((p.id.clone(), Some(p.author_id.clone())));
-        }
-        if fk_vals.is_empty() { return Ok(HashMap::new()); }
-        let placeholders: Vec<String> = (1..=fk_vals.len()).map(|i| format!("${}", i)).collect();
-        let sql = format!("SELECT * FROM users WHERE id IN ({})", placeholders.join(", "));
-        let mut q = sqlx::query_as::<_, UserRow>(&sql);
-        for fk in fk_vals { q = bind(q, fk.into()); }
-        let rows = db.fetch_all(q).await?;
-        let records = crate::generated::models::user::hydrate_records(db.clone(), &rows, base_url).await?;
-        let mut by_pk: HashMap<i64, UserRecord> = HashMap::new();
-        for record in records {
-            let key = record.id.clone();
-            by_pk.insert(key, record);
-        }
-        let mut out = HashMap::new();
-        for (pid, fk) in parent_pairs {
-            out.insert(pid, fk.and_then(|k| by_pk.get(&k).cloned()));
-        }
-        Ok(out)
-    }
+fn rel_author_parent_key(record: &ArticleRecord) -> Option<i64> { Some(record.author_id.clone()) }
+fn rel_author_target_key(record: &UserRecord) -> i64 { record.id.clone() }
+fn rel_author_assign(record: &mut ArticleRecord, child: Option<UserRecord>) { record.author = child.map(Box::new); }
+static REL_RUNTIME_AUTHOR: core_db::common::model_api::BelongsToRuntime<ArticleModel, UserModel, i64> = core_db::common::model_api::BelongsToRuntime {
+    name: "author",
+    target_table: "users",
+    target_key_sql: "id",
+    parent_foreign_key: rel_author_parent_key,
+    target_key: rel_author_target_key,
+    assign: rel_author_assign,
+};
 
-pub struct ArticleCreateInner<'db> {
-    pub(crate) state: core_db::common::model_api::CreateState<'db>,
-    translations: HashMap<&'static str, HashMap<String, String>>,
-    meta: HashMap<String, JsonValue>,
-    attachments_single: HashMap<&'static str, AttachmentInput>,
-    attachments_multi: HashMap<&'static str, Vec<AttachmentInput>>,
-}
-
-impl<'db> ArticleCreateInner<'db> {
-    pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self {
-            state: core_db::common::model_api::CreateState::new(db, base_url, "articles"),
-            translations: HashMap::new(),
-            meta: HashMap::new(),
-            attachments_single: HashMap::new(),
-            attachments_multi: HashMap::new(),
-        }
+impl core_db::common::model_api::RuntimeModel for ArticleModel {
+    type Row = ArticleRow;
+    fn hydrate_records<'db>(db: DbConn<'db>, rows: Vec<Self::Row>, base_url: Option<String>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
+        Box::pin(async move { crate::generated::models::article::hydrate_records(db, &rows, base_url.as_deref()).await })
     }
-    pub fn from_state(state: core_db::common::model_api::CreateState<'db>) -> Self {
-        Self {
-            state,
-            translations: HashMap::new(),
-            meta: HashMap::new(),
-            attachments_single: HashMap::new(),
-            attachments_multi: HashMap::new(),
-        }
+    fn record_pk_i64(record: &Self::Record) -> Option<i64> {
+        Some(record.id.clone())
     }
-
-
-pub fn set_id(mut self, val: i64) -> Self {
-        self.state = self.state.set_col("id", val.into());
-        self
-    }
-    pub fn set_author_id(mut self, val: i64) -> Self {
-        self.state = self.state.set_col("author_id", val.into());
-        self
-    }
-    pub fn set_status(mut self, val: ArticleStatus) -> Self {
-        self.state = self.state.set_col("status", val.into());
-        self
-    }
-    pub fn set_is_system(mut self, val: ArticleSystemFlag) -> Self {
-        self.state = self.state.set_col("is_system", val.into());
-        self
-    }
-    pub fn set_title_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
-        self.translations.entry("title").or_default().insert(locale.into(), val.into());
-        self
-    }
-    pub fn set_title_langs(mut self, langs: localized::LocalizedText) -> Self {
-        if !langs.en.is_empty() { self = self.set_title_lang(localized::Locale::En, langs.en); }
-        if !langs.zh.is_empty() { self = self.set_title_lang(localized::Locale::Zh, langs.zh); }
-        self
-    }
-    pub fn set_title_input(mut self, input: Option<localized::LocalizedInput>) -> Self {
-        let Some(input) = input else { return self; };
-        if input.is_empty() { return self; }
-        let map = input.to_hashmap();
-        for (locale, val) in map {
-            self.translations.entry("title").or_default().insert(locale, val);
-        }
-        self
-    }
-    pub fn set_meta_flags(mut self, val: bool) -> Self {
-        self.meta.insert("flags".to_string(), JsonValue::Bool(val));
-        self
-    }
-    pub fn set_meta_extra(mut self, val: JsonValue) -> Self {
-        self.meta.insert("extra".to_string(), val);
-        self
-    }
-    pub fn set_meta_extra_as<T: serde::Serialize>(mut self, val: &T) -> anyhow::Result<Self> {
-        self.meta.insert("extra".to_string(), serde_json::to_value(val)?);
-        Ok(self)
-    }
-    pub fn set_attachment_hero(mut self, att: AttachmentInput) -> Self {
-        self.attachments_single.insert("hero", att);
-        self
-    }
-    pub fn on_conflict_do_nothing(mut self, conflict_cols: &[ArticleDbCol]) -> Self {
-        self.state = self.state.on_conflict_do_nothing(&conflict_cols.iter().map(|c| c.as_sql()).collect::<Vec<_>>());
-        self
-    }
-    pub fn on_conflict_update(mut self, conflict_cols: &[ArticleDbCol]) -> Self {
-        self.state = self.state.on_conflict_update(&conflict_cols.iter().map(|c| c.as_sql()).collect::<Vec<_>>());
-        self
-    }
-    fn to_create_input(&self) -> Result<ArticleCreate> {
-        let mut input = ArticleCreate::default();
-        for (col_name, bind) in self.state.col_names.iter().zip(self.state.binds.iter()) {
-            match *col_name {
-                "id" => {
-                    let value = match bind {
-            BindValue::I64(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
-        };
-                    input.id = FieldInput::Set(value);
-                }
-                "author_id" => {
-                    let value = match bind {
-            BindValue::I64(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
-        };
-                    input.author_id = FieldInput::Set(value);
-                }
-                "status" => {
-                    let value = match bind {
-                BindValue::String(value) => ArticleStatus::from_storage(value)
-                    .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleStatus'", value))?,
-                BindValue::I64(value) => {
-                    let raw = value.to_string();
-                    ArticleStatus::from_storage(&raw)
-                        .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleStatus'", value))?
-                }
-                other => anyhow::bail!("unexpected bind value '{:?}' for type 'ArticleStatus'", other),
-            };
-                    input.status = FieldInput::Set(value);
-                }
-                "is_system" => {
-                    let value = match bind {
-                BindValue::String(value) => ArticleSystemFlag::from_storage(value)
-                    .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleSystemFlag'", value))?,
-                BindValue::I64(value) => {
-                    let raw = value.to_string();
-                    ArticleSystemFlag::from_storage(&raw)
-                        .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleSystemFlag'", value))?
-                }
-                other => anyhow::bail!("unexpected bind value '{:?}' for type 'ArticleSystemFlag'", other),
-            };
-                    input.is_system = FieldInput::Set(value);
-                }
-                _ => {}
-            }
-        }
-        Ok(input)
-    }
-
-    fn apply_create_overrides(mut state: CreateState<'_>, overrides: serde_json::Value) -> Result<CreateState<'_>> {
-        let map = overrides.as_object()
-            .ok_or_else(|| anyhow::anyhow!("observer overrides must be a JSON object"))?;
-        for (key, val) in map {
-            match key.as_str() {
-                "id" => {
-                    let v: i64 = serde_json::from_value(val.clone())?;
-                    state = state.set_col("id", v.into());
-                }
-                "author_id" => {
-                    let v: i64 = serde_json::from_value(val.clone())?;
-                    state = state.set_col("author_id", v.into());
-                }
-                "status" => {
-                    let v: String = serde_json::from_value(val.clone())?;
-                    state = state.set_col("status", v.into());
-                }
-                "is_system" => {
-                    let v: String = serde_json::from_value(val.clone())?;
-                    state = state.set_col("is_system", v.into());
-                }
-                other => anyhow::bail!("unknown column '{}' in observer create overrides", other),
-            }
-        }
-        Ok(state)
-    }
-
-
-pub async fn save(mut self) -> Result<ArticleRecord> {
-        let __create_input = if try_get_observer().is_some() {
-            Some(self.to_create_input()?)
-        } else {
-            None
-        };
-        if let Some(observer) = try_get_observer() {
-            if let Some(create_input) = __create_input.as_ref() {
-                let event = ModelEvent { model: "article", table: "articles", record_key: None };
-                let data = serde_json::to_value(create_input)?;
-                let action = observer.on_creating(&event, &data).await?;
-                match action {
-                    ObserverAction::Prevent(err) => return Err(err),
-                    ObserverAction::Modify(overrides) => {
-                        self.state = Self::apply_create_overrides(self.state, overrides)?;
-                    }
-                    ObserverAction::Continue => {}
-                }
-            }
-        }
-        let db_conn = self.state.db.clone();
-        match db_conn {
-            DbConn::Pool(pool) => {
-                let tx = pool.begin().await?;
-                let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (record, row) = {
-                    let db = DbConn::tx(tx_lock.clone());
-                    self.save_with_db(db).await?
-                };
-                let tx = std::sync::Arc::try_unwrap(tx_lock)
-                    .map_err(|_| anyhow::anyhow!("transaction scope still has active handles"))?
-                    .into_inner();
-                tx.commit().await?;
-                if let Some(observer) = try_get_observer() {
-                    let event = ModelEvent { model: "article", table: "articles", record_key: Some(format!("{}", row.id)) };
-                    match serde_json::to_value(&row) {
-                        Ok(data) => {
-                            if let Err(err) = observer.on_created(&event, &data).await {
-                                log_observer_error("created", "article", &err);
-                            }
-                        }
-                        Err(err) => log_observer_error("created", "article", &err),
-                    }
-                }
-                Ok(record)
-            }
-            DbConn::Tx(_) => {
-                let (record, row) = self.save_with_db(db_conn).await?;
-                if let Some(observer) = try_get_observer() {
-                    let event = ModelEvent { model: "article", table: "articles", record_key: Some(format!("{}", row.id)) };
-                    match serde_json::to_value(&row) {
-                        Ok(data) => {
-                            if let Err(err) = observer.on_created(&event, &data).await {
-                                log_observer_error("created", "article", &err);
-                            }
-                        }
-                        Err(err) => log_observer_error("created", "article", &err),
-                    }
-                }
-                Ok(record)
-            }
-        }
-    }
-
-    async fn save_with_db<'tx>(mut self, db: DbConn<'tx>) -> Result<(ArticleRecord, ArticleRow)> {
-        if !self.state.col_names.contains(&"id") {
-            self.state = self.state.set_col("id", generate_snowflake_i64().into());
-        }
-        if self.state.col_names.is_empty() {
-            anyhow::bail!("insert: no columns set");
-        }
-        let base_url = self.state.base_url.clone();
-        let (sql, binds) = self.state.build_insert_sql();
-        let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        let mut q = sqlx::query_as::<_, ArticleRow>(&sql);
-        for b in binds {
-            q = bind(q, b);
-        }
-        let row = db.fetch_one(q).await?;
-        record_profiled_query("articles", "INSERT", &sql, &__profiler_binds, __profiler_start.elapsed());
-        if !self.translations.is_empty() {
-            let supported = localized::SUPPORTED_LOCALES;
-            if let Some(map) = self.translations.get("title") {
-                let mut filtered = HashMap::new();
-                for (loc, val) in map {
-                    if supported.contains(&loc.as_str()) { filtered.insert(loc.clone(), val.clone()); }
-                }
-                if !filtered.is_empty() {
-                    localized::upsert_localized_many(db.clone(), localized::ARTICLE_OWNER_TYPE, row.id, "title", &filtered).await?;
-                }
-            }
-        }
-        if !self.meta.is_empty() {
-            localized::upsert_meta_many(db.clone(), localized::ARTICLE_OWNER_TYPE, row.id, &self.meta).await?;
-        }
-        if !self.attachments_single.is_empty() || !self.attachments_multi.is_empty() {
-            for (field, att) in &self.attachments_single {
-                localized::replace_single_attachment(db.clone(), localized::ARTICLE_OWNER_TYPE, row.id, field, att).await?;
-            }
-            for (field, list) in &self.attachments_multi {
-                localized::add_attachments(db.clone(), localized::ARTICLE_OWNER_TYPE, row.id, field, list).await?;
-            }
-        }
-        let localized = localized::load_article_localized(db, &[row.id]).await?;
-        let attachments = localized::load_article_attachments(db, &[row.id]).await?;
-        let meta_map = localized::load_article_meta(db, &[row.id]).await?;
-        let record = hydrate_record(row.clone(), &localized, &meta_map, &attachments, base_url.as_deref());
-        Ok((record, row))
+    fn relation_runtimes() -> &'static [&'static dyn core_db::common::model_api::ErasedRelationRuntime<Self>] {
+        static RELATIONS: [&'static dyn core_db::common::model_api::ErasedRelationRuntime<ArticleModel>; 1] = [
+            &REL_RUNTIME_AUTHOR,
+        ];
+        &RELATIONS
     }
 }
 
-pub struct ArticlePatchInner<'db> {
-    pub(crate) state: core_db::common::model_api::PatchState<'db>,
-    translations: HashMap<&'static str, HashMap<String, String>>,
-    meta: HashMap<String, JsonValue>,
-    attachments_single: HashMap<&'static str, AttachmentInput>,
-    attachments_multi: HashMap<&'static str, Vec<AttachmentInput>>,
-    attachments_clear_single: Vec<&'static str>,
-    attachments_delete_multi: HashMap<&'static str, Vec<Uuid>>,
+pub struct ArticleTableAdapter {
+    db: sqlx::PgPool,
 }
-
-impl<'db> ArticlePatchInner<'db> {
-    pub fn new(db: DbConn<'db>, base_url: Option<String>) -> Self {
-        Self {
-            state: core_db::common::model_api::PatchState::new(db, base_url, "articles"),
-            translations: HashMap::new(),
-            meta: HashMap::new(),
-            attachments_single: HashMap::new(),
-            attachments_multi: HashMap::new(),
-            attachments_clear_single: Vec::new(),
-            attachments_delete_multi: HashMap::new(),
-        }
-    }
-    pub fn from_state(state: core_db::common::model_api::PatchState<'db>) -> Self {
-        Self {
-            state,
-            translations: HashMap::new(),
-            meta: HashMap::new(),
-            attachments_single: HashMap::new(),
-            attachments_multi: HashMap::new(),
-            attachments_clear_single: Vec::new(),
-            attachments_delete_multi: HashMap::new(),
-        }
-    }
-
-
-pub fn set_id(mut self, val: i64) -> Self {
-        self.state = self.state.assign_col(ArticleDbCol::Id.as_sql(), val.into());
-        self
-    }
-    pub fn increment_id(mut self, val: i64) -> Self {
-        self.state = self.state.increment_col(ArticleDbCol::Id.as_sql(), val.into());
-        self
-    }
-    pub fn decrement_id(mut self, val: i64) -> Self {
-        self.state = self.state.decrement_col(ArticleDbCol::Id.as_sql(), val.into());
-        self
-    }
-    pub fn set_author_id(mut self, val: i64) -> Self {
-        self.state = self.state.assign_col(ArticleDbCol::AuthorId.as_sql(), val.into());
-        self
-    }
-    pub fn increment_author_id(mut self, val: i64) -> Self {
-        self.state = self.state.increment_col(ArticleDbCol::AuthorId.as_sql(), val.into());
-        self
-    }
-    pub fn decrement_author_id(mut self, val: i64) -> Self {
-        self.state = self.state.decrement_col(ArticleDbCol::AuthorId.as_sql(), val.into());
-        self
-    }
-    pub fn set_status(mut self, val: ArticleStatus) -> Self {
-        self.state = self.state.assign_col(ArticleDbCol::Status.as_sql(), val.into());
-        self
-    }
-    pub fn set_is_system(mut self, val: ArticleSystemFlag) -> Self {
-        self.state = self.state.assign_col(ArticleDbCol::IsSystem.as_sql(), val.into());
-        self
-    }
-    pub fn set_title_lang(mut self, locale: localized::Locale, val: impl Into<String>) -> Self {
-        self.translations.entry("title").or_default().insert(locale.into(), val.into());
-        self
-    }
-    pub fn set_title_langs(mut self, langs: localized::LocalizedText) -> Self {
-        if !langs.en.is_empty() { self = self.set_title_lang(localized::Locale::En, langs.en); }
-        if !langs.zh.is_empty() { self = self.set_title_lang(localized::Locale::Zh, langs.zh); }
-        self
-    }
-    pub fn set_title_input(mut self, input: Option<localized::LocalizedInput>) -> Self {
-        let Some(input) = input else { return self; };
-        if input.is_empty() { return self; }
-        let map = input.to_hashmap();
-        for (locale, val) in map {
-            self.translations.entry("title").or_default().insert(locale, val);
-        }
-        self
-    }
-    pub fn set_meta_flags(mut self, val: bool) -> Self {
-        self.meta.insert("flags".to_string(), JsonValue::Bool(val));
-        self
-    }
-    pub fn set_meta_extra(mut self, val: JsonValue) -> Self {
-        self.meta.insert("extra".to_string(), val);
-        self
-    }
-    pub fn set_meta_extra_as<T: serde::Serialize>(mut self, val: &T) -> anyhow::Result<Self> {
-        self.meta.insert("extra".to_string(), serde_json::to_value(val)?);
-        Ok(self)
-    }
-    pub fn set_attachment_hero(mut self, att: AttachmentInput) -> Self {
-        self.attachments_single.insert("hero", att);
-        self
-    }
-    pub fn clear_attachment_hero(mut self) -> Self {
-        if !self.attachments_clear_single.contains(&"hero") { self.attachments_clear_single.push("hero"); }
-        self
-    }
-    pub fn where_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.state.where_binds.len() + 1;
-        self.state.where_sql.push(format!("{} {} ${}", ArticleDbCol::Id.as_sql(), op.as_sql(), idx));
-        self.state.where_binds.push(val.into());
-        self
-    }
-    pub fn where_author_id(mut self, op: Op, val: i64) -> Self {
-        let idx = self.state.where_binds.len() + 1;
-        self.state.where_sql.push(format!("{} {} ${}", ArticleDbCol::AuthorId.as_sql(), op.as_sql(), idx));
-        self.state.where_binds.push(val.into());
-        self
-    }
-    pub fn where_status(mut self, op: Op, val: ArticleStatus) -> Self {
-        let idx = self.state.where_binds.len() + 1;
-        self.state.where_sql.push(format!("{} {} ${}", ArticleDbCol::Status.as_sql(), op.as_sql(), idx));
-        self.state.where_binds.push(val.into());
-        self
-    }
-    pub fn where_is_system(mut self, op: Op, val: ArticleSystemFlag) -> Self {
-        let idx = self.state.where_binds.len() + 1;
-        self.state.where_sql.push(format!("{} {} ${}", ArticleDbCol::IsSystem.as_sql(), op.as_sql(), idx));
-        self.state.where_binds.push(val.into());
-        self
-    }
-    pub fn where_col<T: Into<BindValue>>(mut self, col: ArticleDbCol, op: Op, val: T) -> Self {
-        let idx = self.state.where_binds.len() + 1;
-        self.state.where_sql.push(format!("{} {} ${}", col.as_sql(), op.as_sql(), idx));
-        self.state.where_binds.push(val.into());
-        self
-    }
-    fn where_raw<T: Into<BindValue>>(mut self, clause: impl Into<String>, binds: impl IntoIterator<Item = T>) -> Self {
-        let mut clause = clause.into();
-        let incoming: Vec<BindValue> = binds.into_iter().map(Into::into).collect();
-        let mut idx = self.state.where_binds.len() + 1;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${}", idx);
-            clause.replace_range(pos..pos + 1, &ph);
-            idx += 1;
-        }
-        self.state.where_sql.push(clause);
-        self.state.where_binds.extend(incoming);
-        self
-    }
-    fn to_update_changes(&self) -> Result<ArticleChanges> {
-        let mut changes = ArticleChanges::default();
-        for ((col, bind), mode) in self.state.set_cols.iter().zip(self.state.set_binds.iter()).zip(self.state.set_modes.iter()) {
-            match *col {
-                "id" => {
-                    let value = match bind {
-            BindValue::I64(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
-        };
-                    changes.id = Some(match mode {
-                        SetMode::Assign => FieldChange::Assign(value),
-                        SetMode::Increment => FieldChange::Increment(value),
-                        SetMode::Decrement => FieldChange::Decrement(value),
-                    });
-                }
-                "author_id" => {
-                    let value = match bind {
-            BindValue::I64(value) => value.clone(),
-            other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
-        };
-                    changes.author_id = Some(match mode {
-                        SetMode::Assign => FieldChange::Assign(value),
-                        SetMode::Increment => FieldChange::Increment(value),
-                        SetMode::Decrement => FieldChange::Decrement(value),
-                    });
-                }
-                "status" => {
-                    let value = match bind {
-                BindValue::String(value) => ArticleStatus::from_storage(value)
-                    .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleStatus'", value))?,
-                BindValue::I64(value) => {
-                    let raw = value.to_string();
-                    ArticleStatus::from_storage(&raw)
-                        .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleStatus'", value))?
-                }
-                other => anyhow::bail!("unexpected bind value '{:?}' for type 'ArticleStatus'", other),
-            };
-                    changes.status = Some(match mode {
-                        SetMode::Assign => FieldChange::Assign(value),
-                        SetMode::Increment => FieldChange::Increment(value),
-                        SetMode::Decrement => FieldChange::Decrement(value),
-                    });
-                }
-                "is_system" => {
-                    let value = match bind {
-                BindValue::String(value) => ArticleSystemFlag::from_storage(value)
-                    .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleSystemFlag'", value))?,
-                BindValue::I64(value) => {
-                    let raw = value.to_string();
-                    ArticleSystemFlag::from_storage(&raw)
-                        .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleSystemFlag'", value))?
-                }
-                other => anyhow::bail!("unexpected bind value '{:?}' for type 'ArticleSystemFlag'", other),
-            };
-                    changes.is_system = Some(match mode {
-                        SetMode::Assign => FieldChange::Assign(value),
-                        SetMode::Increment => FieldChange::Increment(value),
-                        SetMode::Decrement => FieldChange::Decrement(value),
-                    });
-                }
-                _ => {}
-            }
-        }
-        Ok(changes)
-    }
-
-    fn apply_update_overrides(mut state: PatchState<'_>, overrides: serde_json::Value) -> Result<PatchState<'_>> {
-        let map = overrides.as_object()
-            .ok_or_else(|| anyhow::anyhow!("observer overrides must be a JSON object"))?;
-        for (key, val) in map {
-            match key.as_str() {
-                "id" => {
-                    let v: i64 = serde_json::from_value(val.clone())?;
-                    state = state.assign_col("id", v.into());
-                }
-                "author_id" => {
-                    let v: i64 = serde_json::from_value(val.clone())?;
-                    state = state.assign_col("author_id", v.into());
-                }
-                "status" => {
-                    let v: String = serde_json::from_value(val.clone())?;
-                    state = state.assign_col("status", v.into());
-                }
-                "is_system" => {
-                    let v: String = serde_json::from_value(val.clone())?;
-                    state = state.assign_col("is_system", v.into());
-                }
-                other => anyhow::bail!("unknown column '{}' in observer update overrides", other),
-            }
-        }
-        Ok(state)
-    }
-
-
-pub async fn save(self) -> Result<u64> {
-        if self.state.set_cols.is_empty() { anyhow::bail!("update: no columns set"); }
-        if self.state.where_sql.is_empty() { anyhow::bail!("update: no conditions set"); }
-        let observer_changes = if try_get_observer().is_some() {
-            Some(self.to_update_changes()?)
-        } else {
-            None
-        };
-        let db_conn = self.state.db.clone();
-        match db_conn {
-            DbConn::Pool(pool) => {
-                let tx = pool.begin().await?;
-                let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let affected = {
-                    let db = DbConn::tx(tx_lock.clone());
-                    self.save_with_db(db, observer_changes.clone()).await?
-                };
-                let tx = std::sync::Arc::try_unwrap(tx_lock)
-                    .map_err(|_| anyhow::anyhow!("transaction scope still has active handles"))?
-                    .into_inner();
-                tx.commit().await?;
-                Ok(affected)
-            }
-            DbConn::Tx(_) => self.save_with_db(db_conn, observer_changes).await,
-        }
-    }
-
-    async fn save_with_db<'tx>(self, db: DbConn<'tx>, observer_changes: Option<ArticleChanges>) -> Result<u64> {
-        let mut state = self.state;
-        // find target ids for localized updates
-        let select_sql = format!("SELECT id FROM articles WHERE {}", state.where_sql.join(" AND "));
-        let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
-        for b in &state.where_binds { select_q = bind_scalar(select_q, b.clone()); }
-        let target_ids = db.fetch_all_scalar(select_q).await?;
-        let __observer_active = try_get_observer().is_some();
-        let __old_rows: Vec<ArticleRow> = if __observer_active && !target_ids.is_empty() {
-            let phs: Vec<String> = (1..=target_ids.len()).map(|i| format!("${}", i)).collect();
-            let fetch_sql = format!("SELECT * FROM articles WHERE id IN ({})", phs.join(", "));
-            let mut fq = sqlx::query_as::<_, ArticleRow>(&fetch_sql);
-            for id in &target_ids { fq = fq.bind(id); }
-            let rows: Vec<ArticleRow> = db.fetch_all(fq).await.unwrap_or_default();
-            rows
-        } else {
-            Vec::new()
-        };
-        if !__old_rows.is_empty() {
-            if let Some(observer) = try_get_observer() {
-                if let Some(changes) = observer_changes.as_ref() {
-                    let changes_data = serde_json::to_value(changes)?;
-                    let old_data = serde_json::to_value(&__old_rows)?;
-                    let event = ModelEvent { model: "article", table: "articles", record_key: None };
-                    let action = observer.on_updating(&event, &old_data, &changes_data).await?;
-                    match action {
-                        ObserverAction::Prevent(err) => return Err(err),
-                        ObserverAction::Modify(overrides) => {
-                            state = Self::apply_update_overrides(state, overrides)?;
-                        }
-                        ObserverAction::Continue => {}
-                    }
-                }
-            }
-        }
-        let (sql, all_binds) = state.build_update_sql();
-        let set_binds = &state.set_binds;
-        let mut q = sqlx::query(&sql);
-        let __profiler_binds = if is_sql_profiler_enabled() { all_binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-        let __profiler_start = std::time::Instant::now();
-        for b in &all_binds { q = bind_query(q, b.clone()); }
-        let res = db.execute(q).await?;
-        record_profiled_query("articles", "UPDATE", &sql, &__profiler_binds, __profiler_start.elapsed());
-        if res.rows_affected() > 0 && !self.translations.is_empty() && !target_ids.is_empty() {
-            let supported = localized::SUPPORTED_LOCALES;
-            if let Some(map) = self.translations.get("title") {
-                let mut filtered = HashMap::new();
-                for (loc, val) in map {
-                    if supported.contains(&loc.as_str()) { filtered.insert(loc.clone(), val.clone()); }
-                }
-                if !filtered.is_empty() {
-                    for id in &target_ids {
-                        localized::upsert_localized_many(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), "title", &filtered).await?;
-                    }
-                }
-            }
-        }
-        if res.rows_affected() > 0 && !self.meta.is_empty() && !target_ids.is_empty() {
-            for id in &target_ids {
-                localized::upsert_meta_many(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), &self.meta).await?;
-            }
-        }
-        if res.rows_affected() > 0 && !target_ids.is_empty() {
-            for id in &target_ids {
-                for field in &self.attachments_clear_single {
-                    localized::clear_attachment_field(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), field).await?;
-                }
-                for (field, att) in &self.attachments_single {
-                    localized::replace_single_attachment(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), field, att).await?;
-                }
-                for (field, list) in &self.attachments_multi {
-                    localized::add_attachments(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), field, list).await?;
-                }
-                for (field, ids) in &self.attachments_delete_multi {
-                    localized::delete_attachment_ids(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), field, ids).await?;
-                }
-            }
-        }
-        if !__old_rows.is_empty() && res.rows_affected() > 0 {
-            if let Some(observer) = try_get_observer() {
-                for old_row in &__old_rows {
-                    let fetch_sql = format!("SELECT * FROM articles WHERE id = $1");
-                    match db.fetch_optional(sqlx::query_as::<_, ArticleRow>(&fetch_sql).bind(old_row.id.clone())).await {
-                        Ok(Some(new_row)) => {
-                            match (serde_json::to_value(old_row), serde_json::to_value(&new_row)) {
-                                (Ok(old_data), Ok(new_data)) => {
-                                    let event = ModelEvent { model: "article", table: "articles", record_key: Some(format!("{}", old_row.id)) };
-                                    if let Err(err) = observer.on_updated(&event, &old_data, &new_data).await {
-                                        log_observer_error("updated", "article", &err);
-                                    }
-                                }
-                                (Err(err), _) | (_, Err(err)) => log_observer_error("updated", "article", &err),
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(err) => log_observer_error("updated", "article", &err),
-                    }
-                }
-            }
-        }
-        Ok(res.rows_affected())
-    }
-}
-
-
-
-pub struct ArticleTableAdapter;
 impl ArticleTableAdapter {
     fn parse_col(name: &str) -> Option<ArticleDbCol> {
         match name {
@@ -1165,10 +596,10 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
         }
     }
     fn count<'db>(&self, query: Query<'db, ArticleModel>) -> BoxFuture<'db, anyhow::Result<i64>> where Self: 'db {
-        Box::pin(async move { query.count().await })
+        let db = self.db.clone(); Box::pin(async move { query.count(&db).await })
     }
     fn fetch_page<'db>(&self, query: Query<'db, ArticleModel>, page: i64, per_page: i64) -> BoxFuture<'db, anyhow::Result<Vec<ArticleRecord>>> where Self: 'db {
-        Box::pin(async move { Ok(query.paginate(page, per_page).await?.data) })
+        let db = self.db.clone(); Box::pin(async move { Ok(query.paginate(&db, page, per_page).await?.data) })
     }
 }
 #[derive(Debug, Clone, Copy)]
@@ -1228,20 +659,20 @@ pub struct ArticleDataTable<H = ArticleDefaultDataTableHooks> where H: ArticleDa
 impl ArticleDataTable<ArticleDefaultDataTableHooks> {
     pub fn new(db: sqlx::PgPool) -> Self {
         Self {
-            db,
+            db: db.clone(),
             hooks: ArticleDefaultDataTableHooks,
             config: ArticleDataTableConfig::default(),
-            adapter: ArticleTableAdapter,
+            adapter: ArticleTableAdapter { db },
         }
     }
 }
 impl<H: ArticleDataTableHooks> ArticleDataTable<H> {
     pub fn with_hooks<NH: ArticleDataTableHooks>(self, hooks: NH) -> ArticleDataTable<NH> {
         ArticleDataTable {
-            db: self.db,
+            db: self.db.clone(),
             hooks,
             config: self.config,
-            adapter: ArticleTableAdapter,
+            adapter: ArticleTableAdapter { db: self.db },
         }
     }
     pub fn with_config(mut self, config: ArticleDataTableConfig) -> Self {
@@ -1253,7 +684,7 @@ impl<H: ArticleDataTableHooks> AutoDataTable for ArticleDataTable<H> {
     type Adapter = ArticleTableAdapter;
     fn adapter(&self) -> &Self::Adapter { &self.adapter }
     fn base_query<'db>(&'db self, input: &DataTableInput, ctx: &DataTableContext) -> Query<'db, ArticleModel> {
-        self.hooks.scope(ArticleModel::query(&self.db), input, ctx)
+        self.hooks.scope(ArticleModel::query(), input, ctx)
     }
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> { self.hooks.authorize(input, ctx) }
     fn filter_query<'db>(&'db self, query: Query<'db, ArticleModel>, filter_key: &str, value: &str, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<Option<Query<'db, ArticleModel>>> { self.hooks.filter_query(query, filter_key, value, input, ctx) }
@@ -1281,26 +712,26 @@ impl ArticleModel {
     pub const TABLE: &'static str = "articles";
     pub const MODEL_KEY: &'static str = "article";
     pub const PK: &'static str = "id";
-    pub fn query<'db>(db: impl Into<DbConn<'db>>) -> Query<'db, ArticleModel> {
-        Query::new(db)
+    pub fn query<'db>() -> Query<'db, ArticleModel> {
+        Query::new()
     }
-    pub fn query_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Query<'db, ArticleModel> {
-        Query::new_with_base_url(db, base_url)
+    pub fn query_with_base_url<'db>(base_url: Option<String>) -> Query<'db, ArticleModel> {
+        Query::new_with_base_url(base_url)
     }
-    pub fn create<'db>(db: impl Into<DbConn<'db>>) -> Create<'db, ArticleModel> {
-        Create::new(db)
+    pub fn create<'db>() -> Create<'db, ArticleModel> {
+        Create::new()
     }
-    pub fn create_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Create<'db, ArticleModel> {
-        Create::new_with_base_url(db, base_url)
+    pub fn create_with_base_url<'db>(base_url: Option<String>) -> Create<'db, ArticleModel> {
+        Create::new_with_base_url(base_url)
     }
-    pub fn patch<'db>(db: impl Into<DbConn<'db>>) -> Patch<'db, ArticleModel> {
-        Patch::new(db)
+    pub fn patch<'db>() -> Patch<'db, ArticleModel> {
+        Patch::new()
     }
-    pub fn patch_with_base_url<'db>(db: impl Into<DbConn<'db>>, base_url: Option<String>) -> Patch<'db, ArticleModel> {
-        Patch::new_with_base_url(db, base_url)
+    pub fn patch_with_base_url<'db>(base_url: Option<String>) -> Patch<'db, ArticleModel> {
+        Patch::new_with_base_url(base_url)
     }
     pub async fn find<'db>(db: impl Into<DbConn<'db>>, id: i64) -> Result<Option<ArticleRecord>> {
-        Query::<ArticleModel>::new(db).find(id).await
+        Query::<ArticleModel>::new().find(db, id).await
     }
     fn _transform_create_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {
         let _ = col;
@@ -1373,169 +804,184 @@ impl core_db::common::model_api::QueryModel for ArticleModel {
     const SOFT_DELETE_COL: &'static str = "";
     const HAS_CREATED_AT: bool = false;
     const HAS_UPDATED_AT: bool = false;
-    fn query_all<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
-        Box::pin(async move {
-            let (sql, binds) = state.to_select_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);
-            let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-            let __profiler_start = std::time::Instant::now();
-            let mut q = sqlx::query_as::<_, ArticleRow>(&sql);
-            for b in binds { q = bind(q, b); }
-            let rows = state.db.fetch_all(q).await?;
-            record_profiled_query("articles", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-            let db = state.db.clone();
-            let author = load_author(db.clone(), &rows, state.base_url.as_deref()).await?;
-            let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
-            let localized = localized::load_article_localized(db.clone(), &ids).await?;
-            let meta_map = localized::load_article_meta(db.clone(), &ids).await?;
-            let attachments = localized::load_article_attachments(db.clone(), &ids).await?;
-            let mut out_vec = Vec::with_capacity(rows.len());
-            for r in rows {
-                let key = r.id.clone();
-                let mut record = hydrate_record(r.clone(), &localized, &meta_map, &attachments, state.base_url.as_deref());
-                record.author = author.get(&key).cloned().unwrap_or(None).map(Box::new);
-                out_vec.push(record);
-            }
-            Ok(out_vec)
-        })
+    const PROFILE_QUERIES: bool = true;
+    const OBSERVE_HOOKS: bool = true;
+}
+
+impl core_db::common::model_api::ChunkModel for ArticleModel {
+    fn record_pk(record: &Self::Record) -> Self::Pk {
+        record.id.clone()
     }
-    fn query_first<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
-        Box::pin(async move {
-            let mut v = Self::query_all(state.limit(1)).await?;
-            Ok(v.pop())
-        })
+}
+
+impl core_db::common::model_api::DeleteModel for ArticleModel {
+    fn row_pk(row: &Self::Row) -> Self::Pk {
+        row.id.clone()
     }
-    fn query_find<'db>(state: QueryState<'db>, id: Self::Pk) -> core_db::common::model_api::BoxModelFuture<'db, Option<Self::Record>> {
-        Box::pin(async move { Self::query_first(state.where_col_str("id", Op::Eq, id.into())).await })
+    fn row_pk_text(row: &Self::Row) -> String {
+        row.id.to_string()
     }
-    fn query_count<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, i64> {
-        Box::pin(async move {
-            let (sql, binds) = state.to_count_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);
-            let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-            let __profiler_start = std::time::Instant::now();
-            let mut q = sqlx::query_scalar::<_, i64>(&sql);
-            for b in binds { q = bind_scalar(q, b); }
-            let count = state.db.fetch_scalar(q).await?;
-            record_profiled_query("articles", "COUNT", &sql, &__profiler_binds, __profiler_start.elapsed());
-            Ok(count)
-        })
-    }
-    fn query_delete<'db>(state: QueryState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
-        Box::pin(async move {
-            if state.limit.is_some() {
-                anyhow::bail!("delete() does not support limit; add where clauses");
-            }
-            let db = state.db;
-            let mut where_sql = state.where_sql;
-            let binds = state.binds;
-            if where_sql.is_empty() { anyhow::bail!("delete(): no conditions set"); }
-            let __profiler_binds = if is_sql_profiler_enabled() { binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-            let __observer_active = try_get_observer().is_some();
-            let __old_rows: Vec<ArticleRow> = if __observer_active {
-                let select_sql = format!("SELECT * FROM articles WHERE {}", where_sql.join(" AND "));
-                let mut fq = sqlx::query_as::<_, ArticleRow>(&select_sql);
-                for b in &binds { fq = bind(fq, b.clone()); }
-                let rows: Vec<ArticleRow> = db.fetch_all(fq).await.unwrap_or_default();
-                rows
-            } else {
-                Vec::new()
-            };
-            if !__old_rows.is_empty() {
-                if let Some(observer) = try_get_observer() {
-                    let old_data = serde_json::to_value(&__old_rows)?;
-                    let event = ModelEvent { model: "article", table: "articles", record_key: None };
-                    let action = observer.on_deleting(&event, &old_data).await?;
-                    match action {
-                        ObserverAction::Prevent(err) => return Err(err),
-                        ObserverAction::Modify(overrides) => {
-                            let ids: Vec<i64> = __old_rows.iter().map(|r| r.id.clone()).collect();
-                            let affected = Self::convert_delete_to_update(&db, &ids, overrides).await?;
-                            return Ok(affected);
-                        }
-                        ObserverAction::Continue => {}
-                    }
-                }
-            }
-            let mut sql = String::from("DELETE FROM articles");
-            if !where_sql.is_empty() {
-                sql.push_str(" WHERE ");
-                sql.push_str(&where_sql.join(" AND "));
-            }
-            let __profiler_start = std::time::Instant::now();
-            let mut q = sqlx::query(&sql);
-            for b in binds { q = bind_query(q, b); }
-            let res = db.execute(q).await?;
-            record_profiled_query("articles", "DELETE", &sql, &__profiler_binds, __profiler_start.elapsed());
-            if !__old_rows.is_empty() && res.rows_affected() > 0 {
-                if let Some(observer) = try_get_observer() {
-                    for old_row in &__old_rows {
-                        let event = ModelEvent { model: "article", table: "articles", record_key: Some(format!("{}", old_row.id)) };
-                        match serde_json::to_value(old_row) {
-                            Ok(old_data) => {
-                                if let Err(err) = observer.on_deleted(&event, &old_data).await {
-                                    log_observer_error("deleted", "article", &err);
-                                }
-                            }
-                            Err(err) => log_observer_error("deleted", "article", &err),
-                        }
-                    }
-                }
-            }
-            Ok(res.rows_affected())
-        })
-    }
-    fn query_paginate<'db>(state: QueryState<'db>, page: i64, per_page: i64) -> core_db::common::model_api::BoxModelFuture<'db, core_db::common::model_api::Page<Self::Record>> {
-        Box::pin(async move {
-            let page = if page < 1 { 1 } else { page };
-            let per_page = resolve_per_page(per_page);
-            let (count_sql, count_binds) = state.to_count_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);
-            let __profiler_binds = if is_sql_profiler_enabled() { count_binds.iter().map(|b| format!("{}", b)).collect::<Vec<_>>().join(", ") } else { String::new() };
-            let __profiler_start = std::time::Instant::now();
-            let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
-            for b in count_binds { count_q = bind_scalar(count_q, b); }
-            let total: i64 = state.db.fetch_scalar(count_q).await?;
-            record_profiled_query("articles", "COUNT", &count_sql, &__profiler_binds, __profiler_start.elapsed());
-            let last_page = ((total + per_page - 1) / per_page).max(1);
-            let current_page = page.min(last_page);
-            let offset_val = (current_page - 1) * per_page;
-            let mut state = state;
-            state.offset = Some(offset_val);
-            state.limit = Some(per_page);
-            let (sql, binds) = state.to_select_sql(Self::TABLE, Self::HAS_SOFT_DELETE, Self::SOFT_DELETE_COL);
-            let __profiler_start = std::time::Instant::now();
-            let mut q = sqlx::query_as::<_, ArticleRow>(&sql);
-            for b in binds { q = bind(q, b); }
-            let rows = state.db.fetch_all(q).await?;
-            record_profiled_query("articles", "SELECT", &sql, &__profiler_binds, __profiler_start.elapsed());
-            let db = state.db.clone();
-            let author = load_author(db.clone(), &rows, state.base_url.as_deref()).await?;
-            let ids: Vec<i64> = rows.iter().map(|r| r.id.clone()).collect();
-            let localized = localized::load_article_localized(db.clone(), &ids).await?;
-            let meta_map = localized::load_article_meta(db.clone(), &ids).await?;
-            let attachments = localized::load_article_attachments(db.clone(), &ids).await?;
-            let mut data = Vec::with_capacity(rows.len());
-            for r in rows {
-                let key = r.id.clone();
-                let mut record = hydrate_record(r.clone(), &localized, &meta_map, &attachments, state.base_url.as_deref());
-                record.author = author.get(&key).cloned().unwrap_or(None).map(Box::new);
-                data.push(record);
-            }
-            Ok(core_db::common::model_api::Page { data, total, per_page, current_page, last_page })
-        })
+    fn delete_override_update<'db>(db: DbConn<'db>, ids: Vec<Self::Pk>, overrides: serde_json::Value) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
+        Box::pin(async move { ArticleModel::convert_delete_to_update(&db, &ids, overrides).await })
     }
 }
 
 impl core_db::common::model_api::CreateModel for ArticleModel {
-    fn create_save<'db>(state: CreateState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Self::Record> {
-        Box::pin(async move {
-            let builder = ArticleCreateInner::from_state(state);
-            let db = builder.state.db.clone();
-            let base_url = builder.state.base_url.clone();
-            let created = builder.save().await?;
-            Query::<ArticleModel>::new_with_base_url(db, base_url).find(created.id.clone()).await?.ok_or_else(|| anyhow::anyhow!("articles: created record not found"))
-        })
+    const USE_SNOWFLAKE_ID: bool = true;
+    fn build_create_input(state: &CreateState<'_>) -> anyhow::Result<Self::Create> {
+        let mut input = ArticleCreate::default();
+        for assignment in &state.assignments {
+            let bind = &assignment.value;
+            match assignment.col_sql {
+                "id" => {
+                    let value = match bind {
+            BindValue::I64(value) => value.clone(),
+            other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
+        };
+                    input.id = FieldInput::Set(value);
+                }
+                "author_id" => {
+                    let value = match bind {
+            BindValue::I64(value) => value.clone(),
+            other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
+        };
+                    input.author_id = FieldInput::Set(value);
+                }
+                "status" => {
+                    let value = match bind {
+                BindValue::String(value) => ArticleStatus::from_storage(value)
+                    .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleStatus'", value))?,
+                BindValue::I64(value) => {
+                    let raw = value.to_string();
+                    ArticleStatus::from_storage(&raw)
+                        .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleStatus'", value))?
+                }
+                other => anyhow::bail!("unexpected bind value '{:?}' for type 'ArticleStatus'", other),
+            };
+                    input.status = FieldInput::Set(value);
+                }
+                "is_system" => {
+                    let value = match bind {
+                BindValue::String(value) => ArticleSystemFlag::from_storage(value)
+                    .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleSystemFlag'", value))?,
+                BindValue::I64(value) => {
+                    let raw = value.to_string();
+                    ArticleSystemFlag::from_storage(&raw)
+                        .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleSystemFlag'", value))?
+                }
+                other => anyhow::bail!("unexpected bind value '{:?}' for type 'ArticleSystemFlag'", other),
+            };
+                    input.is_system = FieldInput::Set(value);
+                }
+                _ => {}
+            }
+        }
+        Ok(input)
+    }
+    fn apply_create_overrides(mut state: CreateState<'_>, overrides: serde_json::Value) -> anyhow::Result<CreateState<'_>> {
+        let map = overrides.as_object()
+            .ok_or_else(|| anyhow::anyhow!("observer overrides must be a JSON object"))?;
+        for (key, val) in map {
+            match key.as_str() {
+                "id" => {
+                    let v: i64 = serde_json::from_value(val.clone())?;
+                    state = state.set_col("id", v.into());
+                }
+                "author_id" => {
+                    let v: i64 = serde_json::from_value(val.clone())?;
+                    state = state.set_col("author_id", v.into());
+                }
+                "status" => {
+                    let v: String = serde_json::from_value(val.clone())?;
+                    state = state.set_col("status", v.into());
+                }
+                "is_system" => {
+                    let v: String = serde_json::from_value(val.clone())?;
+                    state = state.set_col("is_system", v.into());
+                }
+                other => anyhow::bail!("unknown column '{}' in observer create overrides", other),
+            }
+        }
+        Ok(state)
+    }
+    fn created_row_key(row: &<Self as core_db::common::model_api::RuntimeModel>::Row) -> String {
+        row.id.to_string()
     }
     fn transform_create_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {
         Self::_transform_create_value(col, value)
+    }
+}
+
+impl core_db::common::model_api::FeaturePersistenceModel for ArticleModel {
+    fn create_owner_id(row: &<Self as core_db::common::model_api::RuntimeModel>::Row) -> Option<i64> {
+        Some(row.id.clone())
+    }
+    fn patch_owner_id(pk: &Self::Pk) -> Option<i64> {
+        Some(pk.clone())
+    }
+    fn supported_locales() -> &'static [&'static str] {
+        localized::SUPPORTED_LOCALES
+    }
+    fn localized_owner_type() -> Option<&'static str> {
+        Some(localized::ARTICLE_OWNER_TYPE)
+    }
+    fn upsert_localized_many<'db>(
+        db: DbConn<'db>,
+        owner_type: &'static str,
+        owner_id: i64,
+        field: &'static str,
+        values: HashMap<String, String>,
+    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
+        Box::pin(async move { localized::upsert_localized_many(db, owner_type, owner_id, field, &values).await })
+    }
+    fn meta_owner_type() -> Option<&'static str> {
+        Some(localized::ARTICLE_OWNER_TYPE)
+    }
+    fn upsert_meta_many<'db>(
+        db: DbConn<'db>,
+        owner_type: &'static str,
+        owner_id: i64,
+        values: HashMap<String, serde_json::Value>,
+    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
+        Box::pin(async move { localized::upsert_meta_many(db, owner_type, owner_id, &values).await })
+    }
+    fn attachment_owner_type() -> Option<&'static str> {
+        Some(localized::ARTICLE_OWNER_TYPE)
+    }
+    fn clear_attachment_field<'db>(
+        db: DbConn<'db>,
+        owner_type: &'static str,
+        owner_id: i64,
+        field: &'static str,
+    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
+        Box::pin(async move { localized::clear_attachment_field(db, owner_type, owner_id, field).await })
+    }
+    fn replace_single_attachment<'db>(
+        db: DbConn<'db>,
+        owner_type: &'static str,
+        owner_id: i64,
+        field: &'static str,
+        value: AttachmentInput,
+    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
+        Box::pin(async move { localized::replace_single_attachment(db, owner_type, owner_id, field, &value).await })
+    }
+    fn add_attachments<'db>(
+        db: DbConn<'db>,
+        owner_type: &'static str,
+        owner_id: i64,
+        field: &'static str,
+        values: Vec<AttachmentInput>,
+    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
+        Box::pin(async move { localized::add_attachments(db, owner_type, owner_id, field, &values).await })
+    }
+    fn delete_attachment_ids<'db>(
+        db: DbConn<'db>,
+        owner_type: &'static str,
+        owner_id: i64,
+        field: &'static str,
+        ids: Vec<uuid::Uuid>,
+    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
+        Box::pin(async move { localized::delete_attachment_ids(db, owner_type, owner_id, field, &ids).await })
     }
 }
 
@@ -1559,43 +1005,144 @@ impl core_db::common::model_api::CreateConflictField<ArticleModel> for ArticleDb
 }
 
 impl core_db::common::model_api::PatchModel for ArticleModel {
-    fn patch_from_query<'db>(mut state: QueryState<'db>) -> PatchState<'db> {
-        let db = state.db.clone();
-        let base_url = state.base_url.clone();
-        state.select_sql = Some(ArticleDbCol::Id.as_sql().to_string());
-        let (scope_sql, binds) = state.to_sql();
-        let mut ps = PatchState::new(db, base_url, "articles");
-        ps.where_sql.push(format!("{} IN ({})", ArticleDbCol::Id.as_sql(), scope_sql));
-        ps.where_binds = binds;
-        ps
-    }
-    fn patch_save<'db>(state: PatchState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, u64> {
-        Box::pin(async move {
-            let builder = ArticlePatchInner::from_state(state);
-            builder.save().await
-        })
-    }
-    fn patch_fetch<'db>(state: PatchState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, Vec<Self::Record>> {
-        Box::pin(async move {
-            if state.where_sql.is_empty() {
-                anyhow::bail!("update: no conditions set");
+    fn build_patch_changes(state: &PatchState<'_>) -> anyhow::Result<Self::Changes> {
+        let mut changes = Self::Changes::default();
+        for assignment in &state.assignments {
+            let bind = &assignment.value;
+            let mode = &assignment.mode;
+            match assignment.col_sql {
+                "id" => {
+                    let value = match bind {
+            BindValue::I64(value) => value.clone(),
+            other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
+        };
+                    changes.id = Some(match mode {
+                        SetMode::Assign => FieldChange::Assign(value),
+                        SetMode::Increment => FieldChange::Increment(value),
+                        SetMode::Decrement => FieldChange::Decrement(value),
+                    });
+                }
+                "author_id" => {
+                    let value = match bind {
+            BindValue::I64(value) => value.clone(),
+            other => anyhow::bail!("unexpected bind value '{:?}' for type 'i64'", other),
+        };
+                    changes.author_id = Some(match mode {
+                        SetMode::Assign => FieldChange::Assign(value),
+                        SetMode::Increment => FieldChange::Increment(value),
+                        SetMode::Decrement => FieldChange::Decrement(value),
+                    });
+                }
+                "status" => {
+                    let value = match bind {
+                BindValue::String(value) => ArticleStatus::from_storage(value)
+                    .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleStatus'", value))?,
+                BindValue::I64(value) => {
+                    let raw = value.to_string();
+                    ArticleStatus::from_storage(&raw)
+                        .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleStatus'", value))?
+                }
+                other => anyhow::bail!("unexpected bind value '{:?}' for type 'ArticleStatus'", other),
+            };
+                    changes.status = Some(match mode {
+                        SetMode::Assign => FieldChange::Assign(value),
+                        SetMode::Increment => FieldChange::Increment(value),
+                        SetMode::Decrement => FieldChange::Decrement(value),
+                    });
+                }
+                "is_system" => {
+                    let value = match bind {
+                BindValue::String(value) => ArticleSystemFlag::from_storage(value)
+                    .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleSystemFlag'", value))?,
+                BindValue::I64(value) => {
+                    let raw = value.to_string();
+                    ArticleSystemFlag::from_storage(&raw)
+                        .ok_or_else(|| anyhow::anyhow!("invalid enum storage '{}' for type 'ArticleSystemFlag'", value))?
+                }
+                other => anyhow::bail!("unexpected bind value '{:?}' for type 'ArticleSystemFlag'", other),
+            };
+                    changes.is_system = Some(match mode {
+                        SetMode::Assign => FieldChange::Assign(value),
+                        SetMode::Increment => FieldChange::Increment(value),
+                        SetMode::Decrement => FieldChange::Decrement(value),
+                    });
+                }
+                _ => {}
             }
-            let db = state.db.clone();
-            let base_url = state.base_url.clone();
-            let mut select_sql = format!("SELECT {} FROM articles", ArticleDbCol::Id.as_sql());
-            select_sql.push_str(&format!(" WHERE {}", state.where_sql.join(" AND ")));
-            let mut select_q = sqlx::query_scalar::<_, i64>(&select_sql);
-            for bind_value in &state.where_binds { select_q = bind_scalar(select_q, bind_value.clone()); }
-            let target_ids = db.fetch_all_scalar(select_q).await?;
-            let builder = ArticlePatchInner::from_state(state);
-            builder.save().await?;
+        }
+        Ok(changes)
+    }
+    fn apply_patch_overrides<'db>(mut state: PatchState<'db>, overrides: serde_json::Value) -> anyhow::Result<PatchState<'db>> {
+        let map = overrides.as_object()
+            .ok_or_else(|| anyhow::anyhow!("observer overrides must be a JSON object"))?;
+        for (key, val) in map {
+            match key.as_str() {
+                "id" => {
+                    let v: i64 = serde_json::from_value(val.clone())?;
+                    state = state.assign_col("id", v.into());
+                }
+                "author_id" => {
+                    let v: i64 = serde_json::from_value(val.clone())?;
+                    state = state.assign_col("author_id", v.into());
+                }
+                "status" => {
+                    let v: String = serde_json::from_value(val.clone())?;
+                    state = state.assign_col("status", v.into());
+                }
+                "is_system" => {
+                    let v: String = serde_json::from_value(val.clone())?;
+                    state = state.assign_col("is_system", v.into());
+                }
+                other => anyhow::bail!("unknown column '{}' in observer update overrides", other),
+            }
+        }
+        Ok(state)
+    }
+    fn row_pk(row: &<Self as core_db::common::model_api::RuntimeModel>::Row) -> Self::Pk {
+        row.id.clone()
+    }
+    fn row_pk_text(row: &<Self as core_db::common::model_api::RuntimeModel>::Row) -> String {
+        row.id.to_string()
+    }
+    fn persist_patch_state<'db>(db: DbConn<'db>, target_ids: Vec<Self::Pk>, state: PatchState<'db>) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
+        Box::pin(async move {
             if target_ids.is_empty() {
-                return Ok(Vec::new());
+                return Ok(());
             }
-            let query = Query::<ArticleModel>::new_with_base_url(db, base_url);
-            let binds: Vec<BindValue> = target_ids.iter().cloned().map(Into::into).collect();
-            let state = query.into_inner().where_in_str(ArticleDbCol::Id.as_sql(), &binds);
-            <Self as core_db::common::model_api::QueryModel>::query_all(state).await
+            if !state.translations.is_empty() {
+                let supported = localized::SUPPORTED_LOCALES;
+                if let Some(map) = state.translations.get("title") {
+                    let mut filtered = HashMap::new();
+                    for (loc, val) in map {
+                        if supported.contains(&loc.as_str()) { filtered.insert(loc.clone(), val.clone()); }
+                    }
+                    if !filtered.is_empty() {
+                        for id in &target_ids {
+                            localized::upsert_localized_many(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), "title", &filtered).await?;
+                        }
+                    }
+                }
+            }
+            if !state.meta.is_empty() {
+                for id in &target_ids {
+                    localized::upsert_meta_many(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), &state.meta).await?;
+                }
+            }
+            for id in &target_ids {
+                for field in &state.attachments_clear_single {
+                    localized::clear_attachment_field(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), field).await?;
+                }
+                for (field, att) in &state.attachments_single {
+                    localized::replace_single_attachment(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), field, att).await?;
+                }
+                for (field, list) in &state.attachments_multi {
+                    localized::add_attachments(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), field, list).await?;
+                }
+                for (field, ids) in &state.attachments_delete_multi {
+                    localized::delete_attachment_ids(db.clone(), localized::ARTICLE_OWNER_TYPE, id.clone(), field, ids).await?;
+                }
+            }
+            Ok(())
         })
     }
     fn transform_patch_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {
@@ -1655,10 +1202,8 @@ impl core_db::common::model_api::QueryField<ArticleModel> for ArticleDbCol {
 }
 
 impl core_db::common::model_api::IncludeRelation<ArticleModel> for OneRelation<ArticleModel, UserRecord, 0> {
-    fn include<'db>(relation: Self, mut state: QueryState<'db>) -> QueryState<'db> {
-        let list = state.with_relations.get_or_insert_with(Vec::new);
-        if !list.iter().any(|s| s.name == "author") { list.push(core_db::common::model_api::WithRelationSpec { name: "author", extra_where: None, extra_binds: vec![], nested: vec![] }); }
-        state
+    fn load_spec<'db>(_relation: Self, _base_url: Option<String>) -> core_db::common::model_api::WithRelationSpec {
+        core_db::common::model_api::WithRelationSpec { name: "author", kind: "belongs_to", target_table: "users", target_pk: "id", foreign_key: "author_id", local_key: "id", has_soft_delete: false, selects: vec![], filters: vec![], orders: vec![], limit: None, offset: None, with_deleted: false, only_deleted: false, nested: vec![], counts: vec![], aggregates: vec![] }
     }
 }
 
@@ -1668,37 +1213,23 @@ impl core_db::common::model_api::WhereHasRelation<ArticleModel> for OneRelation<
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        let start_idx = state.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), state.base_url.clone()));
-        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = articles.author_id".to_string());
-        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        state.where_sql.push(clause);
-        state.binds.extend(sub_binds);
-        state
+        let scoped = scope(UserModel::query_with_base_url(state.base_url.clone()));
+        let relation_spec = <Self as core_db::common::model_api::IncludeRelation<ArticleModel>>::load_spec(_relation, state.base_url.clone());
+        match core_db::common::model_api::relation_exists_from_query_state(relation_spec, scoped.into_inner(), <UserModel as core_db::common::model_api::QueryModel>::DEFAULT_SELECT) {
+            Ok(node) => state.push_relation_exists(core_db::common::model_api::ExistenceBoolean::And, node),
+            Err(err) => state.defer_error(err.to_string()),
+        }
     }
     fn or_where_has<'db, F>(_relation: Self, mut state: QueryState<'db>, scope: F) -> QueryState<'db>
     where
         F: FnOnce(Query<'db, Self::Target>) -> Query<'db, Self::Target>,
     {
-        let start_idx = state.binds.len() + 1;
-        let scoped = scope(UserModel::query_with_base_url(state.db.clone(), state.base_url.clone()));
-        let (mut sub_where, sub_binds) = scoped.into_inner().into_where_parts();
-        sub_where.insert(0, "users.id = articles.author_id".to_string());
-        let mut clause = String::from("EXISTS (SELECT 1 FROM users WHERE ");
-        clause.push_str(&sub_where.join(" AND "));
-        clause.push(')');
-        let clause = renumber_placeholders(&clause, start_idx);
-        if let Some(last) = state.where_sql.pop() {
-            state.where_sql.push(format!("({} OR {})", last, clause));
-        } else {
-            state.where_sql.push(clause);
+        let scoped = scope(UserModel::query_with_base_url(state.base_url.clone()));
+        let relation_spec = <Self as core_db::common::model_api::IncludeRelation<ArticleModel>>::load_spec(_relation, state.base_url.clone());
+        match core_db::common::model_api::relation_exists_from_query_state(relation_spec, scoped.into_inner(), <UserModel as core_db::common::model_api::QueryModel>::DEFAULT_SELECT) {
+            Ok(node) => state.push_relation_exists(core_db::common::model_api::ExistenceBoolean::Or, node),
+            Err(err) => state.defer_error(err.to_string()),
         }
-        state.binds.extend(sub_binds);
-        state
     }
 }
 

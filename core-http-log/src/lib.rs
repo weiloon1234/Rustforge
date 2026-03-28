@@ -39,14 +39,14 @@ pub async fn cleanup_logs(db: &PgPool, retention_days: u64) -> Result<()> {
 
     let cutoff = OffsetDateTime::now_utc() - time::Duration::days(retention_days as i64);
 
-    WebhookLogModel::query(DbConn::pool(db))
+    WebhookLogModel::query()
         .where_col(WebhookLogCol::CREATED_AT, Op::Lt, cutoff)
-        .delete()
+        .delete(DbConn::pool(db))
         .await?;
 
-    HttpClientLogModel::query(DbConn::pool(db))
+    HttpClientLogModel::query()
         .where_col(HttpClientLogCol::CREATED_AT, Op::Lt, cutoff)
-        .delete()
+        .delete(DbConn::pool(db))
         .await?;
 
     Ok(())

@@ -50,7 +50,7 @@ make gen
 
 This generates:
 - **Record fields:** `avatar: Option<Attachment>`, `avatar_url: Option<String>`, `gallery: Vec<Attachment>`, `gallery_urls: Vec<String>`
-- **Create setter:** `set_attachment_avatar(att: AttachmentInput)` / `add_attachment_gallery(att: AttachmentInput)`
+- **Builder methods:** `set_attachment_single("avatar", att)` / `add_attachment_multi("gallery", att)`
 - **Hydration:** attachments are batch-loaded from the `attachments` table automatically
 
 ## Step 4: Handle upload in API handler
@@ -73,11 +73,11 @@ async fn upload_avatar(
     }));
 
     // Set on model
-    MyModel::query(DbConn::pool(&state.db))
+    MyModel::query()
         .where_col(MyCol::ID, Op::Eq, id)
         .patch()
-        .set_attachment_avatar(attachment)
-        .save()
+        .set_attachment_single("avatar", attachment)
+        .save(DbConn::pool(&state.db))
         .await?;
 
     Ok(ApiResponse::success(output, &t("Avatar uploaded")))

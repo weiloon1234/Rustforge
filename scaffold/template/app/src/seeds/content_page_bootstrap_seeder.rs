@@ -52,18 +52,18 @@ async fn ensure_page(
     content_en: &str,
     content_zh: &str,
 ) -> anyhow::Result<()> {
-    let existing = ContentPageModel::query(DbConn::pool(db))
+    let existing = ContentPageModel::query()
         .where_col(ContentPageCol::TAG, Op::Eq, tag.to_string())
-        .first()
+        .first(DbConn::pool(db))
         .await?;
 
     if let Some(page) = existing {
-        ContentPageModel::query(DbConn::pool(db))
+        ContentPageModel::query()
             .where_col(ContentPageCol::ID, Op::Eq, page.id)
             .patch()
             .assign(ContentPageCol::TAG, tag.to_string())?
             .assign(ContentPageCol::IS_SYSTEM, ContentPageSystemFlag::Yes)?
-            .save()
+            .save(DbConn::pool(db))
             .await?;
         return Ok(());
     }
@@ -73,11 +73,11 @@ async fn ensure_page(
     let scope = DbConn::pool(db).begin_scope().await?;
     let conn = scope.conn();
 
-    let page = ContentPageModel::create(conn.clone())
+    let page = ContentPageModel::create()
         .set(ContentPageCol::ID, generate_snowflake_i64())?
         .set(ContentPageCol::TAG, tag.to_string())?
         .set(ContentPageCol::IS_SYSTEM, ContentPageSystemFlag::Yes)?
-        .save()
+        .save(conn.clone())
         .await?;
 
     page.upsert_title(conn.clone(), Some(title_input)).await?;

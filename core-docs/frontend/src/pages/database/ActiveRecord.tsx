@@ -18,8 +18,9 @@ export function ActiveRecord() {
                 <p>
                     The generated models provide a fluent, chainable API for database
                     operations. Field/enum/relation usage is strongly typed at compile time.
-                    For complex edge cases, raw SQL is available only through explicit{' '}
-                    <code>unsafe_sql()</code> wrappers.
+                    For complex edge cases, use clause-level raw helpers like{' '}
+                    <code>where_raw</code>, <code>join_raw</code>, and <code>add_select_raw</code>{' '}
+                    inside the normal typed chain.
                 </p>
                 <p>
                     For a complete generated method reference grouped by struct, see{' '}
@@ -49,13 +50,13 @@ export function ActiveRecord() {
                         <div>
                             <strong>Insert Builder</strong>
                             <pre className="bg-gray-900 text-gray-100 p-2 rounded mt-1">
-                                <code>{`model.insert().set_title(...).save().await?`}</code>
+                                <code>{`model.insert().set_title(...).save(db).await?`}</code>
                             </pre>
                         </div>
                         <div>
                             <strong>Update Builder</strong>
                             <pre className="bg-gray-900 text-gray-100 p-2 rounded mt-1">
-                                <code>{`model.update().where_id(...).set_status(...).save().await?`}</code>
+                                <code>{`model.update().where_id(...).set_status(...).save(db).await?`}</code>
                             </pre>
                         </div>
                     </div>
@@ -181,16 +182,14 @@ model.query()
     .where_in(ArticleCol::Id, &[1, 2, 3, 4, 5])
     .get().await?;
 
-// Raw WHERE (explicit raw escape hatch)
+// Raw WHERE (keep the rest of the chain typed)
 use core_db::common::sql::RawClause;
 
 model.query()
-    .unsafe_sql()
     .where_raw(RawClause::new(
         "title ILIKE ? OR content ILIKE ?",
         ["%rust%", "%rust%"],
     )?)
-    .done()
     .get().await?;`}</code>
                 </pre>
 

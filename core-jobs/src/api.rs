@@ -56,10 +56,10 @@ async fn list_failed_jobs(State(state): State<ApiState>) -> impl IntoResponse {
         None => return (StatusCode::SERVICE_UNAVAILABLE, "DB not configured").into_response(),
     };
 
-    let jobs = match FailedJobModel::query(DbConn::pool(&db))
+    let jobs = match FailedJobModel::query()
         .order_by(FailedJobCol::FAILED_AT, OrderDir::Desc)
         .limit(50)
-        .all()
+        .all(DbConn::pool(&db))
         .await
     {
         Ok(rows) => rows
@@ -88,9 +88,9 @@ async fn retry_failed_job(
         None => return (StatusCode::SERVICE_UNAVAILABLE, "DB not configured").into_response(),
     };
 
-    let row = match FailedJobModel::query(DbConn::pool(&db))
+    let row = match FailedJobModel::query()
         .where_col(FailedJobCol::ID, Op::Eq, id)
-        .first()
+        .first(DbConn::pool(&db))
         .await
     {
         Ok(r) => r,
@@ -124,9 +124,9 @@ async fn retry_failed_job(
     }
 
     // 3. Delete from failed_jobs
-    let delete_result = FailedJobModel::query(DbConn::pool(&db))
+    let delete_result = FailedJobModel::query()
         .where_col(FailedJobCol::ID, Op::Eq, id)
-        .delete()
+        .delete(DbConn::pool(&db))
         .await;
 
     match delete_result {

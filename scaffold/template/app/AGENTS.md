@@ -52,20 +52,20 @@ Relations are **opt-in**. No `.with()` = no relations loaded. `record.user` is `
 
 ```rust
 // Load specific relations
-let deposits = DepositModel::query(db)
+let deposits = DepositModel::query()
     .with(DepositRel::ADMIN)
     .with(DepositRel::USER)
-    .all().await?;
+    .all(db).await?;
 
 // Conditional loading — filtered relation
-let users = UserModel::query(db)
-    .with_where(UserRel::DOWNLINES, |q: Query<UserModel>| {
+let users = UserModel::query()
+    .with_scope(UserRel::DOWNLINES, |q: Query<UserModel>| {
         q.where_col(UserCol::STATUS, Op::Eq, UserStatus::Active)
     })
-    .all().await?;
+    .all(db).await?;
 ```
 
-`Model::find(db, id)` does NOT support `.with()`. Use `Model::query(db).with(Rel::X).find(id)` instead.
+`Model::find(db, id)` does NOT support `.with()`. Use `Model::query().with(Rel::X).find(db, id)` instead.
 
 **Datatables:** add `.with()` in the `scope()` hook for every relation accessed in `row_to_record`:
 
@@ -80,20 +80,38 @@ fn scope<'db>(&'db self, query: Query<'db, MyModel>, ..) -> Query<'db, MyModel> 
 Count related records without loading full rows:
 
 ```rust
-let kbs = KnowledgeBaseModel::query(db)
+let kbs = KnowledgeBaseModel::query()
     .with_count(KbRel::ITEMS)                     // simple count
-    .with_count_where(KbRel::ITEMS, |q| {         // conditional count
+    .with_count_scope(KbRel::ITEMS, |q| {         // conditional count
         q.where_col(ItemCol::STATUS, Op::Eq, ItemStatus::Active)
     })
-    .with_count_nested(KbRel::GROUPS, GroupRel::ITEMS)  // nested 2-level
-    .all().await?;
+    .with_scope(KbRel::GROUPS, |q| {
+        q.with_count(GroupRel::ITEMS)
+    })
+    .all(db).await?;
 
 // Access on record
 let count = record.count(KbRel::ITEMS);                           // Option<i64>
 let nested = record.__relation_counts.get("groups.items");        // Option<&i64>
 ```
 
-Nested `with_count` supports max 2 levels (parent → child → grandchild). Uses a JOIN query, not N+1.
+Nested relation counts and aggregates are tree-based and support manual nesting without a fixed runtime depth cap.
+
+```rust
+let users = UserModel::query()
+    .with_scope(UserRel::DOWNLINES, |q| {
+        q.order_by(UserCol::CREATED_AT, OrderDir::Desc)
+            .limit(5)
+    })
+    .with_sum(UserRel::DOWNLINES, UserCol::CREDIT_1)
+    .with_scope(UserRel::DOWNLINES, |q| {
+        q.with(UserRel::INTRODUCER)
+    })
+    .all(db)
+    .await?;
+
+let total_credit = users[0].sum(UserRel::DOWNLINES, UserCol::CREDIT_1);
+```
 
 ## Recipe: Extend Schema-Generated Model
 
@@ -197,7 +215,7 @@ max_size = 5242880
 
 After `make gen`, the generated code provides:
 - **Record fields:** `logo: Option<Attachment>`, `logo_url: Option<String>`, `photos: Vec<Attachment>`, `photos_urls: Vec<String>`
-- **Create setters:** `set_attachment_logo(att: AttachmentInput)`, `add_attachment_photos(att: AttachmentInput)`
+- **Builder methods:** `set_attachment_single("logo", att)`, `add_attachment_multi("photos", att)`
 - **Hydration:** attachments are batch-loaded from the `attachments` table automatically
 
 ### Uploading files
@@ -212,10 +230,10 @@ let attachment = file_upload.upload(&*state.storage, "my_model", "logo").await?;
 Then set on the model:
 
 ```rust
-MyModel::create(conn)
+MyModel::create()
     .set(MyCol::NAME, "test")?
-    .set_attachment_logo(attachment)
-    .save()
+    .set_attachment_single("logo", attachment)
+    .save(conn)
     .await?;
 ```
 

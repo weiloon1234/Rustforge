@@ -49,9 +49,9 @@ pub async fn login(
     password: &str,
 ) -> Result<(AdminRecord, IssuedTokenPair), AppError> {
     let username = username.trim().to_ascii_lowercase();
-    let admin = AdminModel::query(DbConn::pool(&state.db))
+    let admin = AdminModel::query()
         .where_col(AdminCol::USERNAME, Op::Eq, username)
-        .first()
+        .first(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::Unauthorized(t("Invalid credentials")))?;
@@ -97,7 +97,7 @@ pub async fn profile_update(
     admin_id: i64,
     req: AdminProfileUpdateInput,
 ) -> Result<AdminRecord, AppError> {
-    let mut update = AdminModel::query(DbConn::pool(&state.db))
+    let mut update = AdminModel::query()
         .where_col(AdminCol::ID, Op::Eq, admin_id)
         .patch()
         .assign(AdminCol::NAME, req.name.trim().to_string())
@@ -124,7 +124,7 @@ pub async fn profile_update(
         }
     }
 
-    let affected = update.save().await.map_err(AppError::from)?;
+    let affected = update.save(DbConn::pool(&state.db)).await.map_err(AppError::from)?;
     if affected == 0 {
         return Err(AppError::NotFound(t("Admin not found")));
     }
@@ -148,12 +148,12 @@ pub async fn locale_update(
         .cloned()
         .ok_or_else(|| AppError::BadRequest(t("Unsupported locale")))?;
 
-    let affected = AdminModel::query(DbConn::pool(&state.db))
+    let affected = AdminModel::query()
         .where_col(AdminCol::ID, Op::Eq, admin_id)
         .patch()
         .assign(AdminCol::LOCALE, Some(normalized.to_string()))
         .map_err(AppError::from)?
-        .save()
+        .save(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
 
@@ -179,12 +179,12 @@ pub async fn password_update(
         return Err(AppError::Unauthorized(t("Current password is incorrect")));
     }
 
-    let affected = AdminModel::query(DbConn::pool(&state.db))
+    let affected = AdminModel::query()
         .where_col(AdminCol::ID, Op::Eq, admin_id)
         .patch()
         .assign(AdminCol::PASSWORD, req.password.to_string())
         .map_err(AppError::from)?
-        .save()
+        .save(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?;
     if affected == 0 {

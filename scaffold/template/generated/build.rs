@@ -1,5 +1,3 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 fn main() {
@@ -23,15 +21,6 @@ fn main() {
         println!("cargo:rerun-if-changed={}", path.display());
     }
     println!("cargo:rerun-if-changed=build.rs");
-
-    // Content-hash guard: skip generation if inputs haven't changed.
-    let input_hash = hash_inputs(&configs_path, &permissions_path, &model_files, &framework_paths);
-    let hash_file = out_dir.join(".generation_hash");
-    if let Ok(existing) = std::fs::read_to_string(&hash_file) {
-        if existing.trim() == input_hash {
-            return;
-        }
-    }
 
     let (cfgs, _) =
         db_gen::config::load(configs_path.to_str().unwrap()).expect("Failed to load configs");
@@ -70,9 +59,6 @@ fn main() {
 
     db_gen::write_if_changed(&out_dir.join("generated_root.rs"), &root)
         .expect("Failed to write generated root");
-
-    // Persist hash so next build can skip if inputs are unchanged.
-    std::fs::write(&hash_file, &input_hash).expect("Failed to write generation hash");
 }
 
 /// Collect sorted `.rs` files from a directory (empty vec if dir doesn't exist).
@@ -88,33 +74,4 @@ fn collect_rs_files(dir: &std::path::Path) -> Vec<PathBuf> {
         .collect();
     paths.sort();
     paths
-}
-
-fn hash_inputs(
-    configs_path: &std::path::Path,
-    permissions_path: &std::path::Path,
-    model_files: &[PathBuf],
-    framework_paths: &[PathBuf],
-) -> String {
-    let mut hasher = DefaultHasher::new();
-
-    std::fs::read(configs_path)
-        .expect("Failed to read settings.toml")
-        .hash(&mut hasher);
-    std::fs::read(permissions_path)
-        .expect("Failed to read permissions.toml")
-        .hash(&mut hasher);
-    for path in model_files {
-        path.file_name().hash(&mut hasher);
-        std::fs::read(path)
-            .expect("Failed to read model file")
-            .hash(&mut hasher);
-    }
-    for path in framework_paths {
-        if let Ok(data) = std::fs::read(path) {
-            data.hash(&mut hasher);
-        }
-    }
-
-    format!("{:x}", hasher.finish())
 }

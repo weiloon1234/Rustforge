@@ -19,17 +19,17 @@ impl RealtimeEvent for NotificationCounts {
 }
 
 /// Query current pending counts from the database.
-pub async fn get_pending_counts(db: &sqlx::PgPool) -> Result<NotificationCounts, sqlx::Error> {
+pub async fn get_pending_counts(db: &sqlx::PgPool) -> anyhow::Result<NotificationCounts> {
     let (deposit, withdrawal) = tokio::try_join!(
-        DepositModel::query(DbConn::pool(db))
+        DepositModel::query()
             .where_col(DepositCol::STATUS, Op::Eq, DepositStatus::Pending)
-            .count(),
-        WithdrawalModel::query(DbConn::pool(db))
+            .count(DbConn::pool(db)),
+        WithdrawalModel::query()
             .where_in(
                 WithdrawalCol::STATUS,
                 [WithdrawalStatus::Pending, WithdrawalStatus::Processing],
             )
-            .count(),
+            .count(DbConn::pool(db)),
     )?;
 
     Ok(NotificationCounts {

@@ -44,9 +44,9 @@ pub async fn resolve_user_by_username(
     username: &str,
 ) -> Result<UserRecord, AppError> {
     let username = username.trim().to_ascii_lowercase();
-    UserModel::query(DbConn::pool(&state.db))
+    UserModel::query()
         .where_col(UserCol::USERNAME, Op::Eq, username)
-        .first()
+        .first(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(t("User not found")))
@@ -80,18 +80,18 @@ pub async fn change_introducer(
         .map_err(AppError::from)?;
     let conn = scope.conn();
 
-    UserModel::query(conn.clone())
+    UserModel::query()
         .where_col(UserCol::ID, Op::Eq, target_user.id)
         .patch()
         .assign(UserCol::INTRODUCER_USER_ID, Some(new_introducer.id))
         .map_err(AppError::from)?
-        .save()
+        .save(conn.clone())
         .await
         .map_err(AppError::from)?;
 
     let _ = user_guard::revoke_tokens(conn.clone(), &target_user.id.to_string()).await;
 
-    let log = IntroducerChangeModel::create(conn)
+    let log = IntroducerChangeModel::create()
         .set(IntroducerChangeCol::ID, generate_snowflake_i64())
         .map_err(AppError::from)?
         .set(IntroducerChangeCol::USER_ID, target_user.id)
@@ -104,7 +104,7 @@ pub async fn change_introducer(
         .map_err(AppError::from)?
         .set(IntroducerChangeCol::REMARK, remark)
         .map_err(AppError::from)?
-        .save()
+        .save(conn)
         .await
         .map_err(AppError::from)?;
 

@@ -29,9 +29,9 @@ pub async fn adjust_credit(
         .ok_or_else(|| AppError::BadRequest(t("Invalid credit type")))?;
 
     // Resolve user by username
-    let user = UserModel::query(DbConn::pool(&state.db))
+    let user = UserModel::query()
         .where_col(UserCol::USERNAME, Op::Eq, username)
-        .first()
+        .first(DbConn::pool(&state.db))
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(t("User not found")))?;
@@ -47,7 +47,7 @@ pub async fn adjust_credit(
     let conn = scope.conn();
 
     // Insert transaction record
-    let txn = UserCreditTransactionModel::create(conn.clone())
+    let txn = UserCreditTransactionModel::create()
         .set(UserCreditTransactionCol::USER_ID, user.id)?
         .set(UserCreditTransactionCol::ADMIN_ID, Some(admin_id))?
         .set(UserCreditTransactionCol::CREDIT_TYPE, credit_type)?
@@ -56,7 +56,7 @@ pub async fn adjust_credit(
         .set(UserCreditTransactionCol::RELATED_KEY, None::<String>)?
         .set(UserCreditTransactionCol::REMARK, req.remark)?
         .set(UserCreditTransactionCol::CUSTOM_DESCRIPTION, req.custom_description)?
-        .save()
+        .save(conn.clone())
         .await
         .map_err(AppError::from)?;
 
@@ -68,18 +68,18 @@ pub async fn adjust_credit(
 
     // Atomic relative balance update
     let update = match credit_type {
-        CreditType::Credit1 => UserModel::query(conn.clone())
+        CreditType::Credit1 => UserModel::query()
             .where_col(UserCol::ID, Op::Eq, user.id)
             .patch()
             .increment(UserCol::CREDIT_1, amount),
-        CreditType::Credit2 => UserModel::query(conn.clone())
+        CreditType::Credit2 => UserModel::query()
             .where_col(UserCol::ID, Op::Eq, user.id)
             .patch()
             .increment(UserCol::CREDIT_2, amount),
     };
     update
         .map_err(AppError::from)?
-        .save()
+        .save(conn.clone())
         .await
         .map_err(AppError::from)?;
 

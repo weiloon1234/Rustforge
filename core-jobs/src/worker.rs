@@ -380,7 +380,7 @@ impl Worker {
     async fn persist_failure(&self, wrapper: &JobPayload, group_id: Option<&str>, err: &str) {
         let payload_json = serde_json::to_value(wrapper).unwrap_or(serde_json::json!({}));
 
-        let insert = FailedJobModel::create(DbConn::pool(&self.context.db))
+        let insert = FailedJobModel::create()
             .set(FailedJobCol::JOB_NAME, wrapper.job.clone())
             .and_then(|create| create.set(FailedJobCol::QUEUE, wrapper.queue.clone()))
             .and_then(|create| create.set(FailedJobCol::PAYLOAD, payload_json))
@@ -389,7 +389,7 @@ impl Worker {
             .and_then(|create| create.set(FailedJobCol::GROUP_ID, group_id.map(str::to_string)));
 
         if let Err(e) = match insert {
-            Ok(insert) => insert.save().await,
+            Ok(insert) => insert.save(DbConn::pool(&self.context.db)).await,
             Err(err) => Err(err),
         } {
             tracing::error!("Failed to persist job failure log: {}", e);

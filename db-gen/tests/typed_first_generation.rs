@@ -196,7 +196,9 @@ impl ArticleRecord {
     assert!(article_rs.contains("-> SpecialDto"));
     assert!(article_rs.contains("pub fn is_published"));
     assert!(article_rs.contains("pub fn identity"));
-    assert!(article_rs.contains("record.insert(\"identity\".to_string(), serde_json::to_value(row.identity())?);"));
+    assert!(article_rs.contains(
+        "record.insert(\"identity\".to_string(), serde_json::to_value(row.identity())?);"
+    ));
     assert!(!article_rs.contains("pub struct ArticleJson"));
     assert!(!article_rs.contains("crate::extensions::"));
 
@@ -382,7 +384,8 @@ pub struct Article {
     let article_rs =
         fs::read_to_string(out_dir.join("article.rs")).expect("article.rs should exist");
 
-    assert!(article_rs.contains("\"author__profile\" => Self::parse_bind_for_profile_cols(column, raw)"));
+    assert!(article_rs
+        .contains("\"author__profile\" => Self::parse_bind_for_profile_cols(column, raw)"));
     assert!(article_rs.contains(
         "Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| rq.where_has(UserRel::PROFILE, |rq| Self::filter_has_for_profile_cols(column.as_str(), rq, bind)))))"
     ));
@@ -448,8 +451,189 @@ pub struct User {
 
     assert!(!user_rs.contains("use crate::generated::models::user::{UserCol, UserQuery, UserRow};"));
     assert!(user_rs.contains(
-        "if let Some(fk_val) = row.introducer_user_id.clone() { map.entry(fk_val).or_default().push(row); }"
+        "fn rel_downlines_child_key(record: &UserRecord) -> Option<i64> { record.introducer_user_id.clone() }"
     ));
+    assert!(user_rs.contains(
+        "static REL_RUNTIME_DOWNLINES: core_db::common::model_api::HasManyRuntime<UserModel, UserModel, i64>"
+    ));
+
+    fs::remove_dir_all(root).expect("failed to remove temp dir");
+}
+
+#[test]
+fn generated_models_emit_scoped_relation_load_and_metric_metadata() {
+    let root = temp_dir("scoped_relations");
+    let models_dir = root.join("models");
+    let out_dir = root.join("out");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
+    fs::create_dir_all(&out_dir).expect("failed to create out dir");
+    write_basic_configs(&root, &["en"]);
+
+    write_file(
+        models_dir.join("user.rs"),
+        r#"
+#[rf_db_enum(storage = "i16")]
+pub enum UserBanStatus {
+    No = 0,
+    Yes = 1,
+}
+
+#[rf_model(table = "users")]
+pub struct User {
+    pub id: i64,
+    pub username: String,
+    pub introducer_user_id: Option<i64>,
+    pub ban: UserBanStatus,
+    pub credit_1: rust_decimal::Decimal,
+    #[rf(foreign_key = "introducer_user_id")]
+    pub downlines: HasMany<User>,
+    #[rf(foreign_key = "introducer_user_id", scope = active_downlines_scope)]
+    pub active_downlines: HasMany<User>,
+}
+
+#[rf_model_impl]
+impl UserModel {
+    pub fn active_downlines_scope(query: Query<UserModel>) -> Query<UserModel> {
+        query.where_col(UserCol::BAN, Op::Eq, UserBanStatus::No)
+    }
+}
+"#,
+    );
+
+    let (cfgs, _) = config::load(
+        root.join("configs.toml")
+            .to_str()
+            .expect("configs path should be valid utf-8"),
+    )
+    .expect("failed to load config");
+    let parsed_schema = schema::load(
+        models_dir
+            .to_str()
+            .expect("schema path should be valid utf-8"),
+    )
+    .expect("failed to load schema");
+
+    generate_enums(&parsed_schema, &out_dir).expect("enum generation should succeed");
+    generate_models(&parsed_schema, &cfgs, &out_dir).expect("model generation should succeed");
+
+    let user_rs = fs::read_to_string(out_dir.join("user.rs")).expect("user.rs should exist");
+
+    assert!(user_rs.contains("pub __relation_aggregates: std::collections::HashMap<String, f64>,"));
+    assert!(user_rs.contains("pub fn aggregate(&self, key: &str) -> Option<f64> {"));
+    assert!(user_rs.contains("pub fn sum<R, A>(&self, relation: R, target: A) -> Option<f64>"));
+    assert!(user_rs.contains("pub fn avg<R, A>(&self, relation: R, target: A) -> Option<f64>"));
+    assert!(user_rs.contains("pub fn min<R, A>(&self, relation: R, target: A) -> Option<f64>"));
+    assert!(user_rs.contains("pub fn max<R, A>(&self, relation: R, target: A) -> Option<f64>"));
+    assert!(user_rs.contains("active_downlines_scope(UserModel::query_with_base_url(base_url))"));
+    assert!(user_rs.contains("WithRelationSpec { name: \"active_downlines\""));
+    assert!(user_rs.contains("CountRelationSpec {"));
+    assert!(user_rs.contains("name: \"active_downlines\""));
+    assert!(user_rs.contains("type TargetModel = UserModel;"));
+    assert!(user_rs.contains("impl core_db::common::model_api::RuntimeModel for UserModel {"));
+    assert!(user_rs.contains(
+        "static REL_RUNTIME_ACTIVE_DOWNLINES: core_db::common::model_api::HasManyRuntime<UserModel, UserModel, i64>"
+    ));
+    assert!(user_rs.contains("&REL_RUNTIME_ACTIVE_DOWNLINES,"));
+
+    fs::remove_dir_all(root).expect("failed to remove temp dir");
+}
+
+#[test]
+fn generated_models_support_has_one_relations() {
+    let root = temp_dir("has_one_relations");
+    let models_dir = root.join("models");
+    let out_dir = root.join("out");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
+    fs::create_dir_all(&out_dir).expect("failed to create out dir");
+    write_basic_configs(&root, &["en"]);
+
+    write_file(
+        models_dir.join("user.rs"),
+        r#"
+#[rf_model(table = "users")]
+pub struct User {
+    pub id: i64,
+    pub username: String,
+    #[rf(foreign_key = "user_id")]
+    pub profile: HasOne<Profile>,
+}
+"#,
+    );
+
+    write_file(
+        models_dir.join("profile.rs"),
+        r#"
+#[rf_model(table = "profiles")]
+pub struct Profile {
+    pub id: i64,
+    pub user_id: i64,
+    pub bio: String,
+}
+"#,
+    );
+
+    let (cfgs, _) = config::load(
+        root.join("configs.toml")
+            .to_str()
+            .expect("configs path should be valid utf-8"),
+    )
+    .expect("failed to load config");
+    let parsed_schema = schema::load(
+        models_dir
+            .to_str()
+            .expect("schema path should be valid utf-8"),
+    )
+    .expect("failed to load schema");
+
+    generate_enums(&parsed_schema, &out_dir).expect("enum generation should succeed");
+    generate_models(&parsed_schema, &cfgs, &out_dir).expect("model generation should succeed");
+
+    let user_rs = fs::read_to_string(out_dir.join("user.rs")).expect("user.rs should exist");
+
+    assert!(user_rs.contains("pub profile: Option<Box<ProfileRecord>>,"));
+    assert!(user_rs.contains("kind: \"has_one\""));
+    assert!(user_rs.contains("static REL_RUNTIME_PROFILE: core_db::common::model_api::HasOneRuntime<UserModel, ProfileModel, i64>"));
+    assert!(user_rs.contains("type Target = ProfileRecord;"));
+
+    fs::remove_dir_all(root).expect("failed to remove temp dir");
+}
+
+#[test]
+fn schema_load_rejects_invalid_scoped_relation_signature() {
+    let root = temp_dir("invalid_scope_signature");
+    let models_dir = root.join("models");
+    fs::create_dir_all(&models_dir).expect("failed to create models dir");
+
+    write_file(
+        models_dir.join("user.rs"),
+        r#"
+#[rf_model(table = "users")]
+pub struct User {
+    pub id: i64,
+    pub introducer_user_id: Option<i64>,
+    #[rf(foreign_key = "introducer_user_id", scope = bad_scope)]
+    pub downlines: HasMany<User>,
+}
+
+#[rf_model_impl]
+impl UserModel {
+    pub fn bad_scope(user_id: i64) -> i64 {
+        user_id
+    }
+}
+"#,
+    );
+
+    let err = schema::load(
+        models_dir
+            .to_str()
+            .expect("schema path should be valid utf-8"),
+    )
+    .expect_err("schema load should reject invalid scoped relation signature");
+    let err_text = err.to_string();
+
+    assert!(err_text
+        .contains("must have signature fn bad_scope(query: Query<UserModel>) -> Query<UserModel>"));
 
     fs::remove_dir_all(root).expect("failed to remove temp dir");
 }
@@ -648,6 +832,25 @@ pub struct Article {
 }
 
 #[test]
+fn parse_relations_normalizes_relation_names_to_snake_case() {
+    let mut parsed_schema = schema::Schema::default();
+    parsed_schema
+        .models
+        .insert("user".to_string(), schema::ModelSpec::default());
+
+    let cfg = schema::ModelSpec {
+        relations: Some(vec![
+            "AuthorProfile:belongs_to:user:author_id:id".to_string()
+        ]),
+        ..schema::ModelSpec::default()
+    };
+
+    let relations = schema::parse_relations(&parsed_schema, &cfg, "article", &[]);
+    assert_eq!(relations.len(), 1);
+    assert_eq!(relations[0].name, "author_profile");
+}
+
+#[test]
 fn generated_models_emit_lifecycle_payloads_and_model_keys() {
     let root = temp_dir("observer_payloads");
     let models_dir = root.join("models");
@@ -699,16 +902,17 @@ pub struct Article {
     assert!(article_rs.contains("pub struct ArticleCreate"));
     assert!(article_rs.contains("pub struct ArticleChanges"));
     assert!(article_rs.contains("pub const MODEL_KEY: &'static str = \"article\";"));
-    assert!(article_rs.contains("observer.on_creating(&event, &data).await?;"));
-    assert!(article_rs.contains("observer.on_updating(&event, &old_data, &changes_data).await?;"));
-    assert!(article_rs.contains("observer.on_deleting(&event, &old_data).await?;"));
-    assert!(article_rs.contains("observer.on_created(&event, &data).await"));
-    assert!(article_rs.contains("observer.on_updated(&event, &old_data, &new_data).await"));
-    assert!(article_rs.contains("observer.on_deleted(&event, &old_data).await"));
-    assert!(article_rs.contains("record_key: Some(format!(\"{}\", row.id))"));
-    assert!(article_rs.contains("record_key: Some(format!(\"{}\", old_row.id))"));
-    assert!(article_rs.contains("let data = serde_json::to_value(create_input)?;"));
-    assert!(article_rs.contains("match serde_json::to_value(&row)"));
+    assert!(article_rs.contains("const OBSERVE_HOOKS: bool = true;"));
+    assert!(article_rs.contains("const USE_SNOWFLAKE_ID: bool = true;"));
+    assert!(article_rs.contains("fn build_create_input(state: &CreateState<'_>)"));
+    assert!(article_rs.contains("fn apply_create_overrides(mut state: CreateState<'_>, overrides: serde_json::Value)"));
+    assert!(article_rs.contains("impl core_db::common::model_api::FeaturePersistenceModel for ArticleModel"));
+    assert!(article_rs.contains("fn build_patch_changes(state: &PatchState<'_>)"));
+    assert!(article_rs.contains("fn apply_patch_overrides<'db>(mut state: PatchState<'db>, overrides: serde_json::Value)"));
+    assert!(article_rs.contains("fn row_pk("));
+    assert!(article_rs.contains("fn row_pk_text(row: &<Self as core_db::common::model_api::RuntimeModel>::Row) -> String"));
+    assert!(article_rs.contains("impl core_db::common::model_api::DeleteModel for ArticleModel"));
+    assert!(article_rs.contains("fn delete_override_update<'db>("));
     assert!(article_rs.contains("let value = match bind {"));
     assert!(article_rs.contains("FieldInput::Set(value)"));
     assert!(article_rs.contains("FieldChange::Assign(value)"));
