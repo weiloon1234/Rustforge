@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+pub mod global_config;
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;

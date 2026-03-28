@@ -100,7 +100,31 @@ if state.my_feature_config.enabled {
 }
 ```
 
-## Step 7: Environment variable overrides
+## Step 7 (optional): Register as global config
+
+For configs needed in jobs, datatables, or places without `AppApiState` access:
+
+```rust
+// In AppApiState::new() after loading the config:
+core_config::global_config::set(my_feature_config.clone());
+```
+
+Then access anywhere without threading through function signatures:
+
+```rust
+let config = core_config::global_config::expect::<MyFeatureConfig>();
+// or safely:
+let config = core_config::global_config::get::<MyFeatureConfig>().unwrap_or_default();
+```
+
+Rules:
+- `set()` is write-once — panics if called twice for the same type
+- `try_set()` returns `Err` instead of panicking (useful for tests)
+- `get()` returns `Option<T>` (cloned)
+- `expect()` panics if not set
+- Store `Arc<T>` for large configs to avoid clone overhead
+
+## Step 8: Environment variable overrides
 
 Settings can be overridden via environment variables. The convention is uppercase with underscores:
 

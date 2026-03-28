@@ -27,6 +27,9 @@ pub async fn init_app() -> Result<(BootContext, core_web::logging::WorkerGuard)>
     let settings = Settings::load()?;
     info!("Bootstrapping {} ({})", settings.app.name, settings.app.env);
     core_db::common::model_api::set_default_attachment_base_url(settings.cdn.base_url.clone());
+    // Store as Arc so get() clones only the pointer, not the data
+    let settings = Arc::new(settings);
+    core_config::global_config::set(settings.clone());
 
     // 4. Init I18n (default locale + timezone + catalogs)
     core_i18n::init(&settings.i18n);
@@ -57,7 +60,7 @@ pub async fn init_app() -> Result<(BootContext, core_web::logging::WorkerGuard)>
 
     Ok((
         BootContext {
-            settings: Arc::new(settings),
+            settings,
             db,
             redis,
             storage,

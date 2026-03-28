@@ -292,6 +292,18 @@ let config: MyFeatureConfig = ctx.settings.section("my_feature").unwrap_or_defau
 
 Wire via `AppApiState` when runtime access is needed in handlers/workflows.
 
+For configs needed outside of `AppApiState` (jobs, datatables, utilities), use the global config registry:
+
+```rust
+// At boot (in AppApiState::new):
+core_config::global_config::set(my_config.clone());
+
+// Anywhere:
+let config = core_config::global_config::expect::<MyConfig>();
+```
+
+Write-once at boot, read anywhere. Type-safe (keyed by `TypeId`). See skill `add-config` for details.
+
 ## Audit Log Exclusion
 
 Tables excluded from audit logging:
