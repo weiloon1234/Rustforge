@@ -276,6 +276,33 @@ pub struct CountRelationSpec {
     pub nested: Option<Box<CountRelationSpec>>,
 }
 
+/// Trait for any relation constant that can provide its name.
+/// Used by `Query::with()` to specify which relations to eager-load.
+pub trait RelationName: Copy {
+    fn relation_name(self) -> &'static str;
+}
+
+impl<M, T, const K: usize> RelationName for OneRelation<M, T, K> {
+    fn relation_name(self) -> &'static str {
+        self.name()
+    }
+}
+
+impl<M, T, const K: usize> RelationName for ManyRelation<M, T, K> {
+    fn relation_name(self) -> &'static str {
+        self.name()
+    }
+}
+
+/// Check if a relation should be loaded based on the `with_relations` list.
+/// `None` = no relations loaded. `Some(list)` = only listed relations loaded.
+pub fn should_load_relation(name: &str, with_relations: &Option<Vec<&str>>) -> bool {
+    match with_relations {
+        None => false,
+        Some(list) => list.iter().any(|&n| n == name),
+    }
+}
+
 /// Trait for types that represent a SQL column expression.
 /// Implemented by `Column<M, T>` (typed) and per-model `DbCol` enums (untyped).
 pub trait ColExpr: Copy {
@@ -1410,6 +1437,8 @@ pub struct QueryState<'db> {
     pub with_deleted: bool,
     pub only_deleted: bool,
     pub count_relations: Vec<CountRelationSpec>,
+    /// Which relations to eager-load. `None` = none. `Some(vec)` = only listed.
+    pub with_relations: Option<Vec<&'static str>>,
 }
 
 impl<'db> QueryState<'db> {
@@ -1436,6 +1465,7 @@ impl<'db> QueryState<'db> {
             with_deleted: false,
             only_deleted: false,
             count_relations: vec![],
+            with_relations: None,
         }
     }
 

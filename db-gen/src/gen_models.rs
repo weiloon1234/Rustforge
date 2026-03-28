@@ -1077,7 +1077,7 @@ fn render_query_all_body(
             let rel_name = to_snake(&rel.name);
             writeln!(
                 out,
-                "            let {rel_name} = load_{rel_name}(db.clone(), &rows, state.base_url.as_deref()).await?;"
+                "            let {rel_name} = if core_db::common::model_api::should_load_relation(\"{rel_name}\", &state.with_relations) {{ load_{rel_name}(db.clone(), &rows, state.base_url.as_deref()).await? }} else {{ HashMap::new() }};"
             )
             .unwrap();
         }
@@ -1317,7 +1317,7 @@ fn render_query_paginate_body(
             let rel_name = to_snake(&rel.name);
             writeln!(
                 out,
-                "            let {rel_name} = load_{rel_name}(db.clone(), &rows, state.base_url.as_deref()).await?;"
+                "            let {rel_name} = if core_db::common::model_api::should_load_relation(\"{rel_name}\", &state.with_relations) {{ load_{rel_name}(db.clone(), &rows, state.base_url.as_deref()).await? }} else {{ HashMap::new() }};"
             )
             .unwrap();
         }
@@ -6365,9 +6365,12 @@ fn render_model(
             .unwrap();
             writeln!(
                 out,
-                "    fn include<'db>(_relation: Self, state: {model_query_ty}) -> {model_query_ty} {{"
+                "    fn include<'db>(relation: Self, mut state: {model_query_ty}) -> {model_query_ty} {{"
             )
             .unwrap();
+            let rel_name = to_snake(&rel.name);
+            writeln!(out, "        let list = state.with_relations.get_or_insert_with(Vec::new);").unwrap();
+            writeln!(out, "        if !list.contains(&\"{rel_name}\") {{ list.push(\"{rel_name}\"); }}").unwrap();
             writeln!(out, "        state").unwrap();
             writeln!(out, "    }}").unwrap();
             writeln!(out, "}}\n").unwrap();

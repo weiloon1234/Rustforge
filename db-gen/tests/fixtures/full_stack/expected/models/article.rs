@@ -1655,7 +1655,9 @@ impl core_db::common::model_api::QueryField<ArticleModel> for ArticleDbCol {
 }
 
 impl core_db::common::model_api::IncludeRelation<ArticleModel> for OneRelation<ArticleModel, UserRecord, 0> {
-    fn include<'db>(_relation: Self, state: QueryState<'db>) -> QueryState<'db> {
+    fn include<'db>(relation: Self, mut state: QueryState<'db>) -> QueryState<'db> {
+        let list = state.with_relations.get_or_insert_with(Vec::new);
+        if !list.contains(&"author") { list.push("author"); }
         state
     }
 }
