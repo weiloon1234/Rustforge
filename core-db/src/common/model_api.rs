@@ -294,13 +294,29 @@ impl<M, T, const K: usize> RelationName for ManyRelation<M, T, K> {
     }
 }
 
+/// Specification for a relation to eager-load, with optional WHERE conditions.
+#[derive(Debug, Clone)]
+pub struct WithRelationSpec {
+    pub name: &'static str,
+    pub extra_where: Option<String>,
+    pub extra_binds: Vec<BindValue>,
+}
+
 /// Check if a relation should be loaded based on the `with_relations` list.
 /// `None` = no relations loaded. `Some(list)` = only listed relations loaded.
-pub fn should_load_relation(name: &str, with_relations: &Option<Vec<&str>>) -> bool {
+pub fn should_load_relation(name: &str, with_relations: &Option<Vec<WithRelationSpec>>) -> bool {
     match with_relations {
         None => false,
-        Some(list) => list.iter().any(|&n| n == name),
+        Some(list) => list.iter().any(|s| s.name == name),
     }
+}
+
+/// Get the extra WHERE clause for a relation, if any.
+pub fn get_relation_extra_where<'a>(name: &str, with_relations: &'a Option<Vec<WithRelationSpec>>) -> Option<(&'a str, &'a [BindValue])> {
+    with_relations
+        .as_ref()
+        .and_then(|list| list.iter().find(|s| s.name == name))
+        .and_then(|s| s.extra_where.as_ref().map(|w| (w.as_str(), s.extra_binds.as_slice())))
 }
 
 /// Trait for types that represent a SQL column expression.
@@ -709,6 +725,45 @@ impl<'db, M: QueryModel> Query<'db, M> {
             state: R::include(relation, self.state),
             _marker: PhantomData,
         }
+    }
+
+    /// Eager-load a relation with additional WHERE conditions.
+    /// The scope closure adds conditions that filter which related records are loaded.
+    ///
+    /// Example: `.with_where(UserRel::DOWNLINES, |q| q.where_col(UserCol::HAS_PURCHASED, Op::Eq, true))`
+    pub fn with_where<R, T, F>(mut self, relation: R, scope: F) -> Self
+    where
+        R: IncludeRelation<M> + RelationName,
+        T: QueryModel,
+        F: FnOnce(Query<'db, T>) -> Query<'db, T>,
+    {
+        let name = relation.relation_name();
+        let dummy_state = QueryState::new(self.state.db.clone(), None, "");
+        let scoped = scope(Query::<T>::from_inner(dummy_state));
+        let inner = scoped.into_inner();
+
+        let extra_where = if inner.where_sql.is_empty() {
+            None
+        } else {
+            Some(
+                inner
+                    .where_sql
+                    .iter()
+                    .map(|w| format!("AND {w}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            )
+        };
+
+        let list = self.state.with_relations.get_or_insert_with(Vec::new);
+        // Remove existing entry for this relation if present (with_where replaces with)
+        list.retain(|s| s.name != name);
+        list.push(WithRelationSpec {
+            name,
+            extra_where,
+            extra_binds: inner.binds,
+        });
+        self
     }
 
     pub fn where_has<R, F>(self, relation: R, scope: F) -> Self
@@ -1438,7 +1493,7 @@ pub struct QueryState<'db> {
     pub only_deleted: bool,
     pub count_relations: Vec<CountRelationSpec>,
     /// Which relations to eager-load. `None` = none. `Some(vec)` = only listed.
-    pub with_relations: Option<Vec<&'static str>>,
+    pub with_relations: Option<Vec<WithRelationSpec>>,
 }
 
 impl<'db> QueryState<'db> {

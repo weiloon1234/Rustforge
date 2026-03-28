@@ -1077,7 +1077,7 @@ fn render_query_all_body(
             let rel_name = to_snake(&rel.name);
             writeln!(
                 out,
-                "            let {rel_name} = if core_db::common::model_api::should_load_relation(\"{rel_name}\", &state.with_relations) {{ load_{rel_name}(db.clone(), &rows, state.base_url.as_deref()).await? }} else {{ HashMap::new() }};"
+                "            let {rel_name} = if core_db::common::model_api::should_load_relation(\"{rel_name}\", &state.with_relations) {{ let __ew = core_db::common::model_api::get_relation_extra_where(\"{rel_name}\", &state.with_relations); load_{rel_name}(db.clone(), &rows, state.base_url.as_deref(), __ew.map(|(w, _)| w), __ew.map(|(_, b)| b).unwrap_or(&[])).await? }} else {{ HashMap::new() }};"
             )
             .unwrap();
         }
@@ -1317,7 +1317,7 @@ fn render_query_paginate_body(
             let rel_name = to_snake(&rel.name);
             writeln!(
                 out,
-                "            let {rel_name} = if core_db::common::model_api::should_load_relation(\"{rel_name}\", &state.with_relations) {{ load_{rel_name}(db.clone(), &rows, state.base_url.as_deref()).await? }} else {{ HashMap::new() }};"
+                "            let {rel_name} = if core_db::common::model_api::should_load_relation(\"{rel_name}\", &state.with_relations) {{ let __ew = core_db::common::model_api::get_relation_extra_where(\"{rel_name}\", &state.with_relations); load_{rel_name}(db.clone(), &rows, state.base_url.as_deref(), __ew.map(|(w, _)| w), __ew.map(|(_, b)| b).unwrap_or(&[])).await? }} else {{ HashMap::new() }};"
             )
             .unwrap();
         }
@@ -3034,21 +3034,24 @@ fn render_model(
         match rel.kind {
             RelationKind::HasMany => {
                 let target_fk_optional = relation_target_field_is_optional(schema, rel);
-                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}], base_url: Option<&str>) -> Result<HashMap<{parent_pk_ty}, Vec<{target_record}>>> {{").unwrap();
+                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}], base_url: Option<&str>, extra_where: Option<&str>, extra_binds: &[core_db::common::sql::BindValue]) -> Result<HashMap<{parent_pk_ty}, Vec<{target_record}>>> {{").unwrap();
                 writeln!(
                     out,
                     "        if parents.is_empty() {{ return Ok(HashMap::new()); }}"
                 )
                 .unwrap();
                 writeln!(out, "        let ids: Vec<{parent_pk_ty}> = parents.iter().map(|p| p.{pk}.clone()).collect();").unwrap();
-                writeln!(out, "        let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!(\"${{}}\", i)).collect();").unwrap();
-                writeln!(out, "        let sql = format!(\"SELECT * FROM {rel_table} WHERE {fk} IN ({{}})\", placeholders.join(\", \"));", rel_table = rel.target_table, fk = rel.foreign_key).unwrap();
+                writeln!(out, "        let mut bind_idx: usize = 1;").unwrap();
+                writeln!(out, "        let placeholders: Vec<String> = ids.iter().map(|_| {{ let p = format!(\"${{}}\", bind_idx); bind_idx += 1; p }}).collect();").unwrap();
+                writeln!(out, "        let extra_clause = match extra_where {{ Some(clause) => {{ let mut r = clause.to_string(); for (i, _) in extra_binds.iter().enumerate().rev() {{ r = r.replace(&format!(\"${{}}\", i + 1), &format!(\"${{}}\", bind_idx + i)); }} format!(\" {{}}\", r) }} None => String::new() }};").unwrap();
+                writeln!(out, "        let sql = format!(\"SELECT * FROM {rel_table} WHERE {fk} IN ({{}}){{}}\", placeholders.join(\", \"), extra_clause);", rel_table = rel.target_table, fk = rel.foreign_key).unwrap();
                 writeln!(
                     out,
                     "        let mut q = sqlx::query_as::<_, {target_row}>(&sql);"
                 )
                 .unwrap();
                 writeln!(out, "        for id in ids {{ q = bind(q, id.into()); }}").unwrap();
+                writeln!(out, "        for b in extra_binds {{ q = bind(q, b.clone()); }}").unwrap();
                 writeln!(out, "        let rows = db.fetch_all(q).await?;").unwrap();
                 writeln!(
                     out,
@@ -3085,7 +3088,7 @@ fn render_model(
                 let is_fk_optional = fields
                     .iter()
                     .any(|f| f.name == rel.foreign_key && f.ty.starts_with("Option<"));
-                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}], base_url: Option<&str>) -> Result<HashMap<{parent_pk_ty}, Option<{target_record}>>> {{").unwrap();
+                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}], base_url: Option<&str>, _extra_where: Option<&str>, _extra_binds: &[core_db::common::sql::BindValue]) -> Result<HashMap<{parent_pk_ty}, Option<{target_record}>>> {{").unwrap();
                 writeln!(
                     out,
                     "        if parents.is_empty() {{ return Ok(HashMap::new()); }}"
@@ -6370,7 +6373,7 @@ fn render_model(
             .unwrap();
             let rel_name = to_snake(&rel.name);
             writeln!(out, "        let list = state.with_relations.get_or_insert_with(Vec::new);").unwrap();
-            writeln!(out, "        if !list.contains(&\"{rel_name}\") {{ list.push(\"{rel_name}\"); }}").unwrap();
+            writeln!(out, "        if !list.iter().any(|s| s.name == \"{rel_name}\") {{ list.push(core_db::common::model_api::WithRelationSpec {{ name: \"{rel_name}\", extra_where: None, extra_binds: vec![] }}); }}").unwrap();
             writeln!(out, "        state").unwrap();
             writeln!(out, "    }}").unwrap();
             writeln!(out, "}}\n").unwrap();
