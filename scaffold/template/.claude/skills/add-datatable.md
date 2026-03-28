@@ -29,7 +29,10 @@ impl MyDomainDataTableHooks for MyDomainDataTableAppHooks {
         _input: &DataTableInput,
         _ctx: &DataTableContext,
     ) -> Query<'db, MyDomainModel> {
+        // IMPORTANT: .with() every relation accessed in row_to_record
         query
+            .with(MyDomainRel::USER)
+            .with(MyDomainRel::ADMIN)
     }
 
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {
@@ -207,3 +210,16 @@ make check
 ```
 
 This regenerates TypeScript types and runs full verification.
+
+## Notes — Relations in Datatables
+
+- **`.with()` in `scope()` is mandatory** for every relation accessed in `row_to_record`. Without it, relation fields are `None`/`[]`.
+- Use `.with_count()` in `scope()` to get counts without loading full child records:
+  ```rust
+  fn scope<'db>(&'db self, query: Query<'db, MyModel>, ..) -> Query<'db, MyModel> {
+      query
+          .with(MyRel::ADMIN)           // load full admin record
+          .with_count(MyRel::ITEMS)      // count items without loading them
+  }
+  ```
+  Access in `row_to_record`: `record.count(MyRel::ITEMS)` returns `Option<i64>`.

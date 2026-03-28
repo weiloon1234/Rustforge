@@ -156,6 +156,7 @@ cargo check
 ```
 
 Fix any compilation errors. Common issues:
-- Missing permission enum variant -- add it to `app/permissions.toml` and run `make gen`.
+- Missing permission enum variant — add it to `app/permissions.toml` and run `make gen`.
 - Missing mod declarations in parent modules.
 - Import path mismatches.
+- Relations returning `None`/`[]` — add `.with(Rel::NAME)` to the query for every relation accessed on the record.

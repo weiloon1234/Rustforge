@@ -46,6 +46,55 @@ Boundary rule: handlers should stay thin; workflows own domain logic.
 Main state for API handlers is `src/internal/api/state.rs` (`AppApiState`).
 When a shared runtime dependency is needed in handlers/datatables/workflows, add it there from boot context and pass it through state.
 
+## Relations (Eager Loading)
+
+Relations are **opt-in**. No `.with()` = no relations loaded. `record.user` is `None`, `record.items` is `[]`.
+
+```rust
+// Load specific relations
+let deposits = DepositModel::query(db)
+    .with(DepositRel::ADMIN)
+    .with(DepositRel::USER)
+    .all().await?;
+
+// Conditional loading — filtered relation
+let users = UserModel::query(db)
+    .with_where(UserRel::DOWNLINES, |q: Query<UserModel>| {
+        q.where_col(UserCol::STATUS, Op::Eq, UserStatus::Active)
+    })
+    .all().await?;
+```
+
+`Model::find(db, id)` does NOT support `.with()`. Use `Model::query(db).with(Rel::X).find(id)` instead.
+
+**Datatables:** add `.with()` in the `scope()` hook for every relation accessed in `row_to_record`:
+
+```rust
+fn scope<'db>(&'db self, query: Query<'db, MyModel>, ..) -> Query<'db, MyModel> {
+    query.with(MyRel::USER).with(MyRel::ADMIN)
+}
+```
+
+## Relation Counts (`with_count`)
+
+Count related records without loading full rows:
+
+```rust
+let kbs = KnowledgeBaseModel::query(db)
+    .with_count(KbRel::ITEMS)                     // simple count
+    .with_count_where(KbRel::ITEMS, |q| {         // conditional count
+        q.where_col(ItemCol::STATUS, Op::Eq, ItemStatus::Active)
+    })
+    .with_count_nested(KbRel::GROUPS, GroupRel::ITEMS)  // nested 2-level
+    .all().await?;
+
+// Access on record
+let count = record.count(KbRel::ITEMS);                           // Option<i64>
+let nested = record.__relation_counts.get("groups.items");        // Option<&i64>
+```
+
+Nested `with_count` supports max 2 levels (parent → child → grandchild). Uses a JOIN query, not N+1.
+
 ## Recipe: Extend Schema-Generated Model
 
 Use this when the domain is schema-driven.

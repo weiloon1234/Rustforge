@@ -117,6 +117,29 @@ Non-English keys (like `enum.my_status.active`) MUST exist in both `en.json` and
 cargo check
 ```
 
+## Notes — Relations
+
+Relations (`BelongsTo<T>`, `HasMany<T>`) are **opt-in loaded**. You must call `.with(Rel::NAME)` on the query to load them:
+
+```rust
+// record.user is None without .with()
+let record = MyModel::query(db).with(MyRel::USER).find(id).await?;
+// record.user is now Some(...)
+
+// Conditional loading
+let records = MyModel::query(db)
+    .with_where(MyRel::ITEMS, |q| q.where_col(ItemCol::ACTIVE, Op::Eq, true))
+    .all().await?;
+
+// Count without loading full records
+let records = MyModel::query(db)
+    .with_count(MyRel::ITEMS)
+    .all().await?;
+let count = record.count(MyRel::ITEMS); // Option<i64>
+```
+
+`Model::find(db, id)` does NOT support `.with()`. Use `Model::query(db).with(Rel::X).find(id)` instead.
+
 Fix any compilation errors before proceeding. Common issues:
 - Missing `use` imports for enum types.
 - Enum variants not matching the `string_value` in the database.
