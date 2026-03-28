@@ -4,6 +4,7 @@ use crate::types::{
     DataTablePaginationMode, DataTableRelationColumnMeta, SortDirection,
 };
 use anyhow::Result;
+use core_db::common::sql::BindValue;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::future::Future;
@@ -279,5 +280,39 @@ pub trait AutoDataTable: Send + Sync + 'static {
             DataTablePaginationMode::Offset => true,
             DataTablePaginationMode::Cursor => true,
         }
+    }
+}
+
+/// Model-specific column resolution for datatable filtering.
+/// Generated code implements this; core-datatable owns the dispatch logic
+/// via [`crate::filters::apply_standard_filter`].
+pub trait DataTableColumnResolver {
+    /// Map column name to its SQL identifier (e.g. `"author_id"` -> `"author_id"`).
+    fn resolve_col_sql(&self, column: &str) -> Option<&'static str>;
+
+    /// Map column name to its SQL identifier, but only for string/text columns
+    /// (columns that support LIKE).
+    fn resolve_like_col_sql(&self, column: &str) -> Option<&'static str>;
+
+    /// Parse a raw string value into a [`BindValue`] appropriate for the given
+    /// column's type.
+    fn parse_bind_for_col(&self, column: &str, raw: &str) -> Option<BindValue>;
+
+    /// Check if a column is a localized field, returning the field name.
+    fn resolve_locale_field(&self, column: &str) -> Option<&'static str>;
+
+    /// Parse a datetime string, optionally snapping to end-of-day.
+    fn parse_datetime(&self, raw: &str, end_of_day: bool) -> Option<time::OffsetDateTime>;
+
+    /// The SQL table name for this model (e.g. `"articles"`).
+    fn table_name(&self) -> &'static str;
+
+    /// The primary key column name (e.g. `"id"`).
+    fn pk_column(&self) -> &'static str;
+
+    /// The localized owner-type constant (e.g. `"Article"`), if this model has
+    /// localized fields.
+    fn locale_owner_type(&self) -> Option<&'static str> {
+        None
     }
 }

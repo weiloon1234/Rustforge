@@ -12,11 +12,11 @@ pub use async_export::{
     DataTableAsyncExportTicket,
 };
 pub use executor::execute_datatable;
-pub use filters::{parse_filter_key, ParsedFilter};
+pub use filters::{apply_standard_filter, parse_filter_key, ParsedFilter};
 pub use registry::{DataTableRegistry, DynDataTable};
 pub use traits::{
-    AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableRelationColumnDescriptor,
-    GeneratedTableAdapter,
+    AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableColumnResolver,
+    DataTableRelationColumnDescriptor, GeneratedTableAdapter,
 };
 pub use types::{
     DataTableActor, DataTableColumnMeta, DataTableContext, DataTableCsvExport, DataTableDefaults,

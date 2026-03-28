@@ -578,7 +578,24 @@ pub trait DeleteModel: RuntimeModel {
     ) -> BoxModelFuture<'db, u64>;
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TouchTarget {
+    pub fk_col: &'static str,
+    pub parent_table: &'static str,
+    pub parent_pk: &'static str,
+}
+
 pub trait FeaturePersistenceModel: ModelDef {
+    fn touch_targets() -> &'static [TouchTarget] {
+        &[]
+    }
+
+    fn extract_touch_fk_values(_row: &<Self as RuntimeModel>::Row) -> Vec<(&'static str, Option<i64>)>
+    where
+        Self: RuntimeModel,
+    {
+        vec![]
+    }
     fn create_owner_id(_row: &<Self as RuntimeModel>::Row) -> Option<i64>
     where
         Self: RuntimeModel,
@@ -688,6 +705,68 @@ pub trait FeaturePersistenceModel: ModelDef {
         let _ = (db, target_ids);
         Box::pin(async move { Ok(()) })
     }
+}
+
+/// Macro to generate `FeaturePersistenceModel` delegation methods.
+///
+/// Place inside an `impl FeaturePersistenceModel for XxxModel { ... }` block.
+/// The `$localized_mod` argument is the path to the generated localized module
+/// that contains `upsert_localized_many`, `upsert_meta_many`, etc.
+///
+/// Feature flags (`localized`, `meta`, `attachment`) control which methods are emitted.
+///
+/// ```ignore
+/// impl FeaturePersistenceModel for ArticleModel {
+///     fn localized_owner_type() -> Option<&'static str> { Some(localized::ARTICLE_OWNER_TYPE) }
+///     core_db::impl_feature_persistence_delegates!(localized, localized, meta, attachment);
+/// }
+/// ```
+#[macro_export]
+macro_rules! impl_feature_persistence_delegates {
+    (@single $localized_mod:path, localized) => {
+        fn upsert_localized_many<'db>(
+            db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
+            field: &'static str, values: std::collections::HashMap<String, String>,
+        ) -> $crate::common::model_api::BoxModelFuture<'db, ()> {
+            Box::pin(async move { $localized_mod::upsert_localized_many(db, owner_type, owner_id, field, &values).await })
+        }
+    };
+    (@single $localized_mod:path, meta) => {
+        fn upsert_meta_many<'db>(
+            db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
+            values: std::collections::HashMap<String, serde_json::Value>,
+        ) -> $crate::common::model_api::BoxModelFuture<'db, ()> {
+            Box::pin(async move { $localized_mod::upsert_meta_many(db, owner_type, owner_id, &values).await })
+        }
+    };
+    (@single $localized_mod:path, attachment) => {
+        fn clear_attachment_field<'db>(
+            db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64, field: &'static str,
+        ) -> $crate::common::model_api::BoxModelFuture<'db, ()> {
+            Box::pin(async move { $localized_mod::clear_attachment_field(db, owner_type, owner_id, field).await })
+        }
+        fn replace_single_attachment<'db>(
+            db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
+            field: &'static str, value: $crate::platform::attachments::types::AttachmentInput,
+        ) -> $crate::common::model_api::BoxModelFuture<'db, ()> {
+            Box::pin(async move { $localized_mod::replace_single_attachment(db, owner_type, owner_id, field, &value).await })
+        }
+        fn add_attachments<'db>(
+            db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
+            field: &'static str, values: Vec<$crate::platform::attachments::types::AttachmentInput>,
+        ) -> $crate::common::model_api::BoxModelFuture<'db, ()> {
+            Box::pin(async move { $localized_mod::add_attachments(db, owner_type, owner_id, field, &values).await })
+        }
+        fn delete_attachment_ids<'db>(
+            db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
+            field: &'static str, ids: Vec<uuid::Uuid>,
+        ) -> $crate::common::model_api::BoxModelFuture<'db, ()> {
+            Box::pin(async move { $localized_mod::delete_attachment_ids(db, owner_type, owner_id, field, &ids).await })
+        }
+    };
+    ($localized_mod:path, $($feature:ident),+ $(,)?) => {
+        $($crate::impl_feature_persistence_delegates!(@single $localized_mod, $feature);)+
+    };
 }
 
 pub trait QueryField<M: QueryModel>: Copy {
@@ -2949,6 +3028,68 @@ impl<M, T> ColExpr for Column<M, T> {
     }
 }
 
+pub async fn persist_create_touch_targets<'db>(
+    db: DbConn<'db>,
+    fk_values: &[(&str, Option<i64>)],
+    targets: &[TouchTarget],
+) -> Result<()> {
+    for target in targets {
+        if let Some((_, Some(parent_id))) = fk_values.iter().find(|(fk, _)| *fk == target.fk_col) {
+            let sql = format!(
+                "UPDATE {} SET updated_at = NOW() WHERE {} = $1",
+                target.parent_table, target.parent_pk
+            );
+            let q = sqlx::query(&sql).bind(*parent_id);
+            db.execute(q).await?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn persist_patch_touch_targets<'db>(
+    db: DbConn<'db>,
+    child_table: &str,
+    child_pk: &str,
+    target_ids: &[i64],
+    targets: &[TouchTarget],
+) -> Result<()> {
+    if target_ids.is_empty() || targets.is_empty() {
+        return Ok(());
+    }
+    let (phs, _) = make_placeholders(target_ids.len(), 1);
+    let ph_list = phs.join(", ");
+    for target in targets {
+        let sql = format!(
+            "SELECT DISTINCT {} FROM {} WHERE {} IN ({})",
+            target.fk_col, child_table, child_pk, ph_list
+        );
+        let mut q = sqlx::query_scalar::<_, Option<i64>>(&sql);
+        for id in target_ids {
+            q = q.bind(*id);
+        }
+        let parent_ids: Vec<i64> = db
+            .fetch_all_scalar(q)
+            .await?
+            .into_iter()
+            .flatten()
+            .collect();
+        if parent_ids.is_empty() {
+            continue;
+        }
+        let (parent_phs, _) = make_placeholders(parent_ids.len(), 1);
+        let update_sql = format!(
+            "UPDATE {} SET updated_at = NOW() WHERE {} IN ({})",
+            target.parent_table, target.parent_pk, parent_phs.join(", ")
+        );
+        let mut uq = sqlx::query(&update_sql);
+        for pid in &parent_ids {
+            uq = uq.bind(*pid);
+        }
+        db.execute(uq).await?;
+    }
+    Ok(())
+}
+
 pub trait CreateModel: QueryModel + FeaturePersistenceModel {
     const USE_SNOWFLAKE_ID: bool = false;
 
@@ -3721,6 +3862,26 @@ impl<'db, M: QueryModel> Query<'db, M> {
         self.with_sum_target(relation, target)
     }
 
+    fn push_aggregate_with_spec(
+        &mut self,
+        spec: CountRelationSpec,
+        target: AggregateTargetSpec,
+        kind: RelationAggregateKind,
+    ) {
+        self.state.aggregate_relations.push(RelationAggregateSpec {
+            relation_name: spec.name,
+            target_table: spec.target_table,
+            target_pk: spec.target_pk,
+            foreign_key: spec.foreign_key,
+            has_soft_delete: spec.has_soft_delete,
+            target,
+            kind,
+            filters: spec.filters,
+            with_deleted: spec.with_deleted,
+            only_deleted: spec.only_deleted,
+        });
+    }
+
     fn push_aggregate<R>(
         &mut self,
         relation: R,
@@ -3730,18 +3891,7 @@ impl<'db, M: QueryModel> Query<'db, M> {
         R: CountRelation<M>,
     {
         let spec = R::spec(relation, self.state.base_url.clone());
-        self.state.aggregate_relations.push(RelationAggregateSpec {
-            relation_name: spec.name,
-            target_table: spec.target_table,
-            target_pk: spec.target_pk,
-            foreign_key: spec.foreign_key,
-            has_soft_delete: spec.has_soft_delete,
-            target: target.into_spec(),
-            kind,
-            filters: spec.filters,
-            with_deleted: spec.with_deleted,
-            only_deleted: spec.only_deleted,
-        });
+        self.push_aggregate_with_spec(spec, target.into_spec(), kind);
     }
 
     fn push_aggregate_scoped<R, T, F>(
@@ -3761,18 +3911,7 @@ impl<'db, M: QueryModel> Query<'db, M> {
         spec.filters.extend(inner.filters);
         spec.with_deleted = spec.with_deleted || inner.with_deleted;
         spec.only_deleted = spec.only_deleted || inner.only_deleted;
-        self.state.aggregate_relations.push(RelationAggregateSpec {
-            relation_name: spec.name,
-            target_table: spec.target_table,
-            target_pk: spec.target_pk,
-            foreign_key: spec.foreign_key,
-            has_soft_delete: spec.has_soft_delete,
-            target: target.into_spec(),
-            kind,
-            filters: spec.filters,
-            with_deleted: spec.with_deleted,
-            only_deleted: spec.only_deleted,
-        });
+        self.push_aggregate_with_spec(spec, target.into_spec(), kind);
     }
 
     fn with_sum_target<R>(mut self, relation: R, target: AggregateTarget<R::TargetModel>) -> Self

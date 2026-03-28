@@ -13,6 +13,7 @@ uuid = { workspace = true, features = ["v4"] }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 core-db = { path = "../core-db" }
+core-i18n = { path = "../core-i18n" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

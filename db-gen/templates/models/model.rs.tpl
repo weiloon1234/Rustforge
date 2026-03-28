@@ -3,4 +3,4 @@
 #![allow(dead_code, unused_imports, unused_variables, unused_mut)]
 {{imports}}
 {{constants}}
-{{row_view_json_section}}{{column_model_section}}{{query_section}}{{insert_section}}{{update_section}}{{datatable_section}}{{active_record_section}}{{model_runtime_section}}
+{{row_view_json_section}}{{column_model_section}}{{datatable_section}}{{active_record_section}}{{model_runtime_section}}

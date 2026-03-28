@@ -1411,6 +1411,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "core-db",
+ "core-i18n",
  "serde",
  "serde_json",
  "time",

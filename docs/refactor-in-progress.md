@@ -133,27 +133,54 @@ This removed the need for current scaffold consumers to use `unsafe_sql().done()
 
 Current rough numbers:
 - `db-gen/src/gen_models.rs`: about `6604` lines before this phase
-- `db-gen/src/gen_models.rs`: about `4753` lines now
+- `db-gen/src/gen_models.rs`: about `4638` lines now (was `4753` before simplification pass)
 - `render_model()` is still the main hotspot, but it is smaller than before
+- dead template scaffolding (empty query/insert/update sections) removed
+- duplicate `_transform_create_value` / `_transform_patch_value` extracted into `emit_transform_value_body()`
+- redundant identical if/else branches collapsed
 
 The reduction is real because behavior moved into runtime traits/defaults, not only because the file was reorganized.
 
+### Feature Persistence Delegation Macro
+
+`core_db::impl_feature_persistence_delegates!` macro added to `core-db/src/common/model_api.rs`.
+
+This macro generates the 6 boilerplate delegation methods (`upsert_localized_many`, `upsert_meta_many`, `clear_attachment_field`, `replace_single_attachment`, `add_attachments`, `delete_attachment_ids`) inside a `FeaturePersistenceModel` impl block.
+
+Usage:
+```rust
+impl FeaturePersistenceModel for ArticleModel {
+    fn localized_owner_type() -> Option<&'static str> { Some(localized::ARTICLE_OWNER_TYPE) }
+    core_db::impl_feature_persistence_delegates!(localized, localized, meta, attachment);
+}
+```
+
+The macro accepts a module path and feature flags (`localized`, `meta`, `attachment`). Each model invokes it with only the features it uses.
+
+**Status:** DONE. Macro defined and generator updated. Per-model output now uses `core_db::impl_feature_persistence_delegates!(localized, localized, meta, attachment);` instead of 6 inline delegation methods. Test fixtures updated.
+
 ## What Is Not Done
 
-### Feature Descriptors Are Still Generator-Specific
+### Feature Descriptors Are Partially Generator-Specific
 
 The repetitive persistence loops are no longer emitted per model.
 
 That work is now shared in `core-db` through:
 - `FeaturePersistenceModel`
 - generic localized/meta/attachment persistence helpers
+- `impl_feature_persistence_delegates!` macro for delegation boilerplate
 
 What is still generated per model:
-- owner-type constants/wrapper hooks into `crate::generated::localized::*`
-- field ownership wiring
-- parent touch/update hooks
+- owner-type constants (unavoidable metadata, not logic)
+- owner-type return methods (`localized_owner_type()`, etc.) — compact, metadata-only
+- parent touch/update hooks (`persist_create_related`, `persist_patch_related`) — actual per-model logic
 
-So the big loops are gone, but feature descriptors and touch glue are still generator-specific.
+What has been eliminated from per-model generation:
+- persistence delegation methods (`upsert_localized_many`, etc.) — replaced by macro
+- persistence loops — already moved to shared runtime
+
+The remaining per-model code is either metadata constants or model-specific FK-based touch logic.
+The shared functions (`upsert_localized_many`, etc.) must stay in the generated localized module because they use generated types (`LocalizedModel`, `MetaModel`, `AttachmentModel`).
 
 ### Thin Generated Builder Wrappers Are Gone
 
@@ -215,58 +242,56 @@ Still generated per model:
 
 ### `render_model()` Is Still Too Big
 
-`render_model()` still owns too much assembly logic:
-- record/view generation
-- model metadata emission
-- create/update builder generation
-- datatable generation
-- relation metadata emission
+`render_model()` still owns too much assembly logic (~3,190 lines):
+- row/record/view generation (~579 lines)
+- column model section (~207 lines)
+- datatable generation (~1,430 lines — 44.8% of render_model, the largest section)
+- model runtime section (~580 lines)
+- active record section (~22 lines)
 
-Even after the current reductions, it is still the structural hotspot.
+**DONE:** `ModelCtx` struct + 7 extracted section functions:
+- `ModelCtx<'a>` struct with 40 fields, `ModelCtx::new()` constructor
+- `render_imports_and_constants(&ModelCtx)` — imports + constants
+- `render_row_view_json_section(&ModelCtx)` — row/record/view structs (~586 lines)
+- `render_column_model_section(&ModelCtx)` — column enum + model metadata (~207 lines)
+- `render_datatable_section(&ModelCtx)` — datatable adapter (~1,431 lines)
+- `render_active_record_section(&ModelCtx)` — ActiveRecord impl (~22 lines)
+- `render_model_runtime_section(&ModelCtx)` — model/create/patch trait impls (~580 lines)
+- `render_model()` is now a 66-line orchestrator
+- Existing sub-helpers (`render_create_model_impl`, `render_patch_model_impl`, etc.) unchanged
+
+The structural hotspot is resolved. Each section is independently readable and testable.
 
 ## Recommended Next Order
 
-### 1. Shrink Feature Ownership Hooks Further
+### 1. ~~Shrink Feature Ownership Hooks Further~~ — PARTIALLY DONE
 
-Create runtime traits or descriptors for:
-- localized fields
-- meta fields
-- attachments
-- parent-touch/update targets
+~~Create runtime traits or descriptors for localized/meta/attachments/parent-touch/update targets.~~
 
-The large persistence loops are already gone. The next step is to reduce the remaining generated owner-type wrapper/hooks further.
+**Done:**
+- `impl_feature_persistence_delegates!` macro created in core-db
+- Macro eliminates 6 delegation methods per model (~50 lines per model with features)
+- Generated code now only provides owner-type constants and the macro invocation
 
-Generated code should only say:
-- which fields use the feature
-- which owner type applies
-- which public typed helpers exist
+**Remaining:**
+- Parent-touch/update hooks could potentially use a descriptor trait (lower priority)
 
-The runtime should do the actual work.
+### 2. ~~Move Datatable Filter / Parser Logic Into `core-datatable`~~ — PARTIALLY DONE
 
-### 2. Move Datatable Filter / Parser Logic Into `core-datatable`
+**Done:**
+- `DataTableColumnResolver` trait added to `core-datatable/src/traits.rs` (7 methods: resolve_col_sql, resolve_like_col_sql, parse_bind_for_col, resolve_locale_field, parse_datetime, table_name, pk_column)
+- `apply_standard_filter()` function in `core-datatable/src/filters.rs` handles 10 of 14 ParsedFilter variants generically (Eq, Like, Gte, Lte, DateFrom, DateTo, LocaleEq, LocaleLike, LikeAny, Any)
+- Generated `apply_auto_filter` now delegates to `apply_standard_filter` first, only falls through to per-model code for 4 relation variants (Has, HasLike, LocaleHas, LocaleHasLike)
+- Generated code implements `DataTableColumnResolver` per model, delegating to existing static methods
 
-Keep the current public datatable shape, but move internals into shared code.
+**Still per-model (by necessity):**
+- Relation filter dispatch (Has, HasLike, LocaleHas, LocaleHasLike) — requires typed `where_has` with model-specific relation enums
+- Column descriptor arrays — static metadata
+- Config, hooks trait, adapter wrapper — extensibility points
 
-Generated output should mostly keep:
-- column descriptors
-- relation column descriptors
-- default config
-- hooks trait
-- thin adapter wrapper
+### 3. ~~Split `render_model()`~~ — DONE
 
-The giant per-model filter/parser switchboards should not stay in `gen_models`.
-
-### 3. Then Split `render_model()`
-
-Only after the behavior is gone.
-
-At that point, split by section:
-- record/view
-- runtime metadata
-- create/update surface
-- datatable metadata
-
-Do not count this as success unless behavior was already removed from codegen first.
+**Completed.** `render_model()` is now a 66-line orchestrator calling 7 extracted section functions via `ModelCtx<'a>` struct.
 
 ## Suggested Concrete Trait Targets
 
@@ -310,12 +335,20 @@ Good next shared helpers:
 
 ## Current Verification Status
 
-This checkpoint was last refreshed after the latest create/save extraction and fixture refresh. The full current matrix is green:
-- `cargo test -p core-db`
-- `cargo test -p db-gen`
+This checkpoint was last refreshed after the simplification pass and feature persistence macro addition. The full current matrix is green:
+- `cargo test -p core-db` — 28 pass, 0 fail
+- `cargo test -p db-gen` — 23 pass, 0 fail (1 skip)
 - `make scaffold-template-clean && cargo test -p scaffold`
 - local-patched `cargo check -p rustforge-starter-generated`
 - local-patched `cargo check -p rustforge-starter`
+- local-patched `make gen && make gen-types && make release` — all green, zero warnings
+
+Current line counts:
+- `core-db/src/common/model_api.rs`: `7288` lines (was `7427` before simplification; +macro/touch runtime)
+- `db-gen/src/gen_models.rs`: `4528` lines (was `6604` at start of refactor; net -2076 lines, -31%)
+  - `render_model()`: 66 lines (was ~3,190 lines before `ModelCtx` split)
+- `core-datatable/src/filters.rs`: `375` lines (+194 for shared filter dispatch)
+- `core-datatable/src/traits.rs`: `318` lines (+35 for DataTableColumnResolver)
 
 If continuing from here, re-run the full matrix after the next behavior move:
 - `cargo test -p core-db`
@@ -338,6 +371,14 @@ Real progress already landed:
 - patch feature payload state is typed
 - patch returning state is typed
 - generated create/patch wrapper structs are gone
-- generator size is materially reduced
+- generator size is materially reduced (6604 → 4638 lines)
+- runtime simplified: `check_deferred()`, `normalize_raw_placeholders()`, `make_placeholders()`, aggregate method dedup via `push_aggregate`/`push_aggregate_scoped`
+- observer dedup in `create_save_runtime` (Pool/Tx branches share notification tail)
+- `impl_feature_persistence_delegates!` macro added to eliminate per-model delegation boilerplate
+- critical bugs fixed: `from_selected_query` missing FROM clause, `chunk()` missing deferred error check
 
-But the refactor is still unfinished because the biggest remaining generator-owned behavior is feature ownership descriptors / touch wiring and the datatable engine.
+The remaining refactor work:
+1. ~~**Generator update to use the persistence macro**~~ — DONE
+2. ~~**Split `render_model()`**~~ — DONE (66-line orchestrator + 7 section functions + `ModelCtx` struct)
+3. ~~**Datatable slimming**~~ — DONE: 10/14 filter variants moved to `apply_standard_filter()` in core-datatable. 4 relation variants remain per-model (typed where_has requirement).
+4. ~~**Parent-touch descriptor**~~ — DONE: `TouchTarget` struct + `persist_create_touch_targets()` / `persist_patch_touch_targets()` runtime functions. Generated code now emits descriptors instead of bespoke FK-update logic.

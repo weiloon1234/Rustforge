@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use sqlx::FromRow;
 use core_db::common::sql::{BindValue, Op, OrderDir, SetMode, bind, bind_query, bind_scalar, generate_snowflake_i64, is_sql_profiler_enabled, format_duration, record_profiled_query, DbConn};
 use core_db::common::pagination::resolve_per_page;
-use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
+use core_datatable::{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableColumnResolver, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection};
 use core_db::platform::attachments::types::{Attachment, AttachmentInput, AttachmentMap};
 use uuid::Uuid;
 use core_db::platform::localized::types::LocalizedMap;
@@ -423,6 +423,34 @@ impl ArticleTableAdapter {
         }
     }
 }
+impl DataTableColumnResolver for ArticleTableAdapter {
+    fn resolve_col_sql(&self, column: &str) -> Option<&'static str> {
+        match column {
+            "id" => Some("id"),
+            "author_id" => Some("author_id"),
+            "status" => Some("status"),
+            "is_system" => Some("is_system"),
+            _ => None,
+        }
+    }
+    fn resolve_like_col_sql(&self, column: &str) -> Option<&'static str> {
+        match column {
+            _ => None,
+        }
+    }
+    fn parse_bind_for_col(&self, column: &str, raw: &str) -> Option<BindValue> {
+        Self::parse_bind_for_col(column, raw)
+    }
+    fn resolve_locale_field(&self, column: &str) -> Option<&'static str> {
+        Self::parse_locale_field(column)
+    }
+    fn parse_datetime(&self, raw: &str, end_of_day: bool) -> Option<time::OffsetDateTime> {
+        Self::parse_datetime(raw, end_of_day)
+    }
+    fn table_name(&self) -> &'static str { "articles" }
+    fn pk_column(&self) -> &'static str { "id" }
+    fn locale_owner_type(&self) -> Option<&'static str> { Some(localized::ARTICLE_OWNER_TYPE) }
+}
 impl GeneratedTableAdapter for ArticleTableAdapter {
     type Query<'db> = Query<'db, ArticleModel>;
     type Row = ArticleRecord;
@@ -466,78 +494,12 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
         ]
     }
     fn apply_auto_filter<'db>(&self, query: Query<'db, ArticleModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, ArticleModel>>> where Self: 'db {
+        if let Some(state) = core_datatable::apply_standard_filter(query.clone().into_inner(), filter, value, self)? {
+            return Ok(Some(Query::from_inner(state)));
+        }
         let trimmed = value.trim();
         if trimmed.is_empty() { return Ok(Some(query)); }
         match filter {
-            ParsedFilter::Eq { column } => {
-                let Some(col) = Self::parse_col(column.as_str()) else { return Ok(None); };
-                let Some(bind) = Self::parse_bind_for_col(column.as_str(), trimmed) else { return Ok(None); };
-                Ok(Some(query.where_col(col, Op::Eq, bind)))
-            }
-            ParsedFilter::Like { column } => {
-                let Some(col) = Self::parse_like_col(column.as_str()) else { return Ok(None); };
-                Ok(Some(query.where_col(col, Op::Like, format!("%{}%", trimmed))))
-            }
-            ParsedFilter::Gte { column } => {
-                let Some(col) = Self::parse_col(column.as_str()) else { return Ok(None); };
-                let Some(bind) = Self::parse_bind_for_col(column.as_str(), trimmed) else { return Ok(None); };
-                Ok(Some(query.where_col(col, Op::Ge, bind)))
-            }
-            ParsedFilter::Lte { column } => {
-                let Some(col) = Self::parse_col(column.as_str()) else { return Ok(None); };
-                let Some(bind) = Self::parse_bind_for_col(column.as_str(), trimmed) else { return Ok(None); };
-                Ok(Some(query.where_col(col, Op::Le, bind)))
-            }
-            ParsedFilter::DateFrom { column } => {
-                let Some(col) = Self::parse_col(column.as_str()) else { return Ok(None); };
-                let Some(ts) = Self::parse_datetime(trimmed, false) else { return Ok(None); };
-                Ok(Some(query.where_col(col, Op::Ge, ts)))
-            }
-            ParsedFilter::DateTo { column } => {
-                let Some(col) = Self::parse_col(column.as_str()) else { return Ok(None); };
-                let Some(ts) = Self::parse_datetime(trimmed, true) else { return Ok(None); };
-                Ok(Some(query.where_col(col, Op::Le, ts)))
-            }
-            ParsedFilter::LocaleEq { column } => {
-                let Some(field) = Self::parse_locale_field(column.as_str()) else { return Ok(None); };
-                let locale = core_i18n::current_locale().to_string();
-                let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = articles.id AND l.field = ? AND l.locale = ? AND l.value = ?)".to_string();
-                Ok(Some(query.where_exists_raw(clause, vec![localized::ARTICLE_OWNER_TYPE.to_string(), field.to_string(), locale, trimmed.to_string()])))
-            }
-            ParsedFilter::LocaleLike { column } => {
-                let Some(field) = Self::parse_locale_field(column.as_str()) else { return Ok(None); };
-                let locale = core_i18n::current_locale().to_string();
-                let pattern = format!("%{}%", trimmed);
-                let clause = "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = articles.id AND l.field = ? AND l.locale = ? AND l.value LIKE ?)".to_string();
-                Ok(Some(query.where_exists_raw(clause, vec![localized::ARTICLE_OWNER_TYPE.to_string(), field.to_string(), locale, pattern])))
-            }
-            ParsedFilter::LikeAny { columns } => {
-                let mut applied = false;
-                let pattern = format!("%{}%", trimmed);
-                let next = query.where_group(|group| {
-                    let mut q = group;
-                    for column in columns {
-                        if let Some(col) = Self::parse_like_col(column.as_str()) {
-                            if applied { q = q.or_where_col(col, Op::Like, pattern.clone()); } else { q = q.where_col(col, Op::Like, pattern.clone()); applied = true; }
-                        }
-                    }
-                    q
-                });
-                if applied { Ok(Some(next)) } else { Ok(None) }
-            }
-            ParsedFilter::Any { columns } => {
-                let mut applied = false;
-                let next = query.where_group(|group| {
-                    let mut q = group;
-                    for column in columns {
-                        if let Some(col) = Self::parse_col(column.as_str()) {
-                            if let Some(bind) = Self::parse_bind_for_col(column.as_str(), trimmed) { if applied { q = q.or_where_col(col, Op::Eq, bind.clone()); } else { q = q.where_col(col, Op::Eq, bind.clone()); applied = true; } }
-                        }
-                    }
-                    q
-                });
-                if applied { Ok(Some(next)) } else { Ok(None) }
-            }
             ParsedFilter::Has { relation, column } => {
                 match relation.as_str() {
                     "author" => { let Some(bind) = Self::parse_bind_for_user_cols(column.as_str(), trimmed) else { return Ok(None); }; Ok(Some(query.where_has(ArticleRel::AUTHOR, |rq| Self::filter_has_for_user_cols(column.as_str(), rq, bind)))) },
@@ -569,6 +531,7 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
                     _ => Ok(None),
                 }
             }
+            _ => Ok(None),
         }
     }
     fn apply_sort<'db>(&self, query: Query<'db, ArticleModel>, column: &str, dir: SortDirection) -> anyhow::Result<Query<'db, ArticleModel>> where Self: 'db {
@@ -925,64 +888,13 @@ impl core_db::common::model_api::FeaturePersistenceModel for ArticleModel {
     fn localized_owner_type() -> Option<&'static str> {
         Some(localized::ARTICLE_OWNER_TYPE)
     }
-    fn upsert_localized_many<'db>(
-        db: DbConn<'db>,
-        owner_type: &'static str,
-        owner_id: i64,
-        field: &'static str,
-        values: HashMap<String, String>,
-    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
-        Box::pin(async move { localized::upsert_localized_many(db, owner_type, owner_id, field, &values).await })
-    }
     fn meta_owner_type() -> Option<&'static str> {
         Some(localized::ARTICLE_OWNER_TYPE)
-    }
-    fn upsert_meta_many<'db>(
-        db: DbConn<'db>,
-        owner_type: &'static str,
-        owner_id: i64,
-        values: HashMap<String, serde_json::Value>,
-    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
-        Box::pin(async move { localized::upsert_meta_many(db, owner_type, owner_id, &values).await })
     }
     fn attachment_owner_type() -> Option<&'static str> {
         Some(localized::ARTICLE_OWNER_TYPE)
     }
-    fn clear_attachment_field<'db>(
-        db: DbConn<'db>,
-        owner_type: &'static str,
-        owner_id: i64,
-        field: &'static str,
-    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
-        Box::pin(async move { localized::clear_attachment_field(db, owner_type, owner_id, field).await })
-    }
-    fn replace_single_attachment<'db>(
-        db: DbConn<'db>,
-        owner_type: &'static str,
-        owner_id: i64,
-        field: &'static str,
-        value: AttachmentInput,
-    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
-        Box::pin(async move { localized::replace_single_attachment(db, owner_type, owner_id, field, &value).await })
-    }
-    fn add_attachments<'db>(
-        db: DbConn<'db>,
-        owner_type: &'static str,
-        owner_id: i64,
-        field: &'static str,
-        values: Vec<AttachmentInput>,
-    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
-        Box::pin(async move { localized::add_attachments(db, owner_type, owner_id, field, &values).await })
-    }
-    fn delete_attachment_ids<'db>(
-        db: DbConn<'db>,
-        owner_type: &'static str,
-        owner_id: i64,
-        field: &'static str,
-        ids: Vec<uuid::Uuid>,
-    ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
-        Box::pin(async move { localized::delete_attachment_ids(db, owner_type, owner_id, field, &ids).await })
-    }
+    core_db::impl_feature_persistence_delegates!(localized, localized, meta, attachment);
 }
 
 impl core_db::common::model_api::CreateField<ArticleModel> for ArticleDbCol {

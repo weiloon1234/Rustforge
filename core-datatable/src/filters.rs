@@ -1,3 +1,161 @@
+use crate::traits::DataTableColumnResolver;
+use core_db::common::model_api::QueryState;
+use core_db::common::sql::{BindValue, Op};
+
+/// Apply standard (non-relation) filters generically using [`QueryState`]
+/// string-based methods.
+///
+/// Returns `Ok(Some(query))` when the filter was applied, `Ok(None)` when
+/// the column was not recognised (caller should fall through to model-specific
+/// handling).
+///
+/// Relation filters (`Has`, `HasLike`, `LocaleHas`, `LocaleHasLike`) are
+/// **not** handled here — those remain per-model because they require typed
+/// `where_has` calls.
+pub fn apply_standard_filter<'db>(
+    query_state: QueryState<'db>,
+    filter: &ParsedFilter,
+    value: &str,
+    resolver: &dyn DataTableColumnResolver,
+) -> anyhow::Result<Option<QueryState<'db>>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(Some(query_state));
+    }
+
+    match filter {
+        // ── single-column scalar filters ────────────────────────────
+        ParsedFilter::Eq { column } | ParsedFilter::Gte { column } | ParsedFilter::Lte { column } => {
+            let Some(col_sql) = resolver.resolve_col_sql(column) else {
+                return Ok(None);
+            };
+            let Some(bind) = resolver.parse_bind_for_col(column, trimmed) else {
+                return Ok(None);
+            };
+            let op = match filter {
+                ParsedFilter::Eq { .. } => Op::Eq,
+                ParsedFilter::Gte { .. } => Op::Ge,
+                ParsedFilter::Lte { .. } => Op::Le,
+                _ => unreachable!(),
+            };
+            Ok(Some(query_state.where_col_str(col_sql, op, bind)))
+        }
+        ParsedFilter::Like { column } => {
+            let Some(col_sql) = resolver.resolve_like_col_sql(column) else {
+                return Ok(None);
+            };
+            Ok(Some(query_state.where_col_str(
+                col_sql,
+                Op::Like,
+                BindValue::String(format!("%{trimmed}%")),
+            )))
+        }
+        ParsedFilter::DateFrom { column } | ParsedFilter::DateTo { column } => {
+            let Some(col_sql) = resolver.resolve_col_sql(column) else {
+                return Ok(None);
+            };
+            let end_of_day = matches!(filter, ParsedFilter::DateTo { .. });
+            let Some(dt) = resolver.parse_datetime(trimmed, end_of_day) else {
+                // Column exists but value is not a valid date — skip filter silently
+                // (matches legacy behavior where invalid dates are treated as no-op)
+                return Ok(Some(query_state));
+            };
+            let op = if end_of_day { Op::Le } else { Op::Ge };
+            Ok(Some(
+                query_state.where_col_str(col_sql, op, BindValue::from(dt)),
+            ))
+        }
+
+        // ── locale filters (own model only) ─────────────────────────
+        ParsedFilter::LocaleEq { column } | ParsedFilter::LocaleLike { column } => {
+            let Some(field) = resolver.resolve_locale_field(column) else {
+                return Ok(None);
+            };
+            let Some(owner_type) = resolver.locale_owner_type() else {
+                return Ok(None);
+            };
+            let table = resolver.table_name();
+            let pk = resolver.pk_column();
+            let locale = core_i18n::current_locale().to_string();
+            let is_like = matches!(filter, ParsedFilter::LocaleLike { .. });
+            let comparator = if is_like { "LIKE" } else { "=" };
+            let match_value = if is_like {
+                format!("%{trimmed}%")
+            } else {
+                trimmed.to_string()
+            };
+            let clause = format!(
+                "EXISTS (SELECT 1 FROM localized l WHERE l.owner_type = ? AND l.owner_id = {table}.{pk} AND l.field = ? AND l.locale = ? AND l.value {comparator} ?)"
+            );
+            Ok(Some(query_state.where_exists_raw(
+                clause,
+                vec![
+                    BindValue::String(owner_type.to_string()),
+                    BindValue::String(field.to_string()),
+                    BindValue::String(locale),
+                    BindValue::String(match_value),
+                ],
+            )))
+        }
+
+        // ── multi-column OR filters ─────────────────────────────────
+        ParsedFilter::LikeAny { columns } => {
+            let pattern = format!("%{trimmed}%");
+            let mut applied = false;
+            let next = query_state.where_group(|group| {
+                let mut q = group;
+                for col_name in columns {
+                    if let Some(col_sql) = resolver.resolve_like_col_sql(col_name) {
+                        let bind = BindValue::String(pattern.clone());
+                        if applied {
+                            q = q.or_where_col_str(col_sql, Op::Like, bind);
+                        } else {
+                            q = q.where_col_str(col_sql, Op::Like, bind);
+                            applied = true;
+                        }
+                    }
+                }
+                q
+            });
+            if applied {
+                Ok(Some(next))
+            } else {
+                Ok(None)
+            }
+        }
+        ParsedFilter::Any { columns } => {
+            let mut applied = false;
+            let next = query_state.where_group(|group| {
+                let mut q = group;
+                for col_name in columns {
+                    if let Some(col_sql) = resolver.resolve_col_sql(col_name) {
+                        if let Some(bind) = resolver.parse_bind_for_col(col_name, trimmed) {
+                            if applied {
+                                q = q.or_where_col_str(col_sql, Op::Eq, bind);
+                            } else {
+                                q = q.where_col_str(col_sql, Op::Eq, bind);
+                                applied = true;
+                            }
+                        }
+                    }
+                }
+                q
+            });
+            if applied {
+                Ok(Some(next))
+            } else {
+                Ok(None)
+            }
+        }
+
+        // ── relation filters — handled per-model ────────────────────
+        ParsedFilter::Has { .. }
+        | ParsedFilter::HasLike { .. }
+        | ParsedFilter::LocaleHas { .. }
+        | ParsedFilter::LocaleHasLike { .. } => Ok(None),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedFilter {
     Eq { column: String },
