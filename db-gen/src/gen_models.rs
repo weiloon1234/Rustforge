@@ -1159,7 +1159,7 @@ fn render_query_all_body(
         .collect();
     if !has_many_rels.is_empty() {
         writeln!(out, "            if !state.count_relations.is_empty() {{").unwrap();
-        writeln!(out, "                let parent_ids: Vec<core_db::common::sql::BindValue> = rows.iter().map(|r| r.{pk}.clone().into()).collect();").unwrap();
+        writeln!(out, "                let parent_ids: Vec<core_db::common::sql::BindValue> = out_vec.iter().map(|r| r.{pk}.clone().into()).collect();").unwrap();
         let db_ref = if relations.is_empty() { "state.db" } else { "db" };
         writeln!(out, "                let counts = core_db::common::model_api::execute_relation_counts(&{db_ref}, &parent_ids, &state.count_relations).await?;").unwrap();
         writeln!(out, "                for record in &mut out_vec {{").unwrap();
@@ -1387,6 +1387,25 @@ fn render_query_paginate_body(
             "            let data: Vec<{model_title}Record> = data;"
         )
         .unwrap();
+    }
+    // Relation counts for paginate (same logic as query_all)
+    let has_many_rels_p: Vec<_> = relations
+        .iter()
+        .filter(|r| matches!(r.kind, RelationKind::HasMany))
+        .collect();
+    if !has_many_rels_p.is_empty() {
+        writeln!(out, "            if !state.count_relations.is_empty() {{").unwrap();
+        writeln!(out, "                let parent_ids: Vec<core_db::common::sql::BindValue> = data.iter().map(|r| r.{pk}.clone().into()).collect();").unwrap();
+        let db_ref = if relations.is_empty() { "state.db" } else { "db" };
+        writeln!(out, "                let counts = core_db::common::model_api::execute_relation_counts(&{db_ref}, &parent_ids, &state.count_relations).await?;").unwrap();
+        writeln!(out, "                for record in &mut data {{").unwrap();
+        writeln!(out, "                    for (rel_name, by_fk) in &counts {{").unwrap();
+        writeln!(out, "                        if let Some(&cnt) = by_fk.get(&record.{pk}) {{").unwrap();
+        writeln!(out, "                            record.__relation_counts.insert(rel_name.clone(), cnt);").unwrap();
+        writeln!(out, "                        }}").unwrap();
+        writeln!(out, "                    }}").unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
     }
     writeln!(
         out,
