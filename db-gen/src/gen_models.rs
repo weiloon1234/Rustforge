@@ -1077,7 +1077,7 @@ fn render_query_all_body(
             let rel_name = to_snake(&rel.name);
             writeln!(
                 out,
-                "            let {rel_name} = if core_db::common::model_api::should_load_relation(\"{rel_name}\", &state.with_relations) {{ let __ew = core_db::common::model_api::get_relation_extra_where(\"{rel_name}\", &state.with_relations); load_{rel_name}(db.clone(), &rows, state.base_url.as_deref(), __ew.map(|(w, _)| w), __ew.map(|(_, b)| b).unwrap_or(&[])).await? }} else {{ HashMap::new() }};"
+                "            let {rel_name} = if core_db::common::model_api::should_load_relation(\"{rel_name}\", &state.with_relations) {{ let __ew = core_db::common::model_api::get_relation_extra_where(\"{rel_name}\", &state.with_relations); let __nw = core_db::common::model_api::get_relation_nested(\"{rel_name}\", &state.with_relations); load_{rel_name}(db.clone(), &rows, state.base_url.as_deref(), __ew.map(|(w, _)| w), __ew.map(|(_, b)| b).unwrap_or(&[]), __nw).await? }} else {{ HashMap::new() }};"
             )
             .unwrap();
         }
@@ -1317,7 +1317,7 @@ fn render_query_paginate_body(
             let rel_name = to_snake(&rel.name);
             writeln!(
                 out,
-                "            let {rel_name} = if core_db::common::model_api::should_load_relation(\"{rel_name}\", &state.with_relations) {{ let __ew = core_db::common::model_api::get_relation_extra_where(\"{rel_name}\", &state.with_relations); load_{rel_name}(db.clone(), &rows, state.base_url.as_deref(), __ew.map(|(w, _)| w), __ew.map(|(_, b)| b).unwrap_or(&[])).await? }} else {{ HashMap::new() }};"
+                "            let {rel_name} = if core_db::common::model_api::should_load_relation(\"{rel_name}\", &state.with_relations) {{ let __ew = core_db::common::model_api::get_relation_extra_where(\"{rel_name}\", &state.with_relations); let __nw = core_db::common::model_api::get_relation_nested(\"{rel_name}\", &state.with_relations); load_{rel_name}(db.clone(), &rows, state.base_url.as_deref(), __ew.map(|(w, _)| w), __ew.map(|(_, b)| b).unwrap_or(&[]), __nw).await? }} else {{ HashMap::new() }};"
             )
             .unwrap();
         }
@@ -3034,7 +3034,7 @@ fn render_model(
         match rel.kind {
             RelationKind::HasMany => {
                 let target_fk_optional = relation_target_field_is_optional(schema, rel);
-                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}], base_url: Option<&str>, extra_where: Option<&str>, extra_binds: &[core_db::common::sql::BindValue]) -> Result<HashMap<{parent_pk_ty}, Vec<{target_record}>>> {{").unwrap();
+                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}], base_url: Option<&str>, extra_where: Option<&str>, extra_binds: &[core_db::common::sql::BindValue], nested_with: &[core_db::common::model_api::WithRelationSpec]) -> Result<HashMap<{parent_pk_ty}, Vec<{target_record}>>> {{").unwrap();
                 writeln!(
                     out,
                     "        if parents.is_empty() {{ return Ok(HashMap::new()); }}"
@@ -3081,6 +3081,7 @@ fn render_model(
                     .unwrap();
                 }
                 writeln!(out, "        }}").unwrap();
+                writeln!(out, "        let _ = &nested_with;").unwrap();
                 writeln!(out, "        Ok(map)").unwrap();
                 writeln!(out, "    }}").unwrap();
             }
@@ -3088,7 +3089,7 @@ fn render_model(
                 let is_fk_optional = fields
                     .iter()
                     .any(|f| f.name == rel.foreign_key && f.ty.starts_with("Option<"));
-                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}], base_url: Option<&str>, _extra_where: Option<&str>, _extra_binds: &[core_db::common::sql::BindValue]) -> Result<HashMap<{parent_pk_ty}, Option<{target_record}>>> {{").unwrap();
+                writeln!(out, "async fn {fn_name}<'db>(db: DbConn<'db>, parents: &[{row_ident}], base_url: Option<&str>, _extra_where: Option<&str>, _extra_binds: &[core_db::common::sql::BindValue], _nested_with: &[core_db::common::model_api::WithRelationSpec]) -> Result<HashMap<{parent_pk_ty}, Option<{target_record}>>> {{").unwrap();
                 writeln!(
                     out,
                     "        if parents.is_empty() {{ return Ok(HashMap::new()); }}"
@@ -6373,7 +6374,7 @@ fn render_model(
             .unwrap();
             let rel_name = to_snake(&rel.name);
             writeln!(out, "        let list = state.with_relations.get_or_insert_with(Vec::new);").unwrap();
-            writeln!(out, "        if !list.iter().any(|s| s.name == \"{rel_name}\") {{ list.push(core_db::common::model_api::WithRelationSpec {{ name: \"{rel_name}\", extra_where: None, extra_binds: vec![] }}); }}").unwrap();
+            writeln!(out, "        if !list.iter().any(|s| s.name == \"{rel_name}\") {{ list.push(core_db::common::model_api::WithRelationSpec {{ name: \"{rel_name}\", extra_where: None, extra_binds: vec![], nested: vec![] }}); }}").unwrap();
             writeln!(out, "        state").unwrap();
             writeln!(out, "    }}").unwrap();
             writeln!(out, "}}\n").unwrap();

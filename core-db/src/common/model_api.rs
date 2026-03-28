@@ -300,6 +300,8 @@ pub struct WithRelationSpec {
     pub name: &'static str,
     pub extra_where: Option<String>,
     pub extra_binds: Vec<BindValue>,
+    /// Nested relations to load on the loaded records (max 1 level deep).
+    pub nested: Vec<WithRelationSpec>,
 }
 
 /// Check if a relation should be loaded based on the `with_relations` list.
@@ -309,6 +311,15 @@ pub fn should_load_relation(name: &str, with_relations: &Option<Vec<WithRelation
         None => false,
         Some(list) => list.iter().any(|s| s.name == name),
     }
+}
+
+/// Get the nested with specs for a relation, if any.
+pub fn get_relation_nested<'a>(name: &str, with_relations: &'a Option<Vec<WithRelationSpec>>) -> &'a [WithRelationSpec] {
+    with_relations
+        .as_ref()
+        .and_then(|list| list.iter().find(|s| s.name == name))
+        .map(|s| s.nested.as_slice())
+        .unwrap_or(&[])
 }
 
 /// Get the extra WHERE clause for a relation, if any.
@@ -756,13 +767,54 @@ impl<'db, M: QueryModel> Query<'db, M> {
         };
 
         let list = self.state.with_relations.get_or_insert_with(Vec::new);
-        // Remove existing entry for this relation if present (with_where replaces with)
         list.retain(|s| s.name != name);
         list.push(WithRelationSpec {
             name,
             extra_where,
             extra_binds: inner.binds,
+            nested: vec![],
         });
+        self
+    }
+
+    /// Eager-load a relation AND a nested sub-relation on the loaded records.
+    ///
+    /// Example: `.with_nested(ArticleRel::COMMENTS, CommentRel::USER)`
+    /// Loads comments for each article, then loads each comment's user.
+    pub fn with_nested<R1, R2>(mut self, parent_rel: R1, child_rel: R2) -> Self
+    where
+        R1: IncludeRelation<M> + RelationName,
+        R2: RelationName,
+    {
+        let parent_name = parent_rel.relation_name();
+        let child_name = child_rel.relation_name();
+
+        // First ensure parent relation is marked for loading
+        let list = self.state.with_relations.get_or_insert_with(Vec::new);
+        if let Some(existing) = list.iter_mut().find(|s| s.name == parent_name) {
+            // Parent already registered — add nested
+            if !existing.nested.iter().any(|n| n.name == child_name) {
+                existing.nested.push(WithRelationSpec {
+                    name: child_name,
+                    extra_where: None,
+                    extra_binds: vec![],
+                    nested: vec![],
+                });
+            }
+        } else {
+            // Register parent with nested
+            list.push(WithRelationSpec {
+                name: parent_name,
+                extra_where: None,
+                extra_binds: vec![],
+                nested: vec![WithRelationSpec {
+                    name: child_name,
+                    extra_where: None,
+                    extra_binds: vec![],
+                    nested: vec![],
+                }],
+            });
+        }
         self
     }
 
