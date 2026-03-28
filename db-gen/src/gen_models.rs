@@ -13,6 +13,38 @@ use std::path::Path;
 
 const DATATABLE_REL_FILTER_MAX_DEPTH: usize = 2;
 
+fn emit_transform_value_body(
+    out: &mut String,
+    fn_name: &str,
+    db_fields: &[FieldSpec],
+    col_ident: &str,
+) {
+    writeln!(out, "    fn {fn_name}(col: &str, value: BindValue) -> anyhow::Result<BindValue> {{").unwrap();
+    let hashed_fields: Vec<&FieldSpec> = db_fields
+        .iter()
+        .filter(|f| matches!(f.special_type, Some(SpecialType::Hashed)))
+        .collect();
+    if hashed_fields.is_empty() {
+        writeln!(out, "        let _ = col;").unwrap();
+        writeln!(out, "        Ok(value)").unwrap();
+    } else {
+        writeln!(out, "        match col {{").unwrap();
+        for field in &hashed_fields {
+            let col_variant = to_title_case(&field.name);
+            writeln!(out, "            c if c == {col_ident}::{col_variant}.as_sql() => {{").unwrap();
+            writeln!(out, "                let BindValue::String(value) = value else {{").unwrap();
+            writeln!(out, "                    anyhow::bail!(\"column '{{}}' expects String before hashing, got '{{:?}}'\", col, value);").unwrap();
+            writeln!(out, "                }};").unwrap();
+            writeln!(out, "                let hashed = core_db::common::auth::hash::hash_password(&value)?;").unwrap();
+            writeln!(out, "                Ok(hashed.into())").unwrap();
+            writeln!(out, "            }}").unwrap();
+        }
+        writeln!(out, "            _ => Ok(value),").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    writeln!(out, "    }}").unwrap();
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct GenerateModelsOptions {
     pub include_datatable: bool,
@@ -1997,11 +2029,7 @@ fn render_model(
     if !localized_fields.is_empty() {
         writeln!(out, "    let locale = current_locale();").unwrap();
     }
-    if !localized_fields.is_empty() || has_meta || has_attachments {
-        writeln!(out, "    let mut record = {record_ident} {{").unwrap();
-    } else {
-        writeln!(out, "    let mut record = {record_ident} {{").unwrap();
-    }
+    writeln!(out, "    let mut record = {record_ident} {{").unwrap();
     for f in &db_fields {
         writeln!(out, "        {}: row.{},", f.name, f.name).unwrap();
     }
@@ -2487,86 +2515,11 @@ fn render_model(
 
     let column_model_section = out;
 
-    // Query inner type (XxxQueryInner) is no longer generated.
-    // InnerQuery<'db> = QueryState<'db> — all SQL builder and terminal method logic
-    // is in the QueryModel trait impl and QueryState methods in core_db::common::model_api.
-    let query_struct_section = String::new();
-    let query_builder_methods_section = String::new();
-    let query_terminal_methods_section = String::new();
-    let unsafe_query_section = String::new();
-    let mut query_context = TemplateContext::new();
-    query_context
-        .insert(
-            "query_struct_section",
-            query_struct_section.trim_start().to_string(),
-        )
-        .unwrap();
-    query_context
-        .insert(
-            "query_builder_methods_section",
-            query_builder_methods_section.trim_start().to_string(),
-        )
-        .unwrap();
-    query_context
-        .insert(
-            "query_terminal_methods_section",
-            query_terminal_methods_section.trim_start().to_string(),
-        )
-        .unwrap();
-    query_context
-        .insert("unsafe_query_section", unsafe_query_section)
-        .unwrap();
-    let query_section = render_template("models/query.rs.tpl", &query_context).unwrap();
-    let insert_struct_section = String::new();
-    let insert_builder_methods_section = String::new();
-    let insert_save_methods_section = String::new();
-    let mut insert_context = TemplateContext::new();
-    insert_context
-        .insert(
-            "insert_struct_section",
-            insert_struct_section.trim_start().to_string(),
-        )
-        .unwrap();
-    insert_context
-        .insert(
-            "insert_builder_methods_section",
-            insert_builder_methods_section.trim_start().to_string(),
-        )
-        .unwrap();
-    insert_context
-        .insert(
-            "insert_save_methods_section",
-            insert_save_methods_section.trim_start().to_string(),
-        )
-        .unwrap();
-    let insert_section = render_template("models/insert.rs.tpl", &insert_context).unwrap();
-    let update_struct_section = String::new();
-    let update_builder_methods_section = String::new();
-    let update_save_methods_section = String::new();
-    let unsafe_update_section = String::new();
-    let mut update_context = TemplateContext::new();
-    update_context
-        .insert(
-            "update_struct_section",
-            update_struct_section.trim_start().to_string(),
-        )
-        .unwrap();
-    update_context
-        .insert(
-            "update_builder_methods_section",
-            update_builder_methods_section.trim_start().to_string(),
-        )
-        .unwrap();
-    update_context
-        .insert(
-            "update_save_methods_section",
-            update_save_methods_section.trim_start().to_string(),
-        )
-        .unwrap();
-    update_context
-        .insert("unsafe_update_section", unsafe_update_section)
-        .unwrap();
-    let update_section = render_template("models/update.rs.tpl", &update_context).unwrap();
+    // Query/Insert/Update inner types are no longer generated.
+    // All SQL builder and terminal method logic lives in runtime traits in core_db::common::model_api.
+    let query_section = String::new();
+    let insert_section = String::new();
+    let update_section = String::new();
     let mut out = String::new();
 
     if options.include_datatable {
@@ -4085,76 +4038,8 @@ fn render_model(
     )
     .unwrap();
     writeln!(out, "    }}").unwrap();
-    // _transform_create_value — handles hashed fields for CreateModel::transform_create_value
-    writeln!(out, "    fn _transform_create_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {{").unwrap();
-    {
-        let hashed_fields: Vec<&FieldSpec> = db_fields
-            .iter()
-            .filter(|f| matches!(f.special_type, Some(SpecialType::Hashed)))
-            .collect();
-        if hashed_fields.is_empty() {
-            writeln!(out, "        let _ = col;").unwrap();
-            writeln!(out, "        Ok(value)").unwrap();
-        } else {
-            writeln!(out, "        match col {{").unwrap();
-            for field in &hashed_fields {
-                let col_variant = to_title_case(&field.name);
-                writeln!(
-                    out,
-                    "            c if c == {col_ident}::{col_variant}.as_sql() => {{"
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "                let BindValue::String(value) = value else {{"
-                )
-                .unwrap();
-                writeln!(out, "                    anyhow::bail!(\"column '{{}}' expects String before hashing, got '{{:?}}'\", col, value);").unwrap();
-                writeln!(out, "                }};").unwrap();
-                writeln!(out, "                let hashed = core_db::common::auth::hash::hash_password(&value)?;").unwrap();
-                writeln!(out, "                Ok(hashed.into())").unwrap();
-                writeln!(out, "            }}").unwrap();
-            }
-            writeln!(out, "            _ => Ok(value),").unwrap();
-            writeln!(out, "        }}").unwrap();
-        }
-    }
-    writeln!(out, "    }}").unwrap();
-    // _transform_patch_value — handles hashed fields for PatchModel::transform_patch_value
-    writeln!(out, "    fn _transform_patch_value(col: &str, value: BindValue) -> anyhow::Result<BindValue> {{").unwrap();
-    {
-        let hashed_fields: Vec<&FieldSpec> = db_fields
-            .iter()
-            .filter(|f| matches!(f.special_type, Some(SpecialType::Hashed)))
-            .collect();
-        if hashed_fields.is_empty() {
-            writeln!(out, "        let _ = col;").unwrap();
-            writeln!(out, "        Ok(value)").unwrap();
-        } else {
-            writeln!(out, "        match col {{").unwrap();
-            for field in &hashed_fields {
-                let col_variant = to_title_case(&field.name);
-                writeln!(
-                    out,
-                    "            c if c == {col_ident}::{col_variant}.as_sql() => {{"
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "                let BindValue::String(value) = value else {{"
-                )
-                .unwrap();
-                writeln!(out, "                    anyhow::bail!(\"column '{{}}' expects String before hashing, got '{{:?}}'\", col, value);").unwrap();
-                writeln!(out, "                }};").unwrap();
-                writeln!(out, "                let hashed = core_db::common::auth::hash::hash_password(&value)?;").unwrap();
-                writeln!(out, "                Ok(hashed.into())").unwrap();
-                writeln!(out, "            }}").unwrap();
-            }
-            writeln!(out, "            _ => Ok(value),").unwrap();
-            writeln!(out, "        }}").unwrap();
-        }
-    }
-    writeln!(out, "    }}").unwrap();
+    emit_transform_value_body(&mut out, "_transform_create_value", &db_fields, &col_ident);
+    emit_transform_value_body(&mut out, "_transform_patch_value", &db_fields, &col_ident);
     if emit_hooks {
         let pk_snake_local = to_snake(&pk);
         writeln!(out).unwrap();

@@ -73,6 +73,21 @@ fn check_deferred(err: &Option<String>) -> Result<()> {
     Ok(())
 }
 
+fn make_placeholders(count: usize, start: usize) -> (Vec<String>, usize) {
+    let phs: Vec<String> = (start..start + count).map(|i| format!("${i}")).collect();
+    let next = start + count;
+    (phs, next)
+}
+
+fn normalize_raw_placeholders(clause: &mut String) {
+    let mut idx = 1usize;
+    while let Some(pos) = clause.find('?') {
+        let ph = format!("${idx}");
+        clause.replace_range(pos..pos + 1, &ph);
+        idx += 1;
+    }
+}
+
 fn relation_aggregate_sql(kind: RelationAggregateKind, target_sql: &str) -> String {
     match kind {
         RelationAggregateKind::Sum => format!("SUM({target_sql}::DOUBLE PRECISION)"),
@@ -359,15 +374,7 @@ pub async fn execute_relation_counts(
     }
 
     for spec in specs {
-        let mut bind_idx: usize = 1;
-        let placeholders: Vec<String> = parent_ids
-            .iter()
-            .map(|_| {
-                let p = format!("${}", bind_idx);
-                bind_idx += 1;
-                p
-            })
-            .collect();
+        let (placeholders, bind_idx) = make_placeholders(parent_ids.len(), 1);
 
         let soft_delete_clause = if spec.only_deleted {
             " AND deleted_at IS NOT NULL"
@@ -424,15 +431,7 @@ pub async fn execute_relation_aggregates(
     }
 
     for spec in specs {
-        let mut bind_idx: usize = 1;
-        let placeholders: Vec<String> = parent_ids
-            .iter()
-            .map(|_| {
-                let p = format!("${}", bind_idx);
-                bind_idx += 1;
-                p
-            })
-            .collect();
+        let (placeholders, bind_idx) = make_placeholders(parent_ids.len(), 1);
 
         let soft_delete_clause = if spec.only_deleted {
             " AND deleted_at IS NOT NULL"
@@ -1497,11 +1496,11 @@ where
             }
         }
 
-        match db {
+        let (record, row) = match db {
             DbConn::Pool(pool) => {
                 let tx = pool.begin().await?;
                 let tx_lock = std::sync::Arc::new(tokio::sync::Mutex::new(tx));
-                let (record, row) = {
+                let result = {
                     let db = DbConn::tx(tx_lock.clone());
                     create_save_with_db_runtime::<M>(db, state).await?
                 };
@@ -1509,47 +1508,30 @@ where
                     .map_err(|_| anyhow::anyhow!("transaction scope still has active handles"))?
                     .into_inner();
                 tx.commit().await?;
-
-                if let Some(observer) = try_get_observer() {
-                    let event = ModelEvent {
-                        model: M::MODEL_KEY,
-                        table: M::TABLE,
-                        record_key: Some(M::created_row_key(&row)),
-                    };
-                    match serde_json::to_value(&row) {
-                        Ok(data) => {
-                            if let Err(err) = observer.on_created(&event, &data).await {
-                                log_observer_error("created", M::MODEL_KEY, &err);
-                            }
-                        }
-                        Err(err) => log_observer_error("created", M::MODEL_KEY, &err),
-                    }
-                }
-
-                Ok(record)
+                result
             }
             DbConn::Tx(_) => {
-                let (record, row) = create_save_with_db_runtime::<M>(db, state).await?;
+                create_save_with_db_runtime::<M>(db, state).await?
+            }
+        };
 
-                if let Some(observer) = try_get_observer() {
-                    let event = ModelEvent {
-                        model: M::MODEL_KEY,
-                        table: M::TABLE,
-                        record_key: Some(M::created_row_key(&row)),
-                    };
-                    match serde_json::to_value(&row) {
-                        Ok(data) => {
-                            if let Err(err) = observer.on_created(&event, &data).await {
-                                log_observer_error("created", M::MODEL_KEY, &err);
-                            }
-                        }
-                        Err(err) => log_observer_error("created", M::MODEL_KEY, &err),
+        if let Some(observer) = try_get_observer() {
+            let event = ModelEvent {
+                model: M::MODEL_KEY,
+                table: M::TABLE,
+                record_key: Some(M::created_row_key(&row)),
+            };
+            match serde_json::to_value(&row) {
+                Ok(data) => {
+                    if let Err(err) = observer.on_created(&event, &data).await {
+                        log_observer_error("created", M::MODEL_KEY, &err);
                     }
                 }
-
-                Ok(record)
+                Err(err) => log_observer_error("created", M::MODEL_KEY, &err),
             }
         }
+
+        Ok(record)
     })
 }
 
@@ -2477,15 +2459,7 @@ where
 
     let mut loaded_by_parent: HashMap<K, Vec<T::Record>> = HashMap::new();
     if !unique_keys.is_empty() {
-        let mut bind_idx: usize = 1;
-        let placeholders: Vec<String> = unique_keys
-            .iter()
-            .map(|_| {
-                let p = format!("${}", bind_idx);
-                bind_idx += 1;
-                p
-            })
-            .collect();
+        let (placeholders, bind_idx) = make_placeholders(unique_keys.len(), 1);
         let soft_delete_clause =
             relation_soft_delete_clause(T::HAS_SOFT_DELETE, spec.with_deleted, spec.only_deleted);
         let (filter_clauses, filter_binds) = compile_filters(&spec.filters, bind_idx);
@@ -2644,15 +2618,7 @@ where
 
     let mut loaded_by_parent: HashMap<K, T::Record> = HashMap::new();
     if !unique_keys.is_empty() {
-        let mut bind_idx: usize = 1;
-        let placeholders: Vec<String> = unique_keys
-            .iter()
-            .map(|_| {
-                let p = format!("${}", bind_idx);
-                bind_idx += 1;
-                p
-            })
-            .collect();
+        let (placeholders, bind_idx) = make_placeholders(unique_keys.len(), 1);
         let soft_delete_clause =
             relation_soft_delete_clause(T::HAS_SOFT_DELETE, spec.with_deleted, spec.only_deleted);
         let (filter_clauses, filter_binds) = compile_filters(&spec.filters, bind_idx);
@@ -2815,15 +2781,7 @@ where
 
     let mut by_target_key: HashMap<K, T::Record> = HashMap::new();
     if !unique_keys.is_empty() {
-        let mut bind_idx: usize = 1;
-        let placeholders: Vec<String> = unique_keys
-            .iter()
-            .map(|_| {
-                let p = format!("${}", bind_idx);
-                bind_idx += 1;
-                p
-            })
-            .collect();
+        let (placeholders, bind_idx) = make_placeholders(unique_keys.len(), 1);
         let soft_delete_clause =
             relation_soft_delete_clause(T::HAS_SOFT_DELETE, spec.with_deleted, spec.only_deleted);
         let (filter_clauses, filter_binds) = compile_filters(&spec.filters, bind_idx);
@@ -3763,8 +3721,12 @@ impl<'db, M: QueryModel> Query<'db, M> {
         self.with_sum_target(relation, target)
     }
 
-    fn with_sum_target<R>(mut self, relation: R, target: AggregateTarget<R::TargetModel>) -> Self
-    where
+    fn push_aggregate<R>(
+        &mut self,
+        relation: R,
+        target: AggregateTarget<R::TargetModel>,
+        kind: RelationAggregateKind,
+    ) where
         R: CountRelation<M>,
     {
         let spec = R::spec(relation, self.state.base_url.clone());
@@ -3775,347 +3737,131 @@ impl<'db, M: QueryModel> Query<'db, M> {
             foreign_key: spec.foreign_key,
             has_soft_delete: spec.has_soft_delete,
             target: target.into_spec(),
-            kind: RelationAggregateKind::Sum,
+            kind,
             filters: spec.filters,
             with_deleted: spec.with_deleted,
             only_deleted: spec.only_deleted,
         });
-        self
     }
+
+    fn push_aggregate_scoped<R, T, F>(
+        &mut self,
+        relation: R,
+        target: AggregateTarget<R::TargetModel>,
+        kind: RelationAggregateKind,
+        scope: F,
+    ) where
+        R: CountRelation<M>,
+        T: QueryModel,
+        F: FnOnce(Query<T>) -> Query<T>,
+    {
+        let dummy_state = QueryState::new(self.state.base_url.clone(), T::DEFAULT_SELECT);
+        let inner = scope(Query::<T>::from_inner(dummy_state)).into_inner();
+        let mut spec = R::spec(relation, self.state.base_url.clone());
+        spec.filters.extend(inner.filters);
+        spec.with_deleted = spec.with_deleted || inner.with_deleted;
+        spec.only_deleted = spec.only_deleted || inner.only_deleted;
+        self.state.aggregate_relations.push(RelationAggregateSpec {
+            relation_name: spec.name,
+            target_table: spec.target_table,
+            target_pk: spec.target_pk,
+            foreign_key: spec.foreign_key,
+            has_soft_delete: spec.has_soft_delete,
+            target: target.into_spec(),
+            kind,
+            filters: spec.filters,
+            with_deleted: spec.with_deleted,
+            only_deleted: spec.only_deleted,
+        });
+    }
+
+    fn with_sum_target<R>(mut self, relation: R, target: AggregateTarget<R::TargetModel>) -> Self
+    where R: CountRelation<M>,
+    { self.push_aggregate(relation, target, RelationAggregateKind::Sum); self }
 
     pub fn with_sum_scope<R, T, F, C>(self, relation: R, column: C, scope: F) -> Self
-    where
-        R: CountRelation<M>,
-        T: QueryModel,
-        F: FnOnce(Query<T>) -> Query<T>,
-        C: Into<AggregateTarget<R::TargetModel>>,
-    {
-        self.with_sum_scope_target(relation, column.into(), scope)
-    }
+    where R: CountRelation<M>, T: QueryModel, F: FnOnce(Query<T>) -> Query<T>, C: Into<AggregateTarget<R::TargetModel>>,
+    { self.with_sum_scope_target(relation, column.into(), scope) }
 
-    pub fn with_sum_expr_scope<R, T, F>(
-        self,
-        relation: R,
-        target: AggregateTarget<R::TargetModel>,
-        scope: F,
-    ) -> Self
-    where
-        R: CountRelation<M>,
-        T: QueryModel,
-        F: FnOnce(Query<T>) -> Query<T>,
-    {
-        self.with_sum_scope_target(relation, target, scope)
-    }
+    pub fn with_sum_expr_scope<R, T, F>(self, relation: R, target: AggregateTarget<R::TargetModel>, scope: F) -> Self
+    where R: CountRelation<M>, T: QueryModel, F: FnOnce(Query<T>) -> Query<T>,
+    { self.with_sum_scope_target(relation, target, scope) }
 
-    fn with_sum_scope_target<R, T, F>(
-        mut self,
-        relation: R,
-        target: AggregateTarget<R::TargetModel>,
-        scope: F,
-    ) -> Self
-    where
-        R: CountRelation<M>,
-        T: QueryModel,
-        F: FnOnce(Query<T>) -> Query<T>,
-    {
-        let dummy_state = QueryState::new(self.state.base_url.clone(), T::DEFAULT_SELECT);
-        let scoped = scope(Query::<T>::from_inner(dummy_state));
-        let inner = scoped.into_inner();
-
-        let mut spec = R::spec(relation, self.state.base_url.clone());
-        spec.filters.extend(inner.filters);
-        spec.with_deleted = spec.with_deleted || inner.with_deleted;
-        spec.only_deleted = spec.only_deleted || inner.only_deleted;
-        self.state.aggregate_relations.push(RelationAggregateSpec {
-            relation_name: spec.name,
-            target_table: spec.target_table,
-            target_pk: spec.target_pk,
-            foreign_key: spec.foreign_key,
-            has_soft_delete: spec.has_soft_delete,
-            target: target.into_spec(),
-            kind: RelationAggregateKind::Sum,
-            filters: spec.filters,
-            with_deleted: spec.with_deleted,
-            only_deleted: spec.only_deleted,
-        });
-        self
-    }
+    fn with_sum_scope_target<R, T, F>(mut self, relation: R, target: AggregateTarget<R::TargetModel>, scope: F) -> Self
+    where R: CountRelation<M>, T: QueryModel, F: FnOnce(Query<T>) -> Query<T>,
+    { self.push_aggregate_scoped(relation, target, RelationAggregateKind::Sum, scope); self }
 
     pub fn with_avg<R, C>(self, relation: R, column: C) -> Self
-    where
-        R: CountRelation<M>,
-        C: Into<AggregateTarget<R::TargetModel>>,
-    {
-        self.with_avg_target(relation, column.into())
-    }
+    where R: CountRelation<M>, C: Into<AggregateTarget<R::TargetModel>>,
+    { self.with_avg_target(relation, column.into()) }
 
     pub fn with_avg_expr<R>(self, relation: R, target: AggregateTarget<R::TargetModel>) -> Self
-    where
-        R: CountRelation<M>,
-    {
-        self.with_avg_target(relation, target)
-    }
+    where R: CountRelation<M>,
+    { self.with_avg_target(relation, target) }
 
     fn with_avg_target<R>(mut self, relation: R, target: AggregateTarget<R::TargetModel>) -> Self
-    where
-        R: CountRelation<M>,
-    {
-        let spec = R::spec(relation, self.state.base_url.clone());
-        self.state.aggregate_relations.push(RelationAggregateSpec {
-            relation_name: spec.name,
-            target_table: spec.target_table,
-            target_pk: spec.target_pk,
-            foreign_key: spec.foreign_key,
-            has_soft_delete: spec.has_soft_delete,
-            target: target.into_spec(),
-            kind: RelationAggregateKind::Avg,
-            filters: spec.filters,
-            with_deleted: spec.with_deleted,
-            only_deleted: spec.only_deleted,
-        });
-        self
-    }
+    where R: CountRelation<M>,
+    { self.push_aggregate(relation, target, RelationAggregateKind::Avg); self }
 
     pub fn with_avg_scope<R, T, F, C>(self, relation: R, column: C, scope: F) -> Self
-    where
-        R: CountRelation<M>,
-        T: QueryModel,
-        F: FnOnce(Query<T>) -> Query<T>,
-        C: Into<AggregateTarget<R::TargetModel>>,
-    {
-        self.with_avg_scope_target(relation, column.into(), scope)
-    }
+    where R: CountRelation<M>, T: QueryModel, F: FnOnce(Query<T>) -> Query<T>, C: Into<AggregateTarget<R::TargetModel>>,
+    { self.with_avg_scope_target(relation, column.into(), scope) }
 
-    pub fn with_avg_expr_scope<R, T, F>(
-        self,
-        relation: R,
-        target: AggregateTarget<R::TargetModel>,
-        scope: F,
-    ) -> Self
-    where
-        R: CountRelation<M>,
-        T: QueryModel,
-        F: FnOnce(Query<T>) -> Query<T>,
-    {
-        self.with_avg_scope_target(relation, target, scope)
-    }
+    pub fn with_avg_expr_scope<R, T, F>(self, relation: R, target: AggregateTarget<R::TargetModel>, scope: F) -> Self
+    where R: CountRelation<M>, T: QueryModel, F: FnOnce(Query<T>) -> Query<T>,
+    { self.with_avg_scope_target(relation, target, scope) }
 
-    fn with_avg_scope_target<R, T, F>(
-        mut self,
-        relation: R,
-        target: AggregateTarget<R::TargetModel>,
-        scope: F,
-    ) -> Self
-    where
-        R: CountRelation<M>,
-        T: QueryModel,
-        F: FnOnce(Query<T>) -> Query<T>,
-    {
-        let dummy_state = QueryState::new(self.state.base_url.clone(), T::DEFAULT_SELECT);
-        let scoped = scope(Query::<T>::from_inner(dummy_state));
-        let inner = scoped.into_inner();
-        let mut spec = R::spec(relation, self.state.base_url.clone());
-        spec.filters.extend(inner.filters);
-        spec.with_deleted = spec.with_deleted || inner.with_deleted;
-        spec.only_deleted = spec.only_deleted || inner.only_deleted;
-        self.state.aggregate_relations.push(RelationAggregateSpec {
-            relation_name: spec.name,
-            target_table: spec.target_table,
-            target_pk: spec.target_pk,
-            foreign_key: spec.foreign_key,
-            has_soft_delete: spec.has_soft_delete,
-            target: target.into_spec(),
-            kind: RelationAggregateKind::Avg,
-            filters: spec.filters,
-            with_deleted: spec.with_deleted,
-            only_deleted: spec.only_deleted,
-        });
-        self
-    }
+    fn with_avg_scope_target<R, T, F>(mut self, relation: R, target: AggregateTarget<R::TargetModel>, scope: F) -> Self
+    where R: CountRelation<M>, T: QueryModel, F: FnOnce(Query<T>) -> Query<T>,
+    { self.push_aggregate_scoped(relation, target, RelationAggregateKind::Avg, scope); self }
 
     pub fn with_min<R, C>(self, relation: R, column: C) -> Self
-    where
-        R: CountRelation<M>,
-        C: Into<AggregateTarget<R::TargetModel>>,
-    {
-        self.with_min_target(relation, column.into())
-    }
+    where R: CountRelation<M>, C: Into<AggregateTarget<R::TargetModel>>,
+    { self.with_min_target(relation, column.into()) }
 
     pub fn with_min_expr<R>(self, relation: R, target: AggregateTarget<R::TargetModel>) -> Self
-    where
-        R: CountRelation<M>,
-    {
-        self.with_min_target(relation, target)
-    }
+    where R: CountRelation<M>,
+    { self.with_min_target(relation, target) }
 
     fn with_min_target<R>(mut self, relation: R, target: AggregateTarget<R::TargetModel>) -> Self
-    where
-        R: CountRelation<M>,
-    {
-        let spec = R::spec(relation, self.state.base_url.clone());
-        self.state.aggregate_relations.push(RelationAggregateSpec {
-            relation_name: spec.name,
-            target_table: spec.target_table,
-            target_pk: spec.target_pk,
-            foreign_key: spec.foreign_key,
-            has_soft_delete: spec.has_soft_delete,
-            target: target.into_spec(),
-            kind: RelationAggregateKind::Min,
-            filters: spec.filters,
-            with_deleted: spec.with_deleted,
-            only_deleted: spec.only_deleted,
-        });
-        self
-    }
+    where R: CountRelation<M>,
+    { self.push_aggregate(relation, target, RelationAggregateKind::Min); self }
 
     pub fn with_min_scope<R, T, F, C>(self, relation: R, column: C, scope: F) -> Self
-    where
-        R: CountRelation<M>,
-        T: QueryModel,
-        F: FnOnce(Query<T>) -> Query<T>,
-        C: Into<AggregateTarget<R::TargetModel>>,
-    {
-        self.with_min_scope_target(relation, column.into(), scope)
-    }
+    where R: CountRelation<M>, T: QueryModel, F: FnOnce(Query<T>) -> Query<T>, C: Into<AggregateTarget<R::TargetModel>>,
+    { self.with_min_scope_target(relation, column.into(), scope) }
 
-    pub fn with_min_expr_scope<R, T, F>(
-        self,
-        relation: R,
-        target: AggregateTarget<R::TargetModel>,
-        scope: F,
-    ) -> Self
-    where
-        R: CountRelation<M>,
-        T: QueryModel,
-        F: FnOnce(Query<T>) -> Query<T>,
-    {
-        self.with_min_scope_target(relation, target, scope)
-    }
+    pub fn with_min_expr_scope<R, T, F>(self, relation: R, target: AggregateTarget<R::TargetModel>, scope: F) -> Self
+    where R: CountRelation<M>, T: QueryModel, F: FnOnce(Query<T>) -> Query<T>,
+    { self.with_min_scope_target(relation, target, scope) }
 
-    fn with_min_scope_target<R, T, F>(
-        mut self,
-        relation: R,
-        target: AggregateTarget<R::TargetModel>,
-        scope: F,
-    ) -> Self
-    where
-        R: CountRelation<M>,
-        T: QueryModel,
-        F: FnOnce(Query<T>) -> Query<T>,
-    {
-        let dummy_state = QueryState::new(self.state.base_url.clone(), T::DEFAULT_SELECT);
-        let scoped = scope(Query::<T>::from_inner(dummy_state));
-        let inner = scoped.into_inner();
-        let mut spec = R::spec(relation, self.state.base_url.clone());
-        spec.filters.extend(inner.filters);
-        spec.with_deleted = spec.with_deleted || inner.with_deleted;
-        spec.only_deleted = spec.only_deleted || inner.only_deleted;
-        self.state.aggregate_relations.push(RelationAggregateSpec {
-            relation_name: spec.name,
-            target_table: spec.target_table,
-            target_pk: spec.target_pk,
-            foreign_key: spec.foreign_key,
-            has_soft_delete: spec.has_soft_delete,
-            target: target.into_spec(),
-            kind: RelationAggregateKind::Min,
-            filters: spec.filters,
-            with_deleted: spec.with_deleted,
-            only_deleted: spec.only_deleted,
-        });
-        self
-    }
+    fn with_min_scope_target<R, T, F>(mut self, relation: R, target: AggregateTarget<R::TargetModel>, scope: F) -> Self
+    where R: CountRelation<M>, T: QueryModel, F: FnOnce(Query<T>) -> Query<T>,
+    { self.push_aggregate_scoped(relation, target, RelationAggregateKind::Min, scope); self }
 
     pub fn with_max<R, C>(self, relation: R, column: C) -> Self
-    where
-        R: CountRelation<M>,
-        C: Into<AggregateTarget<R::TargetModel>>,
-    {
-        self.with_max_target(relation, column.into())
-    }
+    where R: CountRelation<M>, C: Into<AggregateTarget<R::TargetModel>>,
+    { self.with_max_target(relation, column.into()) }
 
     pub fn with_max_expr<R>(self, relation: R, target: AggregateTarget<R::TargetModel>) -> Self
-    where
-        R: CountRelation<M>,
-    {
-        self.with_max_target(relation, target)
-    }
+    where R: CountRelation<M>,
+    { self.with_max_target(relation, target) }
 
     fn with_max_target<R>(mut self, relation: R, target: AggregateTarget<R::TargetModel>) -> Self
-    where
-        R: CountRelation<M>,
-    {
-        let spec = R::spec(relation, self.state.base_url.clone());
-        self.state.aggregate_relations.push(RelationAggregateSpec {
-            relation_name: spec.name,
-            target_table: spec.target_table,
-            target_pk: spec.target_pk,
-            foreign_key: spec.foreign_key,
-            has_soft_delete: spec.has_soft_delete,
-            target: target.into_spec(),
-            kind: RelationAggregateKind::Max,
-            filters: spec.filters,
-            with_deleted: spec.with_deleted,
-            only_deleted: spec.only_deleted,
-        });
-        self
-    }
+    where R: CountRelation<M>,
+    { self.push_aggregate(relation, target, RelationAggregateKind::Max); self }
 
     pub fn with_max_scope<R, T, F, C>(self, relation: R, column: C, scope: F) -> Self
-    where
-        R: CountRelation<M>,
-        T: QueryModel,
-        F: FnOnce(Query<T>) -> Query<T>,
-        C: Into<AggregateTarget<R::TargetModel>>,
-    {
-        self.with_max_scope_target(relation, column.into(), scope)
-    }
+    where R: CountRelation<M>, T: QueryModel, F: FnOnce(Query<T>) -> Query<T>, C: Into<AggregateTarget<R::TargetModel>>,
+    { self.with_max_scope_target(relation, column.into(), scope) }
 
-    pub fn with_max_expr_scope<R, T, F>(
-        self,
-        relation: R,
-        target: AggregateTarget<R::TargetModel>,
-        scope: F,
-    ) -> Self
-    where
-        R: CountRelation<M>,
-        T: QueryModel,
-        F: FnOnce(Query<T>) -> Query<T>,
-    {
-        self.with_max_scope_target(relation, target, scope)
-    }
+    pub fn with_max_expr_scope<R, T, F>(self, relation: R, target: AggregateTarget<R::TargetModel>, scope: F) -> Self
+    where R: CountRelation<M>, T: QueryModel, F: FnOnce(Query<T>) -> Query<T>,
+    { self.with_max_scope_target(relation, target, scope) }
 
-    fn with_max_scope_target<R, T, F>(
-        mut self,
-        relation: R,
-        target: AggregateTarget<R::TargetModel>,
-        scope: F,
-    ) -> Self
-    where
-        R: CountRelation<M>,
-        T: QueryModel,
-        F: FnOnce(Query<T>) -> Query<T>,
-    {
-        let dummy_state = QueryState::new(self.state.base_url.clone(), T::DEFAULT_SELECT);
-        let scoped = scope(Query::<T>::from_inner(dummy_state));
-        let inner = scoped.into_inner();
-        let mut spec = R::spec(relation, self.state.base_url.clone());
-        spec.filters.extend(inner.filters);
-        spec.with_deleted = spec.with_deleted || inner.with_deleted;
-        spec.only_deleted = spec.only_deleted || inner.only_deleted;
-        self.state.aggregate_relations.push(RelationAggregateSpec {
-            relation_name: spec.name,
-            target_table: spec.target_table,
-            target_pk: spec.target_pk,
-            foreign_key: spec.foreign_key,
-            has_soft_delete: spec.has_soft_delete,
-            target: target.into_spec(),
-            kind: RelationAggregateKind::Max,
-            filters: spec.filters,
-            with_deleted: spec.with_deleted,
-            only_deleted: spec.only_deleted,
-        });
-        self
-    }
+    fn with_max_scope_target<R, T, F>(mut self, relation: R, target: AggregateTarget<R::TargetModel>, scope: F) -> Self
+    where R: CountRelation<M>, T: QueryModel, F: FnOnce(Query<T>) -> Query<T>,
+    { self.push_aggregate_scoped(relation, target, RelationAggregateKind::Max, scope); self }
 
     pub fn unsafe_sql(self) -> UnsafeQuery<'db, M> {
         UnsafeQuery { inner: self }
@@ -5323,14 +5069,8 @@ impl<'db> QueryState<'db> {
         self
     }
 
-    pub fn where_raw(mut self, clause: String, raw_binds: Vec<BindValue>) -> Self {
-        let mut clause = clause;
-        let mut idx = 1usize;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${idx}");
-            clause.replace_range(pos..pos + 1, &ph);
-            idx += 1;
-        }
+    pub fn where_raw(mut self, mut clause: String, raw_binds: Vec<BindValue>) -> Self {
+        normalize_raw_placeholders(&mut clause);
         self.filters.push(FilterExpr::Raw {
             clause,
             binds: raw_binds,
@@ -5562,12 +5302,8 @@ impl<'db> QueryState<'db> {
         self
     }
 
-    pub fn add_select_raw(mut self, expr: String) -> Self {
-        if expr.is_empty() {
-            return self;
-        }
-        self.selects.push(SelectExpr::Raw(expr));
-        self
+    pub fn add_select_raw(self, expr: String) -> Self {
+        self.select_raw(expr)
     }
 
     pub fn select_only_str(mut self, col_sql: &str) -> Self {
@@ -5893,8 +5629,6 @@ impl<'db> QueryState<'db> {
             self.only_deleted,
             1,
         );
-        let where_binds = binds;
-
         let mut set_parts = format!("{} = {} + $1", col_sql, col_sql);
 
         if has_updated_at {
@@ -5913,7 +5647,7 @@ impl<'db> QueryState<'db> {
 
         let mut q = sqlx::query(&sql);
         q = bind_query(q, amount);
-        for b in where_binds {
+        for b in binds {
             q = bind_query(q, b);
         }
         let result = db.execute(q).await?;
@@ -6227,14 +5961,8 @@ impl<'db> PatchState<'db> {
         self
     }
 
-    pub fn where_raw(mut self, clause: String, raw_binds: Vec<BindValue>) -> Self {
-        let mut clause = clause;
-        let mut idx = 1usize;
-        while let Some(pos) = clause.find('?') {
-            let ph = format!("${idx}");
-            clause.replace_range(pos..pos + 1, &ph);
-            idx += 1;
-        }
+    pub fn where_raw(mut self, mut clause: String, raw_binds: Vec<BindValue>) -> Self {
+        normalize_raw_placeholders(&mut clause);
         self.filters.push(FilterExpr::Raw {
             clause,
             binds: raw_binds,
