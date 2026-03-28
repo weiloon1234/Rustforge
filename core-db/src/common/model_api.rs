@@ -52,7 +52,7 @@ pub async fn execute_relation_counts(
     }
 
     for spec in specs {
-        let mut bind_idx = 1;
+        let mut bind_idx: usize = 1;
         let placeholders: Vec<String> = parent_ids
             .iter()
             .map(|_| {
@@ -61,39 +61,87 @@ pub async fn execute_relation_counts(
                 p
             })
             .collect();
-        let soft_delete_clause = if spec.has_soft_delete {
-            " AND deleted_at IS NULL"
-        } else {
-            ""
-        };
-        // Renumber extra_where placeholders to start after parent_ids
-        let extra_clause = match &spec.extra_where {
-            Some(clause) => {
-                let mut renumbered = clause.clone();
-                // Replace $1, $2, etc. in extra_where with $N+1, $N+2, etc.
-                for (i, _) in spec.extra_binds.iter().enumerate().rev() {
-                    let old = format!("${}", i + 1);
-                    let new = format!("${}", bind_idx + i);
-                    renumbered = renumbered.replace(&old, &new);
+
+        let (sql, extra_binds) = if let Some(nested) = &spec.nested {
+            // Nested count: JOIN through intermediate table
+            // SELECT t1.{fk}, COUNT(t2.{nested_target_pk}) as cnt
+            // FROM {table} t1
+            // JOIN {nested_table} t2 ON t2.{nested_fk} = t1.{target_pk}
+            // WHERE t1.{fk} IN (...)
+            // [AND t1.deleted_at IS NULL]
+            // [AND t2.deleted_at IS NULL]
+            // [AND t2.extra_where]
+            // GROUP BY t1.{fk}
+            let t1_soft = if spec.has_soft_delete { " AND t1.deleted_at IS NULL" } else { "" };
+            let t2_soft = if nested.has_soft_delete { " AND t2.deleted_at IS NULL" } else { "" };
+
+            let extra_clause = match &nested.extra_where {
+                Some(clause) => {
+                    let mut renumbered = clause.clone();
+                    for (i, _) in nested.extra_binds.iter().enumerate().rev() {
+                        let old = format!("${}", i + 1);
+                        let new = format!("${}", bind_idx + i);
+                        renumbered = renumbered.replace(&old, &new);
+                    }
+                    format!(" {renumbered}")
                 }
-                format!(" {renumbered}")
-            }
-            None => String::new(),
+                None => String::new(),
+            };
+
+            // The count key uses "parent_rel.child_rel" naming for __relation_counts
+            let sql = format!(
+                "SELECT t1.{fk}, COUNT(t2.{nested_pk}) as cnt \
+                 FROM {table} t1 \
+                 JOIN {nested_table} t2 ON t2.{nested_fk} = t1.{target_pk} \
+                 WHERE t1.{fk} IN ({placeholders}){t1_soft}{t2_soft}{extra} \
+                 GROUP BY t1.{fk}",
+                fk = spec.foreign_key,
+                table = spec.target_table,
+                target_pk = spec.target_pk,
+                nested_table = nested.target_table,
+                nested_fk = nested.foreign_key,
+                nested_pk = nested.target_pk,
+                placeholders = placeholders.join(", "),
+                t1_soft = t1_soft,
+                t2_soft = t2_soft,
+                extra = extra_clause,
+            );
+            (sql, &nested.extra_binds)
+        } else {
+            // Simple count: direct relation
+            let soft_delete_clause = if spec.has_soft_delete {
+                " AND deleted_at IS NULL"
+            } else {
+                ""
+            };
+            let extra_clause = match &spec.extra_where {
+                Some(clause) => {
+                    let mut renumbered = clause.clone();
+                    for (i, _) in spec.extra_binds.iter().enumerate().rev() {
+                        let old = format!("${}", i + 1);
+                        let new = format!("${}", bind_idx + i);
+                        renumbered = renumbered.replace(&old, &new);
+                    }
+                    format!(" {renumbered}")
+                }
+                None => String::new(),
+            };
+            let sql = format!(
+                "SELECT {fk}, COUNT(*) as cnt FROM {table} WHERE {fk} IN ({placeholders}){soft_delete}{extra} GROUP BY {fk}",
+                fk = spec.foreign_key,
+                table = spec.target_table,
+                placeholders = placeholders.join(", "),
+                soft_delete = soft_delete_clause,
+                extra = extra_clause,
+            );
+            (sql, &spec.extra_binds)
         };
-        let sql = format!(
-            "SELECT {fk}, COUNT(*) as cnt FROM {table} WHERE {fk} IN ({placeholders}){soft_delete}{extra} GROUP BY {fk}",
-            fk = spec.foreign_key,
-            table = spec.target_table,
-            placeholders = placeholders.join(", "),
-            soft_delete = soft_delete_clause,
-            extra = extra_clause,
-        );
 
         let mut q = sqlx::query_as::<_, (i64, i64)>(&sql);
         for id in parent_ids {
             q = crate::common::sql::bind(q, id.clone());
         }
-        for bind in &spec.extra_binds {
+        for bind in extra_binds {
             q = crate::common::sql::bind(q, bind.clone());
         }
 
@@ -104,7 +152,13 @@ pub async fn execute_relation_counts(
             counts.insert(fk_val, cnt);
         }
 
-        result.insert(spec.name.to_string(), counts);
+        // For nested, use "parent.child" as the key
+        let count_key = if spec.nested.is_some() {
+            format!("{}.{}", spec.name, spec.nested.as_ref().unwrap().name)
+        } else {
+            spec.name.to_string()
+        };
+        result.insert(count_key, counts);
     }
 
     Ok(result)
@@ -199,6 +253,7 @@ pub trait RecordManyRelation<M: ModelDef>: Copy {
 pub trait CountRelation<M: ModelDef>: Copy {
     fn name(relation: Self) -> &'static str;
     fn target_table(relation: Self) -> &'static str;
+    fn target_pk(relation: Self) -> &'static str;
     fn foreign_key(relation: Self) -> &'static str;
     fn has_soft_delete(_relation: Self) -> bool {
         false
@@ -210,12 +265,15 @@ pub trait CountRelation<M: ModelDef>: Copy {
 pub struct CountRelationSpec {
     pub name: &'static str,
     pub target_table: &'static str,
+    pub target_pk: &'static str,
     pub foreign_key: &'static str,
     pub has_soft_delete: bool,
     /// Optional extra WHERE clause (e.g., "AND status = $N")
     pub extra_where: Option<String>,
     /// Bind values for extra_where placeholders
     pub extra_binds: Vec<BindValue>,
+    /// Optional nested relation for 2-level counting (e.g., count grandchildren through children)
+    pub nested: Option<Box<CountRelationSpec>>,
 }
 
 /// Trait for types that represent a SQL column expression.
@@ -348,6 +406,7 @@ impl<M, T, const KEY: usize> OneRelation<M, T, KEY> {
 pub struct ManyRelation<M, T, const KEY: usize> {
     name: &'static str,
     target_table: &'static str,
+    target_pk: &'static str,
     foreign_key: &'static str,
     soft_delete: bool,
     _marker: PhantomData<fn() -> (M, T)>,
@@ -365,11 +424,13 @@ impl<M, T, const KEY: usize> ManyRelation<M, T, KEY> {
     pub const fn new(
         name: &'static str,
         target_table: &'static str,
+        target_pk: &'static str,
         foreign_key: &'static str,
     ) -> Self {
         Self {
             name,
             target_table,
+            target_pk,
             foreign_key,
             soft_delete: false,
             _marker: PhantomData,
@@ -379,11 +440,13 @@ impl<M, T, const KEY: usize> ManyRelation<M, T, KEY> {
     pub const fn new_with_soft_delete(
         name: &'static str,
         target_table: &'static str,
+        target_pk: &'static str,
         foreign_key: &'static str,
     ) -> Self {
         Self {
             name,
             target_table,
+            target_pk,
             foreign_key,
             soft_delete: true,
             _marker: PhantomData,
@@ -396,6 +459,10 @@ impl<M, T, const KEY: usize> ManyRelation<M, T, KEY> {
 
     pub const fn target_table(self) -> &'static str {
         self.target_table
+    }
+
+    pub const fn target_pk(self) -> &'static str {
+        self.target_pk
     }
 
     pub const fn foreign_key(self) -> &'static str {
@@ -414,6 +481,10 @@ impl<M: ModelDef, T, const KEY: usize> CountRelation<M> for ManyRelation<M, T, K
 
     fn target_table(relation: Self) -> &'static str {
         relation.target_table()
+    }
+
+    fn target_pk(relation: Self) -> &'static str {
+        relation.target_pk()
     }
 
     fn foreign_key(relation: Self) -> &'static str {
@@ -644,10 +715,12 @@ impl<'db, M: QueryModel> Query<'db, M> {
         self.state.count_relations.push(CountRelationSpec {
             name: R::name(relation),
             target_table: R::target_table(relation),
+            target_pk: R::target_pk(relation),
             foreign_key: R::foreign_key(relation),
             has_soft_delete: R::has_soft_delete(relation),
             extra_where: None,
             extra_binds: vec![],
+            nested: None,
         });
         self
     }
@@ -662,12 +735,10 @@ impl<'db, M: QueryModel> Query<'db, M> {
         T: QueryModel,
         F: FnOnce(Query<'db, T>) -> Query<'db, T>,
     {
-        // Build a temporary query to extract the WHERE clause
         let dummy_state = QueryState::new(self.state.db.clone(), None, "");
         let scoped = scope(Query::<T>::from_inner(dummy_state));
         let inner = scoped.into_inner();
 
-        // Extract WHERE clauses and binds from the scoped query
         let extra_where = if inner.where_sql.is_empty() {
             None
         } else {
@@ -677,10 +748,87 @@ impl<'db, M: QueryModel> Query<'db, M> {
         self.state.count_relations.push(CountRelationSpec {
             name: R::name(relation),
             target_table: R::target_table(relation),
+            target_pk: R::target_pk(relation),
             foreign_key: R::foreign_key(relation),
             has_soft_delete: R::has_soft_delete(relation),
             extra_where,
             extra_binds: inner.binds,
+            nested: None,
+        });
+        self
+    }
+
+    /// Request a count of grandchildren through a HasMany → HasMany chain.
+    ///
+    /// Example: `.with_count_nested(ArticleRel::COMMENTS, CommentRel::REPLIES)`
+    /// SQL: `SELECT c.article_id, COUNT(r.id) FROM comments c JOIN replies r ON r.comment_id = c.id WHERE c.article_id IN (...) GROUP BY c.article_id`
+    pub fn with_count_nested<R1, R2, T>(mut self, parent_rel: R1, child_rel: R2) -> Self
+    where
+        R1: CountRelation<M>,
+        T: ModelDef,
+        R2: CountRelation<T>,
+    {
+        self.state.count_relations.push(CountRelationSpec {
+            name: R1::name(parent_rel),
+            target_table: R1::target_table(parent_rel),
+            target_pk: R1::target_pk(parent_rel),
+            foreign_key: R1::foreign_key(parent_rel),
+            has_soft_delete: R1::has_soft_delete(parent_rel),
+            extra_where: None,
+            extra_binds: vec![],
+            nested: Some(Box::new(CountRelationSpec {
+                name: R2::name(child_rel),
+                target_table: R2::target_table(child_rel),
+                target_pk: R2::target_pk(child_rel),
+                foreign_key: R2::foreign_key(child_rel),
+                has_soft_delete: R2::has_soft_delete(child_rel),
+                extra_where: None,
+                extra_binds: vec![],
+                nested: None,
+            })),
+        });
+        self
+    }
+
+    /// Request a conditional count of grandchildren through a HasMany → HasMany chain.
+    ///
+    /// Example: `.with_count_nested_where(ArticleRel::COMMENTS, CommentRel::REPLIES, |q| q.where_col(ReplyCol::APPROVED, Op::Eq, true))`
+    pub fn with_count_nested_where<R1, R2, T, T2, F>(mut self, parent_rel: R1, child_rel: R2, scope: F) -> Self
+    where
+        R1: CountRelation<M>,
+        T: ModelDef,
+        R2: CountRelation<T>,
+        T2: QueryModel,
+        F: FnOnce(Query<'db, T2>) -> Query<'db, T2>,
+    {
+        let dummy_state = QueryState::new(self.state.db.clone(), None, "");
+        let scoped = scope(Query::<T2>::from_inner(dummy_state));
+        let inner = scoped.into_inner();
+
+        let extra_where = if inner.where_sql.is_empty() {
+            None
+        } else {
+            Some(inner.where_sql.iter().map(|w| format!("AND {w}")).collect::<Vec<_>>().join(" "))
+        };
+
+        self.state.count_relations.push(CountRelationSpec {
+            name: R1::name(parent_rel),
+            target_table: R1::target_table(parent_rel),
+            target_pk: R1::target_pk(parent_rel),
+            foreign_key: R1::foreign_key(parent_rel),
+            has_soft_delete: R1::has_soft_delete(parent_rel),
+            extra_where: None,
+            extra_binds: vec![],
+            nested: Some(Box::new(CountRelationSpec {
+                name: R2::name(child_rel),
+                target_table: R2::target_table(child_rel),
+                target_pk: R2::target_pk(child_rel),
+                foreign_key: R2::foreign_key(child_rel),
+                has_soft_delete: R2::has_soft_delete(child_rel),
+                extra_where,
+                extra_binds: inner.binds,
+                nested: None,
+            })),
         });
         self
     }

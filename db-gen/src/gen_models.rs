@@ -2985,9 +2985,10 @@ fn render_model(
                         "new"
                     };
                     format!(
-                        "ManyRelation::<{model_title}Model, {target_record_ident}, {rel_idx}>::{ctor}(\"{rel_name}\", \"{target_table}\", \"{foreign_key}\")",
+                        "ManyRelation::<{model_title}Model, {target_record_ident}, {rel_idx}>::{ctor}(\"{rel_name}\", \"{target_table}\", \"{target_pk}\", \"{foreign_key}\")",
                         rel_name = rel.name,
                         target_table = rel.target_table,
+                        target_pk = rel.target_pk,
                         foreign_key = rel.foreign_key
                     )
                 },
