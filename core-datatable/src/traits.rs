@@ -217,6 +217,10 @@ pub trait AutoDataTable: Send + Sync + 'static {
     }
 
     fn describe(&self, ctx: &DataTableContext) -> DataTableDescribe {
+        let strs_to_strings = |slice: &[&str]| -> Vec<String> {
+            slice.iter().map(|s| s.to_string()).collect()
+        };
+
         let columns = self
             .adapter()
             .column_descriptors()
@@ -227,7 +231,7 @@ pub trait AutoDataTable: Send + Sync + 'static {
                 data_type: c.data_type.to_string(),
                 sortable: c.sortable,
                 localized: c.localized,
-                filter_ops: c.filter_ops.iter().map(|s| (*s).to_string()).collect(),
+                filter_ops: strs_to_strings(c.filter_ops),
             })
             .collect();
         let relation_columns = self
@@ -238,7 +242,7 @@ pub trait AutoDataTable: Send + Sync + 'static {
                 relation: c.relation.to_string(),
                 column: c.column.to_string(),
                 data_type: c.data_type.to_string(),
-                filter_ops: c.filter_ops.iter().map(|s| (*s).to_string()).collect(),
+                filter_ops: strs_to_strings(c.filter_ops),
             })
             .collect();
 
@@ -248,30 +252,13 @@ pub trait AutoDataTable: Send + Sync + 'static {
                 sorting_column: self.default_sorting_column().to_string(),
                 sorted: self.default_sorted(),
                 per_page: self.default_row_per_page(ctx),
-                export_ignore_columns: self
-                    .default_export_ignore_columns()
-                    .iter()
-                    .map(|s| (*s).to_string())
-                    .collect(),
-                timestamp_columns: self
-                    .default_timestamp_columns()
-                    .iter()
-                    .map(|s| (*s).to_string())
-                    .collect(),
-                unsortable: self
-                    .default_unsortable()
-                    .iter()
-                    .map(|s| (*s).to_string())
-                    .collect(),
+                export_ignore_columns: strs_to_strings(self.default_export_ignore_columns()),
+                timestamp_columns: strs_to_strings(self.default_timestamp_columns()),
+                unsortable: strs_to_strings(self.default_unsortable()),
             },
             columns,
             relation_columns,
-            filter_patterns: self
-                .adapter()
-                .filter_patterns()
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect(),
+            filter_patterns: strs_to_strings(self.adapter().filter_patterns()),
         }
     }
 

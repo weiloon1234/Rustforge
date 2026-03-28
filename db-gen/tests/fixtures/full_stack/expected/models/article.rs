@@ -894,7 +894,12 @@ impl core_db::common::model_api::FeaturePersistenceModel for ArticleModel {
     fn attachment_owner_type() -> Option<&'static str> {
         Some(localized::ARTICLE_OWNER_TYPE)
     }
-    core_db::impl_feature_persistence_delegates!(localized, localized, meta, attachment);
+    fn upsert_localized_many<'db>(db: DbConn<'db>, ot: &'static str, oid: i64, f: &'static str, v: HashMap<String, String>) -> core_db::common::model_api::BoxModelFuture<'db, ()> { Box::pin(async move { localized::upsert_localized_many(db, ot, oid, f, &v).await }) }
+    fn upsert_meta_many<'db>(db: DbConn<'db>, ot: &'static str, oid: i64, v: HashMap<String, serde_json::Value>) -> core_db::common::model_api::BoxModelFuture<'db, ()> { Box::pin(async move { localized::upsert_meta_many(db, ot, oid, &v).await }) }
+    fn clear_attachment_field<'db>(db: DbConn<'db>, ot: &'static str, oid: i64, f: &'static str) -> core_db::common::model_api::BoxModelFuture<'db, ()> { Box::pin(async move { localized::clear_attachment_field(db, ot, oid, f).await }) }
+    fn replace_single_attachment<'db>(db: DbConn<'db>, ot: &'static str, oid: i64, f: &'static str, v: AttachmentInput) -> core_db::common::model_api::BoxModelFuture<'db, ()> { Box::pin(async move { localized::replace_single_attachment(db, ot, oid, f, &v).await }) }
+    fn add_attachments<'db>(db: DbConn<'db>, ot: &'static str, oid: i64, f: &'static str, v: Vec<AttachmentInput>) -> core_db::common::model_api::BoxModelFuture<'db, ()> { Box::pin(async move { localized::add_attachments(db, ot, oid, f, &v).await }) }
+    fn delete_attachment_ids<'db>(db: DbConn<'db>, ot: &'static str, oid: i64, f: &'static str, ids: Vec<uuid::Uuid>) -> core_db::common::model_api::BoxModelFuture<'db, ()> { Box::pin(async move { localized::delete_attachment_ids(db, ot, oid, f, &ids).await }) }
 }
 
 impl core_db::common::model_api::CreateField<ArticleModel> for ArticleDbCol {

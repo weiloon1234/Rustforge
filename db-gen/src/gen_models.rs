@@ -1326,7 +1326,7 @@ impl<'a> ModelCtx<'a> {
             .map(|s| to_snake(&s))
             .collect();
         let localized_set: BTreeSet<String> = localized_fields.iter().cloned().collect();
-        let db_fields: Vec<FieldSpec> = fields.iter().cloned().filter(|f| !localized_set.contains(&f.name)).collect();
+        let db_fields: Vec<FieldSpec> = fields.iter().filter(|f| !localized_set.contains(&f.name)).cloned().collect();
         let enum_specs: BTreeMap<String, EnumSpec> = schema
             .extra_sections
             .iter()
@@ -2409,7 +2409,7 @@ fn render_model_runtime_section(ctx: &ModelCtx) -> String {
     let emit_hooks = ctx.emit_hooks;
     let skip_profiler = ctx.skip_profiler;
     let relations: &[RelationSpec] = &ctx.relations;
-    let touch_targets: &[(String, String, String, String, String, String)] = &ctx.touch_targets;
+    let touch_targets: &[TouchTargetSpec] = &ctx.touch_targets;
     let model_snake_upper: &str = &ctx.model_snake_upper;
     let schema = ctx.schema;
     let cfg = ctx.cfg;

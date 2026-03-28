@@ -707,23 +707,8 @@ pub trait FeaturePersistenceModel: ModelDef {
     }
 }
 
-/// Macro to generate `FeaturePersistenceModel` delegation methods.
-///
-/// Place inside an `impl FeaturePersistenceModel for XxxModel { ... }` block.
-/// The `$localized_mod` argument is the path to the generated localized module
-/// that contains `upsert_localized_many`, `upsert_meta_many`, etc.
-///
-/// Feature flags (`localized`, `meta`, `attachment`) control which methods are emitted.
-///
-/// ```ignore
-/// impl FeaturePersistenceModel for ArticleModel {
-///     fn localized_owner_type() -> Option<&'static str> { Some(localized::ARTICLE_OWNER_TYPE) }
-///     core_db::impl_feature_persistence_delegates!(localized, localized, meta, attachment);
-/// }
-/// ```
-// Feature persistence delegation is generated directly by db-gen as compact one-liner methods.
-// A macro approach was evaluated but Rust's macro_rules! has limitations with path-qualified
-// macro calls inside impl blocks across crate boundaries.
+// Feature persistence delegation methods (localized, meta, attachment) are generated
+// directly by db-gen as compact one-liner methods in each model's impl block.
 
 pub trait QueryField<M: QueryModel>: Copy {
     type Value: Clone + Into<BindValue>;
