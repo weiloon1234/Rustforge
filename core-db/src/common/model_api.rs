@@ -37,6 +37,79 @@ fn resolve_attachment_base_url(base_url: Option<String>) -> Option<String> {
         .or_else(default_attachment_base_url)
 }
 
+/// Execute count queries for requested relations, returning name → (fk_value → count).
+/// Called by generated `query_all`/`query_paginate` when `state.count_relations` is non-empty.
+pub async fn execute_relation_counts(
+    db: &DbConn<'_>,
+    parent_ids: &[BindValue],
+    specs: &[CountRelationSpec],
+) -> Result<std::collections::HashMap<String, std::collections::HashMap<i64, i64>>> {
+    use std::collections::HashMap;
+
+    let mut result: HashMap<String, HashMap<i64, i64>> = HashMap::new();
+    if parent_ids.is_empty() || specs.is_empty() {
+        return Ok(result);
+    }
+
+    for spec in specs {
+        let mut bind_idx = 1;
+        let placeholders: Vec<String> = parent_ids
+            .iter()
+            .map(|_| {
+                let p = format!("${}", bind_idx);
+                bind_idx += 1;
+                p
+            })
+            .collect();
+        let soft_delete_clause = if spec.has_soft_delete {
+            " AND deleted_at IS NULL"
+        } else {
+            ""
+        };
+        // Renumber extra_where placeholders to start after parent_ids
+        let extra_clause = match &spec.extra_where {
+            Some(clause) => {
+                let mut renumbered = clause.clone();
+                // Replace $1, $2, etc. in extra_where with $N+1, $N+2, etc.
+                for (i, _) in spec.extra_binds.iter().enumerate().rev() {
+                    let old = format!("${}", i + 1);
+                    let new = format!("${}", bind_idx + i);
+                    renumbered = renumbered.replace(&old, &new);
+                }
+                format!(" {renumbered}")
+            }
+            None => String::new(),
+        };
+        let sql = format!(
+            "SELECT {fk}, COUNT(*) as cnt FROM {table} WHERE {fk} IN ({placeholders}){soft_delete}{extra} GROUP BY {fk}",
+            fk = spec.foreign_key,
+            table = spec.target_table,
+            placeholders = placeholders.join(", "),
+            soft_delete = soft_delete_clause,
+            extra = extra_clause,
+        );
+
+        let mut q = sqlx::query_as::<_, (i64, i64)>(&sql);
+        for id in parent_ids {
+            q = crate::common::sql::bind(q, id.clone());
+        }
+        for bind in &spec.extra_binds {
+            q = crate::common::sql::bind(q, bind.clone());
+        }
+
+        let rows: Vec<(i64, i64)> = db.fetch_all(q).await?;
+
+        let mut counts: HashMap<i64, i64> = HashMap::new();
+        for (fk_val, cnt) in rows {
+            counts.insert(fk_val, cnt);
+        }
+
+        result.insert(spec.name.to_string(), counts);
+    }
+
+    Ok(result)
+}
+
 pub trait ModelDef: Sized + 'static {
     type Pk: Clone + Send + Sync + Into<BindValue> + 'static;
     type Record: Clone + Send + Sync + 'static;
@@ -127,6 +200,22 @@ pub trait CountRelation<M: ModelDef>: Copy {
     fn name(relation: Self) -> &'static str;
     fn target_table(relation: Self) -> &'static str;
     fn foreign_key(relation: Self) -> &'static str;
+    fn has_soft_delete(_relation: Self) -> bool {
+        false
+    }
+}
+
+/// Specification for a relation count to be loaded alongside the main query.
+#[derive(Debug, Clone)]
+pub struct CountRelationSpec {
+    pub name: &'static str,
+    pub target_table: &'static str,
+    pub foreign_key: &'static str,
+    pub has_soft_delete: bool,
+    /// Optional extra WHERE clause (e.g., "AND status = $N")
+    pub extra_where: Option<String>,
+    /// Bind values for extra_where placeholders
+    pub extra_binds: Vec<BindValue>,
 }
 
 /// Trait for types that represent a SQL column expression.
@@ -260,6 +349,7 @@ pub struct ManyRelation<M, T, const KEY: usize> {
     name: &'static str,
     target_table: &'static str,
     foreign_key: &'static str,
+    soft_delete: bool,
     _marker: PhantomData<fn() -> (M, T)>,
 }
 
@@ -281,6 +371,21 @@ impl<M, T, const KEY: usize> ManyRelation<M, T, KEY> {
             name,
             target_table,
             foreign_key,
+            soft_delete: false,
+            _marker: PhantomData,
+        }
+    }
+
+    pub const fn new_with_soft_delete(
+        name: &'static str,
+        target_table: &'static str,
+        foreign_key: &'static str,
+    ) -> Self {
+        Self {
+            name,
+            target_table,
+            foreign_key,
+            soft_delete: true,
             _marker: PhantomData,
         }
     }
@@ -296,6 +401,10 @@ impl<M, T, const KEY: usize> ManyRelation<M, T, KEY> {
     pub const fn foreign_key(self) -> &'static str {
         self.foreign_key
     }
+
+    pub const fn has_soft_delete(self) -> bool {
+        self.soft_delete
+    }
 }
 
 impl<M: ModelDef, T, const KEY: usize> CountRelation<M> for ManyRelation<M, T, KEY> {
@@ -309,6 +418,10 @@ impl<M: ModelDef, T, const KEY: usize> CountRelation<M> for ManyRelation<M, T, K
 
     fn foreign_key(relation: Self) -> &'static str {
         relation.foreign_key()
+    }
+
+    fn has_soft_delete(relation: Self) -> bool {
+        relation.soft_delete
     }
 }
 
@@ -520,6 +633,56 @@ impl<'db, M: QueryModel> Query<'db, M> {
             state: R::or_where_has(relation, self.state, scope),
             _marker: PhantomData,
         }
+    }
+
+    /// Request a count for a HasMany relation instead of loading full records.
+    /// The count is populated on `record.__relation_counts` and accessible via `record.count(Rel::NAME)`.
+    pub fn with_count<R>(mut self, relation: R) -> Self
+    where
+        R: CountRelation<M>,
+    {
+        self.state.count_relations.push(CountRelationSpec {
+            name: R::name(relation),
+            target_table: R::target_table(relation),
+            foreign_key: R::foreign_key(relation),
+            has_soft_delete: R::has_soft_delete(relation),
+            extra_where: None,
+            extra_binds: vec![],
+        });
+        self
+    }
+
+    /// Request a conditional count for a HasMany relation.
+    /// The scope closure receives a query builder for the target model to add WHERE conditions.
+    ///
+    /// Example: `.with_count_where(Rel::ITEMS, |q| q.where_col(ItemCol::STATUS, Op::Eq, ItemStatus::Active))`
+    pub fn with_count_where<R, T, F>(mut self, relation: R, scope: F) -> Self
+    where
+        R: CountRelation<M>,
+        T: QueryModel,
+        F: FnOnce(Query<'db, T>) -> Query<'db, T>,
+    {
+        // Build a temporary query to extract the WHERE clause
+        let dummy_state = QueryState::new(self.state.db.clone(), None, "");
+        let scoped = scope(Query::<T>::from_inner(dummy_state));
+        let inner = scoped.into_inner();
+
+        // Extract WHERE clauses and binds from the scoped query
+        let extra_where = if inner.where_sql.is_empty() {
+            None
+        } else {
+            Some(inner.where_sql.iter().map(|w| format!("AND {w}")).collect::<Vec<_>>().join(" "))
+        };
+
+        self.state.count_relations.push(CountRelationSpec {
+            name: R::name(relation),
+            target_table: R::target_table(relation),
+            foreign_key: R::foreign_key(relation),
+            has_soft_delete: R::has_soft_delete(relation),
+            extra_where,
+            extra_binds: inner.binds,
+        });
+        self
     }
 
     pub fn unsafe_sql(self) -> UnsafeQuery<'db, M> {
@@ -1098,6 +1261,7 @@ pub struct QueryState<'db> {
     pub binds: Vec<BindValue>,
     pub with_deleted: bool,
     pub only_deleted: bool,
+    pub count_relations: Vec<CountRelationSpec>,
 }
 
 impl<'db> QueryState<'db> {
@@ -1123,6 +1287,7 @@ impl<'db> QueryState<'db> {
             binds: vec![],
             with_deleted: false,
             only_deleted: false,
+            count_relations: vec![],
         }
     }
 

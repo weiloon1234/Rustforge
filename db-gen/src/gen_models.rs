@@ -1152,6 +1152,25 @@ fn render_query_all_body(
         )
         .unwrap();
     }
+    // Relation counts: execute count queries for with_count() relations
+    let has_many_rels: Vec<_> = relations
+        .iter()
+        .filter(|r| matches!(r.kind, RelationKind::HasMany))
+        .collect();
+    if !has_many_rels.is_empty() {
+        writeln!(out, "            if !state.count_relations.is_empty() {{").unwrap();
+        writeln!(out, "                let parent_ids: Vec<core_db::common::sql::BindValue> = rows.iter().map(|r| r.{pk}.clone().into()).collect();").unwrap();
+        let db_ref = if relations.is_empty() { "state.db" } else { "db" };
+        writeln!(out, "                let counts = core_db::common::model_api::execute_relation_counts(&{db_ref}, &parent_ids, &state.count_relations).await?;").unwrap();
+        writeln!(out, "                for record in &mut out_vec {{").unwrap();
+        writeln!(out, "                    for (rel_name, by_fk) in &counts {{").unwrap();
+        writeln!(out, "                        if let Some(&cnt) = by_fk.get(&record.{pk}) {{").unwrap();
+        writeln!(out, "                            record.__relation_counts.insert(rel_name.clone(), cnt);").unwrap();
+        writeln!(out, "                        }}").unwrap();
+        writeln!(out, "                    }}").unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
+    }
     writeln!(out, "            Ok(out_vec)").unwrap();
     out
 }
@@ -2954,12 +2973,24 @@ fn render_model(
                     "OneRelation::<{model_title}Model, {target_record_ident}, {rel_idx}>::new(\"{rel_name}\")",
                     rel_name = rel.name
                 ),
-                RelationKind::HasMany => format!(
-                    "ManyRelation::<{model_title}Model, {target_record_ident}, {rel_idx}>::new(\"{rel_name}\", \"{target_table}\", \"{foreign_key}\")",
-                    rel_name = rel.name,
-                    target_table = rel.target_table,
-                    foreign_key = rel.foreign_key
-                ),
+                RelationKind::HasMany => {
+                    let target_soft_delete = schema
+                        .models
+                        .get(&rel.target_model)
+                        .map(|m| m.soft_delete)
+                        .unwrap_or(false);
+                    let ctor = if target_soft_delete {
+                        "new_with_soft_delete"
+                    } else {
+                        "new"
+                    };
+                    format!(
+                        "ManyRelation::<{model_title}Model, {target_record_ident}, {rel_idx}>::{ctor}(\"{rel_name}\", \"{target_table}\", \"{foreign_key}\")",
+                        rel_name = rel.name,
+                        target_table = rel.target_table,
+                        foreign_key = rel.foreign_key
+                    )
+                },
             };
             writeln!(out, "    pub const {rel_const}: {rel_ty} = {rel_value};",).unwrap();
         }
