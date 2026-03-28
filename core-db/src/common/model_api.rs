@@ -721,66 +721,73 @@ pub trait FeaturePersistenceModel: ModelDef {
 ///     core_db::impl_feature_persistence_delegates!(localized, localized, meta, attachment);
 /// }
 /// ```
+/// Internal helper macro — generates a single localized delegation method.
 #[macro_export]
-macro_rules! impl_feature_persistence_delegates {
-    ($localized_mod:path, localized) => {
+macro_rules! _feature_delegate_localized {
+    ($m:path) => {
         fn upsert_localized_many<'db>(
-            db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
+            db: core_db::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
             field: &'static str, values: std::collections::HashMap<String, String>,
-        ) -> $crate::common::model_api::BoxModelFuture<'db, ()> {
-            Box::pin(async move { $localized_mod::upsert_localized_many(db, owner_type, owner_id, field, &values).await })
+        ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
+            Box::pin(async move { $m::upsert_localized_many(db, owner_type, owner_id, field, &values).await })
         }
     };
-    ($localized_mod:path, meta) => {
+}
+
+/// Internal helper macro — generates a single meta delegation method.
+#[macro_export]
+macro_rules! _feature_delegate_meta {
+    ($m:path) => {
         fn upsert_meta_many<'db>(
-            db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
+            db: core_db::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
             values: std::collections::HashMap<String, serde_json::Value>,
-        ) -> $crate::common::model_api::BoxModelFuture<'db, ()> {
-            Box::pin(async move { $localized_mod::upsert_meta_many(db, owner_type, owner_id, &values).await })
+        ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
+            Box::pin(async move { $m::upsert_meta_many(db, owner_type, owner_id, &values).await })
         }
     };
-    ($localized_mod:path, attachment) => {
+}
+
+/// Internal helper macro — generates attachment delegation methods.
+#[macro_export]
+macro_rules! _feature_delegate_attachment {
+    ($m:path) => {
         fn clear_attachment_field<'db>(
-            db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64, field: &'static str,
-        ) -> $crate::common::model_api::BoxModelFuture<'db, ()> {
-            Box::pin(async move { $localized_mod::clear_attachment_field(db, owner_type, owner_id, field).await })
+            db: core_db::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64, field: &'static str,
+        ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
+            Box::pin(async move { $m::clear_attachment_field(db, owner_type, owner_id, field).await })
         }
         fn replace_single_attachment<'db>(
-            db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
-            field: &'static str, value: $crate::platform::attachments::types::AttachmentInput,
-        ) -> $crate::common::model_api::BoxModelFuture<'db, ()> {
-            Box::pin(async move { $localized_mod::replace_single_attachment(db, owner_type, owner_id, field, &value).await })
+            db: core_db::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
+            field: &'static str, value: core_db::platform::attachments::types::AttachmentInput,
+        ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
+            Box::pin(async move { $m::replace_single_attachment(db, owner_type, owner_id, field, &value).await })
         }
         fn add_attachments<'db>(
-            db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
-            field: &'static str, values: Vec<$crate::platform::attachments::types::AttachmentInput>,
-        ) -> $crate::common::model_api::BoxModelFuture<'db, ()> {
-            Box::pin(async move { $localized_mod::add_attachments(db, owner_type, owner_id, field, &values).await })
+            db: core_db::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
+            field: &'static str, values: Vec<core_db::platform::attachments::types::AttachmentInput>,
+        ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
+            Box::pin(async move { $m::add_attachments(db, owner_type, owner_id, field, &values).await })
         }
         fn delete_attachment_ids<'db>(
-            db: $crate::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
+            db: core_db::common::sql::DbConn<'db>, owner_type: &'static str, owner_id: i64,
             field: &'static str, ids: Vec<uuid::Uuid>,
-        ) -> $crate::common::model_api::BoxModelFuture<'db, ()> {
-            Box::pin(async move { $localized_mod::delete_attachment_ids(db, owner_type, owner_id, field, &ids).await })
+        ) -> core_db::common::model_api::BoxModelFuture<'db, ()> {
+            Box::pin(async move { $m::delete_attachment_ids(db, owner_type, owner_id, field, &ids).await })
         }
     };
-    ($localized_mod:path, localized, meta) => {
-        $crate::impl_feature_persistence_delegates!($localized_mod, localized);
-        $crate::impl_feature_persistence_delegates!($localized_mod, meta);
-    };
-    ($localized_mod:path, localized, attachment) => {
-        $crate::impl_feature_persistence_delegates!($localized_mod, localized);
-        $crate::impl_feature_persistence_delegates!($localized_mod, attachment);
-    };
-    ($localized_mod:path, meta, attachment) => {
-        $crate::impl_feature_persistence_delegates!($localized_mod, meta);
-        $crate::impl_feature_persistence_delegates!($localized_mod, attachment);
-    };
-    ($localized_mod:path, localized, meta, attachment) => {
-        $crate::impl_feature_persistence_delegates!($localized_mod, localized);
-        $crate::impl_feature_persistence_delegates!($localized_mod, meta);
-        $crate::impl_feature_persistence_delegates!($localized_mod, attachment);
-    };
+}
+
+/// Generates `FeaturePersistenceModel` delegation methods.
+/// Place inside an `impl FeaturePersistenceModel for XxxModel { ... }` block.
+#[macro_export]
+macro_rules! impl_feature_persistence_delegates {
+    ($m:path, localized) => { core_db::_feature_delegate_localized!($m); };
+    ($m:path, meta) => { core_db::_feature_delegate_meta!($m); };
+    ($m:path, attachment) => { core_db::_feature_delegate_attachment!($m); };
+    ($m:path, localized, meta) => { core_db::_feature_delegate_localized!($m); core_db::_feature_delegate_meta!($m); };
+    ($m:path, localized, attachment) => { core_db::_feature_delegate_localized!($m); core_db::_feature_delegate_attachment!($m); };
+    ($m:path, meta, attachment) => { core_db::_feature_delegate_meta!($m); core_db::_feature_delegate_attachment!($m); };
+    ($m:path, localized, meta, attachment) => { core_db::_feature_delegate_localized!($m); core_db::_feature_delegate_meta!($m); core_db::_feature_delegate_attachment!($m); };
 }
 
 pub trait QueryField<M: QueryModel>: Copy {
