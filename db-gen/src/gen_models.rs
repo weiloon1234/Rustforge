@@ -1256,7 +1256,6 @@ struct ModelCtx<'a> {
     computed_fields: Vec<crate::schema::ComputedFieldSpec>,
     hidden_fields: BTreeSet<String>,
     meta_fields: Vec<crate::schema::MetaFieldSpec>,
-    attachment_fields: Vec<AttachmentFieldSpec>,
     single_attachments: Vec<AttachmentFieldSpec>,
     multi_attachments: Vec<AttachmentFieldSpec>,
     has_meta: bool,
@@ -1271,7 +1270,6 @@ struct ModelCtx<'a> {
     relation_paths: Vec<RelationPathSpec>,
     touch_targets: Vec<TouchTargetSpec>,
     schema: &'a Schema,
-    cfgs: &'a ConfigsFile,
     options: GenerateModelsOptions,
     cfg: &'a ModelSpec,
 }
@@ -1435,7 +1433,6 @@ impl<'a> ModelCtx<'a> {
             computed_fields,
             hidden_fields,
             meta_fields,
-            attachment_fields,
             single_attachments,
             multi_attachments,
             has_meta,
@@ -1450,7 +1447,6 @@ impl<'a> ModelCtx<'a> {
             relation_paths,
             touch_targets,
             schema,
-            cfgs,
             options,
             cfg,
         }
@@ -1780,10 +1776,10 @@ fn render_row_view_json_section(ctx: &ModelCtx) -> String {
     let row_ident: &str = &ctx.row_ident;
     let record_ident: &str = &ctx.record_ident;
     let col_ident: &str = &ctx.col_ident;
-    let table: &str = &ctx.table;
+    let _table: &str = &ctx.table;
     let pk: &str = &ctx.pk;
     let parent_pk_ty: &str = &ctx.parent_pk_ty;
-    let fields: &[FieldSpec] = &ctx.fields;
+    let _fields: &[FieldSpec] = &ctx.fields;
     let db_fields: &[FieldSpec] = &ctx.db_fields;
     let localized_fields: &[String] = &ctx.localized_fields;
     let enum_explained_fields: &[EnumExplainedFieldSpec] = &ctx.enum_explained_fields;
@@ -1794,7 +1790,7 @@ fn render_row_view_json_section(ctx: &ModelCtx) -> String {
     let has_meta = ctx.has_meta;
     let has_attachments = ctx.has_attachments;
     let relations: &[RelationSpec] = &ctx.relations;
-    let schema = ctx.schema;
+    let _schema = ctx.schema;
     let cfg = ctx.cfg;
 
 let create_input_struct_ident = create_input_ident(&model_title);
@@ -2389,14 +2385,14 @@ if !cfg.record_impl_items.is_empty() {
 fn render_model_runtime_section(ctx: &ModelCtx) -> String {
     let model_snake: &str = &ctx.model_snake;
     let model_title: &str = &ctx.model_title;
-    let row_ident: &str = &ctx.row_ident;
-    let record_ident: &str = &ctx.record_ident;
+    let _row_ident: &str = &ctx.row_ident;
+    let _record_ident: &str = &ctx.record_ident;
     let col_ident: &str = &ctx.col_ident;
     let table: &str = &ctx.table;
     let pk: &str = &ctx.pk;
     let parent_pk_ty: &str = &ctx.parent_pk_ty;
     let base_select: &str = &ctx.base_select;
-    let fields: &[FieldSpec] = &ctx.fields;
+    let _fields: &[FieldSpec] = &ctx.fields;
     let db_fields: &[FieldSpec] = &ctx.db_fields;
     let localized_fields: &[String] = &ctx.localized_fields;
     let enum_specs: &BTreeMap<String, EnumSpec> = &ctx.enum_specs;
@@ -2410,7 +2406,7 @@ fn render_model_runtime_section(ctx: &ModelCtx) -> String {
     let skip_profiler = ctx.skip_profiler;
     let relations: &[RelationSpec] = &ctx.relations;
     let touch_targets: &[TouchTargetSpec] = &ctx.touch_targets;
-    let model_snake_upper: &str = &ctx.model_snake_upper;
+    let _model_snake_upper: &str = &ctx.model_snake_upper;
     let schema = ctx.schema;
     let cfg = ctx.cfg;
 
@@ -2998,15 +2994,15 @@ if !relations.is_empty() {
 
 fn render_datatable_section(ctx: &ModelCtx) -> String {
     let name = ctx.name;
-    let model_snake: &str = &ctx.model_snake;
+    let _model_snake: &str = &ctx.model_snake;
     let model_title: &str = &ctx.model_title;
-    let row_ident: &str = &ctx.row_ident;
-    let record_ident: &str = &ctx.record_ident;
+    let _row_ident: &str = &ctx.row_ident;
+    let _record_ident: &str = &ctx.record_ident;
     let col_ident: &str = &ctx.col_ident;
     let model_snake_upper: &str = &ctx.model_snake_upper;
     let table: &str = &ctx.table;
     let pk: &str = &ctx.pk;
-    let parent_pk_ty: &str = &ctx.parent_pk_ty;
+    let _parent_pk_ty: &str = &ctx.parent_pk_ty;
     let db_fields: &[FieldSpec] = &ctx.db_fields;
     let localized_fields: &[String] = &ctx.localized_fields;
     let enum_explained_fields: &[EnumExplainedFieldSpec] = &ctx.enum_explained_fields;
@@ -4034,73 +4030,95 @@ if options.include_datatable {
     "    fn default_row_to_record(&self, row: {model_title}Record) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {{"
 )
 .unwrap();
-    writeln!(out, "        let value = serde_json::to_value(&row)?;").unwrap();
-    writeln!(
-    out,
-    "        let mut record = match value {{ serde_json::Value::Object(map) => map, _ => anyhow::bail!(\"Generated row must serialize to a JSON object\"), }};"
-)
-.unwrap();
+    writeln!(out, "        let mut record = serde_json::Map::new();").unwrap();
     for f in db_fields {
         if hidden_fields.contains(&f.name) {
-            writeln!(out, "        record.remove(\"{}\");", f.name).unwrap();
+            continue;
         }
-    }
-    for enum_field in enum_explained_fields {
-        if hidden_fields.contains(&enum_field.name) {
+        if use_snowflake_id && f.name == pk {
             writeln!(
                 out,
-                "        record.remove(\"{}\");",
-                enum_field.explained_name
+                "        record.insert(\"{name}\".to_string(), serde_json::Value::String(row.{name}.to_string()));",
+                name = f.name
+            )
+            .unwrap();
+        } else {
+            writeln!(
+                out,
+                "        record.insert(\"{name}\".to_string(), serde_json::to_value(row.{name}.clone())?);",
+                name = f.name
             )
             .unwrap();
         }
     }
+    for enum_field in enum_explained_fields {
+        if hidden_fields.contains(&enum_field.name) {
+            continue;
+        }
+        writeln!(
+            out,
+            "        record.insert(\"{name}\".to_string(), serde_json::to_value(row.{name}.clone())?);",
+            name = enum_field.explained_name
+        )
+        .unwrap();
+    }
     for f in localized_fields {
         if hidden_fields.contains(f) {
-            writeln!(out, "        record.remove(\"{f}\");").unwrap();
-            writeln!(out, "        record.remove(\"{f}_translations\");").unwrap();
+            continue;
         }
+        writeln!(
+            out,
+            "        record.insert(\"{field}\".to_string(), serde_json::to_value(row.{field}.clone())?);",
+            field = f
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        record.insert(\"{field}_translations\".to_string(), serde_json::to_value(row.{field}_translations.clone())?);",
+            field = f
+        )
+        .unwrap();
     }
     for a in single_attachments {
         if hidden_fields.contains(&a.name) {
-            writeln!(out, "        record.remove(\"{}\");", a.name).unwrap();
-            writeln!(out, "        record.remove(\"{}_url\");", a.name).unwrap();
+            continue;
         }
+        writeln!(
+            out,
+            "        record.insert(\"{field}\".to_string(), serde_json::to_value(row.{field}.clone())?);",
+            field = a.name
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        record.insert(\"{field}_url\".to_string(), serde_json::to_value(row.{field}_url.clone())?);",
+            field = a.name
+        )
+        .unwrap();
     }
     for a in multi_attachments {
         if hidden_fields.contains(&a.name) {
-            writeln!(out, "        record.remove(\"{}\");", a.name).unwrap();
-            writeln!(out, "        record.remove(\"{}_urls\");", a.name).unwrap();
+            continue;
         }
+        writeln!(
+            out,
+            "        record.insert(\"{field}\".to_string(), serde_json::to_value(row.{field}.clone())?);",
+            field = a.name
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        record.insert(\"{field}_urls\".to_string(), serde_json::to_value(row.{field}_urls.clone())?);",
+            field = a.name
+        )
+        .unwrap();
     }
-    if has_meta && hidden_fields.contains("meta") {
-        writeln!(out, "        record.remove(\"meta\");").unwrap();
-    }
-    if use_snowflake_id {
+    if has_meta && !hidden_fields.contains("meta") {
         writeln!(
             out,
-            "        if let Some(id_value) = record.get(\"{pk}\").cloned() {{"
+            "        record.insert(\"meta\".to_string(), serde_json::to_value(row.meta.clone())?);"
         )
         .unwrap();
-        writeln!(out, "            let id_text = match id_value {{").unwrap();
-        writeln!(
-            out,
-            "                serde_json::Value::Number(number) => number.to_string(),"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "                serde_json::Value::String(text) => text,"
-        )
-        .unwrap();
-        writeln!(out, "                other => other.to_string(),").unwrap();
-        writeln!(out, "            }};").unwrap();
-        writeln!(
-        out,
-        "            record.insert(\"{pk}\".to_string(), serde_json::Value::String(id_text));"
-        )
-        .unwrap();
-        writeln!(out, "        }}").unwrap();
     }
     for computed in computed_fields {
         writeln!(
