@@ -3559,12 +3559,12 @@ if options.include_datatable {
     .unwrap();
     writeln!(
     out,
-    "    fn sortable_columns(&self) -> &'static [&'static str] {{ &[{sortable_cols_lit}] }}"
+    "    fn sortable_columns(&self) -> &'static [&'static str] {{ static SORTABLE_COLUMNS: &[&str] = &[{sortable_cols_lit}]; SORTABLE_COLUMNS }}"
 )
     .unwrap();
     writeln!(
     out,
-    "    fn timestamp_columns(&self) -> &'static [&'static str] {{ &[{timestamp_cols_lit}] }}"
+    "    fn timestamp_columns(&self) -> &'static [&'static str] {{ static TIMESTAMP_COLUMNS: &[&str] = &[{timestamp_cols_lit}]; TIMESTAMP_COLUMNS }}"
 )
     .unwrap();
     writeln!(
@@ -3572,7 +3572,12 @@ if options.include_datatable {
         "    fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {{"
     )
     .unwrap();
-    writeln!(out, "        &[").unwrap();
+    let column_descriptor_count = db_fields.len() + localized_fields.len();
+    writeln!(
+        out,
+        "        static COLUMN_DESCRIPTORS: [DataTableColumnDescriptor; {column_descriptor_count}] = ["
+    )
+    .unwrap();
     for f in db_fields {
         let ops = column_filter_ops_lit(f);
         let label = crate::schema::to_label(&f.name);
@@ -3594,14 +3599,43 @@ if options.include_datatable {
     )
     .unwrap();
     }
-    writeln!(out, "        ]").unwrap();
+    writeln!(out, "        ];").unwrap();
+    writeln!(out, "        &COLUMN_DESCRIPTORS").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
     out,
     "    fn relation_column_descriptors(&self) -> &'static [DataTableRelationColumnDescriptor] {{"
 )
 .unwrap();
-    writeln!(out, "        &[").unwrap();
+    let relation_descriptor_count: usize = relation_paths
+        .iter()
+        .map(|rel_path| {
+            let target_cfg = schema
+                .models
+                .get(&rel_path.target_model)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Relation path '{}' target model not found",
+                        rel_path.target_model
+                    )
+                });
+            let target_pk = target_cfg.pk.clone().unwrap_or_else(|| "id".to_string());
+            let target_fields = parse_fields(target_cfg, &target_pk);
+            let target_localized_fields: Vec<String> = target_cfg
+                .localized
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| to_snake(&s))
+                .collect();
+            target_fields.len() + target_localized_fields.len()
+        })
+        .sum();
+    writeln!(
+        out,
+        "        static RELATION_COLUMN_DESCRIPTORS: [DataTableRelationColumnDescriptor; {relation_descriptor_count}] = ["
+    )
+    .unwrap();
     for rel_path in relation_paths {
         let rel_key = rel_path.path.join("__");
         let target_cfg = schema
@@ -3647,14 +3681,28 @@ if options.include_datatable {
         .unwrap();
         }
     }
-    writeln!(out, "        ]").unwrap();
+    writeln!(out, "        ];").unwrap();
+    writeln!(out, "        &RELATION_COLUMN_DESCRIPTORS").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
         "    fn filter_patterns(&self) -> &'static [&'static str] {{"
     )
     .unwrap();
-    writeln!(out, "        &[").unwrap();
+    let has_relation_locale = relation_paths.iter().any(|rel_path| {
+        let Some(target_cfg) = schema.models.get(&rel_path.target_model) else {
+            return false;
+        };
+        !target_cfg.localized.clone().unwrap_or_default().is_empty()
+    });
+    let filter_pattern_count = 10
+        + if !localized_fields.is_empty() { 2 } else { 0 }
+        + if has_relation_locale { 2 } else { 0 };
+    writeln!(
+        out,
+        "        static FILTER_PATTERNS: [&str; {filter_pattern_count}] = ["
+    )
+    .unwrap();
     writeln!(out, "            \"f-<col>\",").unwrap();
     writeln!(out, "            \"f-like-<col>\",").unwrap();
     writeln!(out, "            \"f-gte-<col>\",").unwrap();
@@ -3669,17 +3717,12 @@ if options.include_datatable {
         writeln!(out, "            \"f-locale-<col>\",").unwrap();
         writeln!(out, "            \"f-locale-like-<col>\",").unwrap();
     }
-    let has_relation_locale = relation_paths.iter().any(|rel_path| {
-        let Some(target_cfg) = schema.models.get(&rel_path.target_model) else {
-            return false;
-        };
-        !target_cfg.localized.clone().unwrap_or_default().is_empty()
-    });
     if has_relation_locale {
         writeln!(out, "            \"f-locale-has-<relation>-<col>\",").unwrap();
         writeln!(out, "            \"f-locale-has-like-<relation>-<col>\",").unwrap();
     }
-    writeln!(out, "        ]").unwrap();
+    writeln!(out, "        ];").unwrap();
+    writeln!(out, "        &FILTER_PATTERNS").unwrap();
     writeln!(out, "    }}").unwrap();
 
     writeln!(
