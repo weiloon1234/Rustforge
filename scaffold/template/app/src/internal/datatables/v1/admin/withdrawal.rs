@@ -23,6 +23,10 @@ impl WithdrawalDataTableHooks for WithdrawalDataTableAppHooks {
         _ctx: &DataTableContext,
     ) -> Query<'db, WithdrawalModel> {
         query
+            .with(WithdrawalRel::ADMIN)
+            .with(WithdrawalRel::USER)
+            .with(WithdrawalRel::BANK)
+            .with(WithdrawalRel::CRYPTO_NETWORK)
     }
 
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {

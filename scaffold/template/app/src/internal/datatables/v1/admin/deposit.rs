@@ -23,6 +23,10 @@ impl DepositDataTableHooks for DepositDataTableAppHooks {
         _ctx: &DataTableContext,
     ) -> Query<'db, DepositModel> {
         query
+            .with(DepositRel::ADMIN)
+            .with(DepositRel::USER)
+            .with(DepositRel::COMPANY_BANK_ACCOUNT)
+            .with(DepositRel::COMPANY_CRYPTO_ACCOUNT)
     }
 
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {

@@ -455,28 +455,30 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
     type Query<'db> = Query<'db, ArticleModel>;
     type Row = ArticleRecord;
     fn model_key(&self) -> &'static str { "Article" }
-    fn sortable_columns(&self) -> &'static [&'static str] { &["id", "author_id", "status", "is_system"] }
-    fn timestamp_columns(&self) -> &'static [&'static str] { &[] }
+    fn sortable_columns(&self) -> &'static [&'static str] { static SORTABLE_COLUMNS: &[&str] = &["id", "author_id", "status", "is_system"]; SORTABLE_COLUMNS }
+    fn timestamp_columns(&self) -> &'static [&'static str] { static TIMESTAMP_COLUMNS: &[&str] = &[]; TIMESTAMP_COLUMNS }
     fn column_descriptors(&self) -> &'static [DataTableColumnDescriptor] {
-        &[
+        static COLUMN_DESCRIPTORS: [DataTableColumnDescriptor; 5] = [
             DataTableColumnDescriptor { name: "id", label: "ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "author_id", label: "Author ID", data_type: "i64", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "status", label: "Status", data_type: "ArticleStatus", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "is_system", label: "Is System", data_type: "ArticleSystemFlag", sortable: true, localized: false, filter_ops: &["eq", "gte", "lte"] },
             DataTableColumnDescriptor { name: "title", label: "Title", data_type: "String", sortable: false, localized: true, filter_ops: &["locale_eq", "locale_like"] },
-        ]
+        ];
+        &COLUMN_DESCRIPTORS
     }
     fn relation_column_descriptors(&self) -> &'static [DataTableRelationColumnDescriptor] {
-        &[
+        static RELATION_COLUMN_DESCRIPTORS: [DataTableRelationColumnDescriptor; 5] = [
             DataTableRelationColumnDescriptor { relation: "author", column: "id", data_type: "i64", filter_ops: &["has_eq"] },
             DataTableRelationColumnDescriptor { relation: "author", column: "name", data_type: "String", filter_ops: &["has_eq", "has_like"] },
             DataTableRelationColumnDescriptor { relation: "author", column: "profile_id", data_type: "i64", filter_ops: &["has_eq"] },
             DataTableRelationColumnDescriptor { relation: "author__profile", column: "id", data_type: "i64", filter_ops: &["has_eq"] },
             DataTableRelationColumnDescriptor { relation: "author__profile", column: "display_name", data_type: "String", filter_ops: &["locale_has_eq", "locale_has_like"] },
-        ]
+        ];
+        &RELATION_COLUMN_DESCRIPTORS
     }
     fn filter_patterns(&self) -> &'static [&'static str] {
-        &[
+        static FILTER_PATTERNS: [&str; 14] = [
             "f-<col>",
             "f-like-<col>",
             "f-gte-<col>",
@@ -491,7 +493,8 @@ impl GeneratedTableAdapter for ArticleTableAdapter {
             "f-locale-like-<col>",
             "f-locale-has-<relation>-<col>",
             "f-locale-has-like-<relation>-<col>",
-        ]
+        ];
+        &FILTER_PATTERNS
     }
     fn apply_auto_filter<'db>(&self, query: Query<'db, ArticleModel>, filter: &ParsedFilter, value: &str) -> anyhow::Result<Option<Query<'db, ArticleModel>>> where Self: 'db {
         if let Some(state) = core_datatable::apply_standard_filter(query.clone().into_inner(), filter, value, self)? {
@@ -593,16 +596,18 @@ pub trait ArticleDataTableHooks: Send + Sync + 'static {
     fn filters<'db>(&'db self, query: Query<'db, ArticleModel>, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<Query<'db, ArticleModel>> { Ok(query) }
     fn map_row(&self, _row: &mut ArticleRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<()> { Ok(()) }
     fn default_row_to_record(&self, row: ArticleRecord) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-        let value = serde_json::to_value(&row)?;
-        let mut record = match value { serde_json::Value::Object(map) => map, _ => anyhow::bail!("Generated row must serialize to a JSON object"), };
-        if let Some(id_value) = record.get("id").cloned() {
-            let id_text = match id_value {
-                serde_json::Value::Number(number) => number.to_string(),
-                serde_json::Value::String(text) => text,
-                other => other.to_string(),
-            };
-            record.insert("id".to_string(), serde_json::Value::String(id_text));
-        }
+        let mut record = serde_json::Map::new();
+        record.insert("id".to_string(), serde_json::Value::String(row.id.to_string()));
+        record.insert("author_id".to_string(), serde_json::to_value(row.author_id.clone())?);
+        record.insert("status".to_string(), serde_json::to_value(row.status.clone())?);
+        record.insert("is_system".to_string(), serde_json::to_value(row.is_system.clone())?);
+        record.insert("status_explained".to_string(), serde_json::to_value(row.status_explained.clone())?);
+        record.insert("is_system_explained".to_string(), serde_json::to_value(row.is_system_explained.clone())?);
+        record.insert("title".to_string(), serde_json::to_value(row.title.clone())?);
+        record.insert("title_translations".to_string(), serde_json::to_value(row.title_translations.clone())?);
+        record.insert("hero".to_string(), serde_json::to_value(row.hero.clone())?);
+        record.insert("hero_url".to_string(), serde_json::to_value(row.hero_url.clone())?);
+        record.insert("meta".to_string(), serde_json::to_value(row.meta.clone())?);
         Ok(record)
     }
     fn row_to_record(&self, row: ArticleRecord, _input: &DataTableInput, _ctx: &DataTableContext) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {

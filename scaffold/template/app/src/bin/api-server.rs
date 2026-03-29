@@ -1,5 +1,6 @@
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+const TOKIO_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+async fn run() -> anyhow::Result<()> {
     bootstrap::web::start_server(app::internal::api::build_router, |ctx| async move {
         bootstrap::jobs::start_with_context(
             ctx,
@@ -9,4 +10,12 @@ async fn main() -> anyhow::Result<()> {
         .await
     })
     .await
+}
+
+fn main() -> anyhow::Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(TOKIO_THREAD_STACK_SIZE)
+        .build()?
+        .block_on(run())
 }

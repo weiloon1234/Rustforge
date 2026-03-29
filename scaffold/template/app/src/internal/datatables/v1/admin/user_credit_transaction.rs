@@ -23,6 +23,8 @@ impl UserCreditTransactionDataTableHooks for UserCreditTransactionDataTableAppHo
         _ctx: &DataTableContext,
     ) -> Query<'db, UserCreditTransactionModel> {
         query
+            .with(UserCreditTransactionRel::USER)
+            .with(UserCreditTransactionRel::ADMIN)
     }
 
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {

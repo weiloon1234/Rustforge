@@ -54,12 +54,7 @@ impl bootstrap::console::ProjectCommand for ProjectCommands {
                 )?;
 
                 publisher
-                    .publish_raw(
-                        &channel,
-                        &event,
-                        room.as_deref(),
-                        data,
-                    )
+                    .publish_raw(&channel, &event, room.as_deref(), data)
                     .await?;
 
                 let target = room.as_deref().unwrap_or("(broadcast)");
@@ -74,11 +69,20 @@ fn register_seeders(seeders: &mut Vec<Box<dyn core_db::seeder::Seeder>>) {
     app::seeds::register_seeders(seeders);
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+const TOKIO_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+async fn run() -> anyhow::Result<()> {
     bootstrap::console::start_console::<
         ProjectCommands,
         fn(&mut Vec<Box<dyn core_db::seeder::Seeder>>),
     >(Some(register_seeders))
     .await
+}
+
+fn main() -> anyhow::Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(TOKIO_THREAD_STACK_SIZE)
+        .build()?
+        .block_on(run())
 }

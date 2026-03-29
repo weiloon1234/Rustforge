@@ -23,6 +23,7 @@ impl CompanyBankAccountDataTableHooks for CompanyBankAccountDataTableAppHooks {
         _ctx: &DataTableContext,
     ) -> Query<'db, CompanyBankAccountModel> {
         query
+            .with(CompanyBankAccountRel::BANK)
     }
 
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {

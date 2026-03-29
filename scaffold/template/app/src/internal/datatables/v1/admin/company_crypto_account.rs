@@ -23,6 +23,7 @@ impl CompanyCryptoAccountDataTableHooks for CompanyCryptoAccountDataTableAppHook
         _ctx: &DataTableContext,
     ) -> Query<'db, CompanyCryptoAccountModel> {
         query
+            .with(CompanyCryptoAccountRel::CRYPTO_NETWORK)
     }
 
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {

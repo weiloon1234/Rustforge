@@ -29,6 +29,10 @@ impl IntroducerChangeDataTableHooks for IntroducerChangeDataTableAppHooks {
         _ctx: &DataTableContext,
     ) -> Query<'db, IntroducerChangeModel> {
         query
+            .with(IntroducerChangeRel::USER)
+            .with(IntroducerChangeRel::FROM_USER)
+            .with(IntroducerChangeRel::TO_USER)
+            .with(IntroducerChangeRel::ADMIN)
     }
 
     fn authorize(&self, input: &DataTableInput, ctx: &DataTableContext) -> anyhow::Result<bool> {
