@@ -16,7 +16,7 @@ Do not treat these as parallel manuals. The framework docs app is the canonical 
 | Folder | Purpose | Consumer-side bootstrap |
 | --- | --- | --- |
 | `bootstrap/` | Unified startup for web, realtime, worker, and console. Builds `BootContext` (settings, db, redis, storage, queue, mailer). Includes framework console utilities like `assets publish`. | Use `bootstrap::web::start_server`, `bootstrap::realtime::start_server`, `bootstrap::jobs::start_worker` or `start_with_context`, `bootstrap::console::start_console` in starter binaries. |
-| `core-config/` | Runtime config/env loader (`Settings` and typed sub-settings). | Provide `.env` + `app/configs.toml` in starter. Set `APP_CONFIGS_PATH` if needed. |
+| `core-config/` | Runtime config/env loader (`Settings` and typed sub-settings). | Provide `.env` + `app/settings.toml` in starter. Set `SETTINGS_PATH` if needed. |
 | `core-db/` | DB infra, platform repos, migration/seeder commands, auth/platform utilities. | Run migrations/seeders from starter console (`migrate`, `db seed`, `make seeder`). Use generated/platform repos in app workflows. |
 | `core-datatable/` | Generic datatable execution, filters, registry, async export manager. | Register generated datatables in starter state and mount routes via `core_web::datatable`. |
 | `core-docs/` | Framework docs web UI router. | Auto-nested by `bootstrap::web::start_server` when `ENABLE_FRAMEWORK_DOCS=true`. |
@@ -27,7 +27,7 @@ Do not treat these as parallel manuals. The framework docs app is the canonical 
 | `core-notify/` | Notification channel abstraction and notifiable contracts. | Implement app notification payloads/notifiable targets, then dispatch via channel implementations. |
 | `core-realtime/` | WebSocket server state, auth hooks, channel policy, presence, publisher/subscriber, durable replay. | Build websocket server in starter binary with `ws_handler` + `WsServerState`; publish events from API/worker. |
 | `core-web/` | Shared web primitives: auth/authz, OpenAPI router, extractors, response/error types, rules, middleware, datatable routes. | Use `ApiRouter`, `ValidatedJson`, `ApiResponse`, auth/authz helpers in starter API modules. |
-| `db-gen/` | Rust-model/config/permission-driven code generation for models/guards/localized/permissions/datatable stubs. | Starter `generated/build.rs` calls this crate from `app/models`, `app/permissions.toml`, `app/configs.toml`. |
+| `db-gen/` | Rust-model/config/permission-driven code generation for models/guards/localized/permissions/datatable stubs. | Starter `generated/build.rs` calls this crate from `app/models`, `app/permissions.toml`, `app/settings.toml`. |
 | `scaffold/` | CLI generator for starter repository skeleton. | Run once to create new consumer project (`--output ... --force`). |
 | `vendor/` | Vendored crates patched at workspace level (currently validator). | Used automatically by Cargo via `[patch.crates-io]`. |
 
@@ -101,7 +101,7 @@ Static asset publish (from starter console):
 
 ### 4. Keep starter single sources of truth
 
-- `app/configs.toml` (languages/auth/realtime static config)
+- `app/settings.toml` (languages/auth/realtime static config)
 - `app/models/*.rs` (model/enums/helper methods SSOT)
 - `app/permissions.toml` (permission catalog SSOT)
 - `migrations/*.sql` (SQL state)
