@@ -3005,7 +3005,7 @@ if !relations.is_empty() {
 
 fn render_datatable_section(ctx: &ModelCtx) -> String {
     let name = ctx.name;
-    let _model_snake: &str = &ctx.model_snake;
+    let model_snake: &str = &ctx.model_snake;
     let model_title: &str = &ctx.model_title;
     let _row_ident: &str = &ctx.row_ident;
     let _record_ident: &str = &ctx.record_ident;
