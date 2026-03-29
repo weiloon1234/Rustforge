@@ -96,6 +96,13 @@ fn parse_option_inner_type(raw: &str) -> Option<String> {
     }
 }
 
+fn is_datetime_type(ty: &str) -> bool {
+    matches!(
+        ty.trim(),
+        "time::OffsetDateTime" | "Option<time::OffsetDateTime>"
+    )
+}
+
 fn enum_explained_field_name(field_name: &str) -> String {
     let normalized = field_name.trim_end_matches('_');
     format!("{normalized}_explained")
@@ -1455,6 +1462,7 @@ impl<'a> ModelCtx<'a> {
 
 fn render_imports_and_constants(ctx: &ModelCtx) -> (String, String) {
     let mut imports = String::new();
+    let has_datetime_db_field = ctx.db_fields.iter().any(|f| is_datetime_type(&f.ty));
     writeln!(imports, "use anyhow::Result;").unwrap();
     writeln!(imports, "use std::collections::HashMap;").unwrap();
     if ctx.has_meta {
@@ -1471,6 +1479,9 @@ fn render_imports_and_constants(ctx: &ModelCtx) -> (String, String) {
     writeln!(imports, "use core_db::common::pagination::resolve_per_page;").unwrap();
     if ctx.options.include_datatable {
         writeln!(imports, "use core_datatable::{{AutoDataTable, BoxFuture, DataTableColumnDescriptor, DataTableColumnResolver, DataTableContext, DataTableInput, DataTableRelationColumnDescriptor, GeneratedTableAdapter, ParsedFilter, SortDirection}};").unwrap();
+        if has_datetime_db_field {
+            writeln!(imports, "use core_datatable::serialize_offset_datetime_rfc3339;").unwrap();
+        }
     }
     if ctx.has_attachments {
         writeln!(imports, "use core_db::platform::attachments::types::{{Attachment, AttachmentInput, AttachmentMap}};").unwrap();
@@ -4083,6 +4094,22 @@ if options.include_datatable {
                 out,
                 "        record.insert(\"{name}\".to_string(), serde_json::Value::String(row.{name}.to_string()));",
                 name = f.name
+            )
+            .unwrap();
+        } else if f.ty.trim() == "time::OffsetDateTime" {
+            writeln!(
+                out,
+                "        record.insert(\"{name}\".to_string(), serde_json::Value::String(serialize_offset_datetime_rfc3339(row.{name}).map_err(|err| anyhow::anyhow!(\"failed to serialize datatable datetime field '{model}.{name}' (type: OffsetDateTime): {{}}\", err))?));",
+                name = f.name,
+                model = model_snake
+            )
+            .unwrap();
+        } else if f.ty.trim() == "Option<time::OffsetDateTime>" {
+            writeln!(
+                out,
+                "        record.insert(\"{name}\".to_string(), match row.{name} {{ Some(value) => serde_json::Value::String(serialize_offset_datetime_rfc3339(value).map_err(|err| anyhow::anyhow!(\"failed to serialize datatable datetime field '{model}.{name}' (type: Option<OffsetDateTime>): {{}}\", err))?), None => serde_json::Value::Null }});",
+                name = f.name,
+                model = model_snake
             )
             .unwrap();
         } else {

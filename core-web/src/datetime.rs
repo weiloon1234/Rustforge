@@ -176,4 +176,11 @@ mod tests {
             time::OffsetDateTime::parse(&display, &time::format_description::well_known::Rfc3339)
                 .expect("display output should be valid RFC 3339");
     }
+
+    #[test]
+    fn rejects_sql_style_timestamp_when_strict_rfc3339() {
+        let sql_style = "2026-03-29 10:01:18+00";
+        let parsed: Result<DateTime, _> = serde_json::from_str(&format!("\"{sql_style}\""));
+        assert!(parsed.is_err());
+    }
 }

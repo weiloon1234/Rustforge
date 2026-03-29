@@ -196,6 +196,9 @@ impl ArticleRecord {
     assert!(article_rs.contains("-> SpecialDto"));
     assert!(article_rs.contains("pub fn is_published"));
     assert!(article_rs.contains("pub fn identity"));
+    assert!(article_rs.contains("use core_datatable::serialize_offset_datetime_rfc3339;"));
+    assert!(article_rs.contains("record.insert(\"created_at\".to_string(), serde_json::Value::String(serialize_offset_datetime_rfc3339(row.created_at)"));
+    assert!(article_rs.contains("record.insert(\"updated_at\".to_string(), serde_json::Value::String(serialize_offset_datetime_rfc3339(row.updated_at)"));
     assert!(article_rs.contains(
         "record.insert(\"identity\".to_string(), serde_json::to_value(row.identity())?);"
     ));
