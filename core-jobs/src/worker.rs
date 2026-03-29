@@ -5,6 +5,7 @@ use core_db::{
     generated::models::{FailedJobCol, FailedJobModel},
 };
 use redis::AsyncCommands;
+use redis::AsyncConnectionConfig;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -177,7 +178,10 @@ impl Worker {
     // Internal run loop for a single thread
     async fn run_internal(self) -> anyhow::Result<()> {
         let client = self.redis.clone();
-        let mut conn = client.get_multiplexed_async_connection().await?;
+        let config = AsyncConnectionConfig::new().set_response_timeout(None);
+        let mut conn = client
+            .get_multiplexed_async_connection_with_config(&config)
+            .await?;
 
         loop {
             let mut keys = Vec::new();
@@ -189,7 +193,13 @@ impl Worker {
             }
 
             // BLPOP (blocking pop with timeout)
-            let result: Option<(String, String)> = conn.blpop(&keys, 5.0).await.ok();
+            let result: Option<(String, String)> = match conn.blpop(&keys, 5.0).await {
+                Ok(result) => result,
+                Err(err) => {
+                    tracing::error!("Worker BLPOP error: {}", err);
+                    continue;
+                }
+            };
 
             if let Some((source_queue, payload_str)) = result {
                 // Check if it's a Meta Queue (Ordered Group)
