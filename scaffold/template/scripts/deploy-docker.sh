@@ -22,7 +22,7 @@ ENV_FILE="${PROJECT_DIR}/.env"
 
 # ── Parse arguments ───────────────────────────────────────────────────
 VERSION="${1:-}"
-DEPLOY_ENV="${2:-staging}"
+DEPLOY_ENV="${2:-production}"
 
 if [[ -z "${VERSION}" ]]; then
     echo "Usage: $0 <version-tag> [environment]"

@@ -77,7 +77,7 @@ dev: ensure-frontend-deps
 	@command -v cargo-watch >/dev/null 2>&1 || (echo "cargo-watch not found. Run: make install-tools" && exit 1)
 	@trap 'kill 0' EXIT; \
 	RUN_WORKER=true cargo watch -x "run -p rustforge-starter --bin api-server" & \
-	cargo run -p rustforge-starter --bin websocket-server & \
+	cargo watch -x "run -p rustforge-starter --bin websocket-server" & \
 	cargo watch -w app/models -w app/permissions.toml -w app/settings.toml -s "make gen" & \
 	cargo watch -w app/src/contracts -s "make gen-types" & \
 	npm --prefix frontend run dev:user & \
@@ -161,9 +161,9 @@ deploy:
 	@printf "Deploy method [docker/github] (default: docker): "; \
 	read METHOD; \
 	METHOD=$${METHOD:-docker}; \
-	printf "Environment [production/staging] (default: staging): "; \
+	printf "Environment [production/staging] (default: production): "; \
 	read DEPLOY_ENV; \
-	DEPLOY_ENV=$${DEPLOY_ENV:-staging}; \
+	DEPLOY_ENV=$${DEPLOY_ENV:-production}; \
 	VERSION="v$$(date -u +%Y.%m.%d.%H%M%S)"; \
 	echo ""; \
 	echo "  Method      : $$METHOD"; \
