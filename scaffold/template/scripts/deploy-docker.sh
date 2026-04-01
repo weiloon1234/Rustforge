@@ -100,6 +100,7 @@ echo "    Image       : ${IMAGE_TAG}"
 echo
 
 docker build -f "${PROJECT_DIR}/Dockerfile.deploy" \
+    --platform linux/amd64 \
     --build-arg VERSION="${VERSION}" \
     --build-arg VITE_APP_NAME="${VITE_APP_NAME}" \
     --build-arg VITE_S3_URL="${VITE_S3_URL}" \

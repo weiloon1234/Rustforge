@@ -208,8 +208,9 @@ deploy_new_version() {
     fi
 
     # Fix ownership (rsync via sudo may set root ownership)
+    # Exclude .env which may have restricted permissions
     if [[ -n "${PROJECT_USER}" ]]; then
-        chown -R "${PROJECT_USER}:${PROJECT_USER}" "${PROJECT_DIR}"
+        find "${PROJECT_DIR}" -not -name '.env' -exec chown "${PROJECT_USER}:${PROJECT_USER}" {} + 2>/dev/null || true
     fi
 
     # Fix permissions on binaries
