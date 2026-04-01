@@ -116,9 +116,13 @@ docker rm "${CONTAINER_ID}" > /dev/null
 
 echo "    release.zip : $(du -h "${WORK_DIR}/release.zip" | cut -f1)"
 
-# Verify checksum locally
+# Verify checksum locally (shasum on macOS, sha256sum on Linux)
 echo "==> Verifying checksum..."
-(cd "${WORK_DIR}" && sha256sum -c SHA256SUMS)
+if command -v sha256sum >/dev/null 2>&1; then
+    (cd "${WORK_DIR}" && sha256sum -c SHA256SUMS)
+else
+    (cd "${WORK_DIR}" && shasum -a 256 -c SHA256SUMS)
+fi
 
 # ── Upload to R2 ─────────────────────────────────────────────────────
 echo "==> Uploading to R2 (${DEPLOY_ENV})..."
