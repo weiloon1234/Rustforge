@@ -4,8 +4,33 @@ on:
   push:
     tags:
       - "v*"
+      - "staging-v*"
 
 jobs:
+  resolve-env:
+    runs-on: ubuntu-24.04
+    outputs:
+      deploy_env: ${{ steps.env.outputs.deploy_env }}
+      version: ${{ steps.env.outputs.version }}
+      r2_prefix: ${{ steps.env.outputs.r2_prefix }}
+    steps:
+      - name: Determine environment from tag
+        id: env
+        env:
+          GIT_TAG: ${{ github.ref_name }}
+        run: |
+          if [[ "${GIT_TAG}" == staging-* ]]; then
+            DEPLOY_ENV="staging"
+            VERSION="${GIT_TAG#staging-}"
+          else
+            DEPLOY_ENV="production"
+            VERSION="${GIT_TAG}"
+          fi
+          echo "deploy_env=${DEPLOY_ENV}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "r2_prefix=deploy/${DEPLOY_ENV}" >> "$GITHUB_OUTPUT"
+          echo "Environment: ${DEPLOY_ENV}, Version: ${VERSION}"
+
   build-rust:
     runs-on: ubuntu-24.04
     steps:
@@ -81,8 +106,12 @@ jobs:
           retention-days: 1
 
   package-and-deploy:
-    needs: [build-rust, build-frontend]
+    needs: [resolve-env, build-rust, build-frontend]
     runs-on: ubuntu-24.04
+    env:
+      DEPLOY_ENV: ${{ needs.resolve-env.outputs.deploy_env }}
+      VERSION_TAG: ${{ needs.resolve-env.outputs.version }}
+      R2_PREFIX: ${{ needs.resolve-env.outputs.r2_prefix }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v5
@@ -110,12 +139,10 @@ jobs:
           name: frontend-build
           path: public/
 
-      - name: Get version from tag
-        id: version
-        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-
       - name: Package release.zip
         run: |
+          echo "Packaging for ${DEPLOY_ENV}: ${VERSION_TAG}"
+
           STAGING="staging"
           mkdir -p "${STAGING}/bin"
           mkdir -p "${STAGING}/target/release"
@@ -129,7 +156,6 @@ jobs:
           cp target/release/api-server target/release/websocket-server target/release/worker target/release/console "${STAGING}/target/release/"
 
           # Runtime config
-          cp app/settings.toml "${STAGING}/app/settings.toml"
           cp app/settings.toml "${STAGING}/app/settings.toml"
 
           # Seeder source files
@@ -157,7 +183,7 @@ jobs:
           cp .env.example "${STAGING}/.env.example"
 
           # Version file
-          echo "${{ steps.version.outputs.tag }}" > "${STAGING}/VERSION"
+          echo "${VERSION_TAG}" > "${STAGING}/VERSION"
 
           # Create zip
           cd "${STAGING}"
@@ -174,17 +200,18 @@ jobs:
           AWS_DEFAULT_REGION: auto
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
-          VERSION_TAG: ${{ steps.version.outputs.tag }}
         run: |
+          echo "Uploading to ${R2_PREFIX}/${VERSION_TAG}/"
+
           # Upload versioned artifacts
-          aws s3 cp release.zip "s3://${R2_BUCKET}/deploy/${VERSION_TAG}/release.zip" --endpoint-url "${R2_ENDPOINT}"
-          aws s3 cp SHA256SUMS "s3://${R2_BUCKET}/deploy/${VERSION_TAG}/SHA256SUMS" --endpoint-url "${R2_ENDPOINT}"
+          aws s3 cp release.zip "s3://${R2_BUCKET}/${R2_PREFIX}/${VERSION_TAG}/release.zip" --endpoint-url "${R2_ENDPOINT}"
+          aws s3 cp SHA256SUMS "s3://${R2_BUCKET}/${R2_PREFIX}/${VERSION_TAG}/SHA256SUMS" --endpoint-url "${R2_ENDPOINT}"
 
-          # Update VERSION pointer
+          # Update VERSION pointer for this environment
           echo "${VERSION_TAG}" > VERSION
-          aws s3 cp VERSION "s3://${R2_BUCKET}/deploy/VERSION" --endpoint-url "${R2_ENDPOINT}"
+          aws s3 cp VERSION "s3://${R2_BUCKET}/${R2_PREFIX}/VERSION" --endpoint-url "${R2_ENDPOINT}"
 
-      - name: Cleanup old versions (retain 3)
+      - name: Cleanup old versions (retain 3 per environment)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -192,10 +219,10 @@ jobs:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
-          # List all version prefixes, sort descending, skip first 3, delete the rest
+          # List all version prefixes under this environment, sort descending, skip first 3, delete the rest
           PREFIXES=$(aws s3api list-objects-v2 \
             --bucket "${R2_BUCKET}" \
-            --prefix "deploy/v" \
+            --prefix "${R2_PREFIX}/v" \
             --delimiter "/" \
             --endpoint-url "${R2_ENDPOINT}" \
             --query "CommonPrefixes[].Prefix" \

@@ -13,7 +13,13 @@ set -euo pipefail
 #   S3_SECRET_KEY             — R2 secret access key
 #
 # Optional:
+#   DEPLOY_ENV                — "production" or "staging" (default: production)
 #   DEPLOY_POLL_INTERVAL      — seconds between polls (default: 300)
+#
+# R2 layout (environment-scoped):
+#   deploy/<env>/<version>/release.zip
+#   deploy/<env>/<version>/SHA256SUMS
+#   deploy/<env>/VERSION
 
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
@@ -39,6 +45,7 @@ read_env_value() {
 if [[ -f "${ENV_FILE}" ]]; then
     SUPERVISOR_PROJECT_SLUG="${SUPERVISOR_PROJECT_SLUG:-$(read_env_value "${ENV_FILE}" "SUPERVISOR_PROJECT_SLUG")}"
     PROJECT_USER="${PROJECT_USER:-$(read_env_value "${ENV_FILE}" "PROJECT_USER")}"
+    DEPLOY_ENV="${DEPLOY_ENV:-$(read_env_value "${ENV_FILE}" "DEPLOY_ENV")}"
     S3_ENDPOINT="${S3_ENDPOINT:-$(read_env_value "${ENV_FILE}" "S3_ENDPOINT")}"
     S3_BUCKET="${S3_BUCKET:-$(read_env_value "${ENV_FILE}" "S3_BUCKET")}"
     S3_ACCESS_KEY="${S3_ACCESS_KEY:-$(read_env_value "${ENV_FILE}" "S3_ACCESS_KEY")}"
@@ -47,11 +54,21 @@ fi
 
 SUPERVISOR_PROJECT_SLUG="${SUPERVISOR_PROJECT_SLUG:-}"
 PROJECT_USER="${PROJECT_USER:-}"
+DEPLOY_ENV="${DEPLOY_ENV:-production}"
 S3_ENDPOINT="${S3_ENDPOINT:-}"
 S3_BUCKET="${S3_BUCKET:-}"
 S3_ACCESS_KEY="${S3_ACCESS_KEY:-}"
 S3_SECRET_KEY="${S3_SECRET_KEY:-}"
 POLL_INTERVAL="${DEPLOY_POLL_INTERVAL:-300}"
+
+# Validate environment
+if [[ "${DEPLOY_ENV}" != "production" && "${DEPLOY_ENV}" != "staging" ]]; then
+    echo "ERROR: DEPLOY_ENV must be 'production' or 'staging' (got '${DEPLOY_ENV}')."
+    exit 1
+fi
+
+# R2 prefix for this environment
+R2_PREFIX="deploy/${DEPLOY_ENV}"
 
 if [[ -z "${SUPERVISOR_PROJECT_SLUG}" ]]; then
     echo "ERROR: SUPERVISOR_PROJECT_SLUG is not set. Set it in ${ENV_FILE} or environment."
@@ -124,7 +141,7 @@ s3_download() {
 get_remote_version() {
     local tmp_version
     tmp_version="$(mktemp)"
-    if s3_download "deploy/VERSION" "${tmp_version}"; then
+    if s3_download "${R2_PREFIX}/VERSION" "${tmp_version}"; then
         tr -d '[:space:]' < "${tmp_version}"
         rm -f "${tmp_version}"
     else
@@ -139,20 +156,20 @@ get_deployed_version() {
 
 deploy_new_version() {
     local version="$1"
-    log "New version detected: ${version}"
+    log "New version detected: ${version} (${DEPLOY_ENV})"
 
     # Download artifacts to temp dir
     local download_dir
     download_dir="$(mktemp -d)"
 
-    log "Downloading artifacts from R2..."
-    if ! s3_download "deploy/${version}/release.zip" "${download_dir}/release.zip"; then
+    log "Downloading artifacts from R2 (${R2_PREFIX}/${version})..."
+    if ! s3_download "${R2_PREFIX}/${version}/release.zip" "${download_dir}/release.zip"; then
         log "ERROR: Failed to download release.zip. Aborting deploy."
         rm -rf "${download_dir}"
         return 1
     fi
 
-    if ! s3_download "deploy/${version}/SHA256SUMS" "${download_dir}/SHA256SUMS"; then
+    if ! s3_download "${R2_PREFIX}/${version}/SHA256SUMS" "${download_dir}/SHA256SUMS"; then
         log "ERROR: Failed to download SHA256SUMS. Aborting deploy."
         rm -rf "${download_dir}"
         return 1
@@ -230,24 +247,26 @@ deploy_new_version() {
     log "  Restarting ${slug}-api..."
     run_supervisorctl restart "${slug}-api" 2>/dev/null || true
 
-    log "Deploy complete: ${version}"
+    log "Deploy complete: ${version} (${DEPLOY_ENV})"
 }
 
 # Main poll loop
-log "Deploy poller started."
+log "Deploy poller started (${DEPLOY_ENV})."
 log "  PROJECT_DIR: ${PROJECT_DIR}"
+log "  DEPLOY_ENV: ${DEPLOY_ENV}"
+log "  R2_PREFIX: ${R2_PREFIX}"
 log "  S3_ENDPOINT: ${S3_ENDPOINT}"
 log "  S3_BUCKET: ${S3_BUCKET}"
 log "  SUPERVISOR_PROJECT_SLUG: ${SUPERVISOR_PROJECT_SLUG}"
 log "  POLL_INTERVAL: ${POLL_INTERVAL}s"
 
 while true; do
-    # Fetch remote version from R2
+    # Fetch remote version from R2 (environment-scoped)
     REMOTE_VERSION="$(get_remote_version 2>/dev/null || true)"
     DEPLOYED_VERSION="$(get_deployed_version)"
 
     if [[ -z "${REMOTE_VERSION}" ]]; then
-        log "WARNING: Could not fetch VERSION from R2. Will retry next cycle."
+        log "WARNING: Could not fetch VERSION from R2 (${R2_PREFIX}/VERSION). Will retry next cycle."
         sleep "${POLL_INTERVAL}"
         continue
     fi
@@ -258,7 +277,7 @@ while true; do
     fi
 
     if deploy_new_version "${REMOTE_VERSION}"; then
-        log "Successfully deployed ${REMOTE_VERSION}"
+        log "Successfully deployed ${REMOTE_VERSION} (${DEPLOY_ENV})"
     else
         log "Deploy failed for ${REMOTE_VERSION}. Will retry next cycle."
     fi

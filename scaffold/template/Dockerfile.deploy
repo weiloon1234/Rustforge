@@ -1,0 +1,117 @@
+# syntax=docker/dockerfile:1
+# Dockerfile.deploy — Multi-stage build producing release.zip
+# Mirrors the GitHub Actions deploy.yml pipeline.
+#
+# Uses BuildKit cache mounts for fast incremental builds:
+#   - Cargo registry + git deps persist across builds
+#   - Cargo target dir persists (incremental compilation)
+#   - npm cache persists
+#
+# First build: ~10 min (full). Subsequent: ~1-2 min (incremental).
+#
+# Usage:
+#   docker build -f Dockerfile.deploy \
+#     --build-arg VERSION=v1.0.0 \
+#     --build-arg VITE_APP_NAME="My App" \
+#     --build-arg VITE_S3_URL="https://cdn.example.com" \
+#     -t deploy-build .
+#
+#   # Extract the artifact:
+#   id=$(docker create deploy-build)
+#   docker cp "$id:/out/release.zip" ./release.zip
+#   docker cp "$id:/out/SHA256SUMS" ./SHA256SUMS
+#   docker rm "$id"
+
+# ── Stage 1: Build Rust binaries ──────────────────────────────────────
+FROM rust:latest AS rust-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang lld pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY app/ app/
+COPY generated/ generated/
+
+# Build release binaries with persistent caches.
+# Cache mounts survive image removal — only changed crates redownload,
+# only changed code recompiles.
+# Binaries are copied to /out/ because the target/ cache mount is not
+# part of the image layer.
+ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=clang
+ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=lld"
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/src/target \
+    cargo build --release --locked -p rustforge-starter \
+        --bin api-server --bin websocket-server --bin worker --bin console \
+    && mkdir -p /out \
+    && cp target/release/api-server target/release/websocket-server \
+          target/release/worker target/release/console /out/
+
+# ── Stage 2: Build frontend ───────────────────────────────────────────
+FROM node:22-bookworm-slim AS frontend-builder
+
+ARG VITE_APP_NAME=""
+ARG VITE_S3_URL=""
+
+WORKDIR /src/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ── Stage 3: Package release.zip ──────────────────────────────────────
+FROM debian:bookworm-slim AS packager
+
+RUN apt-get update && apt-get install -y --no-install-recommends zip \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG VERSION=v0.0.0-docker
+
+WORKDIR /staging
+
+# Wrapper scripts
+COPY bin/ bin/
+
+# Compiled binaries (from /out/ staging, not cache mount)
+COPY --from=rust-builder /out/api-server target/release/api-server
+COPY --from=rust-builder /out/websocket-server target/release/websocket-server
+COPY --from=rust-builder /out/worker target/release/worker
+COPY --from=rust-builder /out/console target/release/console
+
+# Runtime config
+COPY app/settings.toml app/settings.toml
+
+# Seeder source files
+COPY app/src/seeds/ app/src/seeds/
+
+# Built frontend + static assets
+COPY --from=frontend-builder /src/public/ public/
+
+# Migrations
+COPY migrations/ migrations/
+
+# Translations
+COPY i18n/ i18n/
+
+# Scripts
+COPY scripts/install-ubuntu.sh scripts/install.sh
+COPY scripts/deploy-poll.sh scripts/deploy-poll.sh
+RUN chmod +x scripts/install.sh scripts/deploy-poll.sh
+
+# Console wrapper
+COPY console console
+RUN chmod +x console
+
+# Env example
+COPY .env.example .env.example
+
+# Version file
+RUN echo "${VERSION}" > VERSION
+
+# Create release.zip and checksums
+WORKDIR /out
+RUN cd /staging && zip -r /out/release.zip . \
+    && cd /out && sha256sum release.zip > SHA256SUMS

@@ -37,7 +37,7 @@ help:
 	@echo "  make check"
 	@echo "  make gen"
 	@echo "  make gen-types            # Regenerate frontend TS types from Rust contracts"
-	@echo "  make deploy              # Tag and trigger CI/CD release"
+	@echo "  make deploy              # Interactive deploy (docker or github, production or staging)"
 
 .PHONY: install-tools
 install-tools:
@@ -157,19 +157,43 @@ release:
 	cargo build --release --workspace
 
 .PHONY: deploy
-deploy: check
-	@if [ -n "$$(git status --porcelain)" ]; then \
-		echo "Error: Working directory is not clean. Commit or stash changes first."; \
+deploy:
+	@printf "Deploy method [docker/github] (default: docker): "; \
+	read METHOD; \
+	METHOD=$${METHOD:-docker}; \
+	printf "Environment [production/staging] (default: staging): "; \
+	read DEPLOY_ENV; \
+	DEPLOY_ENV=$${DEPLOY_ENV:-staging}; \
+	VERSION="v$$(date -u +%Y.%m.%d.%H%M%S)"; \
+	echo ""; \
+	echo "  Method      : $$METHOD"; \
+	echo "  Environment : $$DEPLOY_ENV"; \
+	echo "  Version     : $$VERSION"; \
+	echo ""; \
+	if [ "$$METHOD" = "github" ]; then \
+		$(MAKE) check; \
+		if [ -n "$$(git status --porcelain)" ]; then \
+			echo "Error: Working directory is not clean. Commit or stash changes first."; \
+			exit 1; \
+		fi; \
+		BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
+		if [ "$$BRANCH" != "main" ]; then \
+			echo "Error: Must be on main branch (currently on $$BRANCH)"; \
+			exit 1; \
+		fi; \
+		git pull origin main; \
+		if [ "$$DEPLOY_ENV" = "staging" ]; then \
+			TAG="staging-$$VERSION"; \
+		else \
+			TAG="$$VERSION"; \
+		fi; \
+		echo "Creating release tag: $$TAG"; \
+		git tag -a "$$TAG" -m "Release $$TAG ($$DEPLOY_ENV)"; \
+		git push origin "$$TAG"; \
+		echo "Tag $$TAG pushed. GitHub Actions will build and deploy to $$DEPLOY_ENV."; \
+	elif [ "$$METHOD" = "docker" ]; then \
+		./scripts/deploy-docker.sh "$$VERSION" "$$DEPLOY_ENV"; \
+	else \
+		echo "Error: Unknown method '$$METHOD'. Use 'docker' or 'github'."; \
 		exit 1; \
 	fi
-	@BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
-	if [ "$$BRANCH" != "main" ]; then \
-		echo "Error: Must be on main branch (currently on $$BRANCH)"; \
-		exit 1; \
-	fi
-	git pull origin main
-	@VERSION="v$$(date -u +%Y.%m.%d.%H%M%S)"; \
-	echo "Creating release tag: $$VERSION"; \
-	git tag -a "$$VERSION" -m "Release $$VERSION"; \
-	git push origin "$$VERSION"; \
-	echo "Tag $$VERSION pushed. GitHub Actions will build and deploy."

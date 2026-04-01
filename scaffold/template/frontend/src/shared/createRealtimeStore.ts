@@ -39,9 +39,14 @@ export function createRealtimeStore(config: RealtimeConfig) {
   const listeners = new Map<string, Set<(data: unknown) => void>>();
 
   function getWsUrl(): string {
-    // VITE_REALTIME_URL allows explicit override (e.g. "ws://127.0.0.1:3010/ws" in dev)
+    // VITE_REALTIME_URL allows explicit override
     const envUrl = import.meta.env.VITE_REALTIME_URL as string | undefined;
     if (envUrl) return envUrl;
+    // In dev mode, connect directly to the WS server port
+    const wsPort = import.meta.env.VITE_REALTIME_PORT as string | undefined;
+    if (import.meta.env.DEV && wsPort) {
+      return `ws://${window.location.hostname}:${wsPort}${wsPath}`;
+    }
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     return `${proto}//${window.location.host}${wsPath}`;
   }
