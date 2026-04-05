@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback, type RefObject } from "react"
 
 export interface UseDropdownOptions {
   onClose?: () => void;
+  /** Additional ref checked during click-outside detection (e.g. portaled dropdown) */
+  portalRef?: RefObject<HTMLElement | null>;
 }
 
 export interface UseDropdownReturn {
@@ -49,11 +51,13 @@ export function useDropdown(options?: UseDropdownOptions): UseDropdownReturn {
   // Click outside to close
   const handleClickOutside = useCallback(
     (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (containerRef.current && !containerRef.current.contains(target) &&
+          (!options?.portalRef?.current || !options.portalRef.current.contains(target))) {
         close();
       }
     },
-    [close],
+    [close, options?.portalRef],
   );
 
   useEffect(() => {

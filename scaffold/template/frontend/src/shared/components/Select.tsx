@@ -1,4 +1,5 @@
 import { useMemo, useState, useRef, useEffect, useId } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, X, Loader2 } from "lucide-react";
 import type { AxiosInstance } from "axios";
 import { FieldErrors, hasFieldError } from "@shared/components/FieldErrors";
@@ -63,9 +64,11 @@ export function Select({
   const autoId = useId();
   const id = externalId ?? autoId;
 
-  const { dropdownOpen, search, setSearch, open: openDrop, close, containerRef, searchRef } = useDropdown();
+  const portalRef = useRef<HTMLDivElement>(null);
+  const { dropdownOpen, search, setSearch, open: openDrop, close, containerRef, searchRef } = useDropdown({ portalRef });
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [dropUp, setDropUp] = useState(false);
+  const [portalStyle, setPortalStyle] = useState<React.CSSProperties>({});
   const [remoteOptions, setRemoteOptions] = useState<SelectOption[]>([]);
   const [remoteLoading, setRemoteLoading] = useState(false);
 
@@ -104,6 +107,17 @@ export function Select({
       items[highlightedIndex]?.scrollIntoView({ block: "nearest" });
     }
   }, [highlightedIndex]);
+
+  // Close portal dropdown on ancestor scroll (trigger moves but dropdown stays fixed)
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handleScroll = (e: Event) => {
+      if (portalRef.current?.contains(e.target as Node)) return;
+      close();
+    };
+    window.addEventListener("scroll", handleScroll, true);
+    return () => window.removeEventListener("scroll", handleScroll, true);
+  }, [dropdownOpen, close]);
 
   // Remote search with debounce
   useEffect(() => {
@@ -155,6 +169,15 @@ export function Select({
       const spaceBelow = window.innerHeight - rect.bottom;
       const next = spaceBelow < DROPDOWN_MAX_HEIGHT_PX && rect.top >= DROPDOWN_MAX_HEIGHT_PX;
       if (next !== dropUp) setDropUp(next);
+      setPortalStyle({
+        position: "fixed",
+        left: rect.left,
+        right: "auto",
+        width: rect.width,
+        top: next ? "auto" : rect.bottom + 4,
+        bottom: next ? window.innerHeight - rect.top + 4 : "auto",
+        margin: 0,
+      });
     }
     openDrop();
   };
@@ -225,88 +248,92 @@ export function Select({
       {/* Hidden input for form serialization */}
       {name && <input type="hidden" name={name} value={value} />}
 
-      <div className="relative">
-        {/* Trigger button */}
-        <button
-          ref={triggerRef}
-          id={id}
-          type="button"
-          onClick={toggleDropdown}
-          disabled={disabled}
-          className={`rf-select-trigger ${hasError ? "rf-select-error" : ""} ${isPlaceholder ? "rf-select-placeholder" : ""} ${className ?? ""}`}
-        >
-          <span className="flex-1 truncate text-left">
-            {selectedLabel ?? (placeholder !== " " ? placeholder : "\u00A0")}
-          </span>
-          <span className="flex items-center gap-0.5 shrink-0">
-            {clearable && value && !disabled && (
-              <span
-                role="button"
-                tabIndex={-1}
-                onClick={handleClear}
-                className="p-0.5 rounded hover:bg-surface-hover transition-colors"
-              >
-                <X className="h-3.5 w-3.5 text-muted" />
-              </span>
-            )}
-            <ChevronDown className={`h-4 w-4 text-muted transition-transform ${dropdownOpen ? "rotate-180" : ""}`} />
-          </span>
-        </button>
+      {/* Trigger button */}
+      <button
+        ref={triggerRef}
+        id={id}
+        type="button"
+        onClick={toggleDropdown}
+        disabled={disabled}
+        className={`rf-select-trigger ${hasError ? "rf-select-error" : ""} ${isPlaceholder ? "rf-select-placeholder" : ""} ${className ?? ""}`}
+      >
+        <span className="flex-1 truncate text-left">
+          {selectedLabel ?? (placeholder !== " " ? placeholder : "\u00A0")}
+        </span>
+        <span className="flex items-center gap-0.5 shrink-0">
+          {clearable && value && !disabled && (
+            <span
+              role="button"
+              tabIndex={-1}
+              onClick={handleClear}
+              className="p-0.5 rounded hover:bg-surface-hover transition-colors"
+            >
+              <X className="h-3.5 w-3.5 text-muted" />
+            </span>
+          )}
+          <ChevronDown className={`h-4 w-4 text-muted transition-transform ${dropdownOpen ? "rotate-180" : ""}`} />
+        </span>
+      </button>
 
-        {/* Dropdown panel */}
-        {dropdownOpen && (
-          <div className={`rf-select-dropdown ${dropUp ? "rf-select-dropdown-up" : ""}`}>
-            {isSearchable && (
-              <div className="rf-select-dropdown-search-wrapper">
-                <input
-                  ref={searchRef}
-                  type="text"
-                  className="rf-select-dropdown-search"
-                  placeholder={isRemote ? `Type ${minChars}+ chars to search...` : "Search..."}
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    setHighlightedIndex(-1);
-                  }}
-                />
+      {/* Dropdown panel (portaled to body to escape overflow clipping) */}
+      {dropdownOpen && createPortal(
+        <div
+          ref={portalRef}
+          className="rf-select-dropdown"
+          style={portalStyle}
+          onKeyDown={handleKeyDown}
+        >
+          {isSearchable && (
+            <div className="rf-select-dropdown-search-wrapper">
+              <input
+                ref={searchRef}
+                type="text"
+                className="rf-select-dropdown-search"
+                placeholder={isRemote ? `Type ${minChars}+ chars to search...` : "Search..."}
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setHighlightedIndex(-1);
+                }}
+              />
+            </div>
+          )}
+          <div ref={listRef} className="rf-select-dropdown-list">
+            {remoteLoading && (
+              <div className="flex items-center justify-center gap-2 px-3 py-4 text-sm text-muted">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Searching...</span>
               </div>
             )}
-            <div ref={listRef} className="rf-select-dropdown-list">
-              {remoteLoading && (
-                <div className="flex items-center justify-center gap-2 px-3 py-4 text-sm text-muted">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Searching...</span>
-                </div>
-              )}
-              {!remoteLoading && filteredOptions.length === 0 && (
-                <div className="px-3 py-4 text-sm text-muted text-center">
-                  {isRemote && search.trim().length < minChars
-                    ? `Type ${minChars}+ characters to search`
-                    : "No options found"}
-                </div>
-              )}
-              {!remoteLoading &&
-                filteredOptions.map((opt, idx) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    data-select-item
-                    disabled={opt.disabled}
-                    className={`rf-select-dropdown-item ${
-                      opt.value === value ? "rf-select-dropdown-item-active" : ""
-                    } ${highlightedIndex === idx ? "bg-surface-hover" : ""} ${
-                      opt.disabled ? "opacity-50 cursor-not-allowed" : ""
-                    }`}
-                    onClick={() => !opt.disabled && handleSelect(opt.value)}
-                    onMouseEnter={() => setHighlightedIndex(idx)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-            </div>
+            {!remoteLoading && filteredOptions.length === 0 && (
+              <div className="px-3 py-4 text-sm text-muted text-center">
+                {isRemote && search.trim().length < minChars
+                  ? `Type ${minChars}+ characters to search`
+                  : "No options found"}
+              </div>
+            )}
+            {!remoteLoading &&
+              filteredOptions.map((opt, idx) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  data-select-item
+                  disabled={opt.disabled}
+                  className={`rf-select-dropdown-item ${
+                    opt.value === value ? "rf-select-dropdown-item-active" : ""
+                  } ${highlightedIndex === idx ? "bg-surface-hover" : ""} ${
+                    opt.disabled ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
+                  onClick={() => !opt.disabled && handleSelect(opt.value)}
+                  onMouseEnter={() => setHighlightedIndex(idx)}
+                >
+                  {opt.label}
+                </button>
+              ))}
           </div>
-        )}
-      </div>
+        </div>,
+        document.body,
+      )}
 
       <FieldErrors error={error} errors={errors} />
       {notes && !hasError && <p className="rf-note">{notes}</p>}
