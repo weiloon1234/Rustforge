@@ -18,6 +18,9 @@ export interface RemoteSearchConfig {
   debounceMs?: number;
 }
 
+// Must match .rf-select-dropdown max-height (18rem = 288px at 16px base)
+const DROPDOWN_MAX_HEIGHT_PX = 288;
+
 export interface SelectProps {
   options?: SelectOption[];
   value?: string;
@@ -60,8 +63,9 @@ export function Select({
   const autoId = useId();
   const id = externalId ?? autoId;
 
-  const { dropdownOpen, setDropdownOpen, search, setSearch, close, containerRef, searchRef } = useDropdown();
+  const { dropdownOpen, search, setSearch, open: openDrop, close, containerRef, searchRef } = useDropdown();
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [dropUp, setDropUp] = useState(false);
   const [remoteOptions, setRemoteOptions] = useState<SelectOption[]>([]);
   const [remoteLoading, setRemoteLoading] = useState(false);
 
@@ -146,7 +150,13 @@ export function Select({
   const openDropdown = () => {
     setHighlightedIndex(-1);
     if (isRemote) setRemoteOptions([]);
-    setDropdownOpen(true);
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const next = spaceBelow < DROPDOWN_MAX_HEIGHT_PX && rect.top >= DROPDOWN_MAX_HEIGHT_PX;
+      if (next !== dropUp) setDropUp(next);
+    }
+    openDrop();
   };
 
   const toggleDropdown = () => {
@@ -245,7 +255,7 @@ export function Select({
 
         {/* Dropdown panel */}
         {dropdownOpen && (
-          <div className="rf-select-dropdown">
+          <div className={`rf-select-dropdown ${dropUp ? "rf-select-dropdown-up" : ""}`}>
             {isSearchable && (
               <div className="rf-select-dropdown-search-wrapper">
                 <input

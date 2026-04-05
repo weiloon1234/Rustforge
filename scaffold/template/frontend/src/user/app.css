@@ -338,6 +338,10 @@
       bg-surface shadow-xl;
         max-height: 18rem;
     }
+    .rf-select-dropdown-up {
+        @apply bottom-full mb-1;
+        top: auto;
+    }
     .rf-select-dropdown-search-wrapper {
         @apply border-b border-border p-2;
     }
@@ -521,7 +525,7 @@
         @apply bg-surface-hover/50;
     }
     .rf-dt-th {
-        @apply sticky top-0 z-20 whitespace-nowrap border-b border-border bg-surface-hover/95 px-4 py-3 font-medium text-muted;
+        @apply sticky top-0 z-10 whitespace-nowrap border-b border-border bg-surface-hover/95 px-4 py-3 font-medium text-muted;
     }
     .rf-dt-th-index {
         @apply w-12;

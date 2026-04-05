@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "@admin/components/Sidebar";
 import Header from "@admin/components/Header";
 import { ModalOutlet } from "@shared/components";
@@ -8,6 +8,12 @@ import { adminLocalePersistence } from "@admin/locale";
 import { useRealtimeStore } from "@admin/stores/realtime";
 import { useNotificationStore } from "@admin/stores/notifications";
 import { api } from "@admin/api";
+
+function MobileRouteListener({ onRouteChange }: { onRouteChange: () => void }) {
+  const location = useLocation();
+  useEffect(() => { onRouteChange(); }, [location.pathname, onRouteChange]);
+  return null;
+}
 
 const STORAGE_KEY = "admin-sidebar-collapsed";
 const MOBILE_BREAKPOINT = 768;
@@ -77,14 +83,11 @@ export default function AdminLayout() {
     if (!isMobile) localStorage.setItem(STORAGE_KEY, String(collapsed));
   }, [collapsed, isMobile]);
 
-  // Close mobile sidebar on route change
-  useEffect(() => {
-    if (isMobile) setMobileOpen(false);
-  }, [isMobile]);
-
   useEffect(() => {
     void adminLocalePersistence.syncFromAccount(account);
   }, [account]);
+
+  const closeMobileSidebar = useCallback(() => setMobileOpen(false), []);
 
   const toggleSidebar = useCallback(() => {
     if (isMobile) {
@@ -99,6 +102,7 @@ export default function AdminLayout() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <Header collapsed={isMobile ? true : collapsed} onToggle={toggleSidebar} />
+      {isMobile && <MobileRouteListener onRouteChange={closeMobileSidebar} />}
 
       {/* Mobile backdrop */}
       {isMobile && mobileOpen && (
