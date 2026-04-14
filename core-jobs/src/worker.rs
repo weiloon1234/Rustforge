@@ -182,6 +182,7 @@ impl Worker {
         let mut conn = client
             .get_multiplexed_async_connection_with_config(&config)
             .await?;
+        let mut consecutive_errors: u32 = 0;
 
         loop {
             let mut keys = Vec::new();
@@ -194,9 +195,28 @@ impl Worker {
 
             // BLPOP (blocking pop with timeout)
             let result: Option<(String, String)> = match conn.blpop(&keys, 5.0).await {
-                Ok(result) => result,
+                Ok(result) => {
+                    consecutive_errors = 0;
+                    result
+                }
                 Err(err) => {
-                    tracing::error!("Worker BLPOP error: {}", err);
+                    consecutive_errors += 1;
+                    let backoff_secs = std::cmp::min(consecutive_errors, 30);
+                    tracing::error!(
+                        "Worker BLPOP error (retry in {}s): {}",
+                        backoff_secs,
+                        err
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(backoff_secs as u64)).await;
+
+                    // Reconnect
+                    match client
+                        .get_multiplexed_async_connection_with_config(&config)
+                        .await
+                    {
+                        Ok(new_conn) => conn = new_conn,
+                        Err(e) => tracing::error!("Worker reconnect failed: {}", e),
+                    }
                     continue;
                 }
             };
